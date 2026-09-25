@@ -1,11 +1,15 @@
 /**
  * Couche « NIVEAUX DE LIQUIDATION RÉELS » (Hyperliquid) — prix de liquidation des positions
- * OUVERTES observées sur les top adresses du leaderboard, servis par le daemon `axiomd`
- * (`GET /hl/liqlevels/:coin`, cache 5 min côté daemon, capability `hl`).
+ * OUVERTES observées sur un ÉCHANTILLON d'adresses du leaderboard (pool daemon d'environ
+ * 1 500 adresses : plus gros comptes + plus gros volumes de la semaine), servis par le daemon
+ * `axiomd` (`GET /hl/liqlevels/:coin`, cache 5 min côté daemon, capability `hl`). Juste après
+ * le démarrage du daemon, son premier scan (≈ 4 à 5 min) est signalé « en construction » (503) :
+ * la couche reste « chargement » et relance toutes les ~30 s. Un amont en panne répond au
+ * contraire le 503 « pool indisponible » → état « erreur » (jamais « chargement » sans fin).
  *
  * ⚠️ HONNÊTETÉ DE LA SOURCE (garde-fou BUILD-CONTRACT) : ces niveaux sont RÉELS — ce sont de
- * vraies positions, pas un modèle — mais NON EXHAUSTIFS : c'est le TOP du leaderboard, PAS tout
- * le carnet, et le seul Hyperliquid. À NE JAMAIS présenter comme « toutes » les liquidations à
+ * vraies positions, pas un modèle — mais NON EXHAUSTIFS : c'est un échantillon du leaderboard,
+ * PAS tout le carnet, et le seul Hyperliquid. À NE JAMAIS présenter comme « toutes » les liquidations à
  * venir. Distincts des deux autres couches : la heatmap RÉELLE peint des liquidations DÉJÀ
  * EXÉCUTÉES (chart/liquidationHeat.ts), les niveaux ESTIMÉS sont un MODÈLE de levier sur l'OI
  * (chart/liquidationEstimates.ts).
@@ -95,10 +99,22 @@ export function mapperReponseHl(brut: unknown): ReponseHlLiq | null {
 }
 
 /**
+ * Le daemon répond-il « instantané en construction » ? (503 `{ enConstruction: true }`,
+ * corps relayé BRUT par `hlLiqLevelsGet`/`hlPositionsGet` : premier scan du pool après le
+ * boot, sans aucun cache). DISTINCT d'un échec : la couche reste « chargement » et relance
+ * tôt. À tester AVANT `mapperReponseHl`, qui rejette ce corps (→ « erreur »). PURE, partagée
+ * avec la fenêtre WHALES (onglet Positions HL).
+ */
+export function estEnConstructionHl(brut: unknown): boolean {
+  return typeof brut === "object" && brut !== null && (brut as { enConstruction?: unknown }).enConstruction === true;
+}
+
+/**
  * État affiché de la couche (une seule raison à la fois, cf. légende du contrôleur).
  * `chargement` est posé par `sync()` au lancement d'un fetch (activation ou changement
  * de coin) et remplacé par l'état décidé à la réponse — sinon la légende affichait
- * « aucun niveau pour ce symbole » pendant toute la requête, ce qui est faux.
+ * « aucun niveau pour ce symbole » pendant toute la requête, ce qui est faux. Il reste
+ * posé tant que le daemon répond « en construction » (`estEnConstructionHl`).
  */
 export type EtatHl = "ok" | "sans-daemon" | "vide" | "erreur" | "chargement";
 
@@ -145,9 +161,24 @@ export const hlLiqStore: StoreApi<HlLiqState> = createStore<HlLiqState>((set, ge
 
 /** Rafraîchissement tant que la couche est active (le daemon cache déjà 5 min). */
 const REFRESH_MS = 4 * 60 * 1000;
+/**
+ * Relance tant que le daemon répond « en construction » : son premier scan du pool
+ * (~1 500 adresses) dure ≈ 4 min (≈ 4,5 si le leaderboard est retéléchargé) ; aligné sur
+ * l'en-tête Retry-After (30 s) du daemon.
+ */
+export const RELANCE_CONSTRUCTION_MS = 30_000;
 
 let coinActif: string | null = null;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
+/** Relance courte armée par une réponse « en construction » (une seule à la fois). */
+let relanceTimer: ReturnType<typeof setTimeout> | null = null;
+
+function annulerRelance(): void {
+  if (relanceTimer !== null) {
+    clearTimeout(relanceTimer);
+    relanceTimer = null;
+  }
+}
 /** Le drapeau KV `hl/heat` (collecte d'instantanés historiques) n'est posé qu'UNE fois
  *  par activation de la couche — jamais au OFF (cf. en-tête). */
 let drapeauHeatPose = false;
@@ -167,6 +198,18 @@ function assurerDrapeauHeat(): void {
 async function rafraichir(coin: string): Promise<void> {
   const brut = await hlLiqLevelsGet(coin);
   assurerDrapeauHeat();
+  if (estEnConstructionHl(brut)) {
+    if (coinActif !== coin) return;
+    // Premier scan du daemon en cours : « chargement » (pas « erreur », pas « vide »),
+    // niveaux purgés (rien de neuf à montrer) et relance dans ~30 s plutôt que 4 min.
+    hlLiqStore.setState({ ...VIDE, etat: "chargement" });
+    annulerRelance();
+    relanceTimer = setTimeout(() => {
+      relanceTimer = null;
+      if (coinActif === coin) void rafraichir(coin);
+    }, RELANCE_CONSTRUCTION_MS);
+    return;
+  }
   const reponse = brut === null ? null : mapperReponseHl(brut);
   // Lu APRÈS l'appel : `hlLiqLevelsGet` a sondé /health, la capability est donc à jour.
   const etat = deciderEtatHl(daemonSupporteHl(), reponse);
@@ -195,6 +238,7 @@ function sync(): void {
       clearInterval(refreshTimer);
       refreshTimer = null;
     }
+    annulerRelance();
     coinActif = null;
     drapeauHeatPose = false; // la prochaine activation re-posera le drapeau si besoin
     hlLiqStore.setState(VIDE);
@@ -202,9 +246,11 @@ function sync(): void {
   }
   if (coinActif !== coin) {
     coinActif = coin;
+    annulerRelance(); // la relance « en construction » visait l'ancien coin
     // État « chargement » plutôt que VIDE (« vide » = aucun niveau, un mensonge pendant
-    // le fetch — le scan daemon peut durer ~50 s à froid) ; on purge quand même les
-    // niveaux de l'ancien coin pour ne pas les afficher sous le nouveau symbole.
+    // le fetch — à froid le daemon attend jusqu'à 15 s avant de répondre « en
+    // construction ») ; on purge quand même les niveaux de l'ancien coin pour ne pas
+    // les afficher sous le nouveau symbole.
     hlLiqStore.setState({ ...VIDE, etat: "chargement" });
     void rafraichir(coin);
     if (refreshTimer === null) {

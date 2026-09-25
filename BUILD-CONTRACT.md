@@ -422,6 +422,27 @@ rapport `docs/superpowers/progress/2026-09-22-heatmap-hl-indicateurs-onchain.md`
    forcé n'archive rien en cas d'échec total ; les lignes et le dernier succès portent la date
    d'observation `inst.ts`, jamais celle de la relecture. Zéro adresse observée reste un échec ;
    des comptes observés sans positions sur un coin produisent un instantané vide valide.
+   Extension du 25 septembre (demande du propriétaire : « toutes les liquidations disponibles »,
+   précisée en « pool d'adresses scannées porté à ~1 500 ») : le pool devient **1 500 adresses
+   cibles** — top 500 `accountValue` complété par le classement volume hebdomadaire sans doublon
+   (`TAILLE_POOL`, `N_VALEUR_POOL`) ; le pool persisté `hl/pool` porte ses paramètres (un pool
+   d'autres paramètres est retéléchargé, mais reste le repli si l'amont échoue). Cadence : quota
+   officiel 1 200 poids/min/IP, `clearinghouseState` = 2, `fundingHistory` = 20 + 1 par tranche
+   de 20 éléments ; le scan est plafonné à 750 poids/min → un lot de 4 au plus toutes les 640 ms,
+   ≈ 240 s par scan (calculé, non mesuré ; arrêt au premier 429 conservé). Les 450 poids/min
+   restants vont au navigateur (même IP) : une série `fundingHistory` 90 j en consomme ≈ 208 par
+   minute, la marge dépend donc des indicateurs HL actifs. Une lecture `/hl/liqlevels` ou
+   `/hl/positions` n'attend plus jamais un scan quand un cache existe, même périmé (servi, scan
+   relancé en fond) ; sans aucun cache, elle attend au plus 15 s puis répond 503
+   `{ enConstruction: true }` + `Retry-After: 30` — la couche LIQHL reste « chargement » et la
+   fenêtre WHALES affiche « instantané en construction », toutes deux relancent toutes les 30 s
+   (premier scan ≈ 4 min, ≈ 4,5 avec le téléchargement du leaderboard de ≈ 39 Mo). Amont en
+   panne : un scan dont les 3 premiers lots échouent tous est abandonné ; sans cache, un échec
+   total (pool vide ou zéro adresse) est retenu jusqu'au premier succès, les lectures répondent
+   le 503 « pool indisponible » (état « erreur » côté front, jamais « en construction » sans fin)
+   et n'en relancent un essai qu'au moins 2 min après l'échec. Le collecteur forcé attend
+   toujours son point neuf et n'est pas soumis à ce repli. Cela reste un **échantillon** du
+   leaderboard : l'interface annonce « N adresses », jamais « toutes » les liquidations.
 3. **Dix indicateurs** (TS pur, `@axiom/indicators`, un fichier et un test par def, catalogue 200 →
    210). Séries aux ajoutées à `AuxSeriesId` (`@axiom/types`, écart signalé comme aux lots précédents) :
    `liqLongUsd`, `liqShortUsd`, `hashrate`, `sthMvrv`, `lthMvrv`, `nrplUsd`, `vddMultiple`, `aviv`,

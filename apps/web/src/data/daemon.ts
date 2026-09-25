@@ -791,20 +791,34 @@ export async function journalAlertesGet(): Promise<DeclenchementDaemon[] | null>
 // ─────────────────────────── Niveaux de liquidation RÉELS Hyperliquid ───────────────────────────
 
 /**
- * Lit les niveaux de liquidation RÉELS d'un coin (top adresses Hyperliquid) — charge utile
- * BRUTE, dont la VALIDATION de forme vit dans `data/hyperliquidLiq.ts` (pure et testée).
- * Sonde d'abord la capability `hl` (comme `journalAlertesGet`) ; renvoie `null` si le daemon
- * est absent / sans capability / en erreur — la couche affiche alors « nécessite le daemon ».
+ * GET d'une vue HL du daemon (`/hl/liqlevels/:coin` ou `/hl/positions/:coin`). Sonde d'abord
+ * la capability `hl`. Réponse 2xx → corps BRUT. 503 dont le corps porte `enConstruction:
+ * true` (premier scan du pool, aucun cache côté daemon) → ce corps BRUT aussi : l'appelant
+ * le reconnaît (`estEnConstructionHl`, data/hyperliquidLiq.ts) et relance tôt au lieu
+ * d'afficher une erreur. Tout autre échec (absent, 503 « pool indisponible », réseau) → null.
  */
-export async function hlLiqLevelsGet(coin: string): Promise<unknown | null> {
+async function lireVueHl(vue: "liqlevels" | "positions", coin: string): Promise<unknown | null> {
   if (!(await detectDaemon("hl"))) return null;
   try {
-    const res = await fetch(`${baseDaemon()}/hl/liqlevels/${encodeURIComponent(coin)}`);
-    if (!res.ok) return null;
-    return (await res.json()) as unknown;
+    const res = await fetch(`${baseDaemon()}/hl/${vue}/${encodeURIComponent(coin)}`);
+    if (res.ok) return (await res.json()) as unknown;
+    if (res.status !== 503) return null;
+    const corps = (await res.json()) as { enConstruction?: unknown } | null;
+    return corps?.enConstruction === true ? corps : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * Lit les niveaux de liquidation RÉELS d'un coin (échantillon d'adresses du leaderboard
+ * Hyperliquid) — charge utile BRUTE, dont la VALIDATION de forme vit dans
+ * `data/hyperliquidLiq.ts` (pure et testée). Renvoie `null` si le daemon est absent / sans
+ * capability / en erreur — la couche affiche alors « nécessite le daemon » ; le corps
+ * « en construction » est relayé tel quel (cf. `lireVueHl`).
+ */
+export async function hlLiqLevelsGet(coin: string): Promise<unknown | null> {
+  return lireVueHl("liqlevels", coin);
 }
 
 /** Le daemon annonce-t-il la capability `hl` ? (état synchrone, sans nouvelle sonde). */
@@ -898,17 +912,11 @@ export async function whalesRecentGet(opts: OptionsWhalesGet = {}): Promise<unkn
 }
 
 /**
- * Lit les positions des top comptes Hyperliquid d'un coin (`GET /hl/positions/:coin`,
+ * Lit les positions des comptes Hyperliquid échantillonnés d'un coin (`GET /hl/positions/:coin`,
  * MÊME instantané daemon que les niveaux de liquidation) — charge utile BRUTE, validée
- * dans `data/whales.ts`. Même régime de repli que `hlLiqLevelsGet`.
+ * dans `data/whales.ts`. Même régime de repli que `hlLiqLevelsGet`, corps « en
+ * construction » compris.
  */
 export async function hlPositionsGet(coin: string): Promise<unknown | null> {
-  if (!(await detectDaemon("hl"))) return null;
-  try {
-    const res = await fetch(`${baseDaemon()}/hl/positions/${encodeURIComponent(coin)}`);
-    if (!res.ok) return null;
-    return (await res.json()) as unknown;
-  } catch {
-    return null;
-  }
+  return lireVueHl("positions", coin);
 }

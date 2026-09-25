@@ -139,10 +139,11 @@ const serveur = Bun.serve({
   hostname: HOSTNAME,
   port: PORT,
   fetch: gestionnaire,
-  // 120 s : le premier GET /hl/liqlevels après un boot (ou après purge du cache) rejoint
-  // la construction d'instantané en vol (~50 s à ~475 adresses) — le défaut de 10 s de
-  // Bun tuerait la requête en cours de route. Le client front n'impose pas de timeout
-  // propre sur cet appel (fetch nu, cf. data/daemon.ts::hlLiqLevelsGet).
+  // 120 s (défaut Bun : 10 s) : marge pour les requêtes lentes. Les lectures /hl/* ne
+  // l'approchent plus : le scan du pool (~1 500 adresses, ≈ 240 s) n'est jamais attendu
+  // quand un cache existe, et sans cache une lecture répond 503 « en construction »
+  // après ATTENTE_FROID_MAX_MS (15 s, cf. hyperliquid.ts). Le client front n'impose pas
+  // de timeout propre sur ces appels (fetch nu, cf. data/daemon.ts::hlLiqLevelsGet).
   idleTimeout: 120,
   error(err) {
     console.error("[axiomd] erreur non gérée :", err);

@@ -3,12 +3,13 @@
  *  - FLUX ON-CHAIN : gros transferts (BTC natif + stables USDT/USDC) collectés en continu
  *    par le daemon (`GET /whales/recent`, table SQLite, rétention 30 j). Filtres seuil +
  *    actif, pression dépôts vs retraits, fil horodaté (source → destination étiquetées).
- *  - POSITIONS HL : positions ouvertes des top comptes du leaderboard Hyperliquid
- *    (`GET /hl/positions/:coin`, MÊME instantané 5 min que la couche LIQHL).
+ *  - POSITIONS HL : positions ouvertes d'un échantillon de comptes du leaderboard
+ *    Hyperliquid (~1 500 : plus gros comptes + plus gros volumes de la semaine —
+ *    `GET /hl/positions/:coin`, MÊME instantané 5 min que la couche LIQHL).
  *
  * HONNÊTETÉ (garde-fous BUILD-CONTRACT, cf. data/whales.ts) : montants BTC = estimation
  * (heuristique d'exclusion du change), étiquetage dépôt/retrait = liste curée non
- * exhaustive, ETH natif non couvert, positions HL = échantillon top leaderboard. Chaque
+ * exhaustive, ETH natif non couvert, positions HL = échantillon du leaderboard. Chaque
  * onglet porte ses badges et sa note de source. SANS daemon : repli explicite (pattern
  * REPLAY/LIQHL), la fenêtre ne prétend jamais avoir des données qu'elle n'a pas.
  *
@@ -19,6 +20,9 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { daemonSupporte, daemonSupporteHl, hlPositionsGet, whalesRecentGet } from "../data/daemon";
+// Module déjà chargé au démarrage (App.tsx → commandes LIQHL) : l'importer ici ne coûte
+// rien et partage la détection PURE (et testée) du 503 « en construction ».
+import { estEnConstructionHl, RELANCE_CONSTRUCTION_MS } from "../data/hyperliquidLiq";
 import {
   libelleBout,
   mapperReponsePositions,
@@ -72,8 +76,12 @@ const ASSETS: ReadonlyArray<{ id: string; label: string }> = [
 /** Coins proposés pour les positions Hyperliquid (top liquidité du leaderboard). */
 const COINS_HL = ["BTC", "ETH", "SOL", "HYPE"] as const;
 
-/** Statut de chargement local (pattern triplet des fenêtres daemon-dépendantes). */
-type Statut = "charge" | "ok" | "sans-daemon" | "erreur";
+/**
+ * Statut de chargement local (pattern triplet des fenêtres daemon-dépendantes).
+ * `construction` (onglet Positions HL seulement) : le daemon répond 503 « instantané en
+ * construction » — premier scan du pool après son démarrage, relance automatique.
+ */
+type Statut = "charge" | "ok" | "sans-daemon" | "erreur" | "construction";
 
 /**
  * Statut d'un onglet quand la lecture renvoie null : `whalesRecentGet`/`hlPositionsGet`
@@ -330,14 +338,22 @@ function OngletPositions() {
   useEffect(() => {
     if (IS_VERCEL) return;
     const gen = ++generation.current;
-    setStatut("charge");
+    // Une relance pendant la construction garde son message (pas de va-et-vient entre
+    // deux libellés d'attente pendant les ≤ 15 s de la lecture).
+    setStatut((s) => (s === "construction" ? s : "charge"));
     void (async () => {
       const brut = await hlPositionsGet(coin);
       if (generation.current !== gen) return; // réponse périmée (coin changé)
+      if (estEnConstructionHl(brut)) {
+        // 503 « en construction » : premier scan du pool (~1 500 comptes, ≈ 4 à 5 min)
+        // après le démarrage du daemon — ni une erreur, ni une absence de daemon. Un amont
+        // en panne répond l'autre 503 (« pool indisponible ») → « erreur » ci-dessous.
+        setStatut("construction");
+        return;
+      }
       if (brut === null) {
-        // Daemon présent mais réponse indisponible = premier scan en cours (~1 min,
-        // 150 comptes + leaderboard 34 Mo) ou échec amont → « erreur » douce, PAS
-        // « sans daemon » (le feature-detect hl a répondu).
+        // Daemon présent mais réponse indisponible = échec amont (leaderboard ou
+        // scan) → « erreur » douce, PAS « sans daemon » (le feature-detect hl a répondu).
         setStatut(daemonSupporteHl() ? "erreur" : "sans-daemon");
         return;
       }
@@ -350,6 +366,14 @@ function OngletPositions() {
       setStatut("ok");
     })();
   }, [coin, relance]);
+
+  // Relance automatique toutes les ~30 s tant que l'instantané est en construction
+  // (réarmée à chaque relance ; annulée dès que le statut change ou au démontage).
+  useEffect(() => {
+    if (statut !== "construction") return;
+    const minuteur = setTimeout(() => setRelance((n) => n + 1), RELANCE_CONSTRUCTION_MS);
+    return () => clearTimeout(minuteur);
+  }, [statut, relance]);
 
   const agregats = reponse?.agregats ?? null;
   const total = (agregats?.longUsd ?? 0) + (agregats?.shortUsd ?? 0);
@@ -377,9 +401,13 @@ function OngletPositions() {
             Lancer <code className="text-text">pnpm run up</code> puis rouvrir cette fenêtre.
           </Vide>
         ))}
+      {statut === "construction" && (
+        <Chargement libelle="Instantané Hyperliquid en construction — premier scan du pool (~1 500 comptes, ≈ 4 à 5 min) ; nouvel essai toutes les 30 s…" />
+      )}
       {statut === "erreur" && (
         <Vide>
-          Instantané indisponible — au premier démarrage, le scan des 150 comptes prend ~1 min.
+          Instantané indisponible — échec de la source Hyperliquid (leaderboard ou scan des comptes). Le
+          daemon ne relance un essai qu'au moins 2 min après l'échec.
           <br />
           <button
             type="button"
@@ -425,10 +453,11 @@ function OngletPositions() {
       )}
 
       <NoteSource>
-        Échantillon : top {reponse?.adressesScannees ?? 150} comptes du leaderboard Hyperliquid, positions à
-        prix de liquidation exploitable seulement — jamais « tout le marché ». Même instantané que la couche
-        LIQHL (cache 5 min).{" "}
-        <BadgeFiabilite niveau="partiel" label="échantillon" title="Réel mais non exhaustif : top leaderboard Hyperliquid uniquement." />
+        Échantillon : {reponse !== null ? `${reponse.adressesScannees} comptes scannés` : "jusqu'à ~1 500 comptes"}{" "}
+        du leaderboard Hyperliquid (plus gros comptes + plus gros volumes de la semaine), positions à prix de
+        liquidation exploitable seulement — jamais « tout le marché ». Même instantané que la couche LIQHL
+        (cache 5 min).{" "}
+        <BadgeFiabilite niveau="partiel" label="échantillon" title="Réel mais non exhaustif : échantillon du leaderboard Hyperliquid uniquement." />
       </NoteSource>
     </div>
   );

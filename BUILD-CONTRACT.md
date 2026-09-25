@@ -434,7 +434,7 @@ rapport `docs/superpowers/progress/2026-09-22-heatmap-hl-indicateurs-onchain.md`
    relancé en fond) ; sans aucun cache, elle attend au plus 15 s puis répond 503
    `{ enConstruction: true }` + `Retry-After: 30` — la couche LIQHL reste « chargement » et la
    fenêtre WHALES affiche « instantané en construction », toutes deux relancent toutes les 30 s.
-   Le collecteur forcé attend toujours son point neuf. Ce reste un **échantillon** du
+   Le collecteur forcé attend toujours son point neuf. Cela reste un **échantillon** du
    leaderboard : l'interface annonce « N adresses », jamais « toutes » les liquidations.
 3. **Dix indicateurs** (TS pur, `@axiom/indicators`, un fichier et un test par def, catalogue 200 →
    210). Séries aux ajoutées à `AuxSeriesId` (`@axiom/types`, écart signalé comme aux lots précédents) :

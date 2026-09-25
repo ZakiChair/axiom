@@ -483,7 +483,9 @@ rapport `docs/superpowers/progress/2026-09-22-heatmap-hl-indicateurs-onchain.md`
    `api.hyperliquid.xyz/info` : les `clearinghouseState` partent de l'IP du visiteur. Un
    instantané couvre tous les coins : changer de symbole ne relance aucun scan. Un scan
    recommence toutes les 5 min tant que la couche est active, pas plus d'un à la fois. Le scan
-   se met en pause quand l'onglet est caché et s'arrête proprement au OFF. Après un échec total,
+   se met en pause quand l'onglet est caché et s'arrête proprement au OFF ; un rescan échu
+   pendant l'absence n'est horodaté qu'au retour (ni instantané antidaté, ni second scan
+   enchaîné). Après un échec total,
    un nouvel essai part 2 min plus tard ; sans instantané complet à garder, la légende affiche
    « source indisponible ». Pendant le premier scan, les barres apparaissent dès les premières
    adresses. La légende affiche

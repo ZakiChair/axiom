@@ -26,9 +26,14 @@
  *    dès les premières adresses, la légende dit « scan N/T adresses ». Les rescans (toutes les
  *    5 min tant que la couche est active, comptées depuis le DÉBUT du scan précédent) sont
  *    SILENCIEUX : l'instantané complet reste affiché jusqu'à son remplaçant.
- *  - Onglet caché : pause avant chaque lot (reprise au retour, sans rafale). Couche OFF :
- *    arrêt propre (AbortController : plus aucun lot, pool en cours de téléchargement coupé).
- *    Un seul scan à la fois. Échec total : « erreur », réessai 2 min plus tard.
+ *  - Onglet caché : pause avant chaque lot (reprise au retour, sans rafale). Un rescan échu
+ *    pendant l'absence attend le retour AVANT d'être horodaté (sinon instantané antidaté de
+ *    toute l'absence et 2e scan enchaîné aussitôt). Une pause AU MILIEU d'un scan garde le ts
+ *    de son début (datation prudente) : si le scan a duré plus de 5 min, le suivant part
+ *    aussitôt — toujours à 750 poids/min, et il rafraîchit ce qui a été lu avant la pause.
+ *    Couche OFF : arrêt propre (AbortController : plus aucun lot, pool en cours de
+ *    téléchargement coupé). Un seul scan à la fois. Échec total : « erreur », réessai 2 min
+ *    plus tard.
  *
  * LIMITES ASSUMÉES : l'historique (heatmap HL, collecteur `hlLiqHeat`) reste réservé au
  * daemon ; deux fenêtres visibles côte à côte scannent chacune (même IP → un 429 peut tronquer
@@ -286,12 +291,17 @@ export function creerScannerNavigateurHl(deps: DependancesScannerHl): ScannerNav
       const pool = await obtenirPool(signal);
       if (signal.aborted) return;
       if (pool === null) return echec();
-      const debut = horloge.now();
       if (complet === null) {
         phase = "scan";
         progression = { faites: 0, total: pool.adresses.length };
         publierCourant();
       }
+      // Onglet caché (rescan échu pendant l'absence) : on attend le RETOUR AVANT d'horodater.
+      // Pris avant la pause, `debut` antidaterait l'instantané de toute l'absence, et
+      // `delaiProchainCycle` (5 min après ce ts) relancerait aussitôt un 2e scan complet.
+      await attendreVisible(signal);
+      if (signal.aborted) return;
+      const debut = horloge.now();
       const inst = await construireInstantane(pool.adresses, fetchImpl, debut, {
         ...deps.optionsScan,
         signal,

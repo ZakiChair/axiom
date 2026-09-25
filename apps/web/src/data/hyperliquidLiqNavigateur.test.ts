@@ -435,6 +435,27 @@ describe("scanner navigateur — un instantané pour tous les coins, rescan, arr
     expect(derniere()?.etat).toBe("ok");
   });
 
+  it("rescan échu onglet caché : horodaté au RETOUR (pas antidaté de la pause), un seul scan, puis 5 min", async () => {
+    const { fetchImpl, appels } = reseau({ hlpool: "json" });
+    const vis = visibilite();
+    const { scanner, horloge, derniere } = monter({ fetchImpl, vis });
+    scanner.demarrer("BTC");
+    await scanner.attendreCycle();
+    // L'utilisateur passe sur un autre onglet ; le minuteur du rescan tombe pendant l'absence.
+    vis.basculer(true);
+    horloge.t += PERIODE_SCAN_MS;
+    horloge.declencher((m) => m.ms === PERIODE_SCAN_MS);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(appels.filter((a) => a.startsWith("info:"))).toHaveLength(12); // rescan en pause
+    // Retour 2 h plus tard : le rescan reprend, daté du retour, et le suivant attend 5 min.
+    horloge.t += 2 * 3_600_000;
+    vis.basculer(false);
+    await scanner.attendreCycle();
+    expect(appels.filter((a) => a.startsWith("info:"))).toHaveLength(24); // PAS 36 : aucun scan enchaîné
+    expect(derniere()?.ts).toBe(T0 + PERIODE_SCAN_MS + 2 * 3_600_000);
+    expect(horloge.minuteurs.map((m) => m.ms)).toEqual([PERIODE_SCAN_MS]);
+  });
+
   it("un seul scan à la fois : démarrer deux fois ne lance pas deux cycles", async () => {
     const { fetchImpl, appels } = reseau({ hlpool: "json" });
     const { scanner } = monter({ fetchImpl });

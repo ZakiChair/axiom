@@ -1152,5 +1152,7 @@ et signalent l'échec en console (fbd4c61).
 fusionnées) : chargement initial **1 185 189 / 353 279** (Node 24.13.0, zlib 1.3.1), plafonds
 1 220 000 / 360 000 inchangés, marge gzip 6 721 octets. `pnpm check` vert (indicateurs 844,
 alertes 62, backtest 114, daemon 756, web 5 648 tests ; typage monorepo) et `pnpm check:e2e`
-142/142 (mesuré avant le dernier correctif d'interaction, bba3c7b, que couvrent ses tests
-unitaires et la suite web).
+142/142, relancé sur l'état final. Au navigateur sur API réelles, contre main : HYPEUSDT sur
+Bybit (443 bougies 1d depuis le 2025-07-11, contre 3 sur main), ratios ÷Or et en CHF exacts,
+classement TOP, impression de stablecoins en 1d, rectangle à coin futur stable ; démarrage à
+froid sans cache de profondeur environ +400 ms (1 618 contre 1 138 ms en médiane), à chaud égal.

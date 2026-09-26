@@ -48,7 +48,7 @@ export const windowPanelCommands: Commande[] = [
     categorie: "panneau",
     motsCles: ["vue marche", "market map", "treemap", "heatmap", "carte", "secteurs", "capitalisation", "imap"],
     apercu: "Ouvre / ferme la treemap de capitalisation du marché",
-    action: basculer("marketMap"),
+    action: () => marketMapUiStore.getState().toggleMarketMap(),
   },
   {
     id: "panneau:vue-marche-imap",
@@ -57,7 +57,7 @@ export const windowPanelCommands: Commande[] = [
     categorie: "panneau",
     motsCles: ["vue marche", "market map", "treemap", "heatmap", "alias map"],
     apercu: "Alias de MAP — ouvre / ferme la treemap de capitalisation du marché",
-    action: basculer("marketMap"),
+    action: () => marketMapUiStore.getState().toggleMarketMap(),
   },
   {
     id: "panneau:classement-performances",

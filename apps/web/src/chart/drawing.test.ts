@@ -555,3 +555,66 @@ describe("drawing.ts — un rectangle prolongé dans le futur survit au changeme
     unbindChart(a.chart);
   });
 });
+
+describe("drawing.ts — revue du 26/09 : réancrage, abonnements, calendrier", () => {
+  let localStorage: Storage;
+  beforeEach(() => { localStorage = installMockLocalStorage(); });
+  afterEach(() => { delete (globalThis as { localStorage?: Storage }).localStorage; });
+
+  /** Chart simulé : bougies modifiables, abonnements comptés par référence (comme klinecharts). */
+  function chartCompte(data: Array<{ timestamp: number }>) {
+    const base = createMockChart();
+    const surcharges: Array<Record<string, unknown>> = [];
+    const abonnes: Array<() => void> = [];
+    const crees: Array<Record<string, unknown>> = [];
+    const chart = base.chart as unknown as Record<string, unknown>;
+    const creer = chart.createOverlay as (opts: Record<string, unknown>) => string;
+    chart.createOverlay = (opts: Record<string, unknown>) => { crees.push(opts); return creer(opts); };
+    chart.overrideOverlay = (opts: Record<string, unknown>) => { surcharges.push(opts); };
+    chart.getDataList = () => data;
+    chart.subscribeAction = (_type: string, cb: () => void) => { abonnes.push(cb); };
+    chart.unsubscribeAction = (_type: string, cb: () => void) => { const i = abonnes.indexOf(cb); if (i >= 0) abonnes.splice(i, 1); };
+    return {
+      ...base, surcharges, abonnes, crees,
+      setData: (d: typeof data) => { data = d; chart.getDataList = () => data; },
+      donneesPretes: () => { for (const cb of [...abonnes]) cb(); },
+    };
+  }
+
+  it("BLOQUANT : un coin passé rejoué en indice qui RENTRE dans la plage après un préfixe est recalé sur son instant", () => {
+    const a = chartCompte(bougies());
+    bindChart(a.chart, { exchange: EXCHANGE, symbol: SYMBOL }, 0);
+    localStorage.setItem(DRAWINGS_KEY, JSON.stringify({ [SLOT0_KEY]: [{ name: "rect", points: [{ timestamp: T0 - 2 * H, value: 100 }, { timestamp: T0 + 5 * H, value: 120 }] }] }));
+    restoreDrawings(a.chart, EXCHANGE, SYMBOL);
+    expect(a.crees.at(-1)?.points).toEqual([{ dataIndex: -2, value: 100 }, { timestamp: T0 + 5 * H, value: 120 }]);
+    // Extension de session : 100 bougies préfixées ; klinecharts (Init) ne décale pas l'indice -2.
+    a.setData(bougies(110, T0 - 100 * H));
+    a.donneesPretes();
+    expect(a.surcharges).toEqual([{ id: "ov-0", points: [{ timestamp: T0 - 2 * H, value: 100 }, { timestamp: T0 + 5 * H, value: 120 }] }]);
+    unbindChart(a.chart);
+  });
+
+  it("un re-bindChart (changement d'actif ou d'unité de temps) ne laisse qu'un abonnement onDataReady, retiré au démontage", () => {
+    const a = chartCompte(bougies());
+    bindChart(a.chart, { exchange: EXCHANGE, symbol: SYMBOL }, 0);
+    bindChart(a.chart, { exchange: EXCHANGE, symbol: "ETHUSDT" }, 0);
+    bindChart(a.chart, { exchange: EXCHANGE, symbol: SYMBOL, timeframe: "4h" }, 0);
+    expect(a.abonnes).toHaveLength(1);
+    unbindChart(a.chart);
+    expect(a.abonnes).toHaveLength(0);
+  });
+
+  it("1M et plus : extrapolation en mois UTC, pas au plus petit écart (février)", () => {
+    const mois = Array.from({ length: 20 }, (_, i) => ({ timestamp: Date.UTC(2025, i, 1) }));
+    expect(versPointSauve({ dataIndex: 19 + 12, value: 1 }, mois, "1M")).toEqual({ timestamp: Date.UTC(2026, 7 + 12, 1), value: 1 });
+    expect(versPointGraphe({ timestamp: Date.UTC(2027, 7, 1), value: 1 }, mois, "1M")).toEqual({ dataIndex: 31, value: 1 });
+    const trimestres = Array.from({ length: 8 }, (_, i) => ({ timestamp: Date.UTC(2024, 3 * i, 1) }));
+    expect(versPointSauve({ dataIndex: -1, value: 1 }, trimestres, "3M")).toEqual({ timestamp: Date.UTC(2023, 9, 1), value: 1 });
+    expect(versPointGraphe({ timestamp: Date.UTC(2023, 9, 1), value: 1 }, trimestres, "3M")).toEqual({ dataIndex: -1, value: 1 });
+  });
+
+  it("une seule bougie : le pas vient de l'unité de temps, le coin futur garde un instant", () => {
+    expect(versPointSauve({ dataIndex: 3, value: 1 }, [{ timestamp: T0 }], "1h")).toEqual({ timestamp: T0 + 3 * H, value: 1 });
+    expect(versPointGraphe({ timestamp: T0 + 3 * H, value: 1 }, [{ timestamp: T0 }], "1h")).toEqual({ dataIndex: 3, value: 1 });
+  });
+});

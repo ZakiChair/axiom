@@ -59,6 +59,8 @@ export function TableTriable<L>({
   vide,
   maxHauteur,
   surClicLigne,
+  ligneActive,
+  titreLigne,
   ariaLabel,
 }: {
   colonnes: readonly ColonneTable<L>[];
@@ -69,6 +71,10 @@ export function TableTriable<L>({
   vide?: ReactNode;
   maxHauteur?: string;
   surClicLigne?: (ligne: L) => void;
+  /** Ligne cliquable ? (défaut : toutes, dès que `surClicLigne` est fourni). Inactive : estompée. */
+  ligneActive?: (ligne: L) => boolean;
+  /** Infobulle d'une ligne (ex. pourquoi elle n'est pas cliquable). */
+  titreLigne?: (ligne: L) => string | undefined;
   ariaLabel?: string;
 }) {
   const grille = colonnes.map((c) => c.largeur ?? "1fr").join(" ");
@@ -85,13 +91,19 @@ export function TableTriable<L>({
       {lignes.length === 0 && vide !== undefined ? (
         <Vide>{vide}</Vide>
       ) : (
-        lignes.map((l) => (
+        lignes.map((l) => {
+          const active = surClicLigne !== undefined && ligneActive?.(l) !== false;
+          return (
           <div
             key={cle(l)}
             role={ariaLabel ? "row" : undefined}
-            onClick={surClicLigne !== undefined ? () => surClicLigne(l) : undefined}
+            title={titreLigne?.(l)}
+            // Cliquable = atteignable au clavier : Tab, puis Entrée ou Espace.
+            tabIndex={active ? 0 : undefined}
+            onClick={active ? () => surClicLigne(l) : undefined}
+            onKeyDown={active ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); surClicLigne(l); } } : undefined}
             className={`grid items-center gap-2 border-b border-border/50 px-3 py-1.5 text-[11px] last:border-b-0 ${
-              surClicLigne !== undefined ? "cursor-pointer hover:bg-surface" : ""
+              active ? "cursor-pointer outline-none hover:bg-surface focus-visible:bg-surface" : surClicLigne !== undefined ? "opacity-60" : ""
             }`}
             style={{ gridTemplateColumns: grille }}
           >
@@ -101,7 +113,8 @@ export function TableTriable<L>({
               </span>
             ))}
           </div>
-        ))
+          );
+        })
       )}
     </div>
   );

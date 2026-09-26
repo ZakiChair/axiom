@@ -4,7 +4,9 @@
  * (aucune requête supplémentaire). Un actif sans variation connue sur la période sort du
  * classement : jamais de 0 inventé.
  */
+import type { ExchangeId } from "@axiom/types";
 import type { CoinTile } from "../data/marketOverview";
+import { formatPrice } from "../lib/format";
 
 export type PeriodeClassement = "1h" | "24h" | "7j" | "30j";
 export type SensClassement = "hausses" | "baisses";
@@ -36,18 +38,21 @@ const STABLES = new Set([
   "USDT", "USDC", "DAI", "FDUSD", "TUSD", "USDE", "USDS", "PYUSD", "USD1", "USDD", "FRAX", "GUSD", "USDP",
   "LUSD", "BUSD", "RLUSD", "USDG", "USD0", "EURC", "EURS", "SUSDE", "SUSDS", "USDY", "USDTB", "BFUSD", "USDF",
   "CRVUSD", "GHO", "DOLA", "USDL", "USDB", "USDX", "USDO", "BUIDL", "USYC", "OUSG",
+  // Ancrages non USD et jetons de trésorerie à rendement (relevé CoinGecko du 26/09/2026).
+  "EURCV", "A7A5", "JPYSC", "EUTBL", "USTB", "USTBL", "JTRSY", "JAAA", "SAFO", "EURSAFO", "REUSD",
+  "APXUSD", "APYUSD", "SDAI", "SYRUPUSDC", "YLDS", "USX", "USDAI", "USAT", "AUSD",
 ]);
 
 /** Stablecoin : liste connue, ou prix ancré à 1 $ sans mouvement sur 24 h et 7 j. */
 export function estStablecoin(c: CoinTile): boolean {
   if (STABLES.has(c.symbol)) return true;
   const calme = (v: number | null) => v !== null && Math.abs(v) < 0.5;
-  return Math.abs(c.price - 1) < 0.02 && calme(c.changePct24h) && calme(c.changePct7j);
+  return Math.abs(c.price - 1) < 0.02 && calme(c.changePct24hConnu) && calme(c.changePct7j);
 }
 
 /** Variation (%) de la période ; null si CoinGecko ne la fournit pas. */
 export function valeurPeriode(c: CoinTile, periode: PeriodeClassement): number | null {
-  const v = periode === "1h" ? c.changePct1h : periode === "24h" ? c.changePct24h : periode === "7j" ? c.changePct7j : c.changePct30j;
+  const v = periode === "1h" ? c.changePct1h : periode === "24h" ? c.changePct24hConnu : periode === "7j" ? c.changePct7j : c.changePct30j;
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
@@ -72,4 +77,28 @@ export function resumePerformances(lignes: readonly CoinTile[], periode: Periode
     baisses: v.filter((x) => x < 0).length,
     mediane: v.length === 0 ? null : v.length % 2 ? v[m]! : (v[m - 1]! + v[m]!) / 2,
   };
+}
+
+/** Nom lisible d'une place (message du garde). */
+const NOM_PLACE: Record<string, string> = { binance: "Binance", bybit: "Bybit", okx: "OKX", mexc: "MEXC", kraken: "Kraken", coinbase: "Coinbase" };
+
+export type VerdictPaire = { ok: true; paire: string; exchange: ExchangeId } | { ok: false; paire: string; raison: string };
+
+/**
+ * Garde du clic : un ticker CoinGecko n'est pas unique (AIUSDT est Sleepless AI, pas Artificial
+ * Inu). La paire USDT n'est ouverte que si CHAQUE place qui la cote, et dont le prix est connu,
+ * reste dans ×0,8 – ×1,25 du prix CoinGecko de la ligne : le routage pourrait choisir n'importe
+ * laquelle. Aucun prix connu : pas de navigation (identité invérifiable).
+ */
+export function verifierPaire(ligne: { symbol: string; name: string; price: number }, cotations: ReadonlyArray<{ exchange: ExchangeId; prix: number | undefined }>): VerdictPaire {
+  const paire = `${ligne.symbol}USDT`;
+  const connues = cotations.filter((c): c is { exchange: ExchangeId; prix: number } => typeof c.prix === "number" && Number.isFinite(c.prix) && c.prix > 0);
+  if (connues.length === 0 || !(ligne.price > 0)) {
+    return { ok: false, paire, raison: `${paire} : prix indisponible, impossible de vérifier qu'il s'agit bien de ${ligne.name}. Ouverture annulée.` };
+  }
+  const ecart = connues.find((c) => c.prix < ligne.price * 0.8 || c.prix > ligne.price * 1.25);
+  if (ecart) {
+    return { ok: false, paire, raison: `${paire} (${NOM_PLACE[ecart.exchange] ?? ecart.exchange}) cote ${formatPrice(ecart.prix)} $ contre ${formatPrice(ligne.price)} $ pour ${ligne.name} : ce ticker désigne un autre actif. Ouverture annulée.` };
+  }
+  return { ok: true, paire, exchange: connues[0]!.exchange };
 }

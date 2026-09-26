@@ -922,7 +922,7 @@ export function ChartInstance({
     // DÉJÀ lié REMPLACE proprement l'entrée du registre (`registry.set` écrase ; le focus,
     // tracké par référence d'INSTANCE — inchangée — n'est pas perturbé) → aucun
     // `updateChartMeta` dédié nécessaire. Le focus reprend la main si ce slot est le focus.
-    bindChart(chart, { exchange, symbol }, slot);
+    bindChart(chart, { exchange, symbol, timeframe }, slot);
     if (chartLayoutStore.getState().focus === slot) setFocusChart(slot);
 
     // Indicateurs : abonnement qui CAPTURE `exchange` (recréé à chaque changement de données

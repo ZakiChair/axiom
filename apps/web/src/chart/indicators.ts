@@ -141,10 +141,10 @@ function publierStatut(chart: Chart, instanceId: string, statut: StatutIndicateu
 
 /**
  * Defs dont la légende et l'axe ABRÈGENT les grands nombres (`shouldFormatBigNumber`) :
- * le volume piégé est en unités de BASE, à 13 chiffres sur PEPE, et la largeur de l'axe Y
- * est le maximum sur TOUS les panes. Liste locale : `@axiom/types` est figé.
+ * le volume piégé est en unités de BASE, à 13 chiffres sur PEPE, les stablecoins en milliards
+ * de dollars, et la largeur de l'axe Y est le maximum sur TOUS les panes. Liste locale : `@axiom/types` est figé.
  */
-const ABREGER_GRANDS_NOMBRES: ReadonlySet<string> = new Set(["trappedVolume"]);
+const ABREGER_GRANDS_NOMBRES: ReadonlySet<string> = new Set(["trappedVolume", "stablecoinPrint", "stablecoinSupply"]);
 
 /**
  * `customApi.formatBigNumber` de chaque graphe (installé à `init`, commun à tous ses panes

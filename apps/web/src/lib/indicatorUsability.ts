@@ -1,5 +1,5 @@
 import type { ExchangeId, IndicatorDef, Timeframe } from "@axiom/types";
-import { supportsIndicatorTimeframe } from "@axiom/indicators";
+import { supportsIndicatorTimeframe, TIMEFRAME_REQUIS } from "@axiom/indicators";
 import { tfAtLeast } from "../chart/tfOrder";
 import { coinalyzeKeyStore } from "../store/coinalyze";
 import { daemonSupporte } from "../data/daemon";
@@ -132,7 +132,9 @@ export function raisonUnusableIndicateur(
     return "Twelve Data ne fournit pas de volume pour le forex";
   }
   if (!supportsIndicatorTimeframe(def.id, timeframe)) {
-    return "RVOL saisonnier : nécessite l’intervalle 1h (références en UTC)";
+    return def.id === "rvolSeasonal"
+      ? "RVOL saisonnier : nécessite l’intervalle 1h (références en UTC)"
+      : `Nécessite l’intervalle ${TIMEFRAME_REQUIS[def.id]} (données quotidiennes)`;
   }
   if (def.aux?.includes("mark") && ["3M", "6M", "12M"].includes(timeframe)) {
     return "Mark perp indisponible pour cet intervalle";

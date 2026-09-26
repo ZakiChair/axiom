@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { CoinTile } from "../data/marketOverview";
-import { classerPerformances, estStablecoin, resumePerformances, valeurPeriode } from "./classementPerformances.util";
+import { classerPerformances, estStablecoin, resumePerformances, valeurPeriode, verifierPaire } from "./classementPerformances.util";
 
 /** Tuile de fixture, rangée par capitalisation décroissante comme parseMarkets. */
 function tuile(symbol: string, mcapUsd: number, p: Partial<CoinTile> = {}): CoinTile {
   return {
     id: symbol.toLowerCase(), symbol, name: symbol, mcapUsd, price: 10, volume24hUsd: 1e6, observeLe: null,
     changePct24h: 0, changePct7j: 0, changePct30j: 0, changePct1h: 0, ...p,
+    changePct24hConnu: p.changePct24hConnu !== undefined ? p.changePct24hConnu : p.changePct24h ?? 0,
   };
 }
 
@@ -36,6 +37,14 @@ describe("classement des performances (façon accueil CoinGlass)", () => {
     expect(lignes.map((l) => l.symbol)).toEqual(["ETH", "BTC", "PEPE"]);
   });
 
+  it("Δ24 h inconnu (FIGR_HELOC réel) : hors du classement 24 h et de la médiane, présent en 7 j", () => {
+    const avecInconnu = [...MARCHE, tuile("FIGR_HELOC", 23.7e9, { price: 1.02, changePct24h: 0, changePct24hConnu: null, changePct7j: -0.63 })];
+    const lignes = classerPerformances(avecInconnu, { periode: "24h", sens: "hausses", univers: 250, sansStables: true });
+    expect(lignes.map((l) => l.symbol)).not.toContain("FIGR_HELOC");
+    expect(resumePerformances(lignes, "24h").mediane).toBe((1.2 + -2.5) / 2);
+    expect(classerPerformances(avecInconnu, { periode: "7j", sens: "hausses", univers: 250, sansStables: true }).map((l) => l.symbol)).toContain("FIGR_HELOC");
+  });
+
   it("univers : seuls les N premiers par capitalisation concourent", () => {
     const lignes = classerPerformances(MARCHE, { periode: "1h", sens: "hausses", univers: 2, sansStables: true });
     expect(lignes.map((l) => l.symbol)).toEqual(["BTC", "ETH"]);
@@ -55,5 +64,29 @@ describe("classement des performances (façon accueil CoinGlass)", () => {
     // Un actif à 1 $ qui bouge n'est pas un stablecoin.
     expect(estStablecoin(tuile("XRP", 1, { price: 1.01, changePct24h: 3.2, changePct7j: 6 }))).toBe(false);
     expect(estStablecoin(tuile("PAXG", 1, { price: 2_400 }))).toBe(false);
+  });
+});
+
+describe("garde du clic : la paire ouverte est bien l'actif de la ligne", () => {
+  const ai = { symbol: "AI", name: "Artificial Inu", price: 0.258 };
+  it("prix cohérent sur toutes les places qui cotent la paire : navigation, première place cohérente en provenance", () => {
+    expect(verifierPaire({ symbol: "ETH", name: "Ethereum", price: 2_690 }, [{ exchange: "binance", prix: 2_687 }, { exchange: "okx", prix: 2_688 }]))
+      .toEqual({ ok: true, paire: "ETHUSDT", exchange: "binance" });
+  });
+  it("ticker partagé par un autre actif (AIUSDT = Sleepless AI à 0,0203 $) : aucune navigation, raison explicite", () => {
+    const v = verifierPaire(ai, [{ exchange: "binance", prix: 0.0203 }, { exchange: "okx", prix: 0.0217 }]);
+    expect(v.ok).toBe(false);
+    expect(v.ok === false && v.raison).toMatch(/AIUSDT.*Binance.*Artificial Inu/);
+  });
+  it("une seule place incohérente suffit à bloquer (le routage pourrait la choisir)", () => {
+    expect(verifierPaire({ symbol: "FRAX", name: "Legacy Frax Dollar", price: 0.99 }, [{ exchange: "coinbase", prix: 0.99 }, { exchange: "bybit", prix: 0.306 }]).ok).toBe(false);
+  });
+  it("bande ×0,8 – ×1,25 : bornes incluses ; places sans prix ignorées ; aucun prix → pas de navigation", () => {
+    expect(verifierPaire(ai, [{ exchange: "binance", prix: 0.258 * 0.8 }, { exchange: "okx", prix: undefined }]).ok).toBe(true);
+    expect(verifierPaire(ai, [{ exchange: "binance", prix: 0.258 * 1.25 }]).ok).toBe(true);
+    expect(verifierPaire(ai, [{ exchange: "binance", prix: 0.258 * 1.26 }]).ok).toBe(false);
+    const sansPrix = verifierPaire(ai, [{ exchange: "binance", prix: undefined }]);
+    expect(sansPrix.ok === false && sansPrix.raison).toMatch(/prix indisponible/i);
+    expect(verifierPaire(ai, []).ok).toBe(false);
   });
 });

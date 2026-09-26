@@ -1,12 +1,15 @@
 /**
  * Onglet « Classement » de la vue marché (MAP) : les actifs les plus performants, à la
  * manière de l'accueil CoinGlass. Mêmes tuiles CoinGecko que la carte (top 250, ~5 min) :
- * aucune requête supplémentaire. Un clic ouvre la paire USDT sur le graphe si un
- * catalogue la cote ; la source reste choisie automatiquement par le routage.
+ * aucune requête CoinGecko supplémentaire. Un clic (ou Entrée) ouvre la paire USDT si un
+ * catalogue la cote ET si son prix sur chaque place qui la cote reste cohérent avec la ligne
+ * (un ticker CoinGecko n'est pas unique) ; la source reste choisie par le routage.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ExchangeId } from "@axiom/types";
+import { getAdapter } from "../data/adapters";
 import type { CoinTile } from "../data/marketOverview";
-import { fetchMarketCatalog } from "../data/marketRouting";
+import { fetchMarketCatalog, subscribeMarketCatalog, type MarketCatalog } from "../data/marketRouting";
 import { formatPct, formatPrice, formatUsd } from "../lib/format";
 import { navigateTo } from "../lib/navigation";
 import { TableTriable, trierLignes, type ColonneTable, type TriTable } from "./TableTriable";
@@ -19,7 +22,22 @@ import {
   type LigneClassement,
   type PeriodeClassement,
   type SensClassement,
+  verifierPaire,
 } from "./classementPerformances.util";
+
+/** Places spot cotant chaque paire, d'après le catalogue commun. */
+function placesParPaire(c: MarketCatalog): ReadonlyMap<string, ExchangeId[]> {
+  const m = new Map<string, ExchangeId[]>();
+  for (const i of c.instruments) if (i.kind === "spot") m.set(i.symbol, [...(m.get(i.symbol) ?? []), i.exchange]);
+  return m;
+}
+
+/** Dernier prix d'une paire sur une place (clôture de la dernière bougie 1h), borné à 4 s. */
+async function dernierPrix(exchange: ExchangeId, paire: string): Promise<number | undefined> {
+  const delai = new Promise<undefined>((fin) => setTimeout(fin, 4_000));
+  const bougies = getAdapter(exchange).fetchKlines(paire, "1h", { limit: 2 }).then((b) => b.at(-1)?.close, () => undefined);
+  return Promise.race([bougies, delai]);
+}
 
 const classeVariation = (v: number | null) => (v === null ? "text-text-dim" : v > 0 ? "text-up" : v < 0 ? "text-down" : "text-text-dim");
 
@@ -58,16 +76,40 @@ export function ClassementPerformances({ coins, loading }: { coins: readonly Coi
   const [univers, setUnivers] = useState(100);
   const [sansStables, setSansStables] = useState(true);
   const [tri, setTri] = useState<TriTable | null>(null);
-  const [paires, setPaires] = useState<ReadonlySet<string> | null>(null);
+  const [paires, setPaires] = useState<ReadonlyMap<string, ExchangeId[]> | null>(null);
+  /** Lignes dont la paire désigne un autre actif (raison affichée en infobulle). */
+  const [refusees, setRefusees] = useState<ReadonlyMap<string, string>>(new Map());
+  const [etat, setEtat] = useState<string | null>(null);
+  const clic = useRef(0);
 
-  // Paires spot cotées (tous catalogues) : un clic n'ouvre qu'un instrument réel.
+  // Paires spot cotées (tous catalogues, republiés à leur retour) : un clic n'ouvre qu'un instrument réel.
   useEffect(() => {
     let actif = true;
-    void fetchMarketCatalog()
-      .then((c) => { if (actif) setPaires(new Set(c.instruments.filter((i) => i.kind === "spot").map((i) => i.symbol))); })
-      .catch(() => { /* sans catalogue, les lignes restent consultables mais ne naviguent pas */ });
-    return () => { actif = false; };
+    const recevoir = (c: MarketCatalog) => { if (actif) setPaires(placesParPaire(c)); };
+    const stop = subscribeMarketCatalog(recevoir);
+    void fetchMarketCatalog().then(recevoir).catch(() => { /* sans catalogue, lignes consultables mais non navigables */ });
+    return () => { actif = false; clic.current += 1; stop(); };
   }, []);
+
+  const ouvrir = async (l: LigneClassement) => {
+    const places = paires?.get(`${l.symbol}USDT`);
+    if (!places) return;
+    const n = ++clic.current;
+    setEtat(`Vérification du prix de ${l.symbol}USDT…`);
+    const cotations = await Promise.all(places.map(async (exchange) => ({ exchange, prix: await dernierPrix(exchange, `${l.symbol}USDT`) })));
+    if (n !== clic.current) return; // clic plus récent ou démontage
+    const verdict = verifierPaire(l, cotations);
+    if (verdict.ok) {
+      setEtat(null);
+      navigateTo({ symbol: verdict.paire, exchange: verdict.exchange, source: "map" });
+    } else {
+      setEtat(verdict.raison);
+      setRefusees((m) => new Map(m).set(l.id, verdict.raison));
+    }
+  };
+  const titreLigne = (l: LigneClassement) => refusees.get(l.id)
+    ?? (paires === null ? "Catalogue des paires en chargement…"
+      : paires.has(`${l.symbol}USDT`) ? `Ouvrir ${l.symbol}USDT sur le graphe` : `Aucune paire ${l.symbol}USDT cotée : pas d'ouverture sur le graphe`);
 
   const lignes = useMemo(
     () => classerPerformances(coins, { periode, sens, univers, sansStables }),
@@ -96,7 +138,6 @@ export function ClassementPerformances({ coins, loading }: { coins: readonly Coi
     { id: "cap", label: "Cap.", align: "right", triable: true, valeurTri: (l) => l.mcapUsd, rendu: (l) => formatUsd(l.mcapUsd) },
   ];
   const affichees = tri === null ? lignes : trierLignes(lignes, colonnes, tri);
-  const paire = (l: LigneClassement) => `${l.symbol}USDT`;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 p-3">
@@ -123,6 +164,7 @@ export function ClassementPerformances({ coins, loading }: { coins: readonly Coi
           <span className={classeVariation(resume.mediane)}>{formatPct(resume.mediane)}</span>
         </span>
       </div>
+      {etat && <p role="status" className="text-[11px] text-text-dim">{etat}</p>}
       {coins.length === 0 && loading ? (
         <Chargement />
       ) : (
@@ -135,7 +177,9 @@ export function ClassementPerformances({ coins, loading }: { coins: readonly Coi
             onTri={setTri}
             cle={(l) => l.id}
             vide="Aucun actif avec une variation connue sur cette période."
-            surClicLigne={(l) => { if (paires?.has(paire(l))) navigateTo({ symbol: paire(l), source: "map" }); }}
+            surClicLigne={(l) => void ouvrir(l)}
+            ligneActive={(l) => !refusees.has(l.id) && paires?.has(`${l.symbol}USDT`) === true}
+            titreLigne={titreLigne}
           />
         </div>
       )}

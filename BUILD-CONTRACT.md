@@ -756,60 +756,74 @@ plus lancer `vercel build` dans le checkout principal. Il écrase
 direct sans la clé `.env`, WHALES et Replay coupés). Déployer par build distant,
 puis reconstruire `dist` par `pnpm --filter @axiom/web build`.
 
+## Classement, impression de stablecoins et dessins (26 septembre 2026)
 
-## Demandes du 26 septembre 2026 (classement, impression de stablecoins, rectangles)
+Le propriétaire a demandé trois changements : un classement des actifs les plus performants
+(comme l'accueil de CoinGlass), l'impression quotidienne de stablecoins sous le graphique, et
+la correction des rectangles qui se déplacent en passant d'un graphique à un autre. **39
+fenêtres, 215 indicateurs (+1), 9 identifiants de marché. Aucune dépendance, aucun hôte ni
+fournisseur, aucune règle de proxy ; `@axiom/types` inchangé.** Une revue indépendante (trois
+angles, constats contre-vérifiés) a été suivie d'un second commit de corrections.
 
-Le propriétaire a demandé trois changements : un classement des actifs les plus
-performants (comme l'accueil de CoinGlass), l'impression quotidienne de stablecoins
-visible sous le graphique, et la correction des rectangles qui se déplacent en passant
-d'un graphique à un autre. **39 fenêtres, 215 indicateurs (+1), 9 identifiants de marché,
-aucune dépendance, aucun hôte ni fournisseur, aucune règle de proxy, `@axiom/types`
-inchangé.**
+1. **Classement : onglet « Classement » de MAP, mnémonique `TOP`.** C'est un onglet, pas une
+   nouvelle fenêtre.
+   - Données : les tuiles CoinGecko de la carte (top 250, cache 5 min). La requête
+     `/coins/markets` ajoute seulement la période `1h` : toujours 3 requêtes par
+     rafraîchissement.
+   - Affichage : rang, prix, Δ 1 h / 24 h / 7 j / 30 j, volume 24 h, capitalisation ; choix
+     hausses ou baisses, top 100 ou 250, « Hors stablecoins » (liste connue, ancrages non USD
+     et jetons de trésorerie compris, ou prix ancré à 1 $ sans mouvement) ; nombre de hausses,
+     de baisses et médiane.
+   - Un actif sans variation connue sur la période sort du classement, sans 0 inventé. Le Δ24 h
+     a pour cela un champ nullable dédié (`changePct24hConnu`) ; la treemap garde sa convention
+     0. Un cache d'un ancien schéma est rechargé au lieu d'être servi.
+   - Clic ou Entrée sur une ligne : la paire `SYMBOLEUSDT` ne s'ouvre que si un catalogue la
+     cote ET si son dernier prix sur CHAQUE place qui la cote reste dans ×0,8 – ×1,25 du prix
+     CoinGecko. Un ticker n'est pas unique : AIUSDT est Sleepless AI, pas Artificial Inu. Sinon,
+     aucune navigation, et la raison est affichée. Les lignes non navigables sont estompées, avec
+     une infobulle.
+   - `MAP` et `IMAP` rouvrent sur la carte ; `TOP` ouvre sur le classement sans fermer la
+     fenêtre.
+2. **Impression de stablecoins : `stablecoinPrint`, pane séparé, unité 1d SEULEMENT.**
+   - Mesure : variation nette quotidienne du stock circulant de stablecoins valorisé en USD
+     (DefiLlama, série auxiliaire `stablecoins` existante, tous ancrages convertis en USD).
+   - Ce n'est PAS une mesure des mint/burn. La variation inclut les effets de change et les
+     changements de couverture. Les sorties s'appellent « Hausse nette de l'offre » et « Baisse
+     nette de l'offre » (règle « ni d'interprétation mint/burn » ci-dessus) ; le nom
+     « Impression de stablecoins (Δ offre / jour) » reprend le mot du propriétaire.
+   - Unité : `minTimeframe` 1d, et `supportsIndicatorTimeframe` n'admet que 1d (table
+     `TIMEFRAME_REQUIS`, commune au graphe, aux alertes et au backtest, avec le RVOL saisonnier
+     en 1h). Le point DefiLlama daté D porte la dernière valeur du jour D : en intrajournalier,
+     il serait lu dès 00:00 (anticipation) ; en 1w, la bougie du lundi lirait la semaine
+     précédente.
+   - Une valeur reportée à l'identique ne fait aucune barre. La bougie non clôturée (point
+     réécrit en cours de journée) va dans « Jour en cours (partiel) », en gris, hors de la
+     moyenne.
+   - Moyenne au plus 60 jours (la série couvre 90 jours) ; légende et axe abrégés (K/M/B),
+     comme pour l'offre de stablecoins.
+3. **Dessins dont un point est hors des bougies chargées.** Dans klinecharts 9.8, un point
+   posé à droite de la dernière bougie (ou avant la première) n'a qu'un `dataIndex`.
+   - Cause : la sauvegarde ne gardait que `{timestamp, value}`. Le point revenait donc sans
+     abscisse au rejeu (changement d'actif, d'unité de temps, de disposition, rechargement), et
+     le dessin se déformait vers le bord gauche.
+   - Sauvegarde : l'instant est extrapolé (mois UTC en 1M et au-delà ; sinon au pas des bougies,
+     ou à la durée de l'unité de temps s'il y a moins de deux bougies).
+   - Rejeu : un instant hors des bougies devient un indice extrapolé, que klinecharts rabattait
+     sur la première ou la dernière bougie.
+   - Historique préfixé : quand la première bougie change (extension de session, resync,
+     pagination), TOUS les dessins sont rejoués depuis leurs instants. klinecharts ne décale pas
+     l'indice en `applyNewData`. Parcours `e2e/dessins-hors-bougies` : −1 661 barres sans ce
+     rejeu, 0 avec.
+   - Le VPFR borne une plage dont un bord n'a qu'un indice (bougies chargées) au lieu de
+     disparaître.
+   - Limites :
+     - en TradFi, nuits et week-ends sont extrapolés comme des bougies de même durée (instant
+       approché), et un instant futur peut ensuite être rabattu sur la bougie la plus proche ;
+     - un dessin déjà sauvegardé par l'ancien code a perdu l'abscisse de son point futur et doit
+       être retracé ;
+     - les dessins restent indexés par slot, place et symbole (changer de place masque ceux de
+       l'ancienne).
 
-1. **Classement (MAP, onglet « Classement », mnémonique `TOP`).** Il s'agit d'un nouvel
-   onglet de la vue marché, pas d'une nouvelle fenêtre. Il utilise les mêmes tuiles
-   CoinGecko que la carte (top 250, cache 5 min), et la requête `/coins/markets` ajoute
-   seulement la période `1h` (`price_change_percentage=1h,24h,7d,30d`) : toujours
-   3 requêtes par rafraîchissement.
-   - Colonnes : rang, actif, prix, Δ 1 h / 24 h / 7 j / 30 j, volume 24 h, capitalisation.
-   - Réglages : période, hausses/baisses, top 100/250, « Hors stablecoins » (liste connue,
-     ou prix ancré à 1 $ sans mouvement). Le résumé affiche le nombre de hausses et de
-     baisses et la médiane.
-   - Un actif sans variation connue sur la période sort du classement, sans 0 inventé.
-   - Un clic ouvre `SYMBOLEUSDT` uniquement si un catalogue le cote ; la source reste
-     choisie par le routage automatique.
-2. **Impression de stablecoins (`stablecoinPrint`, pane séparé).** Il s'agit de la
-   variation nette QUOTIDIENNE de l'offre agrégée DefiLlama (série auxiliaire
-   `stablecoins` existante).
-   - C'est un Δ de stock net, jamais une somme de mints ou de burns bruts : la règle
-     « ni d'interprétation mint/burn » reste respectée, et le libellé dit « Δ offre / jour ».
-   - Une valeur reportée à l'identique (jour non publié, bougie intrajournalière) ne
-     produit aucune barre : pas de 0 inventé.
-   - Le montant est ramené par jour : Δ du jour en 1d, moyenne quotidienne en 1w, une
-     barre par jour publié en intrajournalier.
-   - Sorties : émission nette (--up), contraction nette (--down), moyenne des N dernières
-     observations.
-3. **Rectangles et dessins déplacés.** Dans klinecharts 9.8, un point posé à droite de
-   la dernière bougie (ou avant la première) n'a qu'un `dataIndex`.
-   - Cause : la sauvegarde ne gardait que `{timestamp, value}`. Au rejeu (changement
-     d'actif, d'unité de temps, de disposition, rechargement), ce point revenait sans
-     abscisse et le dessin se déformait vers le bord gauche. De plus, `applyNewData`
-     (extension de session, resync) ne décale pas ces points.
-   - Correction : l'instant est extrapolé au pas des bougies à la sauvegarde. Au rejeu,
-     un instant hors des bougies redevient un indice extrapolé (klinecharts le
-     rabattait sur la dernière bougie). Les dessins sont réancrés quand la première
-     bougie change (`onDataReady`).
-   - Limite : un dessin déjà sauvegardé par l'ancien code a perdu l'abscisse de son
-     point futur et ne peut pas être reconstitué. Il faut le retracer.
-
-Validation : indicateurs 843, alertes 62, backtest 114, web 5 410 tests, typage monorepo
-réussi. Budget d'entrée mesuré en Node 24 (zlib 1.3.x) : **1 193 852 / 356 054**
-octets (bruts/gzip) contre 1 190 550 / 355 056 sur `main`. Plafonds 1 220 000 / 360 000
-inchangés. Parcours navigateur réel (serveur Vite, API réelles) :
-- rectangle BTCUSDT 1h, coin droit 4 bougies dans le futur : instant sauvegardé, puis
-  position identique après un aller-retour ETHUSDT et le passage en 4h / 1h ;
-- onglet Classement ouvert par `TOP` : top 100 hors stablecoins, variation 1 h présente
-  pour les 250 actifs, stablecoins écartés sans faux positif ;
-- pane d'impression en 1d (Δ réels de l'ordre de ±1,7 G$) et en 1h (une barre toutes
-  les 24 bougies).
-
+Validation : indicateurs 844, backtest 114, alertes 62, web 5 429 tests, typage
+monorepo, e2e `dessins-hors-bougies` et `multivue` deux fois de suite. Budget d'entrée en
+Node 24 (zlib 1.3.x) : voir le commit de corrections ; plafonds 1 220 000 / 360 000 inchangés.

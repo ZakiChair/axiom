@@ -225,14 +225,43 @@ interface PointGraphe extends SavedPoint {
 }
 type Bougies = ReadonlyArray<{ timestamp: number }>;
 
-/** Pas des bougies : plus petit écart positif des 20 dernières (un week-end ne le fausse pas). */
-function pasBougies(data: Bougies): number | null {
+/** Pas d'extrapolation : mois calendaires UTC (1M, 3M…) ou durée fixe. */
+type Pas = { mois: number } | { ms: number };
+const UNITES: Record<string, number> = { s: 1e3, m: 6e4, h: 36e5, d: 864e5, w: 6048e5 };
+
+/**
+ * Pas des bougies. 1M et plus : mois UTC (février ne raccourcit pas les mois suivants).
+ * Sinon plus petit écart positif des 20 dernières (un week-end ne le fausse pas), ou la durée
+ * de l'unité de temps s'il y a moins de deux bougies. Limite assumée : en TradFi, nuits et
+ * week-ends restent comptés comme des bougies de même durée (instant calendaire approché).
+ */
+function pasDe(data: Bougies, timeframe?: string): Pas | null {
+  const mois = /^(\d+)M$/.exec(timeframe ?? "");
+  if (mois) return { mois: Number(mois[1]) };
   let pas = Infinity;
   for (let i = Math.max(1, data.length - 20); i < data.length; i++) {
     const ecart = data[i]!.timestamp - data[i - 1]!.timestamp;
     if (ecart > 0 && ecart < pas) pas = ecart;
   }
-  return Number.isFinite(pas) ? pas : null;
+  if (Number.isFinite(pas)) return { ms: pas };
+  const tf = /^(\d+)([smhdw])$/.exec(timeframe ?? "");
+  return tf ? { ms: Number(tf[1]) * UNITES[tf[2]!]! } : null;
+}
+
+/** Instant situé `k` pas après `t` (avant si `k` < 0). */
+function decaler(t: number, k: number, pas: Pas): number {
+  if ("ms" in pas) return t + k * pas.ms;
+  const d = new Date(t);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + k * pas.mois, d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes());
+}
+
+/** Nombre de pas, arrondi, de `depuis` à `t`. */
+function nbPas(depuis: number, t: number, pas: Pas): number {
+  if ("ms" in pas) return Math.round((t - depuis) / pas.ms);
+  const a = new Date(depuis);
+  const b = new Date(t);
+  const mois = (b.getUTCFullYear() - a.getUTCFullYear()) * 12 + b.getUTCMonth() - a.getUTCMonth() + (b.getUTCDate() - a.getUTCDate()) / 30;
+  return Math.round(mois / pas.mois);
 }
 
 /**
@@ -241,13 +270,14 @@ function pasBougies(data: Bougies): number | null {
  * bougies. Sans cela il était sauvegardé sans abscisse et revenait au bord gauche au rejeu
  * (rectangle « déplacé » en passant d'un graphe à un autre).
  */
-export function versPointSauve(p: PointGraphe, data: Bougies): SavedPoint {
+export function versPointSauve(p: PointGraphe, data: Bougies, timeframe?: string): SavedPoint {
   const out: SavedPoint = {};
   let t = p.timestamp;
-  const pas = pasBougies(data);
-  if (typeof t !== "number" && typeof p.dataIndex === "number" && pas !== null) {
-    const bord = p.dataIndex < 0 ? 0 : data.length - 1;
-    t = data[bord]!.timestamp + (p.dataIndex - bord) * pas;
+  const i = p.dataIndex;
+  if (typeof t !== "number" && typeof i === "number" && data.length > 0) {
+    const pas = pasDe(data, timeframe);
+    const bord = i < 0 ? 0 : Math.min(i, data.length - 1);
+    if (bord === i || pas !== null) t = pas === null ? data[bord]!.timestamp : decaler(data[bord]!.timestamp, i - bord, pas);
   }
   if (typeof t === "number") out.timestamp = t;
   if (typeof p.value === "number") out.value = p.value;
@@ -259,14 +289,14 @@ export function versPointSauve(p: PointGraphe, data: Bougies): SavedPoint {
  * cherche la plus proche à chaque rendu, d'une unité de temps à l'autre). Hors plage : par
  * indice extrapolé, car klinecharts rabattrait l'instant sur la première ou la dernière bougie.
  */
-export function versPointGraphe(p: SavedPoint, data: Bougies): PointGraphe {
-  const pas = pasBougies(data);
+export function versPointGraphe(p: SavedPoint, data: Bougies, timeframe?: string): PointGraphe {
+  const pas = pasDe(data, timeframe);
   const t = p.timestamp;
-  if (typeof t !== "number" || pas === null) return { ...p };
+  if (typeof t !== "number" || pas === null || data.length === 0) return { ...p };
   const premier = data[0]!.timestamp;
   const dernier = data[data.length - 1]!.timestamp;
   if (t >= premier && t <= dernier) return { ...p };
-  const out: PointGraphe = t > dernier ? { dataIndex: data.length - 1 + Math.round((t - dernier) / pas) } : { dataIndex: Math.round((t - premier) / pas) };
+  const out: PointGraphe = { dataIndex: t > dernier ? data.length - 1 + nbPas(dernier, t, pas) : nbPas(premier, t, pas) };
   if (typeof p.value === "number") out.value = p.value;
   return out;
 }
@@ -300,7 +330,9 @@ interface ChartEntry {
    * Posé à true à `unbindChart`, false à `bindChart`.
    */
   suppressPersist: boolean;
-  /** Première bougie vue : si elle change (historique préfixé), les points hors bougies sont réancrés. */
+  /** Unité de temps affichée (extrapolation calendaire des points hors bougies). */
+  timeframe?: string;
+  /** Première bougie vue : si elle change (historique préfixé), les dessins sont réancrés. */
   premiere?: number;
   /** Abonnement klinecharts `onDataReady`, retiré à `unbindChart`. */
   surDonnees?: () => void;
@@ -318,21 +350,25 @@ let activeChart: KLineChartInstance | null = null;
 /** Lie une instance (appelé par ChartInstance juste après `init`), avec sa méta actif + slot. */
 export function bindChart(
   chart: KLineChartInstance,
-  meta: { exchange: string; symbol: string },
+  meta: { exchange: string; symbol: string; timeframe?: string },
   slot: number,
 ): void {
+  // Re-bind (changement d'actif, d'unité de temps, de source) : l'abonnement précédent part.
+  const ancien = registry.get(chart)?.surDonnees;
+  if (ancien) actionsDe(chart).unsubscribeAction?.("onDataReady", ancien);
   const entry: ChartEntry = {
     chart,
     slot,
     exchange: meta.exchange,
     symbol: meta.symbol,
+    ...(meta.timeframe ? { timeframe: meta.timeframe } : {}),
     liveOverlays: new Map(),
     selectedOverlayId: null,
     suppressPersist: false,
   };
   // Historique préfixé par `applyNewData` (extension de session, resync) : klinecharts ne
-  // décale pas les points posés par indice (hors bougies) ; ils sont réancrés sur leur instant.
-  entry.surDonnees = () => reancrerHorsBougies(entry);
+  // décale pas les points posés par indice ; les dessins sont réancrés sur leurs instants.
+  entry.surDonnees = () => reancrerSurPrefixe(entry);
   actionsDe(chart).subscribeAction?.("onDataReady", entry.surDonnees);
   registry.set(chart, entry);
   // Première instance liée → devient le focus par défaut (typiquement le slot maître).
@@ -347,15 +383,18 @@ function actionsDe(chart: KLineChartInstance) {
   };
 }
 
-/** Réancre les dessins ayant un point hors bougies quand la première bougie change. */
-function reancrerHorsBougies(entry: ChartEntry): void {
+/**
+ * Quand la première bougie change, TOUS les dessins sont rejoués depuis leurs instants : un
+ * point rejoué en indice qui rentre dans la plage (ou y reste) serait sinon décalé de la
+ * longueur du préfixe. Même chemin (`setPoints`) que la création d'un dessin restauré.
+ */
+function reancrerSurPrefixe(entry: ChartEntry): void {
   const data = bougiesDe(entry.chart);
   const premiere = data[0]?.timestamp;
   if (premiere === entry.premiere) return; // simple tick ou bougie ajoutée : rien à faire
   entry.premiere = premiere;
   for (const [id, ov] of entry.liveOverlays) {
-    const points = ov.points.map((p) => versPointGraphe(p, data));
-    if (points.some((p) => p.dataIndex !== undefined)) entry.chart.overrideOverlay({ id, points });
+    entry.chart.overrideOverlay({ id, points: ov.points.map((p) => versPointGraphe(p, data, entry.timeframe)) });
   }
 }
 
@@ -458,7 +497,8 @@ function persistEntry(entry: ChartEntry): void {
 /** Ne garde que {timestamp, value} (ancrage stable, stockage léger), instant extrapolé hors bougies. */
 function normalizePoints(chart: KLineChartInstance, points: ReadonlyArray<PointGraphe>): SavedPoint[] {
   const data = bougiesDe(chart);
-  return points.map((p) => versPointSauve(p, data));
+  const timeframe = registry.get(chart)?.timeframe;
+  return points.map((p) => versPointSauve(p, data, timeframe));
 }
 
 /**
@@ -475,9 +515,10 @@ function createTrackedOverlay(chart: KLineChartInstance, name: string, points?: 
     persistEntry(entry);
   };
   const data = points ? bougiesDe(chart) : [];
+  const timeframe = registry.get(chart)?.timeframe;
   const created = chart.createOverlay({
     name,
-    ...(points ? { points: points.map((p) => versPointGraphe(p, data)) } : {}),
+    ...(points ? { points: points.map((p) => versPointGraphe(p, data, timeframe)) } : {}),
     // L'overlay VPFR a besoin des bougies + de l'échelle prix du chart hôte :
     // le chart est passé par extendData (par overlay → sûr en multi-chart).
     ...(name === VPFR_NAME ? { extendData: chart } : {}),

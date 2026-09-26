@@ -94,10 +94,11 @@ test("MAP : cliquer une tuile de la treemap ouvre le symbole dans le chart", asy
           ethDominance: 12,
           mcapChangePct24h: 1.2,
         },
+        // `changePct24hConnu` : schéma courant (un cache sans ce champ serait rechargé en ligne).
         coins: [
-          { id: "bitcoin", symbol: "BTC", name: "Bitcoin", mcapUsd: 1.8e12, price: 100_000, changePct24h: 1.5 },
-          { id: "ethereum", symbol: "ETH", name: "Ethereum", mcapUsd: 4.0e11, price: 3_500, changePct24h: -0.8 },
-          { id: "solana", symbol: "SOL", name: "Solana", mcapUsd: 9.0e10, price: 180, changePct24h: 2.1 },
+          { id: "bitcoin", symbol: "BTC", name: "Bitcoin", mcapUsd: 1.8e12, price: 100_000, changePct24h: 1.5, changePct24hConnu: 1.5 },
+          { id: "ethereum", symbol: "ETH", name: "Ethereum", mcapUsd: 4.0e11, price: 3_500, changePct24h: -0.8, changePct24hConnu: -0.8 },
+          { id: "solana", symbol: "SOL", name: "Solana", mcapUsd: 9.0e10, price: 180, changePct24h: 2.1, changePct24hConnu: 2.1 },
         ],
         sectors: [],
         fetchedAt: Date.now(),

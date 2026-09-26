@@ -29,7 +29,7 @@ import {
   type ConditionSimple,
   type SensCroisement,
 } from "@axiom/alerts";
-import { INDICATORS, getIndicator, supportsIndicatorTimeframe } from "@axiom/indicators";
+import { INDICATORS, getIndicator, supportsIndicatorTimeframe, TIMEFRAME_REQUIS } from "@axiom/indicators";
 import { marketStore } from "../store/market";
 import { alertsStore } from "../store/alerts";
 import { decisionDossiersStore } from "../store/decisionDossiers";
@@ -603,7 +603,7 @@ export function AlertsPanel() {
               >
                 {INDICATEURS_SEUIL.map((d) => (
                   <option key={d.id} value={d.id} disabled={!supportsIndicatorTimeframe(d.id, tfCourant)}>
-                    {d.name}{supportsIndicatorTimeframe(d.id, tfCourant) ? "" : " · 1h requis"}
+                    {d.name}{supportsIndicatorTimeframe(d.id, tfCourant) ? "" : ` · ${TIMEFRAME_REQUIS[d.id] ?? "1h"} requis`}
                   </option>
                 ))}
               </select>

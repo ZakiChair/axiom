@@ -66,6 +66,9 @@ export interface CoinTile {
   changePct30j: number | null;
   /** Variation 1 h (%) — classement MAP ; même convention null (absente d'un ancien cache). */
   changePct1h: number | null;
+  /** Variation 24 h (%) SANS repli : null si CoinGecko ne la fournit pas (classement MAP).
+   *  `changePct24h` garde la convention 0 de la treemap. */
+  changePct24hConnu: number | null;
 }
 
 /** Performance d'un secteur (catégorie CoinGecko). */
@@ -186,6 +189,7 @@ export function parseMarkets(json: unknown): CoinTile[] {
       changePct7j: numOuNull(raw.price_change_percentage_7d_in_currency),
       changePct30j: numOuNull(raw.price_change_percentage_30d_in_currency),
       changePct1h: numOuNull(raw.price_change_percentage_1h_in_currency),
+      changePct24hConnu: numOuNull(raw.price_change_percentage_24h),
     });
   }
   out.sort((a, b) => b.mcapUsd - a.mcapUsd);
@@ -326,6 +330,11 @@ async function getJson(url: string, signal?: AbortSignal): Promise<unknown> {
   return res.json();
 }
 
+/** Tuile d'un cache ancien : champs ajoutés depuis → null (inconnu, jamais un 0 inventé). */
+function normaliserTuile(coin: CoinTile): CoinTile {
+  return { ...coin, volume24hUsd: coin.volume24hUsd ?? null, observeLe: coin.observeLe ?? null, changePct1h: coin.changePct1h ?? null, changePct24hConnu: coin.changePct24hConnu ?? null };
+}
+
 /**
  * Récupère l'agrégat marché. Cache 5 min : une ouverture dans la fenêtre de fraîcheur
  * ne déclenche AUCUN appel. Sinon EXACTEMENT 3 requêtes CoinGecko (global/markets/
@@ -334,8 +343,10 @@ async function getJson(url: string, signal?: AbortSignal): Promise<unknown> {
  */
 export async function fetchMarketOverview(signal?: AbortSignal): Promise<MarketOverview> {
   const cached = readCache<MarketOverview>(CACHE_KEY);
-  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
-    return { ...cached, coins: cached.coins.map((coin) => ({ ...coin, volume24hUsd: coin.volume24hUsd ?? null, observeLe: coin.observeLe ?? null, changePct1h: coin.changePct1h ?? null })), stale: false };
+  // Un cache frais d'un ancien schéma (sans Δ24 h nullable) est rechargé : servi, il viderait
+  // le classement 24 h pendant 5 min. Il reste un repli si le réseau échoue.
+  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS && cached.coins[0]?.changePct24hConnu !== undefined) {
+    return { ...cached, coins: cached.coins.map(normaliserTuile), stale: false };
   }
 
   const [globalR, marketsR, categoriesR] = await Promise.allSettled([
@@ -368,14 +379,14 @@ export async function fetchMarketOverview(signal?: AbortSignal): Promise<MarketO
   // Échec des données essentielles : santé en erreur, repli gracieux sur le cache périmé.
   const reason = globalR.status === "rejected" ? globalR.reason : (marketsR as PromiseRejectedResult).reason;
   healthStore.getState().marquerErreur(HEALTH_SOURCE, reason instanceof Error ? reason.message : String(reason));
-  if (cached) return { ...cached, coins: cached.coins.map((coin) => ({ ...coin, volume24hUsd: coin.volume24hUsd ?? null, observeLe: coin.observeLe ?? null, changePct1h: coin.changePct1h ?? null })), stale: true };
+  if (cached) return { ...cached, coins: cached.coins.map(normaliserTuile), stale: true };
   throw reason instanceof Error ? reason : new Error(String(reason));
 }
 
 /** Dernier contexte marché déjà mis en cache, sans aucun appel réseau supplémentaire. */
 export function lireContexteMarcheCache(): { coins: CoinTile[]; fetchedAt: number } | null {
   const cached = readCache<MarketOverview>(CACHE_KEY);
-  return cached ? { fetchedAt: cached.fetchedAt, coins: cached.coins.map((coin) => ({ ...coin, volume24hUsd: coin.volume24hUsd ?? null, observeLe: coin.observeLe ?? null, changePct1h: coin.changePct1h ?? null })) } : null;
+  return cached ? { fetchedAt: cached.fetchedAt, coins: cached.coins.map(normaliserTuile) } : null;
 }
 
 /**

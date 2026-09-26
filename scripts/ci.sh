@@ -16,7 +16,7 @@ if [[ "${1:-}" == "--e2e" && "$#" == 1 ]]; then
   export AXIOM_E2E_PORT="${AXIOM_E2E_PORT:-5239}"
   exec pnpm --filter @axiom/web exec playwright test \
     gate-g6-screener.hermetique gate-lot3-corr gate-v25-cap-dominance \
-    gate-g3-playbooks corrections-revue macro-globale dom-microstructure onchain-complements \
+    gate-g3-playbooks corrections-revue macro-globale dom-microstructure onchain-complements dessins-hors-bougies \
     revue-evenements qualite-fraicheur revue-outils-avances \
     revue-chain-rotation revue-macro-vintage revue-economie-chaines macro-dette-long-terme multivue \
     niveaux-chart omon-lectures-options revue-cycle term-portage-tbill des-oi-perps-dex des-flux-takers chain-mineurs-cotes \

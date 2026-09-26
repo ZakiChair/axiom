@@ -26,7 +26,7 @@ export interface MarketMapUiState {
   ouvrirClassement: () => void;
 }
 
-export const marketMapUiStore = createStore<MarketMapUiState>((set) => ({
+export const marketMapUiStore = createStore<MarketMapUiState>((set, get) => ({
   open: false,
   onglet: "carte",
   setOnglet: (onglet) => set({ onglet }),
@@ -34,9 +34,16 @@ export const marketMapUiStore = createStore<MarketMapUiState>((set) => ({
     set({ onglet: "classement" });
     windowManagerStore.getState().openWindow("marketMap");
   },
-  openMarketMap: () => windowManagerStore.getState().openWindow("marketMap"),
+  // MAP / IMAP : une fenêtre fermée se rouvre sur la carte, pas sur l'onglet laissé par TOP.
+  openMarketMap: () => {
+    if (!get().open) set({ onglet: "carte" });
+    windowManagerStore.getState().openWindow("marketMap");
+  },
   closeMarketMap: () => windowManagerStore.getState().closeWindow("marketMap"),
-  toggleMarketMap: () => windowManagerStore.getState().toggleWindow("marketMap"),
+  toggleMarketMap: () => {
+    if (!get().open) set({ onglet: "carte" });
+    windowManagerStore.getState().toggleWindow("marketMap");
+  },
 }));
 
 mirrorOpenState("marketMap", marketMapUiStore);

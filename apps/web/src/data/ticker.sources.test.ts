@@ -142,12 +142,21 @@ describe("résolution vérifiée du ticker", () => {
     expect(await resolveTickerMarket({ symbol: "NOPEUSDT", timeframe: "1h" })).toBeUndefined();
   });
 
-  it("route les candidats sur le catalogue déjà publié par l'appelant", async () => {
+  it("route les candidats sur le catalogue déjà publié par l'appelant, au rang des favoris (après le graphe)", async () => {
     const catalog: routing.MarketCatalog = { instruments: [{ exchange: "okx", symbol: "CARDSUSDT", kind: "spot" }], unavailableSources: [] };
     const candidates = vi.spyOn(routing, "resolveMarketCandidates");
     vi.stubGlobal("fetch", vi.fn(async () => response({ code: "0", data: [cards] })));
     expect(await resolveTickerMarket({ symbol: "CARDSUSDT", timeframe: "1h" }, undefined, catalog)).toEqual({ exchange: "okx", symbol: "CARDSUSDT", timeframe: "1h" });
-    expect(candidates).toHaveBeenCalledWith({ symbol: "CARDSUSDT", timeframe: "1h" }, catalog);
+    expect(candidates).toHaveBeenCalledWith({ symbol: "CARDSUSDT", timeframe: "1h" }, catalog, { priorite: "favoris" });
+  });
+
+  it("un abonnement hors watchlist (bandeau, portefeuille) mesure HYPEUSDT au rang des favoris, jamais devant le graphe", async () => {
+    const candidates = vi.spyOn(routing, "resolveMarketCandidates").mockResolvedValue([{ exchange: "bybit", symbol: "HYPEUSDT", timeframe: "1h" }]);
+    vi.stubGlobal("fetch", vi.fn(async () => response({ retCode: 0, result: { category: "spot", list: [{ symbol: "HYPEUSDT", lastPrice: "45", prevPrice24h: "44" }] } })));
+    const stop = subscribeTickers(["HYPEUSDT"], () => {});
+    await vi.advanceTimersByTimeAsync(0);
+    stop();
+    expect(candidates).toHaveBeenCalledWith({ symbol: "HYPEUSDT", timeframe: "1h" }, undefined, { priorite: "favoris" });
   });
 
   it("des candidats déjà classés (jusqu'à la source d'un favori) sont sondés dans leur ordre, sans nouvelle résolution", async () => {

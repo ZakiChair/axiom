@@ -376,6 +376,6 @@ describe("limite Kraken visible (PARTIAL)", () => {
     expect(doitSignalerLimiteKraken("kraken", 500, 0)).toBe(true);
     expect(doitSignalerLimiteKraken("kraken", 500, 220)).toBe(false);
     expect(doitSignalerLimiteKraken("binance", 500, 0)).toBe(false);
-    expect(MESSAGE_LIMITE_KRAKEN).toMatch(/720/);
+    expect(MESSAGE_LIMITE_KRAKEN).toMatch(/~500 bougies/);
   });
 });

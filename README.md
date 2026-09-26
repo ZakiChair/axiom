@@ -26,12 +26,16 @@ droits de l’opérateur ; certains historiques exigent une clé ou un abonnemen
 | **Ne pas décrocher** | alertes onglet fermé (macOS + Telegram optionnel), replay sur dumps officiels Binance, panneau de santé des sources |
 
 **Sources automatiques** : choisissez un actif dans la recherche commune ; AXIOM
-sélectionne une source disponible et indique sa provenance. En cas d'échec de
+sélectionne une source disponible et indique sa provenance. Pour un même
+instrument au comptant, la source retenue est celle qui offre le plus
+d'historique à l'unité de temps affichée (HYPEUSDT : Bybit plutôt que Binance) ;
+la recherche affiche « Auto » le temps de la mesure. En cas d'échec de
 l'historique, il essaie une autre source compatible, sans changer la devise ni
 remplacer un marché comptant par un perpétuel. Les contrats Hyperliquid apparaissent
 explicitement sous la forme `BTC-PERP`. Les deux jambes des ratios sont également
 résolues automatiquement ; les accès nécessitant une clé restent personnels.
-Voir le [rapport de revue](docs/revue-2026-09-23-sources-automatiques.md).
+Voir le [rapport de revue](docs/revue-2026-09-23-sources-automatiques.md) et celui
+sur la [profondeur d'historique](docs/revue-2026-09-26-profondeur-historique.md).
 
 Deux partis pris structurent le produit :
 

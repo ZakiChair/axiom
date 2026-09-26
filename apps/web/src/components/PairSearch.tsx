@@ -33,12 +33,35 @@ export const titreSource = (m: MarketCandidate) => m.places && (m.profondeurInco
 export const resultatsAMesurer = (resultats: readonly MarketCandidate[]) =>
   resultats.slice(0, 12).filter((m): m is MarketCandidate & { places: ExchangeId[] } => !!m.profondeurIncomplete && !!m.places);
 
-/** Mesure (sans attendre) ces résultats après un anti-rebond ; renvoie l'annulation. */
+/**
+ * Mesure (sans attendre) ces résultats après un anti-rebond, au rang de la recherche : derrière le
+ * graphe et les favoris. Renvoie l'annulation, qui abandonne aussi les sondes pas encore parties.
+ */
 export function planifierMesures(resultats: readonly MarketCandidate[], delai = 250): () => void {
   const liste = resultatsAMesurer(resultats);
   if (!liste.length) return () => {};
-  const t = setTimeout(() => { for (const m of liste) void mesurerProfondeurs(m.places.map((exchange) => ({ exchange, symbol: m.symbol }))); }, delai);
-  return () => clearTimeout(t);
+  const abandon = new AbortController();
+  const t = setTimeout(() => {
+    for (const m of liste) void mesurerProfondeurs(m.places.map((exchange) => ({ exchange, symbol: m.symbol })), undefined, { priorite: "recherche", signal: abandon.signal });
+  }, delai);
+  return () => { clearTimeout(t); abandon.abort(); };
+}
+
+/** Identité stable d'un résultat à plusieurs places : ni sa mesure ni le reclassement de ses places ne la changent. */
+const identiteMesure = (m: MarketCandidate) => m.places ? `${m.kind}:${m.symbol}:${[...m.places].sort().join("+")}` : "";
+
+/**
+ * Clés des mesures de la liste ouverte : le résultat actif (clavier, survol), puis les 12 premiers.
+ * Une nouvelle frappe les change et la fermeture les vide : les mesures en file sont abandonnées.
+ */
+export function clesMesures(resultats: readonly MarketCandidate[], indexActif: number, requete: string, visible: boolean): { actif: string; liste: string } {
+  if (!visible) return { actif: "", liste: "" };
+  const actif = resultats[indexActif];
+  const liste = resultats.slice(0, 12).map(identiteMesure).filter(Boolean).join();
+  return {
+    actif: actif && identiteMesure(actif) ? `${requete}\n${identiteMesure(actif)}` : "",
+    liste: liste && `${requete}\n${liste}`,
+  };
 }
 
 export const JAMBE_B_TRADFI_DEFAUT = "GLD";
@@ -123,16 +146,19 @@ export function PairSearch({ onPick, placeholder = "Rechercher une paire" }: Pai
   const searchable = onPick ? { ...catalog, instruments: catalog.instruments.filter((m) => m.exchange === exchange) } : catalog;
   const matches = query.trim() ? searchMarkets(searchable, query, 30, timeframe) : [];
   const listeVisible = open && !syntheticOpen && matches.length > 0;
-  // Liste ouverte : les premiers résultats « Auto » sont mesurés, puis affichent la place retenue.
-  const aMesurer = listeVisible ? resultatsAMesurer(matches) : [];
-  const cleMesure = aMesurer.map((m) => `${m.kind}:${m.symbol}`).join();
+  // Liste ouverte : le résultat actif puis les 12 premiers « Auto » sont mesurés (l'actif d'abord,
+  // son minuteur est posé avant), puis affichent la place retenue.
+  const cles = clesMesures(matches, indexActif, query, listeVisible);
   const [, setMesures] = useState(0);
   useEffect(() => {
-    if (!cleMesure) return;
-    const desabonner = abonnerProfondeurs(() => setMesures((n) => n + 1));
-    const annuler = planifierMesures(aMesurer);
-    return () => { annuler(); desabonner(); };
-  }, [cleMesure, query]);
+    if (!listeVisible) return;
+    return abonnerProfondeurs(() => setMesures((n) => n + 1));
+  }, [listeVisible]);
+  useEffect(() => {
+    const actif = matches[indexActif];
+    return cles.actif && actif ? planifierMesures([actif]) : undefined;
+  }, [cles.actif]);
+  useEffect(() => cles.liste ? planifierMesures(matches) : undefined, [cles.liste]);
 
   useEffect(() => {
     listeRef.current?.querySelector<HTMLElement>(`[data-idx="${indexActif}"]`)?.scrollIntoView({ block: "nearest" });

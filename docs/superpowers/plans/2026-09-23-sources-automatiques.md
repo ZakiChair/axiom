@@ -128,3 +128,53 @@ Le navigateur utilisateur confirme la suggestion USOIL vers WTI/USD et le refus
 réel Grow/Venture, maintenant lisible. La recherche fonctionne ; les cours restent
 conditionnés aux droits de l'accès Twelve Data configuré. Aucun commit, push ou
 déploiement. Voir les preuves du [rapport](../../revue-2026-09-23-sources-automatiques.md).
+
+## Reprise — HYPEUSDT (profondeur d'historique, 26/09)
+
+Le propriétaire signale HYPEUSDT routé sur Binance, qui n'a pas une semaine
+d'historique : la source retenue doit être celle qui affiche le plus de données.
+Mesuré : Binance ne sert HYPEUSDT que depuis le 24/09/2026 (3 bougies 1d), Bybit
+depuis le 11/07/2025 et OKX depuis le 04/11/2025. L'amendement du 24/09 (Binance
+confirmé passe devant) en était la cause ; il est remplacé par celui du 26/09
+de la [conception](../specs/2026-09-23-sources-automatiques-design.md).
+
+Lots à fichiers disjoints (lettres de l'orchestration), chacun vérifié par un
+agent indépendant :
+
+- Lot A, routage (`410d90d`) : `data/profondeurHistorique.ts` (nouveau),
+  `data/marketRouting.ts`, `chart/ChartInstance.tsx` et leurs tests. Mesure de
+  la première bougie par adaptateur, cache, classement par historique accessible
+  à l'unité de temps, tolérance, bénéfice du doute.
+- Lot B, favoris (`28bc365`) : `components/Watchlist.tsx`, `data/ticker.ts`,
+  `store/screener.ts` et leurs tests. Migration vers la place la plus profonde,
+  jamais sous la source enregistrée, sans oscillation.
+- Lot C, recherche (`8a4986e`) : `components/PairSearch.tsx` et son test.
+  « Auto » puis la place retenue.
+- Lot E, parcours navigateur (`4c7f304`) : `e2e/sources-automatiques.e2e.ts`.
+  HYPEUSDT recherché, chargé et ajouté aux favoris sur Bybit ; migration d'un
+  ancien favori `binance:HYPEUSDT`. Son vérificateur a trouvé la tolérance fixe
+  de 7 jours, corrigée dans le lot A avant son commit (5 % de la fenêtre,
+  affinage au jour).
+- Lot D, documentation : contrat, conception, plan, README et
+  [rapport](../../revue-2026-09-26-profondeur-historique.md).
+- Lot F, corrections de la revue finale, en deux sous-lots parallèles. F1, noyau
+  (`b0062f2`) : priorités des files, créneau laissé au graphe, sortie anticipée,
+  chemin à froid sans raccourci, bornes « au moins aussi profondes », OKX en 1M,
+  plafond Kraken 500. F2, favoris et recherche (`fc6271d`) : rangs, abandon des
+  mesures de la recherche, doute borné à 5 min, graphe retenu seulement en tête
+  du classement. Puis contrôle conjoint et remesure au navigateur.
+- Lot G (après `fc6271d`) : mineurs du contrôle conjoint (graphe hors favoris,
+  place retenue sans mesure, repli sans ticker, oubli du doute d'un favori
+  retiré, message Kraken, en-tête du cache).
+
+Aucun fournisseur, hôte, proxy, dépendance ni type partagé ajouté.
+
+**État final :** web 390 fichiers, 5 546 tests ; parcours `sources-automatiques`
+et `multivue` 30/30. La revue finale relevait un bloquant et sept importants,
+traités par les lots D, F et G. Au navigateur, sur API réelles (contrôle conjoint
+F1 + F2, non remesuré après le lot G) : HYPEUSDT part
+sur Bybit (443 bougies 1d contre 3 sur main) ; démarrage à froid 1 562 ms contre
+1 272 ms sur main (+290 ms, contre +3 057 ms avant le lot F). Budget d'entrée
+1 198 940 / 358 297 octets, marge gzip 1 703. Limites et suites possibles dans le
+[rapport](../../revue-2026-09-26-profondeur-historique.md). Commits sur la
+branche ; aucune fusion ni déploiement.

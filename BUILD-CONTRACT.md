@@ -27,7 +27,10 @@ de ratios ne demandent plus de choisir un fournisseur ; le routage garde la devi
 et la nature de l'instrument, et affiche la provenance effective. Aucun repli spot
 vers perpétuel, ni action vers action tokenisée. Les erreurs, conditions d'accès et
 capacités manquantes restent explicites. Les paramètres de calcul OHLC, les clés
-personnelles et la provenance historique conservent leur sens. Voir la
+personnelles et la provenance historique conservent leur sens. Depuis le
+26 septembre 2026, pour un même instrument au comptant, la place retenue est celle
+qui affiche le plus d'historique à l'unité de temps demandée (cf. « Profondeur
+d'historique (demande du 26 septembre 2026) »). Voir la
 [conception](docs/superpowers/specs/2026-09-23-sources-automatiques-design.md).
 
 **Exceptions ACTÉES le 2026-09-04 — corrections demandées par le propriétaire, plan validé par Fable 5 :**
@@ -682,7 +685,8 @@ dépendance, aucun hôte ni fournisseur, aucune règle de proxy modifiée,
    Corrections : catalogue servi périmé et rafraîchi en fond, republication
    seulement si son contenu change, échec d'une source mémorisé 30 s sans perdre
    son dernier succès ; résolution progressive (à froid, seule la provenance ou
-   Binance est attendue) ; essai spéculatif borné à 4 s ; Coinbase par `/extapi`
+   Binance est attendue ; chemin à froid modifié le 26/09, cf. section Profondeur
+   d'historique) ; essai spéculatif borné à 4 s ; Coinbase par `/extapi`
    (hôte déjà admis) ; exchangeInfo `symbolStatus=TRADING&showPermissionSets=false`
    (mêmes 1 372 symboles, 2,5 Mo) ; file Twelve Data FIFO à deux priorités
    (graphe devant cotations et polls), annulable, crédits d'une cotation groupée
@@ -703,7 +707,8 @@ dépendance, aucun hôte ni fournisseur, aucune règle de proxy modifiée,
 3. **Provenance.** Voir l'amendement de
    `docs/superpowers/specs/2026-09-23-sources-automatiques-design.md` : Binance
    confirmé passe devant une provenance enregistrée au comptant. `store/market.ts`
-   (héritage de `setSymbol`) est inchangé : le routage tranche.
+   (héritage de `setSymbol`) est inchangé : le routage tranche. *Remplacé le
+   26/09, cf. section Profondeur d'historique.*
 4. **Volume piégé (`trappedVolume`) — nouveau modèle.** Le modèle du 21 septembre
    n'était qu'un miroir du profil de volume (corrélation 0,996-1,000 avec un split
    50/50 ou permuté ; au plus bas 24 h, jusqu'à 100 % de tout le volume acheteur
@@ -756,6 +761,179 @@ plus lancer `vercel build` dans le checkout principal. Il écrase
 direct sans la clé `.env`, WHALES et Replay coupés). Déployer par build distant,
 puis reconstruire `dist` par `pnpm --filter @axiom/web build`.
 
+
+## Profondeur d'historique (demande du 26 septembre 2026)
+
+Le propriétaire demande : « lorsque je recherche un actif pour l'ajouter à ma
+liste de surveillance, la source doit être celle qui affiche le plus de données
+d'historique » (HYPEUSDT routé sur Binance, qui n'a pas une semaine d'historique).
+**39 fenêtres, 214 indicateurs, 9 identifiants de marché, aucune dépendance,
+aucun hôte ni fournisseur, aucune règle de proxy modifiée, `@axiom/types`
+inchangé.** Branche `feat/sources-profondeur-historique` : `410d90d` (routage),
+`28bc365` (favoris), `8a4986e` (recherche), `4c7f304` (parcours navigateur),
+`b0062f2` et `fc6271d` (corrections de la revue finale), puis le lot G (après
+`fc6271d`). Conception : amendement du 26/09 de
+`docs/superpowers/specs/2026-09-23-sources-automatiques-design.md`, qui remplace
+celui du 24/09.
+
+1. **Cause mesurée.** Binance ne sert HYPEUSDT que depuis le 24/09/2026 (1 bougie
+   1w, 3 bougies 1d). Bybit le sert depuis le 11/07/2025 (443 bougies 1d), OKX
+   depuis le 04/11/2025 (327 bougies 1d). La règle du 24/09 plaçait Binance
+   confirmé devant toute autre place.
+2. **Règle** (`classer`, `data/marketRouting.ts`). Pour un même instrument au
+   comptant (même symbole, même devise), la place dont le graphe affiche
+   l'historique le plus ancien à l'unité de temps demandée passe devant,
+   provenance comprise.
+   - Historique accessible = max(première bougie servie par l'adaptateur de la
+     place, maintenant − min(plafond de la place, 20 000) × unité). Plafonds :
+     OKX 1 440 (`/market/candles`), Kraken 500 (backfill de 500 bougies,
+     `endTime` ignoré ; message « Historique Kraken limité à ~500 bougies »),
+     graphe 20 000.
+   - Chaque place a une fourchette de début accessible : exacte ; bornée
+     (`exact:false`, sonde arrêtée avant le début réel), « au moins aussi
+     profonde », du plancher de sa place à la borne ; non mesurée, du plancher de
+     sa place à +∞ ; sans aucune bougie, reléguée.
+   - Clés, dans l'ordre : essai spéculatif hors provenance en dernier, unité de
+     temps supportée, palier de profondeur, Binance confirmé, provenance, ordre
+     des sources. Palier 0 : peut être aussi profonde que la place la plus
+     profonde prouvée parmi celles qui peuvent être en tête (premier groupe
+     présent), à la tolérance près ; palier 1 : au-delà, par début croissant ;
+     palier 2 : aucune bougie.
+   - Tolérance : 5 % de la fenêtre du graphe (20 000 bougies), bornée à 7 jours,
+     jamais moins d'une bougie (1m : environ 16 h 40).
+   - Binance ne départage qu'à profondeur équivalente (BTCUSDT reste sur Binance).
+   - Mesure absente (sonde en échec, encore en vol, place sans sonde) : bénéfice
+     du doute jusqu'au plancher de sa place. Elle ne perd la tête que si ce
+     plancher l'empêche d'égaler la place la plus profonde prouvée (OKX ou Kraken
+     non mesurés derrière une place plus profonde).
+   - Aucune sonde pour un perp, un actif TradFi, un synthétique ni un actif coté
+     sur une seule place (CARDSUSDT reste sur OKX).
+3. **Mesure** (`data/profondeurHistorique.ts`).
+   - Première bougie servie par l'adaptateur existant : Binance, Bybit, MEXC
+     1w × 1 000 ; Kraken 1w × 720 ; OKX 1M × 300 ; Coinbase 1d × 350 sur 4 pages
+     au plus, arrêt sur page vide. Une cotation récente est ramenée au jour par
+     une sonde 1d ; OKX plus ancien, par une page 1w autour du 1er du mois.
+   - Files par place à trois rangs (graphe, favoris, recherche), puis ordre
+     d'arrivée ; une sonde rejointe par un demandeur plus prioritaire est promue.
+     Deux créneaux par place : favoris et recherche n'en prennent qu'un, le second
+     reste au graphe. Départs espacés : Kraken 1 s, Coinbase 200 ms, OKX 70 ms,
+     autres 50 ms. Le créneau n'est rendu qu'à la fin réelle de la requête ; à
+     15 s, les demandeurs reçoivent « inconnu » et une réponse tardive entre
+     encore au cache. Mesures dédoublonnées ; un appel abandonné (`AbortSignal`)
+     retire ses sondes non démarrées que personne d'autre n'attend.
+   - Sortie anticipée : `mesurerProfondeurs` rend dès que la tête ne peut plus
+     changer (`teteDecidee`, qui borne chaque place non mesurée par son
+     plancher). BTCUSDT en 1m ou 1h est décidé à la mesure de Binance, sans
+     attendre Coinbase. Sinon, le graphe et la recherche attendent au plus 2,5 s,
+     les favoris 15 s.
+   - Cache `axiom:profondeurHistorique:v1` : mémoire et localStorage, 25 à 35 j
+     selon la clé (pseudo-aléa fixe, pour éviter une expiration groupée), 1 000
+     entrées au plus (environ 50 ko), `place:symbole → [début, exact, horodatage
+     de mesure]`, sans identifiant ni credential ; « vide » 24 h et échec 60 s,
+     en mémoire seulement. Non recopiée par le daemon (hors `MANAGED_KEYS`) ;
+     incluse dans l'export JSON comme les autres caches (`eco`, `cot`).
+4. **Graphe, chemin à froid** (`resolveMarketCandidatesProgressifs`). Catalogue en
+   cache, même périmé : liste complète classée après mesure. À froid, les huit
+   catalogues partent et le perp n'attend qu'Hyperliquid. Au comptant, le
+   catalogue Binance est toujours lu : une mesure en cache ne prouve pas la
+   cotation (paire suspendue, bougies figées). Les autres places spot sont
+   attendues jusqu'à 2,5 s après le début. Binance confirmé est mesuré pendant ce
+   temps ; décidé face à toutes les places encore possibles, il part seul
+   aussitôt. Sinon, les places confirmées sont mesurées puis classées, et les
+   catalogues retardataires ne comptent que dans la liste complète. Sans aucune
+   place confirmée, la provenance spot reste attendue au-delà (CARDSUSDT).
+5. **Favoris** (`components/Watchlist.tsx`). Classés comme le graphe, en 1h, sur
+   le catalogue complet ; mesures au rang des favoris.
+   - Sans source : le premier candidat qui renvoie un vrai prix. Source R en tête
+     et listée : confirmée sans sonde de ticker. Sinon, sondes des places classées
+     au-dessus de R (mesurées comme elle), puis de R, jamais d'une place classée
+     dessous ; sans prix, R est conservée. Un favori peut donc migrer vers une
+     place plus profonde (`binance:HYPEUSDT` → Bybit) ; `okx:BTCUSDT` revient à
+     Binance. Les confirmations valent pour la session : pas d'oscillation.
+   - Doute : dès que le favori a deux places mesurables et que l'une d'elles, la
+     place retenue comprise, reste sans mesure, rien n'est confirmé. Une source
+     enregistrée reste la sienne, sans sonde ; un favori sans source, ou dont le
+     catalogue dément la source, affiche à titre provisoire le prix de la place
+     retenue. Réessai à chaque passe (30 s), 5 min au plus depuis le premier
+     doute, puis confirmation définitive. Un favori retiré oublie son doute.
+   - Graphe prêt : il ne retient la place d'un favori sans source que si elle est
+     en tête du classement 1h, même quand aucun ticker ne répond. Un graphe prêt
+     sur un actif hors watchlist n'est ni classé ni mesuré. Le screener ajoute ses
+     favoris sans source imposée.
+6. **Recherche** (`components/PairSearch.tsx`). Un résultat par instrument,
+   représenté par sa place la mieux classée d'après le cache, à l'unité du
+   graphe. Libellé « Auto » tant qu'une de ses places n'est pas mesurée, puis la
+   place qui sera retenue ; infobulle : places classées, ou ordre alphabétique
+   pendant la mesure. Après 250 ms sans frappe, le résultat actif (clavier,
+   survol) puis les 12 premiers sont mesurés au rang de la recherche. Les sondes
+   pas encore parties sont abandonnées à la frappe suivante, à la fermeture et au
+   démontage.
+7. **Validation de la branche.**
+   - Web : 390 fichiers, 5 546 tests (journaux du lot G) ; `tsc` web réussi (lot
+     G) ; `pnpm -r typecheck` réussi (contrôle conjoint du lot F). Les paquets
+     hors web ne sont pas modifiés ; `pnpm -r test` réussi au `4c7f304` (revue
+     finale).
+   - Mutants détectés : tolérance de 7 jours (lot A) ; 9 (lot B), 10 (lot F2) et
+     7 (lot G) sur `Watchlist.tsx` ; 6 sur `PairSearch.tsx` (lot F2) ; priorité
+     et sortie anticipée (lot F1).
+   - E2E `sources-automatiques` et `multivue` : 30/30 deux fois au lot F et deux
+     fois au lot G, dont deux parcours HYPEUSDT (recherche, graphe et favori sur
+     Bybit ; migration d'un ancien favori Binance). Limite Kraken PARTIAL : 1/1
+     (lot G).
+   - Revue finale sous trois angles (routage et latence, favoris et persistance,
+     budget et sécurité), chaque constat bloquant ou important contre-vérifié (dix
+     contre-vérifications, dont un réfuté et un rétrogradé) : un bloquant (les sondes
+     de la recherche affamaient celle du graphe) et sept importants, dont un sur
+     la documentation. Ils sont traités par les lots D, F et G ; les résidus
+     figurent ci-dessous et dans le rapport.
+   - Budget d'entrée de la branche (Node 24.13, zlib 1.3.x ; état F1 + F2, non
+     remesuré après le lot G) : **1 198 940 / 358 297 octets** (bruts/gzip),
+     plafonds 1 220 000 / 360 000 inchangés, marge 21 060 / **1 703** (0,47 %) ;
+     +8 390 / +3 241 par rapport à main.
+8. **Mesures au navigateur** (contrôle conjoint du lot F, avant le lot G :
+   Chromium headless, profils neufs, API réelles, serveurs Vite de dev, branche
+   contre main `f786c0a`, 26/09) :
+   - HYPEUSDT : recherche « Auto » à 8 ms, puis « Bybit » à 1 050 ms (main :
+     « Binance » à 7 ms). Entrée : graphe Bybit prêt en 307 ms, barre d'outils
+     « Auto · Bybit » (main : Binance en 409 ms). **443 bougies 1d depuis le
+     11/07/2025** (main : 3 bougies depuis le 24/09/2026).
+   - Démarrage à froid, BTCUSDT 1m (médiane de 5 mesures alternées) : **1 562 ms
+     contre 1 272 ms** sur main, soit +290 ms (+3 057 ms à la revue finale).
+     Binance 5 fois sur 5. La borne de 2,5 s n'est plus atteinte ; le reste est
+     la sonde Binance 1w, qui décide la tête. 15 sondes (3 favoris × 5 places) en
+     27 requêtes, terminées entre 5,7 et 6,9 s ; main n'en fait aucune.
+   - À chaud (5 rechargements) : 906 ms contre 915 ms, 0 sonde.
+   - Entrée immédiate, libellé encore « Auto » : Bybit en 827, 927 et 1 847 ms,
+     contre Binance en 317, 320 et 416 ms sur main.
+   - Frappe lente de « HYPEUSDT » : 32 sondes à 250 ms par touche et 36 à
+     350 ms (55 à la revue finale), qui touchent chaque fois 9 paires jamais
+     choisies ; 6 sondes à 150 ms.
+9. **Limites assumées.**
+   - Le split taker Binance est perdu (CVD, indicateurs acheteur/vendeur, DOM,
+     DES) sur les actifs dont Binance n'est pas la place la plus profonde :
+     HYPEUSDT sur Bybit affiche le CVD UNUSABLE.
+   - La place retenue peut changer avec l'unité de temps (HYPEUSD : OKX en 1d,
+     Coinbase en 1h). Les dessins sont indexés par `slot:place:symbole`.
+   - Coinbase est sondé sur 4 pages : sa borne (environ 3,8 ans) reste « au moins
+     aussi profonde », et Binance départage BTCEUR, BTCUSDC et ETHBTC en 4h, 6h et
+     1d alors que Coinbase afficherait plus d'historique.
+   - Dépassements simulés de la borne de 2,5 s : Kraken dans 1 cas sur 48 (clic
+     au départ d'une sonde de recherche Kraken) ; Coinbase à 1 340 ms par page,
+     où deux pages en série dépassent seules la borne. La place non mesurée garde
+     alors le bénéfice du doute.
+   - Une requête qui ne se termine jamais garde son créneau pour la session, faute
+     de signal dans `fetchKlines` (`@axiom/types` figé). Une seule sonde pendue,
+     quel que soit son demandeur (graphe compris), bloque favoris et recherche de sa
+     place ; une seconde, forcément du graphe puisque le second créneau lui est
+     réservé, bloquerait tout.
+   - La frappe lente mesure encore environ 9 paires non choisies. L'Entrée
+     immédiate sur « Auto » coûte environ 600 ms.
+   - Quand la mesure de la place retenue échoue, le favori reste en doute 5 min
+     au plus, avec un réessai toutes les 30 s.
+   - OKX est limité aux 1 440 dernières bougies par `/market/candles` ; suite
+     possible : `history-candles`.
+
+Rapport : `docs/revue-2026-09-26-profondeur-historique.md`.
 
 ## Ratios ÷ marchés et devises (demande du 26 septembre 2026)
 

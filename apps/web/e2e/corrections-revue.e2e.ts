@@ -265,7 +265,7 @@ test("limite Kraken visible (PARTIAL) après chargement", async ({ page }) => {
   });
   const badge = page.locator('[data-chart-status="partial"]');
   await expect(badge).toBeVisible({ timeout: 20_000 });
-  await expect(badge).toContainText(/720/);
+  await expect(badge).toContainText(/~500 bougies/);
 });
 
 test("watchlist : BTCUSDT / ETHUSDT / SOLUSDT lisibles en entier à 1440 px (sidebar 240)", async ({

@@ -280,7 +280,7 @@ export function doitSignalerLimiteKraken(
   return exchange === "kraken" && limitDemandee > 0 && olderRecus === 0;
 }
 
-export const MESSAGE_LIMITE_KRAKEN = "Historique Kraken limité à ~720 bougies";
+export const MESSAGE_LIMITE_KRAKEN = "Historique Kraken limité à ~500 bougies";
 
 export interface ParamsOrdonnanceurExtension {
   estAnnule: () => boolean;

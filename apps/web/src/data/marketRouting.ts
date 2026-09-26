@@ -2,7 +2,7 @@
 import type { ExchangeId, Timeframe } from "@axiom/types";
 import { fetchPairs, isTradfiMarketSymbol, pairsCacheExpiresAt, TRADFI_SEARCH_METADATA, TWELVEDATA_SYMBOLS } from "./pairs";
 import { supportedTimeframesFor } from "./adapters";
-import { debutAccessible, lireProfondeur, mesurerProfondeurs, toleranceProfondeurMs } from "./profondeurHistorique";
+import { debutAccessible, lireProfondeur, mesurerProfondeurs, plancherAccessible, toleranceProfondeurMs, type PrioriteMesure } from "./profondeurHistorique";
 import { estSymboleCapitalisation, SYMBOLES_CAPITALISATION } from "./mcap";
 import { parseSyntheticSymbol } from "./synthetic";
 import { basePerp, splitSymbol } from "./symbol";
@@ -168,23 +168,45 @@ const sansCatalogue = (id: IdentitePreparee) => id.kind === "synthetic" || id.ki
 const CATALOGUE_VIDE: MarketCatalog = { instruments: [], unavailableSources: [] };
 
 /**
+ * Fourchette [au plus tôt, au plus tard] du début accessible au graphe ; `null` : aucune bougie.
+ * Exacte : [début, début]. Borne (`exact:false`, début réel antérieur ou égal) : « au moins aussi
+ * profonde », au plus tôt le plancher de sa place ; inconnue : du plancher à +∞. Dérivée de
+ * `debutAccessible` (au plus tard), seul point à simuler dans les tests des vues.
+ */
+function fourchetteDebut(exchange: ExchangeId, symbol: string, timeframe: Timeframe): [number, number] | null {
+  const auPlusTard = debutAccessible(exchange, symbol, timeframe);
+  if (auPlusTard === null) return null;
+  const p = lireProfondeur(exchange, symbol);
+  const exacte = auPlusTard !== undefined && (typeof p !== "object" || p.exact);
+  return [exacte ? auPlusTard : plancherAccessible(exchange, timeframe), auPlusTard ?? Infinity];
+}
+
+/**
  * Classement transitif par clés propres à chaque candidat : essai spéculatif hors provenance en
- * dernier, unité de temps supportée, palier de profondeur (0 : début accessible à la tolérance près
- * du plus profond, ou inconnu — une mesure absente ne fait jamais perdre la tête ; 1 : au-delà,
- * par début croissant ; 2 : aucune bougie), puis Binance confirmé, provenance, ordre SOURCES.
- * La profondeur accessible dépend de l'unité de temps : la place retenue la suit (HYPEUSD :
- * Kraken en 1d, Coinbase en 1h), même contre la provenance.
+ * dernier, unité de temps supportée, palier de profondeur, puis Binance confirmé, provenance, ordre
+ * SOURCES. Chaque place a une fourchette de début accessible (`fourchetteDebut` : exacte ; bornée,
+ * « au moins aussi profonde » ; inconnue, jusqu'au plafond de sa place). Palier 0 : peut être aussi
+ * profonde que la plus profonde PROUVÉE parmi les prétendants à la tête (BTCUSDT 1w : Coinbase, sans
+ * 1w, n'en est pas), à la tolérance près — une mesure absente ou bornée ne fait
+ * perdre la tête que si le plafond de sa place l'exclut ; 1 : au-delà, par début au plus tôt
+ * croissant ; 2 : aucune bougie. La profondeur accessible dépend de l'unité de temps : la place
+ * retenue la suit (HYPEUSD : OKX en 1d, Coinbase en 1h où OKX ne sert que 1 440 bougies), même
+ * contre la provenance.
  */
 function classer<T extends { exchange: ExchangeId; speculative?: true }>(liste: T[], symbol: string, timeframe: Timeframe, provenance?: ExchangeId): T[] {
-  const debuts = liste.map((c) => debutAccessible(c.exchange, symbol, timeframe));
-  const limite = Math.min(...debuts.map((d) => d ?? Infinity)) + toleranceProfondeurMs(timeframe);
-  const cles = new Map(liste.map((c, i): [T, number[]] => {
-    const d = debuts[i];
-    const palier = d === undefined ? 0 : d === null ? 2 : d <= limite ? 0 : 1;
+  const lignes = liste.map((c) => {
+    const groupe = [Number(!!c.speculative && c.exchange !== provenance), Number(!supportedTimeframesFor(c.exchange, symbol).includes(timeframe))];
+    return { c, groupe, rang: 2 * groupe[0]! + groupe[1]!, f: fourchetteDebut(c.exchange, symbol, timeframe) };
+  });
+  // Référence des paliers : la plus profonde prouvée parmi les prétendants à la tête (premier groupe
+  // présent). Une place reléguée (unité non supportée, essai hors provenance) ne la fixe pas.
+  const premier = Math.min(...lignes.map((l) => l.rang));
+  const limite = Math.min(...lignes.filter((l) => l.rang === premier).map((l) => l.f?.[1] ?? Infinity)) + toleranceProfondeurMs(timeframe);
+  const cles = new Map(lignes.map(({ c, groupe, f }): [T, number[]] => {
+    const palier = f === null ? 2 : f[0] <= limite ? 0 : 1;
     return [c, [
-      Number(!!c.speculative && c.exchange !== provenance),
-      Number(!supportedTimeframesFor(c.exchange, symbol).includes(timeframe)),
-      palier, palier === 1 ? d! : 0,
+      ...groupe,
+      palier, f !== null && palier === 1 ? f[0] : 0,
       Number(c.exchange !== "binance" || !!c.speculative),
       Number(c.exchange !== provenance),
       SOURCES.indexOf(c.exchange),
@@ -234,10 +256,33 @@ function candidatsDepuisCatalogue(id: IdentitePreparee, loaded: MarketCatalog): 
   }));
 }
 
-/** Classement après mesure bornée (2,5 s) des places spot confirmées, dès qu'il y en a deux. */
-async function avecProfondeurs(id: IdentitePreparee, loaded: MarketCatalog): Promise<ResolvedMarket[]> {
+/**
+ * Tête du classement que les mesures encore attendues ne peuvent plus changer, sinon `undefined`.
+ * Une place spot confirmée sans mesure (absente ou en vol) commence au mieux au plafond de sa place :
+ * `classer` la compte déjà ainsi, donc si elle pouvait égaler la tête en la battant au départage,
+ * elle serait devant (tête inconnue : rien de décidé). Reste qu'elle ne doit pas pouvoir être plus
+ * profonde que la tête au-delà de la tolérance. BTCUSDT 1m : Binance au plafond, décidé sans
+ * attendre Coinbase ; HYPEUSDT 1d : OKX attendu tant qu'il peut passer devant Bybit. Une place
+ * sans l'unité de la tête reste derrière elle quoi qu'elle mesure (BTCUSDT 1w : Coinbase).
+ */
+function teteDecidee(id: IdentitePreparee, loaded: MarketCatalog): ExchangeId | undefined {
+  const [tete] = candidatsDepuisCatalogue(id, loaded);
+  const unite = (exchange: ExchangeId) => supportedTimeframesFor(exchange, id.symbol).includes(id.timeframe);
+  const inconnues = loaded.instruments.filter((p) => p.kind === "spot" && p.symbol === id.symbol && debutAccessible(p.exchange, p.symbol, id.timeframe) === undefined
+    && (unite(p.exchange) || !tete || !unite(tete.exchange)));
+  if (!tete || inconnues.some((p) => p.exchange === tete.exchange)) return undefined;
+  const auPlusTot = fourchetteDebut(tete.exchange, id.symbol, id.timeframe)?.[0] ?? Infinity;
+  const tolerance = toleranceProfondeurMs(id.timeframe);
+  return inconnues.every((p) => (fourchetteDebut(p.exchange, p.symbol, id.timeframe)?.[0] ?? Infinity) + tolerance >= auPlusTot) ? tete.exchange : undefined;
+}
+
+/**
+ * Classement après mesure des places spot confirmées, dès qu'il y en a deux : bornée à 2,5 s,
+ * rendue dès que la tête est décidée.
+ */
+async function avecProfondeurs(id: IdentitePreparee, loaded: MarketCatalog, priorite: PrioriteMesure = "graphe"): Promise<ResolvedMarket[]> {
   const confirmes = id.kind === "spot" ? loaded.instruments.filter((p) => p.kind === "spot" && p.symbol === id.symbol) : [];
-  if (confirmes.length > 1) await mesurerProfondeurs(confirmes);
+  if (confirmes.length > 1) await mesurerProfondeurs(confirmes, 2_500, { priorite, assez: () => teteDecidee(id, loaded) !== undefined });
   return candidatsDepuisCatalogue(id, loaded);
 }
 
@@ -245,16 +290,18 @@ async function avecProfondeurs(id: IdentitePreparee, loaded: MarketCatalog): Pro
  * Le catalogue optionnel permet les usages déjà chargés et les tests sans réseau.
  * Catalogue périmé servi pendant son rafraîchissement : un actif qu'il ne confirme pas
  * (nouvelle cotation) attend ce rafraîchissement au lieu d'être déclaré introuvable.
+ * `priorite` : rang des sondes de profondeur dans la file de chaque place (graphe par défaut).
  */
 export async function resolveMarketCandidates(
   identity: { exchange?: ExchangeId; symbol: string; timeframe: Timeframe },
   catalog?: MarketCatalog,
+  options: { priorite?: PrioriteMesure } = {},
 ): Promise<ResolvedMarket[]> {
   const id = preparerIdentite(identity);
   if (sansCatalogue(id)) return candidatsDepuisCatalogue(id, CATALOGUE_VIDE);
   let loaded = catalog ?? await fetchMarketCatalog();
   if (!catalog && pendingCatalog && !candidatsDepuisCatalogue(id, loaded).some((candidat) => !candidat.speculative)) loaded = await pendingCatalog;
-  return avecProfondeurs(id, loaded);
+  return avecProfondeurs(id, loaded, options.priorite);
 }
 
 /** Premiers essais disponibles tout de suite, liste complète habituelle à la demande. */
@@ -268,12 +315,13 @@ export interface CandidatsProgressifs {
  * bornée ; s'il est périmé, `complets` attend le rafraîchissement que sa lecture a lancé (un actif
  * coté depuis, ou retiré, trouve ainsi son repli) ; sans aucun instrument confirmé, rien ne part
  * avant elle. À froid : les huit catalogues partent ; le perp n'attend qu'Hyperliquid. Au
- * comptant, une profondeur déjà en cache prouve la cotation : la meilleure place part sans
- * attendre les autres catalogues (Binance non mesuré : son catalogue puis sa sonde bornée, pour
- * conclure comme `resolveMarketCandidates`). Sinon Binance (référence, parfois lent) est attendu,
- * les autres places spot jusqu'à une échéance commune (2,5 s après le début, ou l'arrivée de
- * Binance) ; celles-là sont mesurées puis classées, les retardataires ne comptent que dans
- * `complets` (catalogue entier).
+ * comptant, Binance (référence, parfois lent) est attendu : une mesure en cache ne prouve pas la
+ * cotation (paire suspendue, bougies figées). Les autres places spot sont attendues jusqu'à une
+ * échéance commune (2,5 s après le début, ou l'arrivée de Binance). Binance confirmé est mesuré
+ * pendant ce temps, sans les retenir : décidé face à toutes les places encore possibles (catalogue
+ * en attente compris), il part seul aussitôt. Sinon les places confirmées sont mesurées (sortie
+ * anticipée ; la sonde Binance en vol est rejointe) puis classées, les retardataires ne comptent
+ * que dans `complets` (catalogue entier).
  */
 export async function resolveMarketCandidatesProgressifs(
   identity: { exchange?: ExchangeId; symbol: string; timeframe: Timeframe },
@@ -299,20 +347,23 @@ export async function resolveMarketCandidatesProgressifs(
   // Requêtes partagées avec le catalogue en vol ; Hyperliquid y enregistre aussi sa casse (kPEPE).
   const cote = (place: ExchangeId) => fetchPairs(place).then((paires) => paires.includes(id.symbol), () => false);
   if (id.kind === "perp") return { immediats: await cote("hyperliquid") ? retenus(candidatsDepuisCatalogue(id, places(["hyperliquid"]))) : [], complets };
-  const connues = SPOT.filter((place) => typeof lireProfondeur(place, id.symbol) === "object");
-  // Binance sans mesure (sonde échouée, entrée élaguée) : comme la résolution complète, son
-  // catalogue puis sa sonde bornée ; encore inconnu, il garde le bénéfice du doute.
-  if (connues.length && lireProfondeur("binance", id.symbol) === undefined && await cote("binance")) {
-    await mesurerProfondeurs([{ exchange: "binance", symbol: id.symbol }]);
-    connues.push("binance");
-  }
-  const [meilleure] = retenus(candidatsDepuisCatalogue(id, places(connues)));
-  if (meilleure) return { immediats: [meilleure], complets };
   const confirmees: ExchangeId[] = [];
-  const suivis = SPOT.map((place) => cote(place).then((oui) => { if (oui) confirmees.push(place); }));
+  const refusees: ExchangeId[] = [];
+  const suivis = SPOT.map((place) => cote(place).then((oui) => { (oui ? confirmees : refusees).push(place); }));
   await suivis[0];
+  // Binance confirmé et décidé face à toutes les places encore possibles (catalogue en attente compris).
+  const decide = () => confirmees.includes("binance") && teteDecidee(id, places(SPOT.filter((place) => !refusees.includes(place)))) === "binance";
   const reste = debut + 2_500 - Date.now();
-  if (reste > 0) await Promise.race([Promise.all(suivis), new Promise((fin) => setTimeout(fin, reste))]);
+  // Sa sonde part sans retenir les catalogues ; chaque mesure ou refus de catalogue peut le décider.
+  if (!decide() && reste > 0) await new Promise<void>((fin) => {
+    const t = setTimeout(fin, reste);
+    const finir = () => { clearTimeout(t); fin(); };
+    const verifier = () => { if (decide()) finir(); };
+    for (const suivi of suivis) void suivi.then(verifier);
+    void Promise.all(suivis).then(finir);
+    if (confirmees.includes("binance")) void mesurerProfondeurs([{ exchange: "binance", symbol: id.symbol }], reste, { assez: decide }).then(verifier);
+  });
+  if (decide()) return { immediats: retenus(candidatsDepuisCatalogue(id, places(["binance"]))), complets };
   // Comme sur main, sans aucune place confirmée, la provenance spot reste attendue au-delà de
   // l'échéance : un actif propre à une place lente (okx:CARDSUSDT) n'attend pas le catalogue le
   // plus lent de la liste complète.

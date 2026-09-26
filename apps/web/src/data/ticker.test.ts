@@ -129,7 +129,7 @@ describe("isMarketOpen — crypto (jamais gaté)", () => {
   });
 });
 
-describe("isMarketOpen — actions/ETF US (lun-ven 13:20-20:10 UTC)", () => {
+describe("isMarketOpen — séance NYSE à l'heure de New York (09:20-16:10 locales)", () => {
   // 2026-01-07 est un MERCREDI (2026-01-01 = jeudi).
   it("ouvert en pleine séance (15:00 UTC un mercredi)", () => {
     expect(isMarketOpen("stock", new Date(Date.UTC(2026, 0, 7, 15, 0)))).toBe(true);

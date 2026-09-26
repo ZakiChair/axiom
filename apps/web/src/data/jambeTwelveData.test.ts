@@ -68,6 +68,36 @@ describe("souscrireJambeTwelveData — cadence et heures de marché", () => {
     expect(requetes.length).toBeGreaterThan(280);
   });
 
+  it("SPY en 1d souscrit à 13:12Z : un dernier sondage suit la fermeture (clôture de 16:00 captée), puis plus rien", async () => {
+    vi.setSystemTime(new Date("2026-09-24T13:12:00Z"));
+    const heures: string[] = [];
+    const fetchOriginal = globalThis.fetch as unknown as (url: string) => Promise<unknown>;
+    vi.stubGlobal("fetch", vi.fn((url: string) => { heures.push(new Date().toISOString().slice(11, 16)); return fetchOriginal(url); }));
+    const { souscrireJambeTwelveData } = await import("./twelvedata");
+    const stop = souscrireJambeTwelveData("SPY", "1d", () => {});
+    await vi.advanceTimersByTimeAsync(10 * 60 * MINUTE);
+    stop();
+    // Fenêtre jusqu'à 20:10Z (16:10 à New York) : 19:57 dedans, 20:12 est le sondage de fermeture.
+    expect(heures).toContain("20:12");
+    expect(heures.filter((h) => h > "20:12")).toEqual([]);
+  });
+
+  it("sondage de fermeture en échec : réessayé à la cadence suivante jusqu'à sa réussite, puis plus rien", async () => {
+    vi.setSystemTime(new Date("2026-09-24T13:12:00Z"));
+    const heures: string[] = [];
+    const fetchOriginal = globalThis.fetch as unknown as (url: string) => Promise<unknown>;
+    vi.stubGlobal("fetch", vi.fn((url: string) => {
+      const hhmm = new Date().toISOString().slice(11, 16);
+      heures.push(hhmm);
+      return hhmm > "20:10" && hhmm < "20:30" ? Promise.reject(new Error("réseau")) : fetchOriginal(url);
+    }));
+    const { souscrireJambeTwelveData } = await import("./twelvedata");
+    const stop = souscrireJambeTwelveData("SPY", "1d", () => {});
+    await vi.advanceTimersByTimeAsync(10 * 60 * MINUTE);
+    stop();
+    expect(heures.filter((h) => h > "20:10")).toEqual(["20:12", "20:27", "20:42"]);
+  });
+
   it("jeudi 02:00Z, SPY hors séance : amorçage seul", async () => {
     await suivre("SPY", "1m", "2026-09-24T02:00:00Z", 30 * MINUTE);
     expect(requetes).toEqual(["SPY"]);

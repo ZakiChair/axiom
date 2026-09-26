@@ -776,10 +776,20 @@ aucune dépendance, aucun hôte ni fournisseur, aucune règle de proxy modifiée
    XAG/USD exigent l'offre Grow. D'où les ETF SPY et QQQ, nommés dans le libellé et
    l'infobulle (prix de l'ETF, pas le niveau de l'indice : ≈ SPX/10, ≈ NDX/41) : jamais
    une substitution silencieuse.
-2. **Devise.** Réservé aux actifs cotés en dollar : USD, USDT, USDC et FDUSD (le
-   stablecoin est compté pour 1 USD, ce que dit l'infobulle ; FDUSD est désormais une
-   cotation connue de `splitSymbol`), perps Hyperliquid (USDC), TOTAL*, tickers Twelve
-   Data US sans place explicite (« RY:TSX » refusé) et paires X/USD. Jamais l'actif
+2. **Devise.** Réservé aux actifs cotés en dollar : USD et stablecoins USD (USDT, USDC,
+   FDUSD, USDD, TUSD, USDE, DAI ; un stablecoin est compté pour 1 USD, ce que dit
+   l'infobulle), perps Hyperliquid (USDC), TOTAL*, tickers Twelve Data US sans place
+   explicite (« RY:TSX » refusé) et paires X/USD. Liste unique `COTATIONS_USD`
+   (`data/symbol.ts`), partagée avec la couche HL et le cache d'options. `splitSymbol`
+   tient compte de la place : FDUSD n'est une cotation que chez Binance (WFDUSD =
+   W/FDUSD ; UFD/USD de Kraken reste UFD/USD) ; TUSD ne l'est pas chez Kraken, Coinbase,
+   OKX et Bybit (DOT/USD reste DOT/USD, sans note « TUSD »). La place est transmise par
+   les ratios, la couche et la fenêtre de liquidations HL (`basePerp`,
+   `raisonCotationHl`) et `actifDeribit` ; les autres consommateurs, sans place, gardent
+   le découpage historique. Rejeu sur 7 529 symboles réels (catalogue de prix, 32 paires
+   FDUSD réellement TRADING) : découpages justes Binance 2 421 → 2 618, Kraken 1 272 →
+   1 336, Coinbase 462 → 509, OKX 1 378 → 1 406, Bybit 513 → 514 ; sans place, aucun
+   changement ; aucun découpage juste devenu faux. Jamais l'actif
    divisé par lui-même ni par sa propre devise (EURUSDT en EUR). `estRatio` ne reconnaît
    que ce que le bouton aurait posé.
 3. **÷BTC/ETH/SOL étendus** à Bybit et OKX (spot contre spot) et aux perps Hyperliquid
@@ -791,26 +801,34 @@ aucune dépendance, aucun hôte ni fournisseur, aucune règle de proxy modifiée
    proposées (`supportedTimeframesFor`), y compris pour le lot D. Les préréglages
    « BTC / OR (proxy GLD) » et « BTC / DXY (proxy UUP) » n'offrent donc plus 1h ni 4h. Une
    unité retirée devient l'unité suivante proposée (`timeframeProche`, ex. ÷SPY 4h → 1d),
-   jamais la minute : bouton du bandeau, slots, routeur, liaison des graphes, espaces de
-   travail et session restaurée. En direct, une barre B ouverte après la bougie A (daily
+   jamais la minute : bouton du bandeau, slots, routeur, liaison des graphes (en dernier
+   repli, après l'unité de la source), espaces de travail et session restaurée. Twelve
+   Data au numérateur (GLD ÷ BTC, AAPL en CHF, AAPL ÷ SPY) : le 1m n'est pas proposé,
+   car cette jambe n'est sondée que toutes les 5 min ; il devient 5m. En direct, une barre B ouverte après la bougie A (daily
    forex/or daté J+1 dès 21:00Z) ne fige plus le ratio : la barre B précédente sert,
    sinon la dernière clôture connue (au plus une barre d'avance), et la bougie A
    clôturée est toujours émise. Twelve Data au numérateur (GLD ÷ BTC) : après la
    clôture de séance, la dernière bougie tradfi n'est pas repeinte avec le cours crypto.
 5. **Quota Twelve Data.** Toute jambe Twelve Data d'un synthétique est amorcée
    immédiatement (réessayée, même marché fermé, tant que rien n'est livré), puis sondée
-   seulement marché ouvert, au plus toutes les 5 min, toutes les 15 min dès 1d : environ
+   seulement marché ouvert, plus une dernière fois au premier sondage marché fermé (la
+   clôture de 16:00 à New York est captée même si le sondage précédent l'a devancée),
+   au plus toutes les 5 min, toutes les 15 min dès 1d : environ
    288 crédits par jour ouvré pour l'or et le forex (96 dès 1d), 82 pour les actions et
    ETF (28 dès 1d). Avant : 60 s, 24 h/24, soit 1 440 crédits par jour pour un seul
    ratio ouvert, au-delà du plafond de 800. La séance actions (`data/heuresMarche.ts`,
    extrait de `data/ticker.ts` qui le réexporte) suit désormais l'heure de New York :
    09:20-16:10 locales, soit 13:20-20:10Z en été et 14:20-21:10Z en hiver ; les
-   cotations TradFi de la watchlist en profitent aussi.
+   cotations TradFi de la watchlist en profitent aussi. Moteur sans ce fuseau : repli
+   sur l'ancienne fenêtre UTC d'été, jamais un module qui ne se charge plus.
 6. **Clavier.** Le menu repose sur la primitive `MenuDeroulant` (`aria-haspopup`,
    ↑/↓/Début/Fin, Échap). À l'ouverture, le focus entre dans le panneau, et une flèche
-   reçue hors du panneau y ramène (Safari et Firefox ne donnent pas le focus au bouton
-   cliqué). Le raccourci global ignore une flèche ou un Échap déjà traités par un menu :
-   ↓ ne change plus de paire menu ouvert, Échap ne réduit plus la fenêtre focalisée.
+   reçue quand le focus n'est nulle part y ramène (Safari et Firefox ne donnent pas le
+   focus au bouton cliqué) ; un champ qui a pris le focus (« / ») le garde. Le menu se
+   ferme quand le focus part vers un autre élément (Tab, « / »), et ↓ retrouve alors
+   son sens global. Le raccourci global ignore une flèche ou un Échap déjà traités par un menu :
+   ↓ ne change plus de paire tant que le focus est dans le menu (ou nulle part), Échap
+   ne réduit plus la fenêtre focalisée.
 
 Limites assumées :
 - Daily forex/or (J-1 21:00Z → J 21:00Z) apparié à la bougie crypto J : décalage de 3 h,
@@ -824,15 +842,22 @@ Limites assumées :
   BTC/UUP.
 - Sans clé Twelve Data en appel direct (Vercel), les entrées restent actives et l'erreur
   « clé » s'affiche au chargement.
+- Jours fériés US non gérés : SPY et QQQ y sont sondés pour rien (environ 82 crédits en
+  intrajournalier, 28 dès 1d, par jour férié).
+- Clôture SPY/QQQ en direct : captée par le sondage de fermeture, au plus 5 min (15 min
+  dès 1d) après 16:10 à New York, retenté à chaque cadence en cas d'échec ; exacte au
+  rechargement.
 
-Validation : **5 439 tests web** et typage de tous les paquets réussis ; parcours
+Validation : **5 449 tests web** et typage de tous les paquets réussis ; parcours
 Chromium `gate-v24-macro-denominateur`, `gate-v25-cap-dominance`, `multivue`,
-`quatre-lots-indicateurs` et `niveaux-chart` : 33/33 deux fois de suite (les parcours
-clavier échouent sans leurs gardes). Budget d'entrée **1 195 412 octets bruts /
-356 842 gzip** (Node 24.13.0, zlib 1.3.1), contre 1 190 550 / 355 056 sur `main` ;
-plafonds 1 220 000 / 360 000 inchangés. Revue indépendante sous trois angles (calcul,
-robustesse, contrat et budget), puis contre-revue ; leurs points bloquant, importants
-et mineurs retenus sont corrigés ci-dessus.
+`quatre-lots-indicateurs` et `niveaux-chart` : 34/34 deux fois de suite au tour
+précédent, puis `gate-v24-macro-denominateur` et `multivue` 19/19 deux fois après le
+dernier tour (les parcours clavier échouent sans leurs gardes). Budget d'entrée
+**1 195 875 octets bruts / 356 997 gzip** (Node 24.13.0, zlib 1.3.1), contre
+1 190 550 / 355 056 sur `main` ; plafonds 1 220 000 / 360 000 inchangés. Revue
+indépendante sous trois angles (calcul, robustesse, contrat et budget), contre-revue
+puis deux vérifications ; leurs points bloquant, importants et mineurs retenus sont
+corrigés ci-dessus.
 
 ## Classement, impression de stablecoins et dessins (26 septembre 2026)
 

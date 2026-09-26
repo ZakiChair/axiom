@@ -206,8 +206,8 @@ export function MenuDeroulant({
 
   // Fermeture globale (quel que soit le focus) : clic extérieur (mousedown document)
   // et touche Échap — Échap rend le focus au déclencheur. À l'ouverture, le focus entre dans
-  // le panneau (Safari/Firefox ne le donnent pas au bouton cliqué) ; une flèche reçue hors du
-  // panneau y ramène : dans les deux cas, elle ne change jamais la paire (raccourci global).
+  // le panneau (Safari/Firefox ne le donnent pas au bouton cliqué) ; une flèche reçue quand le
+  // focus n'est nulle part (body) y ramène — jamais volée à un champ ou à un autre bouton.
   useEffect(() => {
     if (!ouvert) return;
     const actifs = () => Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])') ?? []);
@@ -221,7 +221,7 @@ export function MenuDeroulant({
         setOuvert(false);
         declencheurRef.current?.focus();
       } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !e.defaultPrevented
-        && !wrapperRef.current?.contains(document.activeElement)) {
+        && (document.activeElement === null || document.activeElement === document.body)) {
         e.preventDefault();
         const items = actifs();
         (e.key === "ArrowDown" ? items[0] : items.at(-1))?.focus();
@@ -249,7 +249,16 @@ export function MenuDeroulant({
   };
 
   return (
-    <div className="relative" ref={wrapperRef} onKeyDown={surTouche}>
+    <div
+      className="relative"
+      ref={wrapperRef}
+      onKeyDown={surTouche}
+      onBlur={(e) => {
+        // Focus parti vers un autre élément (Tab, « / ») : le menu se ferme, et ↓ retrouve son
+        // sens global sans menu fantôme. Focus perdu vers nulle part (clic Safari) : il reste.
+        if (ouvert && e.relatedTarget !== null && !wrapperRef.current?.contains(e.relatedTarget as Node)) setOuvert(false);
+      }}
+    >
       <button
         type="button"
         ref={declencheurRef}

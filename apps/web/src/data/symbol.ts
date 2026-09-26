@@ -16,7 +16,7 @@
  * au lieu de base "FOO" / quote "TUSD".
  */
 export const QUOTE_ASSETS = [
-  // Stablecoins / cotations crypto (5 et 4 caractères)
+  // Stablecoins / cotations crypto (5 et 4 caractères ; FDUSD et TUSD selon la place, cf. splitSymbol)
   "FDUSD", "USDT", "USDC", "USDD", "TUSD", "USDE", "EURC",
   // Fiat + stablecoin 3 lettres + cryptos de cotation
   "DAI", "USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "TRY", "BRL", "BTC", "ETH",
@@ -43,12 +43,21 @@ export function splitSymbol(symbol: string, exchangeLabel: string): { base: stri
   }
 
   // Format concaténé : suffixe de cotation reconnu, le plus LONG d'abord (cf. tri ci-dessus).
-  const quote = QUOTE_ASSETS.find((q) => s.endsWith(q) && s.length > q.length);
+  // FDUSD n'est une cotation que chez Binance (WFDUSD = W/FDUSD ; UFD/USD de Kraken reste UFD /
+  // USD). TUSD l'est partout sauf chez Kraken, Coinbase, OKX et Bybit, qui n'en cotent pas :
+  // DOT/USD (« DOTUSD ») y reste DOT / USD. Sans place connue, comportement historique.
+  const binance = /binance/i.test(exchangeLabel);
+  const sansTusd = /kraken|coinbase|okx|bybit/i.test(exchangeLabel);
+  const quote = QUOTE_ASSETS.find((q) => s.endsWith(q) && s.length > q.length
+    && (q !== "FDUSD" || binance) && (q !== "TUSD" || !sansTusd));
   if (quote === undefined) {
     throw new Error(`${exchangeLabel}: format de symbole inattendu '${symbol}' (devise de cotation inconnue)`);
   }
   return { base: s.slice(0, s.length - quote.length), quote };
 }
+
+/** Cotations assimilées au dollar : USD et stablecoins USD (1 stablecoin compté pour 1 USD). */
+export const COTATIONS_USD: readonly string[] = ["USD", "USDT", "USDC", "FDUSD", "USDD", "TUSD", "USDE", "DAI"];
 
 /** Alias d'actif propres à un exchange → ticker canonique (Kraken code le bitcoin « XBT »). */
 const ALIAS_BASE: Record<string, string> = { XBT: "BTC" };
@@ -65,8 +74,9 @@ const ALIAS_BASE: Record<string, string> = { XBT: "BTC" };
  *  - symbole SYNTHÉTIQUE (encodage `exA:LEGA|op|exB:LEGB`, cf. data/synthetic.ts) → `null` :
  *    il n'a pas d'actif sous-jacent unique ;
  *  - cotation inconnue / base vide ou non alphanumérique → `null` (l'appelant renonce au fetch).
+ * `place` (facultative) : sans elle, FDUSD n'est pas une cotation et TUSD l'est (cf. splitSymbol).
  */
-export function basePerp(symbol: string): string | null {
+export function basePerp(symbol: string, place = "basePerp"): string | null {
   const s = symbol.trim().toUpperCase();
   if (s.length === 0 || s.includes("|")) return null; // vide ou synthétique
 
@@ -79,7 +89,7 @@ export function basePerp(symbol: string): string | null {
   const normalise = s.replace("-", "/");
   let base: string;
   try {
-    base = splitSymbol(normalise, "basePerp").base;
+    base = splitSymbol(normalise, place).base;
   } catch {
     return null; // cotation inconnue / côté vide → inextricable
   }

@@ -42,7 +42,7 @@ import {
   type EtatHeat,
   type InstantaneHlHeat,
 } from "../data/hyperliquidHeat";
-import { basePerp, splitSymbol } from "../data/symbol";
+import { basePerp, COTATIONS_USD as COTATIONS_DOLLAR_SYMBOL, splitSymbol } from "../data/symbol";
 import type { Commande } from "../commands/registry";
 import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
@@ -665,8 +665,8 @@ export function libelleLegendeHl(
   return `${base} · ↑ ${formatUsd(cumuls.auDessus)} · ↓ ${formatUsd(cumuls.enDessous)}`;
 }
 
-/** Cotations assimilées au dollar : USD et stablecoins USD de `QUOTE_ASSETS` (data/symbol.ts). */
-const COTATIONS_USD: ReadonlySet<string> = new Set(["USD", "USDT", "USDC", "USDD", "TUSD", "USDE", "DAI"]);
+/** Cotations assimilées au dollar : constante unique de data/symbol.ts. */
+const COTATIONS_USD: ReadonlySet<string> = new Set(COTATIONS_DOLLAR_SYMBOL);
 
 /**
  * Raison de TAIRE la couche HL sur ce symbole, ou `null` quand ses niveaux sont affichables.
@@ -681,12 +681,12 @@ const COTATIONS_USD: ReadonlySet<string> = new Set(["USD", "USDT", "USDC", "USDD
  * tiret Coinbase ramené au slash ; symbole synthétique ou cotation inconnue → `null`, car
  * `basePerp` renonce alors déjà au fetch (état « vide », qui dit la chose honnêtement). PURE.
  */
-export function raisonCotationHl(symbol: string): string | null {
+export function raisonCotationHl(symbol: string, place = "raisonCotationHl"): string | null {
   const s = symbol.trim().toUpperCase();
   if (s.length === 0 || s.includes("|") || s.endsWith("-PERP")) return null;
   let cotation: string;
   try {
-    cotation = splitSymbol(s.replace("-", "/"), "raisonCotationHl").quote;
+    cotation = splitSymbol(s.replace("-", "/"), place).quote;
   } catch {
     return null;
   }
@@ -1481,7 +1481,7 @@ export class LiquidationHeatController {
     const hlActif = hlLiqStore.getState().actif;
     // Niveaux HL = prix en USD : sur une paire cotée hors USD (ETHBTC, BTCJPY…), la couche se
     // tait à l'écran et la légende dit pourquoi (cf. raisonCotationHl).
-    const raisonHl = hlActif ? raisonCotationHl(marketStore.getState().symbol) : null;
+    const raisonHl = hlActif ? raisonCotationHl(marketStore.getState().symbol, marketStore.getState().exchange) : null;
     const hlDessinable = hlActif && raisonHl === null;
     // Historique d'instantanés : collecteur du DAEMON seulement — en mode navigateur (Vercel,
     // local sans daemon), aucun fetch /hl/liqheat ni heatmap ; la légende dit pourquoi.
@@ -1783,7 +1783,7 @@ export class LiquidationHeatController {
     const to = Math.min(candles.length, range.to);
     const premier = candles[from];
     if (to - from < 1 || premier === undefined) return;
-    const coin = basePerp(marketStore.getState().symbol);
+    const coin = basePerp(marketStore.getState().symbol, marketStore.getState().exchange);
     if (coin === null) return;
     const pas = Math.max(PERIODE_SNAP_HL_MS, pasBougieMs(candles, from, to));
     assurerHeat({ coin, pasMs: pas, depuisMs: premier.time - HL_REPORT_MAX_PAS * pas });

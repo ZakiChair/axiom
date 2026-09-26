@@ -63,11 +63,16 @@ describe("supportedTimeframesFor", () => {
     expect(supportedTimeframesFor("synthetic", "bybit:HYPEUSDT|/|twelvedata:SPY")).toEqual([
       "1m", "5m", "15m", "1d", "1w", "1M",
     ]);
+    // Twelve Data au numérateur : sondé toutes les 5 min, le 1m n'est pas proposé.
     expect(supportedTimeframesFor("synthetic", "twelvedata:GLD|/|binance:BTCUSDT")).toEqual([
-      "1m", "5m", "15m", "1d", "1w", "1M",
+      "5m", "15m", "1d", "1w", "1M",
     ]);
     // Deux jambes Twelve Data de même nature : même grille, rien à retirer.
     expect(supportedTimeframesFor("synthetic", "twelvedata:AAPL|/|twelvedata:SPY")).toContain("1h");
+    expect(supportedTimeframesFor("synthetic", "twelvedata:AAPL|/|twelvedata:SPY")).not.toContain("1m");
+    expect(supportedTimeframesFor("synthetic", "twelvedata:AAPL|/|twelvedata:CHF/USD")).not.toContain("1m");
+    // Twelve Data au dénominateur seulement : le 1m reste (la jambe crypto mène le direct).
+    expect(supportedTimeframesFor("synthetic", "binance:BTCUSDT|/|twelvedata:XAU/USD")).toContain("1m");
     expect(supportedTimeframesFor("synthetic", "twelvedata:EUR/USD|/|twelvedata:CHF/USD")).toContain("4h");
     // Natures différentes : les deux grilles se retirent.
     expect(supportedTimeframesFor("synthetic", "twelvedata:SPY|/|twelvedata:EUR/USD")).not.toContain("1h");

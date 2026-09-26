@@ -1438,3 +1438,11 @@ describe("libelleLegendeHlHeat — légende raison comprise", () => {
     );
   });
 });
+
+describe("raisonCotationHl — libellé de la place (vérification du 26/09)", () => {
+  it("BTCFDUSD de Binance est coté en dollar ; DOTUSD de Coinbase aussi", () => {
+    expect(raisonCotationHl("BTCFDUSD", "binance")).toBeNull();
+    expect(raisonCotationHl("DOTUSD", "coinbase")).toBeNull();
+    expect(raisonCotationHl("BTCEUR", "kraken")).toBe("cotation EUR ≠ USD, niveaux masqués");
+  });
+});

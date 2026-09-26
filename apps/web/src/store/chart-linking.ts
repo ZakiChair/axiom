@@ -21,14 +21,12 @@ export function masterLinkSource(
 function linkedIdentity(current: MarketIdentity, source: MarketIdentity): MarketIdentity {
   const symbol = normalizeMarketSymbol(source.symbol);
   const supported = supportedTimeframesFor(source.exchange, symbol);
-  // Ratio dont l'unité est retirée (÷SPY 4h) : la suivante proposée, pas la minute.
+  // Dernier repli d'un ratio dont l'unité est retirée (÷SPY 4h) : la suivante, pas la minute.
   const timeframe = supported.includes(current.timeframe)
     ? current.timeframe
-    : source.exchange === "synthetic"
-      ? (timeframeProche(supported, current.timeframe) ?? source.timeframe)
-      : supported.includes(source.timeframe)
-        ? source.timeframe
-        : (supported[0] ?? source.timeframe);
+    : supported.includes(source.timeframe)
+      ? source.timeframe
+      : (source.exchange === "synthetic" ? timeframeProche(supported, current.timeframe) : supported[0]) ?? source.timeframe;
   return { exchange: source.exchange, symbol, timeframe };
 }
 

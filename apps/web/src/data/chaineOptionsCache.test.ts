@@ -136,3 +136,9 @@ describe("actifDeribit — marchés éligibles aux chaînes Deribit", () => {
     expect(actifDeribit(exchange, symbol)).toBe(attendu);
   });
 });
+
+describe("actifDeribit — libellé de la place (vérification du 26/09)", () => {
+  it("BTCFDUSD de Binance est du BTC coté en dollar", () => {
+    expect(actifDeribit("binance", "BTCFDUSD")).toBe("BTC");
+  });
+});

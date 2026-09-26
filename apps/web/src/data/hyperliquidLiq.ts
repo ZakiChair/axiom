@@ -284,7 +284,7 @@ async function rafraichir(coin: string): Promise<void> {
  */
 function sync(): void {
   const actif = hlLiqStore.getState().actif;
-  const coin = actif ? basePerp(marketStore.getState().symbol) : null;
+  const coin = actif ? basePerp(marketStore.getState().symbol, marketStore.getState().exchange) : null;
 
   if (!actif) arreterNavigateur();
   else if (modeNavigateur) {
@@ -365,7 +365,7 @@ function passerEnNavigateur(coin: string | null): void {
       scannerNav = m.scannerNavigateurHl((p) => {
         if (modeNavigateur) hlLiqStore.setState({ ...p, source: "navigateur" });
       });
-      if (modeNavigateur) scannerNav.demarrer(basePerp(marketStore.getState().symbol));
+      if (modeNavigateur) scannerNav.demarrer(basePerp(marketStore.getState().symbol, marketStore.getState().exchange));
     },
     () => {
       chargementNav = false; // chunk introuvable (déploiement remplacé) : erreur, pas d'attente sans fin

@@ -13,6 +13,8 @@ describe("splitSymbol — format concaténé", () => {
   it("priorise TUSD sur USD (USD est une terminaison de TUSD)", () => {
     // Sans le tri par longueur, "FOOTUSD" serait mal coupé en base "FOOT" / quote "USD".
     expect(splitSymbol("FOOTUSD", "Test")).toEqual({ base: "FOO", quote: "TUSD" });
+    // Chez Coinbase, qui ne cote pas TUSD (DOT/USD), USD s'applique.
+    expect(splitSymbol("FOOTUSD", "Coinbase")).toEqual({ base: "FOOT", quote: "USD" });
   });
 
   it("priorise EURC sur EUR", () => {
@@ -79,10 +81,11 @@ describe("basePerp — base normalisée pour un perp USDT", () => {
   it("tolère le slash Kraken et mappe XBT → BTC", () => {
     expect(basePerp("XBT/USD")).toBe("BTC");
     expect(basePerp("ETH/USD")).toBe("ETH");
-    // LIMITE ASSUMÉE : l'altname REST concaténé « XBTUSD » se termine par « TUSD » (TrueUSD),
-    // que QUOTE_ASSETS prend en priorité — il donne donc « XB ». Sans conséquence : le catalogue
-    // rétablit BTC (data/pairs.ts KRAKEN_ASSET_ALIAS) et le WS Kraken v2 émet « BTC »/« XBT/USD ».
+    // LIMITE ASSUMÉE sans place : l'altname REST concaténé « XBTUSD » se termine par « TUSD »
+    // (TrueUSD), pris en priorité — il donne donc « XB ». Avec la place Kraken, qui ne cote pas
+    // TUSD, il redonne XBT → BTC (vérification du 26/09).
     expect(basePerp("XBTUSD")).toBe("XB");
+    expect(basePerp("XBTUSD", "kraken")).toBe("BTC");
   });
 
   it("est insensible à la casse et aux espaces", () => {
@@ -108,9 +111,23 @@ describe("identité perp explicite", () => {
   });
 });
 
-describe("splitSymbol — FDUSD (contre-revue du 26/09)", () => {
-  it("découpe BTCFDUSD en BTC / FDUSD, et FDUSDUSDT en FDUSD / USDT", () => {
+describe("splitSymbol — FDUSD, coté par Binance seulement (revues du 26/09)", () => {
+  it("chez Binance : BTCFDUSD → BTC / FDUSD, WFDUSD → W / FDUSD, FDUSDUSDT → FDUSD / USDT", () => {
     expect(splitSymbol("BTCFDUSD", "binance")).toEqual({ base: "BTC", quote: "FDUSD" });
+    expect(splitSymbol("WFDUSD", "Binance spot")).toEqual({ base: "W", quote: "FDUSD" });
     expect(splitSymbol("FDUSDUSDT", "binance")).toEqual({ base: "FDUSD", quote: "USDT" });
+  });
+
+  it("ailleurs, FDUSD n'est pas une cotation : UFD/USD de Kraken reste UFDUSD → UFD / USD", () => {
+    expect(splitSymbol("UFDUSD", "Kraken")).toEqual({ base: "UFD", quote: "USD" });
+    expect(basePerp("UFDUSD", "kraken")).toBe("UFD");
+    expect(basePerp("BTCFDUSD", "binance")).toBe("BTC");
+  });
+
+  it("TUSD selon la place : DOT/USD de Coinbase reste DOT / USD, BTCTUSD de Binance → BTC / TUSD", () => {
+    expect(splitSymbol("DOTUSD", "Coinbase")).toEqual({ base: "DOT", quote: "USD" });
+    expect(splitSymbol("ACTUSD", "Kraken")).toEqual({ base: "ACT", quote: "USD" });
+    expect(splitSymbol("BTCTUSD", "binance")).toEqual({ base: "BTC", quote: "TUSD" });
+    expect(splitSymbol("TUSDUSDT", "binance")).toEqual({ base: "TUSD", quote: "USDT" });
   });
 });

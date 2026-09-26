@@ -248,3 +248,38 @@ test("menu ouvert à la souris, focus perdu (Safari/Firefox) : ↓ revient au me
   await expect(page.getByRole("menuitem", { name: "÷ETH" })).toBeFocused();
   expect(await symbole()).toBe("BTCUSDT");
 });
+
+test("menu ouvert puis « / » : le champ de recherche garde le focus sur ↓, la paire ne change pas", async ({ page }) => {
+  await page.goto("/");
+  const symbole = () => page.evaluate(async () => {
+    const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{ marketStore: { getState: () => { symbol: string } } }>;
+    return (await importer()).marketStore.getState().symbol;
+  });
+  await expect.poll(symbole).toBe("BTCUSDT");
+  await page.getByRole("button", { name: "Choisir l'actif de comparaison" }).click();
+  await expect(page.getByRole("menuitem", { name: "÷ETH" })).toBeFocused();
+  await page.keyboard.press("/");
+  const recherche = page.getByRole("combobox", { name: "Rechercher une paire", exact: true });
+  await expect(recherche).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(recherche).toBeFocused();
+  expect(await symbole()).toBe("BTCUSDT");
+});
+
+test("focus sorti du menu par ⇧Tab : le menu se ferme et ↓ garde son sens global", async ({ page }) => {
+  await page.goto("/");
+  const symbole = () => page.evaluate(async () => {
+    const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{ marketStore: { getState: () => { symbol: string } } }>;
+    return (await importer()).marketStore.getState().symbol;
+  });
+  await expect.poll(symbole).toBe("BTCUSDT");
+  const menu = page.getByRole("button", { name: "Choisir l'actif de comparaison" });
+  await menu.click();
+  await expect(page.getByRole("menuitem", { name: "÷ETH" })).toBeFocused();
+  await page.keyboard.press("Shift+Tab"); // vers le déclencheur : toujours dans le menu
+  await expect(menu).toHaveAttribute("aria-expanded", "true");
+  await page.keyboard.press("Shift+Tab"); // vers « ÷ETH », hors du menu
+  await expect(menu).toHaveAttribute("aria-expanded", "false");
+  await page.keyboard.press("ArrowDown");
+  await expect.poll(symbole).not.toBe("BTCUSDT");
+});

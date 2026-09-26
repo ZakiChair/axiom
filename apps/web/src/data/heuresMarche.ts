@@ -12,8 +12,18 @@ export function classifyTradfi(symbol: string): "stock" | "forex" {
   return symbol.includes("/") ? "forex" : "stock";
 }
 
-/** Heure et jour de New York (heure d'été comprise) : la séance NYSE suit ce fuseau. */
-const NEW_YORK = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+/**
+ * Heure et jour de New York (heure d'été comprise) : la séance NYSE suit ce fuseau. Moteur sans
+ * ce fuseau : `null`, et repli sur l'ancienne fenêtre UTC d'été (13:20-20:10Z) plutôt qu'un
+ * module qui ne se charge plus.
+ */
+const NEW_YORK = (() => {
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  } catch {
+    return null;
+  }
+})();
 
 /**
  * Marché plausiblement OUVERT pour `kind` à l'instant `date`. PURE & testée.
@@ -35,6 +45,7 @@ export function isMarketOpen(kind: TradfiMarketKind, date: Date): boolean {
     return true; // lundi-jeudi : ouvert en continu
   }
   // kind === "stock" : jour et heure de New York.
+  if (NEW_YORK === null) return day !== 0 && day !== 6 && minutes >= 13 * 60 + 20 && minutes < 20 * 60 + 10;
   const parts = Object.fromEntries(NEW_YORK.formatToParts(date).map((p) => [p.type, p.value]));
   if (parts.weekday === "Sat" || parts.weekday === "Sun") return false; // week-end : fermé
   const local = Number(parts.hour) * 60 + Number(parts.minute);

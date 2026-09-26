@@ -26,6 +26,9 @@ const MODULES_DIFFERES: Record<string, string> = {
   "store/backtest": "store du backtest — chargé avec BacktestWindow (React.lazy)",
   "data/backtestFunding": "funding réel du backtest — import() au lancement d'un run",
   "data/brief": "overnight de la watchlist — import() depuis rafraichirRegime (commit 7784984)",
+  "store/signaux": "store des signaux — import() par la commande SIG (commands/windowPanels), chargé avec ScreenerWindow",
+  "store/macroRatesView": "vue macro — import() par la commande MACRO (commands/registry), chargée avec MacroRatesWindow",
+  "data/macro/catalogueMacro": "catalogue macro — chart/macro importe fred et stablecoins sans passer par le baril data/macro",
 };
 
 /** `import type { A } from "x"`, `import type * as M from "x"`, `export type { A } from "x"`, multi-lignes compris. */

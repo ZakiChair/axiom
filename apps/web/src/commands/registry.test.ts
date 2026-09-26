@@ -67,7 +67,6 @@ import { commandes as onchainCommandes } from "../store/onchain";
 import { commandes as portfolioCommandes } from "../store/portfolio";
 import { commandes as notesCommandes } from "../store/notes";
 import { commandesScreener } from "../store/screener";
-import { commandesSignaux } from "../store/signaux";
 import { commandes as derivChartCommandes } from "../store/derivatives-chart";
 import { commandes as marksCommandes } from "../chart/tradeMarkers";
 import { commandes as liqMarksCommandes } from "../chart/liquidationMarkers";
@@ -80,7 +79,7 @@ import { commandes as domCommandes } from "../store/dom-ui";
 import { commandes as replayCommandes } from "../store/replay";
 import { commandes as globeCommandes } from "../store/globe-ui";
 import { commandes as tickerCommandes } from "../store/tickerBand";
-import { commandesBacktest, windowPanelCommands } from "./windowPanels";
+import { commandesBacktest, commandesSignaux, windowPanelCommands } from "./windowPanels";
 import { commandesOnboarding } from "../store/onboarding";
 import { commandesPlaybooks } from "../data/playbooks";
 
@@ -95,7 +94,6 @@ const SOURCES_GREFFEES: Record<string, readonly Commande[]> = {
   "store/portfolio": portfolioCommandes,
   "store/notes": notesCommandes,
   "store/screener": commandesScreener,
-  "store/signaux": commandesSignaux,
   "store/derivatives-chart": derivChartCommandes,
   "chart/tradeMarkers": marksCommandes,
   "chart/liquidationMarkers": liqMarksCommandes, // LIQMARK + LIQMODE (déplacée de liquidationHeat)
@@ -106,6 +104,7 @@ const SOURCES_GREFFEES: Record<string, readonly Commande[]> = {
   "chart/niveauxOverlays": commandesNiveauxOverlays,
   "store/dom-ui": domCommandes,
   "commands/windowPanels (BT)": commandesBacktest,
+  "commands/windowPanels (SIG)": commandesSignaux,
   "store/replay": replayCommandes,
   "store/globe-ui": globeCommandes,
   "store/tickerBand": tickerCommandes,
@@ -425,14 +424,29 @@ describe("construireRegistre — commandes attendues présentes", () => {
     expect(registre.filter((c) => c.categorie === "theme")).toHaveLength(5);
   });
 
-  it("MACRO demande le tableau économique même après une courbe de taux", () => {
+  it("MACRO demande le tableau économique même après une courbe de taux", async () => {
     const ouvrir = vi.spyOn(windowManagerStore.getState(), "openWindow");
     macroRatesViewStore.getState().demanderCourbe();
     registre.find((c) => c.id === "panneau:macro")?.action();
-    expect(ouvrir).toHaveBeenCalledWith("macroRates");
+    // store/macroRatesView est chargé par import() : l'ouverture suit la demande d'indicateurs.
+    await vi.waitFor(() => expect(ouvrir).toHaveBeenCalledWith("macroRates"));
     expect(macroRatesViewStore.getState().requeteIndicateurs).toBeGreaterThan(0);
     expect(macroRatesViewStore.getState().requete).toBe(0);
     ouvrir.mockRestore();
+  });
+
+  it("SIG choisit la vue Signaux AVANT d'ouvrir EQS (store chargé par import())", async () => {
+    const { signauxStore } = await import("../store/signaux");
+    signauxStore.getState().setVue("filtres");
+    // Vue lue au moment de l'ouverture : EQS ne doit jamais s'afficher d'abord sur « filtres ».
+    const vuesALOuverture: string[] = [];
+    const ouvrir = vi.spyOn(windowManagerStore.getState(), "openWindow").mockImplementation((id) => {
+      vuesALOuverture.push(`${id}:${signauxStore.getState().vue}`);
+    });
+    commandesSignaux.find((c) => c.id === "panneau:signaux")?.action();
+    await vi.waitFor(() => expect(vuesALOuverture).toEqual(["screener:signaux"]));
+    ouvrir.mockRestore();
+    signauxStore.getState().setVue("filtres");
   });
 
   it("MONEY conserve l'accès aux indicateurs de masse monétaire", () => {

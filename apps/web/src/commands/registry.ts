@@ -24,7 +24,6 @@ import { revenueStore } from "../store/revenue";
 import { derivativesUiStore } from "../store/derivatives-ui";
 import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
 import { windowManagerStore } from "../store/windowManager";
-import { macroRatesViewStore } from "../store/macroRatesView";
 import { settingsUiStore } from "../store/settings-ui";
 import { exportChartImage, clearAllOverlays } from "../chart/drawing";
 import { QUOTE_ASSETS } from "../data/symbol";
@@ -476,9 +475,14 @@ export function construireRegistre(): Commande[] {
       categorie: "panneau",
       motsCles: ["macro", "inflation", "cpi", "ppi", "pib", "chomage", "economie", "pays", "croissance"],
       apercu: "Ouvre l'évolution des statistiques économiques par zone",
+      // store/macroRatesView (et le catalogue macro) ne servent qu'aux fenêtres macro, toutes
+      // paresseuses : chargés ici à la demande, hors du chargement initial (garde-fou :
+      // chargementInitial.test.ts). La requête d'indicateurs précède l'ouverture.
       action: () => {
-        macroRatesViewStore.getState().demanderIndicateurs();
-        windowManagerStore.getState().openWindow("macroRates");
+        void import("../store/macroRatesView").then(({ macroRatesViewStore }) => {
+          macroRatesViewStore.getState().demanderIndicateurs();
+          windowManagerStore.getState().openWindow("macroRates");
+        });
       },
     },
     {

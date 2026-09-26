@@ -1,7 +1,9 @@
 import { registerIndicator, IndicatorSeries } from "klinecharts";
 import type { Chart, IndicatorFigure } from "klinecharts";
 import type { MacroSeries } from "../data/macro";
-import { fredM2WeeklyProvider, stablecoinsSupplyProvider } from "../data/macro";
+// Imports directs, pas le baril data/macro : il tirerait catalogueMacro dans le chargement initial.
+import { fredM2WeeklyProvider } from "../data/macro/fred";
+import { stablecoinsSupplyProvider } from "../data/macro/stablecoins";
 import { getFredKey } from "../store/macro";
 import { macroHistorySeries, recordGlobalSnapshotNow } from "../store/macroHistory";
 import type { MacroOverlayId } from "../store/macro-overlays";

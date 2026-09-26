@@ -15,7 +15,6 @@
 import { createStore } from "zustand/vanilla";
 import type { Candle, Timeframe } from "@axiom/types";
 import { computeIndicator, getIndicator } from "@axiom/indicators";
-import type { Commande } from "../commands/registry";
 import { navigateTo } from "../lib/navigation";
 import {
   fetchGlobalLongShortAccountRatio,
@@ -58,7 +57,6 @@ import type { PointSerie } from "../lib/referentiel";
 import { futuresSymbol } from "../data/binanceFutures";
 import { mapPool, TICKER_24H_URL } from "./screener";
 import { watchlistStore } from "./watchlist";
-import { windowManagerStore } from "./windowManager";
 
 const KLINES_URL = "https://api.binance.com/api/v3/klines";
 /** Concurrence du pool par symbole (4-5 requêtes chacun, budget très en deçà des limites). */
@@ -420,31 +418,3 @@ export const signauxStore = createStore<SignauxState>((set) => ({
 export function ouvrirSetupDansChart(symbol: string): void {
   navigateTo({ symbol, exchange: "binance", timeframe: DIVERGENCE_TF, source: "eqs" });
 }
-
-// ─────────────────────────── Commande de la palette ───────────────────────────
-
-/** Commande SIG : ouvre EQS directement en vue Signaux (enregistrée par App.tsx). */
-export const commandesSignaux: Commande[] = [
-  {
-    id: "panneau:signaux",
-    mnemonique: "SIG",
-    libelle: "Signaux — scan de setups",
-    categorie: "panneau",
-    motsCles: [
-      "signaux",
-      "setup",
-      "confluence",
-      "inbox",
-      "divergence",
-      "squeeze",
-      "build-up",
-      "crowded",
-      "quadrant",
-    ],
-    apercu: "Ouvre le screener en vue Signaux (détection de setups)",
-    action: () => {
-      signauxStore.getState().setVue("signaux");
-      windowManagerStore.getState().openWindow("screener");
-    },
-  },
-];

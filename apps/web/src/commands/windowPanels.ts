@@ -7,8 +7,9 @@
  * sans tirer le graphe de dépendances chart/canvas au démarrage.
  *
  * Les fenêtres dont le store est déjà dans `store/*.ts` (ECO, NEWS, DOM…) gardent
- * leurs commandes exportées depuis ces modules — sauf BT (`commandesBacktest`, en fin de
- * fichier), dont le store ne sert qu'une fois la fenêtre montée.
+ * leurs commandes exportées depuis ces modules — sauf BT (`commandesBacktest`) et SIG
+ * (`commandesSignaux`), en fin de fichier, dont le store ne sert qu'une fois la fenêtre
+ * montée.
  */
 import type { Commande } from "./registry";
 import { cryptoquantUiStore, ENTREES_CQ, type CibleCq } from "../store/cryptoquantUi";
@@ -683,5 +684,29 @@ export const commandesBacktest: Commande[] = [
     motsCles: ["backtest", "bt", "strategie", "test", "equity", "backtesting", "regles"],
     apercu: "Ouvre / ferme le backtest de stratégie",
     action: basculer("backtest"),
+  },
+];
+
+/**
+ * SIG — commande rapatriée de `store/signaux.ts` : ce store (avec `data/signaux` et
+ * `data/validationSignaux`, ≈ 3,8 Ko gzip) ne sert qu'à ScreenerWindow (React.lazy) et reste
+ * hors du chargement initial (garde-fou : chargementInitial.test.ts). L'action charge le
+ * store — le même code que la fenêtre chargera — puis choisit la vue AVANT d'ouvrir la
+ * fenêtre, qui ne s'affiche donc jamais d'abord sur la vue « filtres ».
+ */
+export const commandesSignaux: Commande[] = [
+  {
+    id: "panneau:signaux",
+    mnemonique: "SIG",
+    libelle: "Signaux — scan de setups",
+    categorie: "panneau",
+    motsCles: ["signaux", "setup", "confluence", "inbox", "divergence", "squeeze", "build-up", "crowded", "quadrant"],
+    apercu: "Ouvre le screener en vue Signaux (détection de setups)",
+    action: () => {
+      void import("../store/signaux").then(({ signauxStore }) => {
+        signauxStore.getState().setVue("signaux");
+        windowManagerStore.getState().openWindow("screener");
+      });
+    },
   },
 ];

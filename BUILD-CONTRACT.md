@@ -905,3 +905,18 @@ angles, constats contre-vérifiés) a été suivie d'un second commit de correct
 Validation : indicateurs 844, backtest 114, alertes 62, web 5 429 tests, typage
 monorepo, e2e `dessins-hors-bougies` et `multivue` deux fois de suite. Budget d'entrée en
 Node 24 (zlib 1.3.x) : voir le commit de corrections ; plafonds 1 220 000 / 360 000 inchangés.
+
+## Budget d'entrée de l'intégration du 26 septembre 2026
+
+Fusionnées, les branches profondeur d'historique, ratios ÷ marchés et devises, classement
+des stablecoins et rectangles dépassaient le plafond : **1 204 877 / 360 399** (Node 24,
+zlib 1.3.x). Leurs ajouts servent presque tous le premier graphe et restent statiques. La
+compensation vient de deux commandes de palette qui tiraient des stores de fenêtres paresseuses :
+- SIG (`commands/windowPanels.ts`) charge `store/signaux` par `import()`, choisit la vue
+  Signaux puis ouvre EQS (≈ −3,8 Ko gzip) ;
+- MACRO (`commands/registry.ts`) charge `store/macroRatesView` par `import()` ; `chart/macro.ts`
+  importe `data/macro/fred` et `data/macro/stablecoins` sans le baril `data/macro`, qui tirait
+  `catalogueMacro` (≈ −4,9 Ko gzip).
+
+Budget : **1 180 508 / 351 567** (plafonds 1 220 000 / 360 000 inchangés). Le garde-fou
+`src/chargementInitial.test.ts` interdit le retour de ces trois modules.

@@ -288,6 +288,7 @@ describe("revue du 26/09 : gardes et libellés des dénominateurs marchés et de
     expect(noteDollar("BTCUSDT", "binance")).toBe("USDT compté pour 1 USD");
     expect(noteDollar("ETHUSDC", "coinbase")).toBe("USDC compté pour 1 USD");
     expect(noteDollar("HYPE-PERP", "hyperliquid")).toBe("perp réglé en USDC, compté pour 1 USD");
+    expect(noteDollar("BTCFDUSD", "binance")).toBe("FDUSD compté pour 1 USD");
     expect(noteDollar("BTCUSD", "kraken")).toBeNull();
     expect(noteDollar("SPY", "twelvedata")).toBeNull();
   });

@@ -228,6 +228,12 @@ describe("hydrateStores — marché (exchange/symbole/timeframe)", () => {
     }
   });
 
+  it("restaure un ratio ÷SPY enregistré en 4h (unité retirée) sur l'unité suivante, pas la minute", () => {
+    localStorage.setItem(CHART_KEY, JSON.stringify({ exchange: "synthetic", symbol: "binance:BTCUSDT|/|twelvedata:SPY", timeframe: "4h", indicators: [] }));
+    hydrateStores();
+    expect(marketStore.getState().timeframe).toBe("1d");
+  });
+
   it("restaure exchange/symbole/timeframe valides", () => {
     localStorage.setItem(
       CHART_KEY,

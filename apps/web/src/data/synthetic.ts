@@ -58,6 +58,12 @@ export function formatSyntheticLabel(spec: SyntheticSpec): string {
   return `${spec.legA} ${spec.op} ${spec.legB}`;
 }
 
+/** Durée nominale d'une bougie (mois de 30 j, 3M/6M/12M proportionnels). */
+function dureeBougie(tf: string): number {
+  const unite: Record<string, number> = { s: 1e3, m: 6e4, h: 36e5, d: 864e5, w: 6048e5, M: 2592e6 };
+  return parseInt(tf, 10) * (unite[tf.slice(-1)] ?? 864e5);
+}
+
 function apply(op: SyntheticOp, x: number, y: number): number {
   return op === "/" ? x / y : x - y;
 }
@@ -144,9 +150,13 @@ export function createSyntheticAdapter(
         // Barre B ouverte après la bougie A en cours (daily forex/or Twelve Data daté J+1 dès
         // 21:00Z) : la barre précédente si elle couvre A, sinon la dernière clôture B connue
         // (voie non exacte) — la bougie A, clôture comprise, est toujours émise.
+        // Au-delà d'une barre d'avance de B (Twelve Data au numérateur, séance close), la
+        // dernière bougie A n'est pas repeinte avec un cours postérieur : rien n'est émis.
         const b = lastB.time <= lastA.time ? lastB
           : precedentB !== null && precedentB.time <= lastA.time ? precedentB
-          : { ...lastB, time: lastA.time - 1 };
+          : lastB.time - lastA.time <= dureeBougie(tf) ? { ...lastB, time: lastA.time - 1 }
+          : null;
+        if (b === null) return;
         const cd = combineKlines([lastA], [b], spec.op)[0];
         if (cd !== undefined) cb(cd);
       };

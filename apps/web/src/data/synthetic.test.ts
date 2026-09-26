@@ -236,3 +236,26 @@ describe("subscribeKline — jambe B Twelve Data plus récente que la bougie A (
     expect(recu.at(-1)!.close).toBeCloseTo(84000 / 1.207, 6);
   });
 });
+
+describe("subscribeKline — Twelve Data au numérateur après la clôture (contre-revue du 26/09)", () => {
+  const M5 = 300_000;
+  const t0 = Date.UTC(2026, 8, 24, 19, 55);
+  const gld: Candle = { time: t0, open: 395, high: 395.6, low: 394.9, close: 395.4, volume: 1, closed: true };
+  const btc = (time: number, close: number): Candle => ({ time, open: close, high: close, low: close, close, volume: 1 });
+
+  it("la dernière bougie tradfi n'est pas repeinte avec le cours crypto au-delà d'une barre", () => {
+    const a = adaptateurPilote();
+    const b = adaptateurPilote();
+    const recu: Candle[] = [];
+    const syn = createSyntheticAdapter(((ex: string) => (ex === "twelvedata" ? a : b)) as never);
+    syn.subscribeKline("twelvedata:GLD|/|binance:BTCUSDT", "5m", (candle: Candle) => recu.push(candle));
+    a.pousser(gld);
+    b.pousser(btc(t0, 84000));
+    expect(recu.at(-1)!.close).toBeCloseTo(395.4 / 84000, 9);
+    b.pousser(btc(t0 + M5, 84100)); // une barre d'avance : repli admis
+    const avant = recu.length;
+    b.pousser(btc(t0 + 2 * M5, 85000));
+    b.pousser(btc(t0 + 43 * M5, 86000)); // 23:30Z : GLD fermé depuis longtemps
+    expect(recu).toHaveLength(avant);
+  });
+});

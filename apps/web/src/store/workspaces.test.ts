@@ -318,6 +318,22 @@ describe("workspacesStore — validation au chargement", () => {
     expect(ws?.content.timeframe).toBe("1h");
   });
 
+  it("un ratio ÷SPY enregistré en 4h (unité retirée) passe à l'unité suivante, pas à la minute", async () => {
+    installMockLocalStorage();
+    localStorage.setItem(
+      "axiom:workspaces:v1",
+      JSON.stringify({
+        workspaces: [
+          { id: "defaut", name: "Défaut", content: { ...contenuVierge(), exchange: "synthetic", symbol: "binance:BTCUSDT|/|twelvedata:SPY", timeframe: "4h" } },
+        ],
+        currentId: "defaut",
+      })
+    );
+    vi.resetModules();
+    const mod = await import("./workspaces");
+    expect(mod.workspacesStore.getState().workspaces.find((w) => w.id === "defaut")?.content.timeframe).toBe("1d");
+  });
+
   it("un workspace relu depuis localStorage conserve l'état ouvert des fenêtres (sémantique unique, revue v2 H15)", async () => {
     windowManagerStore.getState().openWindow("derivatives");
     workspacesStore.getState().saveAs("plan");

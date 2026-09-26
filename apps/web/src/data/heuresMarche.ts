@@ -12,18 +12,17 @@ export function classifyTradfi(symbol: string): "stock" | "forex" {
   return symbol.includes("/") ? "forex" : "stock";
 }
 
+/** Heure et jour de New York (heure d'été comprise) : la séance NYSE suit ce fuseau. */
+const NEW_YORK = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+
 /**
- * Marché plausiblement OUVERT pour `kind` à l'instant `date` (UTC). PURE & testée.
+ * Marché plausiblement OUVERT pour `kind` à l'instant `date`. PURE & testée.
  *  - crypto : toujours ouvert (24/7, jamais gaté) ;
  *  - forex  : ouvert du dimanche 22:00 UTC au vendredi 22:00 UTC (fermé le samedi) ;
- *  - stock  : actions/ETF US, lundi-vendredi 13:20-20:10 UTC.
- *
- * APPROXIMATION DST (documentée) : la fenêtre actions est calée sur l'HEURE D'ÉTÉ (EDT,
- * UTC-4 → séance NYSE 13:30-20:00 UTC, élargie à 13:20-20:10). En HIVER (EST, UTC-5) la
- * séance réelle est 14:30-21:00 UTC : la fenêtre sous-couvre alors la dernière ~heure
- * (prix figé, jamais de crash) et sur-couvre le début de matinée. Les jours fériés ne sont
- * pas gérés. Objectif = couper le polling nocturne/week-end pour économiser le quota Twelve
- * Data, pas fournir une horloge de marché exacte.
+ *  - stock  : actions/ETF US, lundi-vendredi 09:20-16:10 à New York (séance 09:30-16:00,
+ *    marges de 10 min), heure d'été comprise : 13:20-20:10Z en été, 14:20-21:10Z en hiver.
+ * Les jours fériés ne sont pas gérés. Objectif = couper le polling nocturne/week-end pour
+ * économiser le quota Twelve Data, pas fournir une horloge de marché exacte.
  */
 export function isMarketOpen(kind: TradfiMarketKind, date: Date): boolean {
   if (kind === "crypto") return true;
@@ -35,7 +34,9 @@ export function isMarketOpen(kind: TradfiMarketKind, date: Date): boolean {
     if (day === 5) return minutes < 22 * 60; // vendredi : ferme à 22:00 UTC
     return true; // lundi-jeudi : ouvert en continu
   }
-  // kind === "stock"
-  if (day === 0 || day === 6) return false; // week-end : fermé
-  return minutes >= 13 * 60 + 20 && minutes < 20 * 60 + 10;
+  // kind === "stock" : jour et heure de New York.
+  const parts = Object.fromEntries(NEW_YORK.formatToParts(date).map((p) => [p.type, p.value]));
+  if (parts.weekday === "Sat" || parts.weekday === "Sun") return false; // week-end : fermé
+  const local = Number(parts.hour) * 60 + Number(parts.minute);
+  return local >= 9 * 60 + 20 && local < 16 * 60 + 10;
 }

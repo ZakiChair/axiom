@@ -134,14 +134,17 @@ describe("isMarketOpen — actions/ETF US (lun-ven 13:20-20:10 UTC)", () => {
   it("ouvert en pleine séance (15:00 UTC un mercredi)", () => {
     expect(isMarketOpen("stock", new Date(Date.UTC(2026, 0, 7, 15, 0)))).toBe(true);
   });
-  it("ouvert pile à la borne basse 13:20 UTC (inclusive)", () => {
-    expect(isMarketOpen("stock", new Date(Date.UTC(2026, 0, 7, 13, 20)))).toBe(true);
+  // 2026-01-07 : heure normale de l'Est (UTC-5), séance 09:20-16:10 New York = 14:20-21:10Z.
+  it("ouvert pile à la borne basse 14:20 UTC en hiver (inclusive)", () => {
+    expect(isMarketOpen("stock", new Date(Date.UTC(2026, 0, 7, 14, 20)))).toBe(true);
+    expect(isMarketOpen("stock", new Date(Date.UTC(2026, 0, 7, 13, 20)))).toBe(false);
   });
   it("fermé avant l'ouverture (12:00 UTC)", () => {
     expect(isMarketOpen("stock", new Date(Date.UTC(2026, 0, 7, 12, 0)))).toBe(false);
   });
-  it("fermé pile à la borne haute 20:10 UTC (exclusive)", () => {
-    expect(isMarketOpen("stock", new Date(Date.UTC(2026, 0, 7, 20, 10)))).toBe(false);
+  it("fermé pile à la borne haute 21:10 UTC en hiver (exclusive)", () => {
+    expect(isMarketOpen("stock", new Date(Date.UTC(2026, 0, 7, 21, 10)))).toBe(false);
+    expect(isMarketOpen("stock", new Date(Date.UTC(2026, 0, 7, 20, 10)))).toBe(true);
   });
   it("fermé le week-end (samedi 15:00 UTC)", () => {
     // 2026-01-03 = samedi.

@@ -606,36 +606,39 @@ export function fetchKlinesTwelveData(
 function sondageBougieCourante(symbol: string, tf: Timeframe, cb: (candle: Candle) => void) {
   const interval = TF_MAP[tf] ?? "1day";
   let lastClosedTime: number | null = null;
-  return async (signal: AbortSignal, isCancelled: () => boolean): Promise<void> => {
+  /** Vrai si une bougie a été livrée. */
+  return async (signal: AbortSignal, isCancelled: () => boolean): Promise<boolean> => {
     // Polling = données fraîches → requête directe (limitée par le quota), sans cache ;
     // un sondage arrêté pendant son attente quitte la file sans consommer de créneau.
     const candles = await requestSeries(symbol, interval, 2, { signal });
-    if (isCancelled() || candles.length === 0) return;
+    if (isCancelled() || candles.length === 0) return false;
     const prev = candles.length >= 2 ? candles[candles.length - 2] : undefined;
     if (prev && prev.closed && (lastClosedTime === null || prev.time > lastClosedTime)) {
       lastClosedTime = prev.time;
       cb(prev);
     }
     const last = candles[candles.length - 1];
-    if (!isCancelled() && last) cb(last);
+    if (isCancelled() || !last) return false;
+    cb(last);
+    return true;
   };
 }
 
 /**
- * Jambe Twelve Data d'un ratio (÷Or, ÷S&P 500, en CHF…) : un dénominateur n'a pas besoin du
- * rythme d'un graphe Twelve Data. Amorçage immédiat (le ratio a sa valeur tout de suite), puis
- * sondage seulement marché ouvert, toutes les minutes jusqu'au 15m, 5 min en 1h/4h, 15 min au-
- * delà : un ratio laissé ouvert n'épuise plus seul le quota de 800 crédits/jour.
+ * Toute jambe Twelve Data d'un synthétique (÷Or, ÷S&P 500, en CHF, GLD÷BTC…) : amorçage
+ * immédiat, réessayé (backoff de pollLoop) même marché fermé tant que rien n'est livré — sinon le
+ * ratio n'émettrait rien jusqu'à la réouverture. Ensuite, sondage seulement marché ouvert, au plus
+ * toutes les 5 min, 15 min dès 1d : forex et or ≈ 288 crédits par jour ouvré (≈ 96 dès 1d),
+ * actions ≈ 82 (≈ 28), sous le plafond de 800 crédits/jour.
  */
 export function souscrireJambeTwelveData(symbol: string, tf: Timeframe, cb: (candle: Candle) => void): Unsubscribe {
   const sonder = sondageBougieCourante(symbol, tf, cb);
-  const cadence = tf === "1m" || tf === "5m" || tf === "15m" ? POLL_MS : tf === "1h" || tf === "4h" ? 5 * 60_000 : 15 * 60_000;
+  const intraday = /^\d+[smh]$/.test(tf);
   let amorce = false;
   return pollLoop(async (signal, isCancelled) => {
     if (amorce && !isMarketOpen(classifyTradfi(symbol), new Date())) return;
-    amorce = true;
-    await sonder(signal, isCancelled);
-  }, cadence, { immediate: true });
+    if (await sonder(signal, isCancelled)) amorce = true;
+  }, (intraday ? 5 : 15) * 60_000, { immediate: true });
 }
 
 export const twelveDataAdapter: IExchangeAdapter = {
@@ -647,7 +650,8 @@ export const twelveDataAdapter: IExchangeAdapter = {
 
   // Pas de WebSocket en gratuit → POLLING de la bougie courante (petit outputsize).
   subscribeKline(symbol, tf, cb) {
-    return pollLoop(sondageBougieCourante(symbol, tf, cb), POLL_MS);
+    const sonder = sondageBougieCourante(symbol, tf, cb);
+    return pollLoop(async (signal, isCancelled) => { await sonder(signal, isCancelled); }, POLL_MS);
   },
 
   // Aucune donnée tick en tradfi gratuit → orderflow/footprint désactivés (dégradation propre).

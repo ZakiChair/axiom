@@ -5,6 +5,7 @@ import { supportedTimeframesFor } from "./adapters";
 import { estSymboleCapitalisation, SYMBOLES_CAPITALISATION } from "./mcap";
 import { parseSyntheticSymbol } from "./synthetic";
 import { basePerp, splitSymbol } from "./symbol";
+import { timeframeProche } from "./adapters";
 
 export interface MarketCandidate {
   exchange: ExchangeId;
@@ -153,7 +154,7 @@ function candidatsDepuisCatalogue(id: IdentitePreparee, loaded: MarketCatalog): 
   const { symbol, kind } = id;
   if (kind === "synthetic") {
     const supported = supportedTimeframesFor("synthetic", symbol);
-    const timeframe = supported.includes(id.timeframe) ? id.timeframe : supported.includes("1h") ? "1h" : supported[0];
+    const timeframe = timeframeProche(supported, id.timeframe); // unité retirée (÷SPY 4h) : la suivante
     return timeframe ? [{ exchange: "synthetic", symbol, timeframe }] : [];
   }
   let candidates: Array<MarketCandidate & { speculative?: true }>;

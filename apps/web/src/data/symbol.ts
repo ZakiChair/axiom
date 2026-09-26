@@ -16,8 +16,8 @@
  * au lieu de base "FOO" / quote "TUSD".
  */
 export const QUOTE_ASSETS = [
-  // Stablecoins / cotations crypto (4 caractères)
-  "USDT", "USDC", "USDD", "TUSD", "USDE", "EURC",
+  // Stablecoins / cotations crypto (5 et 4 caractères)
+  "FDUSD", "USDT", "USDC", "USDD", "TUSD", "USDE", "EURC",
   // Fiat + stablecoin 3 lettres + cryptos de cotation
   "DAI", "USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "TRY", "BRL", "BTC", "ETH",
 ].sort((a, b) => b.length - a.length);

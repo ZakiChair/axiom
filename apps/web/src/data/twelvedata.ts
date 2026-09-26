@@ -23,6 +23,7 @@
  */
 import type { Candle, IExchangeAdapter, Timeframe, Unsubscribe } from "@axiom/types";
 import { pollLoop } from "./pollLoop";
+import { classifyTradfi, isMarketOpen } from "./heuresMarche";
 import { healthStore } from "../store/health";
 
 /** Base directe sur Vercel, proxifiée par /tdapi en local pour conserver le repli .env. */
@@ -596,6 +597,47 @@ export function fetchKlinesTwelveData(
   return cachedSeries(symbol, interval, outputsize, opts.endTime, controle); // cache + dédup + repli périmé
 }
 
+/**
+ * Un sondage de la bougie courante (outputsize 2). parseTwelveData ne force `closed:false`
+ * QUE sur la dernière barre du lot : candles[0] porte déjà closed:true dès qu'elle est
+ * terminée. On la ré-émet (une seule fois, via lastClosedTime) AVANT la barre en cours,
+ * sinon aucune bougie clôturée n'est transmise et les indicateurs ne recalculent plus.
+ */
+function sondageBougieCourante(symbol: string, tf: Timeframe, cb: (candle: Candle) => void) {
+  const interval = TF_MAP[tf] ?? "1day";
+  let lastClosedTime: number | null = null;
+  return async (signal: AbortSignal, isCancelled: () => boolean): Promise<void> => {
+    // Polling = données fraîches → requête directe (limitée par le quota), sans cache ;
+    // un sondage arrêté pendant son attente quitte la file sans consommer de créneau.
+    const candles = await requestSeries(symbol, interval, 2, { signal });
+    if (isCancelled() || candles.length === 0) return;
+    const prev = candles.length >= 2 ? candles[candles.length - 2] : undefined;
+    if (prev && prev.closed && (lastClosedTime === null || prev.time > lastClosedTime)) {
+      lastClosedTime = prev.time;
+      cb(prev);
+    }
+    const last = candles[candles.length - 1];
+    if (!isCancelled() && last) cb(last);
+  };
+}
+
+/**
+ * Jambe Twelve Data d'un ratio (÷Or, ÷S&P 500, en CHF…) : un dénominateur n'a pas besoin du
+ * rythme d'un graphe Twelve Data. Amorçage immédiat (le ratio a sa valeur tout de suite), puis
+ * sondage seulement marché ouvert, toutes les minutes jusqu'au 15m, 5 min en 1h/4h, 15 min au-
+ * delà : un ratio laissé ouvert n'épuise plus seul le quota de 800 crédits/jour.
+ */
+export function souscrireJambeTwelveData(symbol: string, tf: Timeframe, cb: (candle: Candle) => void): Unsubscribe {
+  const sonder = sondageBougieCourante(symbol, tf, cb);
+  const cadence = tf === "1m" || tf === "5m" || tf === "15m" ? POLL_MS : tf === "1h" || tf === "4h" ? 5 * 60_000 : 15 * 60_000;
+  let amorce = false;
+  return pollLoop(async (signal, isCancelled) => {
+    if (amorce && !isMarketOpen(classifyTradfi(symbol), new Date())) return;
+    amorce = true;
+    await sonder(signal, isCancelled);
+  }, cadence, { immediate: true });
+}
+
 export const twelveDataAdapter: IExchangeAdapter = {
   id: "twelvedata",
 
@@ -605,26 +647,7 @@ export const twelveDataAdapter: IExchangeAdapter = {
 
   // Pas de WebSocket en gratuit → POLLING de la bougie courante (petit outputsize).
   subscribeKline(symbol, tf, cb) {
-    const interval = TF_MAP[tf] ?? "1day";
-    // parseTwelveData ne force `closed:false` QUE sur la dernière barre du lot : avec
-    // outputsize=2, candles[0] porte déjà closed:true dès qu'elle est terminée. On la
-    // ré-émet ici (une seule fois, via lastClosedTime) AVANT la barre en cours, sinon
-    // aucune bougie clôturée n'est jamais transmise et les indicateurs ne recalculent plus.
-    let lastClosedTime: number | null = null;
-
-    return pollLoop(async (signal, isCancelled) => {
-      // Polling = données fraîches → requête directe (limitée par le quota), sans cache ;
-      // un sondage arrêté pendant son attente quitte la file sans consommer de créneau.
-      const candles = await requestSeries(symbol, interval, 2, { signal });
-      if (isCancelled() || candles.length === 0) return;
-      const prev = candles.length >= 2 ? candles[candles.length - 2] : undefined;
-      if (prev && prev.closed && (lastClosedTime === null || prev.time > lastClosedTime)) {
-        lastClosedTime = prev.time;
-        cb(prev);
-      }
-      const last = candles[candles.length - 1];
-      if (!isCancelled() && last) cb(last);
-    }, POLL_MS);
+    return pollLoop(sondageBougieCourante(symbol, tf, cb), POLL_MS);
   },
 
   // Aucune donnée tick en tradfi gratuit → orderflow/footprint désactivés (dégradation propre).

@@ -213,6 +213,7 @@ export function MenuDeroulant({
     };
     const surEchap = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        e.preventDefault(); // traitée ici : le raccourci global ne réduit pas la fenêtre focalisée
         setOuvert(false);
         declencheurRef.current?.focus();
       }

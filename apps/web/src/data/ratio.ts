@@ -70,8 +70,8 @@ export const REF_CANONIQUE: Record<DenominateurCrypto, { ex: "binance"; sym: str
  */
 export const REFS_TRADFI: Record<DenominateurTradfi, { sym: string; libelle: string; detail: string }> = {
   OR: { sym: "XAU/USD", libelle: "÷Or", detail: "l'or spot (XAU/USD, en onces)" },
-  NASDAQ: { sym: "QQQ", libelle: "÷Nasdaq 100 (QQQ)", detail: "le Nasdaq 100 via l'ETF QQQ (l'indice NDX exige l'offre Grow de Twelve Data)" },
-  SP500: { sym: "SPY", libelle: "÷S&P 500 (SPY)", detail: "le S&P 500 via l'ETF SPY (l'indice SPX exige l'offre Grow de Twelve Data)" },
+  NASDAQ: { sym: "QQQ", libelle: "÷Nasdaq 100 (QQQ)", detail: "le Nasdaq 100 via l'ETF QQQ : prix de l'ETF, pas le niveau de l'indice (≈ NDX/41) ; l'indice NDX exige l'offre Grow de Twelve Data" },
+  SP500: { sym: "SPY", libelle: "÷S&P 500 (SPY)", detail: "le S&P 500 via l'ETF SPY : prix de l'ETF, pas le niveau de l'indice (≈ SPX/10) ; l'indice SPX exige l'offre Grow de Twelve Data" },
   EUR: { sym: "EUR/USD", libelle: "en EUR", detail: "l'euro (÷ EUR/USD)" },
   GBP: { sym: "GBP/USD", libelle: "en GBP", detail: "la livre sterling (÷ GBP/USD)" },
   CHF: { sym: "CHF/USD", libelle: "en CHF", detail: "le franc suisse (÷ CHF/USD)" },
@@ -121,7 +121,8 @@ function symboleRatioTradfi(symbol: string, exchange: ExchangeId, denom: Denomin
     exA = "mcap";
   } else if (exchange === "twelvedata") {
     const [base, quote] = symbol.toUpperCase().split("/");
-    if (symbol === ref || base === denom || (quote !== undefined && quote !== "USD")) return null;
+    // « RY:TSX » : place explicite, cotation hors dollar possible — refusé.
+    if (symbol === ref || symbol.includes(":") || base === denom || (quote !== undefined && quote !== "USD")) return null;
     exA = exchange;
   } else {
     const parts = decouper(symbol, exchange);
@@ -129,6 +130,14 @@ function symboleRatioTradfi(symbol: string, exchange: ExchangeId, denom: Denomin
     exA = exchange;
   }
   return encodeSyntheticSymbol({ exA, legA: symbol, exB: "twelvedata", legB: ref, op: "/" });
+}
+
+/** Mention d'un prix coté en stablecoin compté pour 1 USD par les ratios marchés et devises. */
+export function noteDollar(symbol: string, exchange: ExchangeId): string | null {
+  if (exchange === "hyperliquid") return basePerp(symbol) === null ? null : "perp réglé en USDC, compté pour 1 USD";
+  if (exchange === "twelvedata" || exchange === "synthetic") return null;
+  const quote = decouper(symbol, exchange)?.quote;
+  return quote !== undefined && quote !== "USD" && COTATIONS_DOLLAR.includes(quote) ? `${quote} compté pour 1 USD` : null;
 }
 
 /**
@@ -215,7 +224,9 @@ export function estRatio(symbol: string, exchange: ExchangeId): RatioActif | nul
   if (spec.op !== "/" || exB === "mcap") return null;
   const denom = DENOMINATEURS.find((d) =>
     !estCrypto(d)
+      // Jambe A cotée en dollar : c'est exactement le ratio que le bouton aurait posé.
       ? exB === "twelvedata" && spec.legB === REFS_TRADFI[d].sym
+        && symboleRatioTradfi(spec.legA, spec.exA === "mcap" ? "synthetic" : spec.exA, d) === symbol
       : exB === spec.exA
         ? spec.legB === REFS[d][exB]
         : exB === REF_CANONIQUE[d].ex && spec.legB === REF_CANONIQUE[d].sym,

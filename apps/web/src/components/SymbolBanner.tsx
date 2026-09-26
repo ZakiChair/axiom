@@ -10,7 +10,7 @@
  *  - variation 24 h : abonnement `subscribeTickers` existant (data/ticker.ts) ;
  *  - prix / H-L / volume : dérivés du buffer de bougies (marketStore), fenêtre 24 h.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useStore } from "zustand";
 import type { Candle, ExchangeId, Timeframe, Unsubscribe } from "@axiom/types";
 import { marketStore } from "../store/market";
@@ -33,9 +33,12 @@ import {
   detailDenominateur,
   estRatio,
   libelleDenominateur,
+  noteDollar,
   symboleRatio,
   type DenominateurId,
 } from "../data/ratio";
+import { supportedTimeframesFor, timeframeProche } from "../data/adapters";
+import { MenuDeroulant } from "./ui";
 import { formatCompact, formatCountdown, formatPct, formatPrice } from "../lib/format";
 
 /** Durée (ms) d'une bougie pour les timeframes à pas FIXE. */
@@ -177,7 +180,6 @@ function BoutonsRatio({
   symbol: string;
   timeframe: Timeframe;
 }) {
-  const [menuOuvert, setMenuOuvert] = useState(false);
   const choisi = useStore(denominateurStore, (s) => s.denominateur);
   const setChoisi = useStore(denominateurStore, (s) => s.setDenominateur);
 
@@ -190,12 +192,17 @@ function BoutonsRatio({
       : exchange;
   const baseSym = actif ? actif.spec.legA : symbol;
 
-  /** Pose le ratio ÷denom (sans jamais détoggler). Sans cible composable : rien. */
+  /**
+   * Pose le ratio ÷denom (sans jamais détoggler). Sans cible composable : rien. Unité de temps
+   * absente du ratio (ex. 4h, dont la grille Twelve Data diffère) : la suivante proposée, sinon
+   * la plus longue — jamais une chute vers la minute.
+   */
   const poser = (denom: DenominateurId): void => {
     const cible = symboleRatio(baseSym, baseEx, denom);
     if (cible === null) return;
+    const tf = timeframeProche(supportedTimeframesFor("synthetic", cible), timeframe) ?? timeframe;
     syntheticsStore.getState().addRecent(cible);
-    marketStore.getState().setMarket({ exchange: "synthetic", symbol: cible, timeframe });
+    marketStore.getState().setMarket({ exchange: "synthetic", symbol: cible, timeframe: tf });
   };
 
   /** Clic sur un bouton : détoggle si CE dénominateur est actif, sinon pose son ratio. */
@@ -213,6 +220,18 @@ function BoutonsRatio({
 
   const disponible = (denom: DenominateurId): boolean =>
     actif?.denom === denom || symboleRatio(baseSym, baseEx, denom) !== null;
+  /** Infobulle : jambe réellement divisée, stablecoin compté pour 1 USD s'il y a lieu. */
+  const note = noteDollar(baseSym, baseEx);
+  const detail = (denom: DenominateurId, prefixe = "Ratio vs"): string => {
+    const tradfi = !(DENOMINATEURS_CRYPTO as readonly string[]).includes(denom);
+    return `${prefixe} ${detailDenominateur(denom)}${tradfi && note ? ` — ${note}` : ""}`;
+  };
+  const raison = (denom: DenominateurId): string =>
+    (DENOMINATEURS_CRYPTO as readonly string[]).includes(denom)
+      ? `${libelleDenominateur(denom)} indisponible : l'actif est déjà ${denom} ou coté en ${denom}`
+      : `${libelleDenominateur(denom)} indisponible : actif non coté en dollar, ou déjà cette référence`;
+  // Puce du menu : le ratio affiché, sinon la préférence du bouton scindé.
+  const marque = actif?.denom ?? choisi;
 
   // Bouton scindé : tout sauf BTC, qui garde son bouton propre. Si le dénominateur
   // préféré n'est pas composable ici (ex. ÷ETH sur ETHUSDT, ÷Or sur BTCEUR), on retombe
@@ -251,67 +270,52 @@ function BoutonsRatio({
             title={
               actif?.denom === denomScinde
                 ? `Revenir à ${actif.spec.legA}`
-                : `Ratio vs ${detailDenominateur(denomScinde)}`
+                : detail(denomScinde)
             }
             onClick={() => basculer(denomScinde)}
             className={`${classeBouton(actif?.denom === denomScinde)} rounded-r-none border-r-0`}
           >
             {libelleDenominateur(denomScinde)}
           </button>
-          <button
-            type="button"
-            aria-label="Choisir l'actif de comparaison"
-            aria-expanded={menuOuvert}
-            title="Choisir l'actif de comparaison"
-            onClick={() => setMenuOuvert((v) => !v)}
-            className={`${classeBouton(false)} rounded-l-none px-1`}
+          <MenuDeroulant
+            declencheur="▾"
+            chevron={false}
+            ariaLabel="Choisir l'actif de comparaison"
+            titre="Choisir l'actif de comparaison"
+            align="right"
+            classePanneau="w-56"
+            declencheurClasse={`${classeBouton(false)} rounded-l-none px-1`}
           >
-            ▾
-          </button>
-
-          {menuOuvert && (
-            <>
-              {/* Fermeture au clic extérieur (même mécanisme que les menus de la Toolbar). */}
-              <span
-                className="pointer-events-auto fixed inset-0 z-40"
-                onClick={() => setMenuOuvert(false)}
-              />
-              <span className="absolute right-0 top-full z-50 mt-1 flex max-h-96 w-48 flex-col overflow-y-auto rounded border border-border bg-surface py-1 shadow-xl">
-                {groupes.map(([titre, liste]) => (
-                  <span key={titre} role="group" aria-label={titre} className="flex flex-col">
-                    <span className="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-dim">
-                      {titre}
-                    </span>
-                    {liste.map((denom) => (
-                      <button
-                        key={denom}
-                        type="button"
-                        disabled={!disponible(denom)}
-                        title={
-                          disponible(denom)
-                            ? `Comparer vs ${detailDenominateur(denom)}`
-                            : `Indisponible sur ce marché (actif non coté en dollar, ou déjà ${denom})`
-                        }
-                        onClick={() => {
-                          setChoisi(denom);
-                          poser(denom);
-                          setMenuOuvert(false);
-                        }}
-                        className={`flex items-center gap-1.5 px-2 py-1 text-left text-xs ${
-                          disponible(denom)
-                            ? "text-text hover:bg-neutral-800"
-                            : "cursor-not-allowed text-text-dim"
-                        }`}
-                      >
-                        <span className="w-2 text-accent">{choisi === denom ? "•" : ""}</span>
-                        <span>{libelleDenominateur(denom)}</span>
-                      </button>
-                    ))}
-                  </span>
+            {(fermer) => groupes.map(([titre, liste]) => (
+              <div key={titre} role="group" aria-labelledby={`ratio-groupe-${titre}`} className="flex flex-col">
+                <span id={`ratio-groupe-${titre}`} className="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-dim">
+                  {titre}
+                </span>
+                {liste.map((denom) => (
+                  <button
+                    key={denom}
+                    type="button"
+                    role="menuitem"
+                    disabled={!disponible(denom)}
+                    title={disponible(denom) ? detail(denom, "Comparer vs") : raison(denom)}
+                    onClick={() => {
+                      setChoisi(denom);
+                      poser(denom);
+                      fermer();
+                    }}
+                    className={`flex items-center gap-1.5 px-2 py-1 text-left text-xs ${
+                      disponible(denom)
+                        ? "text-text hover:bg-neutral-800 focus:bg-neutral-800 focus:outline-none"
+                        : "cursor-not-allowed text-text-dim"
+                    }`}
+                  >
+                    <span aria-hidden className="w-2 text-accent">{marque === denom ? "•" : ""}</span>
+                    <span>{libelleDenominateur(denom)}</span>
+                  </button>
                 ))}
-              </span>
-            </>
-          )}
+              </div>
+            ))}
+          </MenuDeroulant>
         </span>
       )}
     </>

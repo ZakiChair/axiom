@@ -137,14 +137,30 @@ export function createSyntheticAdapter(
       if (spec === null) return () => {};
       let lastA: Candle | null = null;
       let lastB: Candle | null = null;
+      /** Barre B précédente : couvre encore la bougie A quand B a déjà ouvert la suivante. */
+      let precedentB: Candle | null = null;
       const emit = (): void => {
         if (lastA === null || lastB === null) return;
-        const merged = combineKlines([lastA], [lastB], spec.op);
-        const cd = merged[0];
+        // Barre B ouverte après la bougie A en cours (daily forex/or Twelve Data daté J+1 dès
+        // 21:00Z) : la barre précédente si elle couvre A, sinon la dernière clôture B connue
+        // (voie non exacte) — la bougie A, clôture comprise, est toujours émise.
+        const b = lastB.time <= lastA.time ? lastB
+          : precedentB !== null && precedentB.time <= lastA.time ? precedentB
+          : { ...lastB, time: lastA.time - 1 };
+        const cd = combineKlines([lastA], [b], spec.op)[0];
         if (cd !== undefined) cb(cd);
       };
       const offA = resolve(spec.exA).subscribeKline(spec.legA, tf, (cd) => { lastA = cd; emit(); });
-      const offB = resolve(spec.exB).subscribeKline(spec.legB, tf, (cd) => { lastB = cd; emit(); });
+      const offB = resolve(spec.exB).subscribeKline(spec.legB, tf, (cd) => {
+        // Une barre plus ancienne que la dernière (clôture réémise) ne met à jour que la précédente.
+        if (lastB !== null && cd.time < lastB.time) {
+          if (precedentB === null || cd.time >= precedentB.time) precedentB = cd;
+        } else {
+          if (lastB !== null && cd.time > lastB.time) precedentB = lastB;
+          lastB = cd;
+        }
+        emit();
+      });
       return () => { offA(); offB(); };
     },
 

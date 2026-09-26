@@ -173,3 +173,66 @@ describe("createSyntheticAdapter", () => {
     off();
   });
 });
+
+/** Adaptateur pilotable : chaque abonnement expose son rappel pour simuler un flux. */
+function adaptateurPilote(): IExchangeAdapter & { pousser: (candle: Candle) => void } {
+  let rappel: ((candle: Candle) => void) | undefined;
+  return {
+    id: "binance",
+    async fetchKlines() { return []; },
+    subscribeKline(_symbol: string, _tf: string, cb: (candle: Candle) => void) { rappel = cb; return () => {}; },
+    subscribeTrades() { return () => {}; },
+    pousser: (candle: Candle) => rappel?.(candle),
+  } as IExchangeAdapter & { pousser: (candle: Candle) => void };
+}
+
+describe("subscribeKline — jambe B Twelve Data plus récente que la bougie A (revue du 26/09)", () => {
+  const J = Date.UTC(2026, 8, 25);
+  const J1 = J + 86_400_000;
+  // BTCUSDT 1d réel et CHF/USD 1day réel (daily forex daté J, couvrant J-1 21:00Z → J 21:00Z).
+  const btc = (closed: boolean): Candle => ({ time: J, open: 84410.24, high: 85255, low: 83183, close: 84099.99, volume: 1, closed });
+  const chf: Candle = { time: J, open: 1.20795, high: 1.20881, low: 1.20507, close: 1.20696, volume: 0, closed: true };
+  const chfJ1: Candle = { time: J1, open: 1.20696, high: 1.2071, low: 1.2065, close: 1.207, volume: 0, closed: false };
+
+  function monter() {
+    const a = adaptateurPilote();
+    const b = adaptateurPilote();
+    const recu: Candle[] = [];
+    const syn = createSyntheticAdapter(((ex: string) => (ex === "binance" ? a : b)) as never);
+    syn.subscribeKline("binance:BTCUSDT|/|twelvedata:CHF/USD", "1d", (candle: Candle) => recu.push(candle));
+    return { a, b, recu };
+  }
+
+  it("dès 21:00Z (barre B J+1 ouverte), la bougie A J reste émise et sa clôture passe, avec la barre B J", () => {
+    const { a, b, recu } = monter();
+    a.pousser(btc(false));
+    b.pousser(chf);
+    b.pousser(chfJ1); // sondage de 21:01Z : [J clôturée, J+1 en cours]
+    recu.length = 0;
+    a.pousser(btc(false));
+    a.pousser(btc(true));
+    expect(recu).toHaveLength(2);
+    const derniere = recu.at(-1)!;
+    expect(derniere.closed).toBe(true);
+    expect(derniere.time).toBe(J);
+    expect(derniere.close).toBeCloseTo(69679.19, 2);
+    expect(derniere.open).toBeCloseTo(69878.92, 2);
+  });
+
+  it("sans barre B couvrant A, la dernière clôture B connue sert : jamais d'émission perdue", () => {
+    const { a, b, recu } = monter();
+    b.pousser(chfJ1);
+    a.pousser(btc(true));
+    expect(recu).toHaveLength(1);
+    expect(recu[0]!.closed).toBe(true);
+    expect(recu[0]!.close).toBeCloseTo(84099.99 / 1.207, 6);
+  });
+
+  it("une barre B ancienne réémise après la suivante ne remplace pas la plus récente", () => {
+    const { a, b, recu } = monter();
+    b.pousser(chfJ1);
+    b.pousser(chf);
+    a.pousser({ ...btc(false), time: J1, close: 84000 });
+    expect(recu.at(-1)!.close).toBeCloseTo(84000 / 1.207, 6);
+  });
+});

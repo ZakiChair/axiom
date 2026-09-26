@@ -755,3 +755,64 @@ plus lancer `vercel build` dans le checkout principal. Il écrase
 `apps/web/dist`, que le daemon sert (bundle Vercel en local : Twelve Data en
 direct sans la clé `.env`, WHALES et Replay coupés). Déployer par build distant,
 puis reconstruire `dist` par `pnpm --filter @axiom/web build`.
+
+
+## Ratios ÷ marchés et devises (demande du 26 septembre 2026)
+
+Le propriétaire a demandé de pouvoir diviser un actif par autre chose que BTC, ETH et
+SOL : l'or, le Nasdaq, le S&P 500, le franc suisse, le yen, etc. Exception au gel G100
+sur demande explicite, limitée au bouton ÷ existant du bandeau. **39 fenêtres, 214
+indicateurs, 9 identifiants de marché (`EXCHANGE_IDS`), aucune dépendance, aucun hôte ni
+fournisseur, aucune règle de proxy modifiée, `@axiom/types` inchangé.**
+
+1. **Dénominateurs.** Menu groupé Crypto (ETH, SOL ; ÷BTC garde son bouton), Marchés
+   (÷Or = or spot XAU/USD, en onces ; ÷Nasdaq 100 (QQQ) ; ÷S&P 500 (SPY)) et Devises
+   (en EUR, GBP, CHF, JPY, CAD, AUD, par la paire CCY/USD : BTC en CHF = BTCUSDT ÷
+   CHF/USD). Jambe B Twelve Data unique, quelle que soit la source de l'actif
+   (`data/ratio.ts`). Vérifié sur l'offre du propriétaire le 26/09 : XAU/USD, CHF/USD,
+   JPY/USD et CAD/USD sont servis ; SPX, NDX et XAG/USD exigent l'offre Grow. D'où les
+   ETF SPY et QQQ, nommés dans le libellé et l'infobulle (prix de l'ETF, pas le niveau
+   de l'indice : ≈ SPX/10, ≈ NDX/41) : jamais une substitution silencieuse.
+2. **Devise.** Réservé aux actifs cotés en dollar : USD, USDT, USDC et FDUSD (le
+   stablecoin est compté pour 1 USD, ce que dit l'infobulle), perps Hyperliquid (USDC),
+   TOTAL*, tickers Twelve Data US sans place explicite (« RY:TSX » refusé) et paires
+   X/USD. Jamais l'actif divisé par lui-même ni par sa propre devise (EURUSDT en EUR).
+   `estRatio` ne reconnaît que ce que le bouton aurait posé.
+3. **÷BTC/ETH/SOL étendus** à Bybit et OKX (spot contre spot) et aux perps Hyperliquid
+   (perp contre perp) : un actif routé sur Bybit (HYPEUSDT) garde ses ratios.
+4. **Aucune anticipation.** La grille Twelve Data n'est pas la grille UTC (mesures du
+   26/09, `timezone=UTC`) : or et forex 4h à 01/05/09…Z en heure d'été, actions et ETF
+   1h/4h en séance à :30. Composée à une autre grille, la barre B chevauchant l'ouverture
+   de A porterait un prix futur : ces unités ne sont pas proposées
+   (`supportedTimeframesFor`). Le bouton et les slots prennent alors l'unité suivante
+   (`timeframeProche`), jamais la minute. En direct, une barre B ouverte après la bougie
+   A (daily forex/or daté J+1 dès 21:00Z) ne fige plus le ratio : la barre B précédente
+   sert, sinon la dernière clôture connue, et la bougie A clôturée est toujours émise.
+5. **Quota Twelve Data.** La jambe B d'un ratio est amorcée immédiatement, puis sondée
+   seulement marché ouvert (`data/heuresMarche.ts`, extrait de `data/ticker.ts` qui le
+   réexporte) : chaque minute jusqu'au 15m, toutes les 5 min en 1h/4h, toutes les 15 min
+   au-delà. Avant : 60 s, 24 h/24, soit 1 440 crédits par jour pour un seul ratio
+   ouvert, au-delà du plafond de 800.
+6. **Clavier.** Le menu repose sur la primitive `MenuDeroulant` (`aria-haspopup`,
+   ↑/↓/Début/Fin, Échap). Le raccourci global ignore une flèche ou un Échap déjà traités
+   par un menu : ↓ ne change plus de paire menu ouvert, Échap ne réduit plus la fenêtre
+   focalisée.
+
+Limites assumées :
+- Le daily forex/or (J-1 21:00Z → J 21:00Z) est apparié à la bougie crypto J : décalage
+  de 3 h, sans prix postérieur à la clôture de A.
+- Le daily et le weekly SPY/QQQ (séance du jour) s'apparient comme un ratio de séances :
+  l'ouverture du ratio divise par l'ouverture de séance, postérieure à 00:00Z.
+- Un dénominateur Twelve Data périmé (quota épuisé, réseau) reste reporté sans signal
+  sur le graphique. C'est une dette antérieure, commune aux préréglages BTC/GLD et
+  BTC/UUP.
+- Sans clé Twelve Data en appel direct (Vercel), les entrées restent actives et l'erreur
+  « clé » s'affiche au chargement.
+
+Validation : **5 425 tests web** et typage de tous les paquets réussis ; parcours
+Chromium `gate-v24-macro-denominateur`, `gate-v25-cap-dominance`, `multivue`,
+`quatre-lots-indicateurs` et `niveaux-chart` : 32/32 deux fois de suite. Budget d'entrée
+**1 194 234 octets bruts / 356 397 gzip** (Node 24.13.0, zlib 1.3.1), contre
+1 190 550 / 355 056 sur `main` ; plafonds 1 220 000 / 360 000 inchangés. Revue
+indépendante sous trois angles (calcul, robustesse, contrat et budget) ; ses points
+bloquant et importants sont corrigés ci-dessus.

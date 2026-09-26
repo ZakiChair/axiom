@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DENOMINATEURS, detailDenominateur, estRatio, libelleDenominateur, symboleRatio } from "./ratio";
+import { DENOMINATEURS, detailDenominateur, estRatio, libelleDenominateur, noteDollar, symboleRatio } from "./ratio";
 
 describe("symboleRatio — cible SYN X/DENOM pour le marché courant", () => {
   it("compose le ratio ÷BTC sur binance (réf BTCUSDT)", () => {
@@ -263,5 +263,32 @@ describe("dénominateurs marchés et devises (demande du 26/09/2026) : jambe Twe
     expect(libelleDenominateur("CHF")).toBe("en CHF");
     expect(detailDenominateur("SP500")).toContain("SPY");
     for (const denom of DENOMINATEURS) expect(libelleDenominateur(denom).length).toBeGreaterThan(0);
+  });
+});
+
+describe("revue du 26/09 : gardes et libellés des dénominateurs marchés et devises", () => {
+  it("estRatio ne reconnaît une jambe Twelve Data que si la jambe A est cotée en dollar", () => {
+    // ETHBTC ÷ EUR/USD : unité BTC·USD/EUR, pas « ETHBTC en EUR ».
+    expect(estRatio("binance:ETHBTC|/|twelvedata:EUR/USD", "synthetic")).toBeNull();
+    expect(estRatio("kraken:BTCEUR|/|twelvedata:XAU/USD", "synthetic")).toBeNull();
+    expect(estRatio("binance:BTCUSDT|/|twelvedata:EUR/USD", "synthetic")?.denom).toBe("EUR");
+  });
+
+  it("refuse un ticker Twelve Data à place explicite (RY:TSX, coté en CAD)", () => {
+    expect(symboleRatio("RY:TSX", "twelvedata", "CHF")).toBeNull();
+    expect(symboleRatio("RY:TSX", "twelvedata", "OR")).toBeNull();
+  });
+
+  it("précise que l'ETF n'est pas le niveau de l'indice", () => {
+    expect(detailDenominateur("SP500")).toContain("≈ SPX/10");
+    expect(detailDenominateur("NASDAQ")).toContain("≈ NDX/41");
+  });
+
+  it("signale le stablecoin compté pour 1 USD (et l'USDC des perps Hyperliquid)", () => {
+    expect(noteDollar("BTCUSDT", "binance")).toBe("USDT compté pour 1 USD");
+    expect(noteDollar("ETHUSDC", "coinbase")).toBe("USDC compté pour 1 USD");
+    expect(noteDollar("HYPE-PERP", "hyperliquid")).toBe("perp réglé en USDC, compté pour 1 USD");
+    expect(noteDollar("BTCUSD", "kraken")).toBeNull();
+    expect(noteDollar("SPY", "twelvedata")).toBeNull();
   });
 });

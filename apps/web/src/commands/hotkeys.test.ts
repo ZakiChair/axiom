@@ -33,6 +33,7 @@ import { settingsUiStore } from "../store/settings-ui";
 import { windowManagerStore, type SnapZone } from "../store/windowManager";
 import { orderflowStore } from "../store/orderflow";
 import { marketStore } from "../store/market";
+import { watchlistStore } from "../store/watchlist";
 // Les deux sources externes n'exportent qu'un tableau `Commande[]` — c'est App.tsx qui les
 // greffe dans le registre via `enregistrerCommandes([...])`. Un simple import side-effect ne
 // greffe donc RIEN dans `commandesExternes` (même remarque que registry.test.ts). On reproduit
@@ -191,6 +192,33 @@ describe("gererRaccourciGlobal — ancrage ⌥+flèches et modale Réglages", ()
     gererRaccourciGlobal(ev({ key: "o" }));
     expect(orderflowStore.getState().enabled).toBe(true); // actif hors modale
     orderflowStore.getState().setEnabled(false);
+  });
+});
+
+describe("gererRaccourciGlobal — menu ouvert (revue du 26/09)", () => {
+  beforeEach(() => {
+    (globalThis as { HTMLElement?: unknown }).HTMLElement = class {};
+    settingsUiStore.getState().closeSettings();
+  });
+
+  it("↓ déjà traitée par un menu déroulant (defaultPrevented) ne change pas de paire", () => {
+    watchlistStore.getState().setAll(["BTCUSDT", "ETHUSDT"]);
+    marketStore.setState({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1h" });
+    gererRaccourciGlobal({ ...ev({ key: "ArrowDown" }), defaultPrevented: true } as KeyboardEvent);
+    expect(marketStore.getState().symbol).toBe("BTCUSDT");
+  });
+
+  it("Échap déjà traitée par un menu déroulant ne réduit pas la fenêtre focalisée", () => {
+    const appels: string[] = [];
+    const etat = windowManagerStore.getState();
+    const originales = { fenetreFocalisee: etat.fenetreFocalisee, minimizeWindow: etat.minimizeWindow };
+    windowManagerStore.setState({ fenetreFocalisee: () => "whales", minimizeWindow: (id: string) => void appels.push(id) });
+    try {
+      gererRaccourciGlobal({ ...ev({ key: "Escape" }), defaultPrevented: true } as KeyboardEvent);
+      expect(appels).toEqual([]);
+    } finally {
+      windowManagerStore.setState(originales);
+    }
   });
 });
 

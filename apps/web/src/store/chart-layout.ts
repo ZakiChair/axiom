@@ -18,7 +18,7 @@
  */
 import { createStore } from "zustand/vanilla";
 import { EXCHANGE_IDS, type ExchangeId, type Timeframe } from "@axiom/types";
-import { supportedTimeframesFor } from "../data/adapters";
+import { SUPPORTED_TIMEFRAMES, supportedTimeframesFor, timeframeProche } from "../data/adapters";
 import { exchangeForSymbol, normalizeMarketSymbol } from "./market";
 import { parseSyntheticSymbol } from "../data/synthetic";
 import { estSymboleCapitalisation } from "../data/mcap";
@@ -141,10 +141,14 @@ export function sanitizeSlotConfig(raw: unknown, fallback: SlotConfig): SlotConf
   const fallbackTimeframe = supported.includes(fallback.timeframe)
     ? fallback.timeframe
     : (supported[0] ?? "1m");
-  const timeframe =
-    typeof o.timeframe === "string" && (supported as readonly string[]).includes(o.timeframe)
-      ? (o.timeframe as Timeframe)
-      : fallbackTimeframe;
+  // Ratio dont l'unité connue n'est pas offerte (ex. 1h d'un ratio ÷ETF, séance à :30) : la
+  // suivante proposée plutôt que la minute ; les autres sources gardent leur repli.
+  const connue = typeof o.timeframe === "string"
+    && (SUPPORTED_TIMEFRAMES.binance as readonly string[] | undefined)?.includes(o.timeframe);
+  const timeframe = !connue ? fallbackTimeframe
+    : supported.includes(o.timeframe as Timeframe) ? (o.timeframe as Timeframe)
+    : exchange === "synthetic" ? timeframeProche(supported, o.timeframe as Timeframe) ?? fallbackTimeframe
+    : fallbackTimeframe;
   return { exchange, symbol, timeframe };
 }
 

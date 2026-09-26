@@ -32,6 +32,20 @@ async function marche(page: Page) {
   });
 }
 
+/** Profondeurs d'historique que le routage a mises en cache (`null` : jamais mesurée). */
+async function profondeurs(page: Page, symbol: string) {
+  return page.evaluate(async (symbol) => {
+    const importer = new Function("return import('/src/data/profondeurHistorique.ts')") as () => Promise<{ lireProfondeur: (exchange: string, symbol: string) => unknown }>;
+    const { lireProfondeur } = await importer();
+    return { binance: lireProfondeur("binance", symbol) ?? null, bybit: lireProfondeur("bybit", symbol) ?? null };
+  }, symbol);
+}
+/**
+ * Les fixtures servent les mêmes 30 bougies à toute requête klines, sondes 1w/W comprises :
+ * BTCUSDT est mesuré à égalité chez Binance et Bybit, et Binance ne gagne qu'au départage.
+ */
+const PROFONDEUR_EGALE = { debut: FIN - 29 * 60_000, exact: true };
+
 async function choisir(page: Page, symbole: string) {
   const input = page.getByRole("combobox", { name: "Rechercher une paire", exact: true });
   await input.fill(symbole);
@@ -42,6 +56,8 @@ async function choisir(page: Page, symbole: string) {
 test("recherche unique : crypto, tradfi, tokenisé et perp gardent leur identité et leurs bougies", async ({ page }) => {
   await fixtures(page); await page.goto("/");
   await expect.poll(() => marche(page)).toMatchObject({ symbol: "BTCUSDT", exchange: "binance", prix: 60001, status: "ready" });
+  // Bonne raison : les deux places sont mesurées (aucune sonde en échec) et égales, Binance départage.
+  expect(await profondeurs(page, "BTCUSDT")).toEqual({ binance: PROFONDEUR_EGALE, bybit: PROFONDEUR_EGALE });
   await expect(page.getByRole("combobox", { name: "Source", exact: true })).toHaveCount(0);
   for (const [symbol, exchange, prix] of [["SPY", "twelvedata", 501], ["AAPLXUSDT", "mexc", 201], ["BTC-PERP", "hyperliquid", 62001], ["ONLYUSDT", "bybit", 61001]] as const) {
     await choisir(page, symbol);
@@ -128,6 +144,7 @@ test("construction SYN lente : une navigation plus récente reste prioritaire", 
 test("comparaison : refuse un actif hors du marché affiché et garde les ajouts compatibles", async ({ page }) => {
   await fixtures(page); await page.goto("/");
   await expect.poll(() => marche(page)).toMatchObject({ exchange: "binance", status: "ready" });
+  expect(await profondeurs(page, "BTCUSDT")).toEqual({ binance: PROFONDEUR_EGALE, bybit: PROFONDEUR_EGALE });
   await page.getByRole("button", { name: /Comparer \(base 100\)/i }).click();
   const input = page.getByRole("combobox", { name: "Ajouter à comparer", exact: true });
   await input.fill("SPY"); await input.press("Enter");
@@ -404,4 +421,145 @@ test("TradFi : le catalogue local reste recherchable pendant une source crypto b
     await choisir(page, "SPY");
     await expect.poll(() => marche(page)).toMatchObject({ symbol: "SPY", exchange: "twelvedata", status: "ready" });
   } finally { release(); }
+});
+
+const SEMAINE = 7 * 86_400_000;
+/**
+ * Horloge figée : au graphe 1m (≈ 13,9 jours affichables), la place retenue dépend de la date.
+ * Binance (1re bougie le 24/09, affinée au jour) n'y devient équivalent qu'une fois la fenêtre
+ * couverte, vers le 08/10 (tolérance de 5 % de la fenêtre, ~16 h 40 en 1m).
+ */
+const MAINTENANT_HYPE = Date.UTC(2026, 8, 26, 12);
+/** Premières bougies hebdomadaires réelles : lundis des 1res bougies Binance (2026-09-24) et Bybit (2025-07-11). */
+const SEMAINE_BINANCE_HYPE = Date.UTC(2026, 8, 21);
+const SEMAINE_BYBIT_HYPE = Date.UTC(2025, 6, 7);
+/** Premières bougies quotidiennes réelles (sondes d'affinage 1d). */
+const JOUR_BINANCE_HYPE = Date.UTC(2026, 8, 24);
+const JOUR_BYBIT_HYPE = Date.UTC(2025, 6, 11);
+const quotidiennes = (debut: number, n: number, prix: number) => Array.from({ length: n }, (_, i) => hebdo(debut + i * 86_400_000, prix));
+const hebdo = (t: number, prix: number) => [t, `${prix}`, `${prix + 2}`, `${prix - 2}`, `${prix + 1}`, "10", t + SEMAINE - 1, "1000", 4, "5", "500", "0"];
+const versBybit = (liste: ReturnType<typeof hebdo>[]) => liste.map((b) => b.slice(0, 6).map(String)).reverse();
+
+/**
+ * HYPEUSDT coté chez Binance et Bybit, BTCUSDT gardé. Sondes : Binance 1w une bougie (2026-09-21),
+ * Bybit W 64 semaines depuis 2025-07-07. Graphe : 41 chez Binance, 46 chez Bybit ; tickers aux deux
+ * places (Binance répond : Bybit n'est pas retenu par défaut de Binance). `retenirSondeBybit` bloque
+ * la sonde W de Bybit jusqu'à `libererSondeBybit()`.
+ */
+async function fixturesHype(page: Page, retenirSondeBybit = false) {
+  await fixtures(page);
+  await page.clock.install({ time: MAINTENANT_HYPE });
+  let libererSondeBybit = () => {};
+  const sondeBybit = retenirSondeBybit ? new Promise<void>((ok) => { libererSondeBybit = ok; }) : Promise.resolve();
+  const klinesBinance: string[] = [];
+  const klinesBybit: string[] = [];
+  const tickersBinance: string[] = [];
+  await page.route("**/api.binance.com/api/v3/exchangeInfo*", (route) => route.fulfill({ json: { symbols: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "HYPEUSDT"].map((symbol) => ({ symbol, status: "TRADING" })) } }));
+  await page.route("**/api.bybit.com/v5/market/instruments-info*", (route) => route.fulfill({ json: { retCode: 0, result: { list: ["BTCUSDT", "ONLYUSDT", "HYPEUSDT"].map((symbol) => ({ symbol, status: "Trading" })) } } }));
+  await page.route("**/api.binance.com/api/v3/klines*", (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    if (params.get("symbol") !== "HYPEUSDT") return route.fallback();
+    klinesBinance.push(`${params.get("interval")}:${params.get("limit")}`);
+    const interval = params.get("interval");
+    return route.fulfill({ json: interval === "1w" ? [hebdo(SEMAINE_BINANCE_HYPE, 38)] : interval === "1d" && params.get("limit") === "1000" ? quotidiennes(JOUR_BINANCE_HYPE, 3, 38) : bougies(40) });
+  });
+  await page.route("**/api.bybit.com/v5/market/kline*", async (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    if (params.get("symbol") !== "HYPEUSDT") return route.fallback();
+    klinesBybit.push(`${params.get("interval")}:${params.get("limit")}`);
+    if (params.get("interval") === "D" && params.get("limit") === "1000") return route.fulfill({ json: { retCode: 0, result: { list: versBybit(quotidiennes(JOUR_BYBIT_HYPE, 443, 30)) } } });
+    if (params.get("interval") !== "W") return route.fulfill({ json: { retCode: 0, result: { list: versBybit(bougies(45)) } } });
+    await sondeBybit;
+    return route.fulfill({ json: { retCode: 0, result: { list: versBybit(Array.from({ length: 64 }, (_, i) => hebdo(SEMAINE_BYBIT_HYPE + i * SEMAINE, 30))) } } });
+  });
+  await page.route("**/api.bybit.com/v5/market/tickers*", (route) => route.fulfill({ json: { retCode: 0, result: { category: "spot", list: [
+    { symbol: "BTCUSDT", lastPrice: "61444", prevPrice24h: "60000", price24hPcnt: "0.024", turnover24h: "1000000" },
+    { symbol: "HYPEUSDT", lastPrice: "45.5", prevPrice24h: "44", price24hPcnt: "0.034", turnover24h: "500000" },
+  ] } } }));
+  const prixBinance: Record<string, string> = { BTCUSDT: "60123", ETHUSDT: "3000", SOLUSDT: "150", HYPEUSDT: "40.5" };
+  await page.route("**/api.binance.com/api/v3/ticker/24hr*", (route) => {
+    const symbol = new URL(route.request().url()).searchParams.get("symbol") ?? "";
+    tickersBinance.push(symbol);
+    const lastPrice = prixBinance[symbol];
+    return route.fulfill(lastPrice ? { json: { symbol, lastPrice, priceChangePercent: "1", quoteVolume: "1000" } } : { status: 400, json: { code: -1121, msg: "Invalid symbol." } });
+  });
+  return { libererSondeBybit: () => libererSondeBybit(), klinesBinance, klinesBybit, tickersBinance };
+}
+
+const sourcesFavoris = (page: Page) => page.evaluate(() => (JSON.parse(localStorage.getItem("axiom:watchlist:v1") ?? "{}") as { sources?: Record<string, string> }).sources ?? {});
+
+test("HYPEUSDT : la recherche et le favori retiennent la place la plus profonde", async ({ page }) => {
+  const api = await fixturesHype(page, true);
+  await page.goto("/");
+  // (e) BTCUSDT : profondeur égale mesurée aux deux places, Binance départage.
+  await expect.poll(() => marche(page)).toMatchObject({ symbol: "BTCUSDT", exchange: "binance", prix: 60001, status: "ready" });
+  expect(await profondeurs(page, "BTCUSDT")).toEqual({ binance: PROFONDEUR_EGALE, bybit: PROFONDEUR_EGALE });
+  // Aucune mesure de HYPEUSDT avant que la recherche ne l'affiche.
+  expect([...api.klinesBinance, ...api.klinesBybit]).toEqual([]);
+
+  // (a) « Auto » tant que Bybit n'est pas mesuré, puis la place retenue.
+  const search = page.getByRole("combobox", { name: "Rechercher une paire", exact: true });
+  await search.fill("HYPEUSDT");
+  const hype = page.getByRole("option", { name: /^HYPEUSDT\b/ });
+  await expect(hype).toContainText("Auto");
+  await expect.poll(() => api.klinesBybit).toEqual(["W:1000"]);
+  // Binance, coté cette semaine, est affiné au jour par une sonde 1d.
+  await expect.poll(() => api.klinesBinance).toEqual(["1w:1000", "1d:1000"]);
+  await expect(hype).toContainText("Auto");
+  api.libererSondeBybit();
+  await expect(hype).toContainText("Bybit");
+  await expect(hype).not.toContainText(/Auto|Binance/);
+  await expect(hype).toHaveAttribute("title", "Bybit, Binance — la plus profonde est retenue");
+  expect(await profondeurs(page, "HYPEUSDT")).toEqual({
+    binance: { debut: JOUR_BINANCE_HYPE, exact: true },
+    bybit: { debut: JOUR_BYBIT_HYPE, exact: true },
+  });
+  // (e) BTCUSDT : la recherche garde Binance.
+  await search.fill("BTCUSDT");
+  const btc = page.getByRole("option", { name: /^BTCUSDT\b/ });
+  await expect(btc).toContainText("Binance");
+  await expect(btc).toHaveAttribute("title", "Binance, Bybit — la plus profonde est retenue");
+  await search.press("Escape");
+
+  // (d) Favori ajouté pendant que le graphe reste sur BTCUSDT : aucune confirmation par le graphe.
+  const add = page.getByPlaceholder("Ajouter (ex. BNBUSDT)");
+  await add.fill("HYPEUSDT"); await add.press("Enter");
+  await expect.poll(() => sourcesFavoris(page)).toMatchObject({ HYPEUSDT: "bybit", BTCUSDT: "binance" });
+  await expect(page.getByRole("button", { name: "HYPEUSDT", exact: true }).locator("..")).toContainText("45.50");
+  // Classement, pas repli : le prix Binance de HYPEUSDT (disponible) n'a jamais été demandé.
+  expect(api.tickersBinance).not.toContain("HYPEUSDT");
+
+  // (b) Entrée : le graphe charge Bybit, sans passer par Binance.
+  await search.fill("HYPEUSDT");
+  await expect(hype).toContainText("Bybit");
+  await search.press("Enter");
+  await expect.poll(() => marche(page)).toMatchObject({ symbol: "HYPEUSDT", exchange: "bybit", prix: 46, status: "ready" });
+  // (c) Indication de source de la barre d'outils.
+  await expect(page.getByLabel("Source automatique", { exact: true })).toHaveText("Auto · Bybit");
+  // Bougies du graphe (1m : intervalle « 1 » chez Bybit), distinctes des sondes W et D.
+  expect(api.klinesBybit.some((k) => k.startsWith("1:"))).toBe(true);
+  expect(new Set(api.klinesBinance)).toEqual(new Set(["1w:1000", "1d:1000"]));
+  expect(await sourcesFavoris(page)).toMatchObject({ HYPEUSDT: "bybit", BTCUSDT: "binance" });
+});
+
+test("HYPEUSDT : un ancien favori Binance migre vers la place la plus profonde au chargement", async ({ page }) => {
+  const api = await fixturesHype(page, true);
+  await page.addInitScript(() => localStorage.setItem("axiom:watchlist:v1", JSON.stringify({
+    groups: [{ id: "principal", name: "Principal", symbols: ["BTCUSDT", "HYPEUSDT"] }],
+    activeGroupId: "principal",
+    sources: { BTCUSDT: "binance", HYPEUSDT: "binance" },
+  })));
+  await page.goto("/");
+  // Point de départ prouvé : la source Binance restaurée est bien lue avant la mesure de Bybit.
+  await expect.poll(() => api.klinesBybit).toContain("W:1000");
+  expect(await page.evaluate(async () => {
+    const importer = new Function("return import('/src/store/watchlist.ts')") as () => Promise<{ watchlistStore: { getState: () => { sources: Record<string, string> } } }>;
+    return (await importer()).watchlistStore.getState().sources.HYPEUSDT;
+  })).toBe("binance");
+  api.libererSondeBybit();
+  await expect.poll(() => sourcesFavoris(page)).toMatchObject({ HYPEUSDT: "bybit", BTCUSDT: "binance" });
+  await expect(page.getByRole("button", { name: "HYPEUSDT", exact: true }).locator("..")).toContainText("45.50");
+  expect(api.tickersBinance).not.toContain("HYPEUSDT");
+  // Le graphe n'y est pour rien : il reste sur BTCUSDT, chez Binance.
+  await expect.poll(() => marche(page)).toMatchObject({ symbol: "BTCUSDT", exchange: "binance", status: "ready" });
 });

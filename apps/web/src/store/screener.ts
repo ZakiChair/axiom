@@ -271,9 +271,9 @@ export function ouvrirDansChart(symbol: string): void {
   });
 }
 
-/** Ajoute un résultat à la watchlist (groupe actif), source Binance figée. */
+/** Ajoute un résultat à la watchlist (groupe actif), sans source : classé comme tout favori. */
 export function ajouterAWatchlist(symbol: string): void {
-  watchlistStore.getState().add(symbol, "binance");
+  watchlistStore.getState().add(symbol);
 }
 
 // ─────────────────────────── Commandes de la palette (EXPORT pour l'intégrateur) ───────────────────────────

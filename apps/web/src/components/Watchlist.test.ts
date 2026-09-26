@@ -2,15 +2,21 @@
  * Règles PURES de lisibilité de la watchlist (env vitest node, pas de jsdom).
  * Le rendu (troncature réelle à 1440×240) est vérifié par e2e/corrections-revue.e2e.ts.
  * La résolution des provenances vit hors React : testée ici à timers simulés, avec le vrai
- * routage des sondes et un réseau bouchonné (aucun appel réel).
+ * routage des sondes, un cache de profondeur simulé et un réseau bouchonné (aucun appel réel).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ExchangeId } from "@axiom/types";
+import type { ExchangeId, Timeframe } from "@axiom/types";
 import { colonnesWatchlistPourLargeur, nouvelleSessionProvenances, suivreProvenancesFavoris } from "./Watchlist";
 import * as routing from "../data/marketRouting";
+import * as profondeur from "../data/profondeurHistorique";
 import * as ticker from "../data/ticker";
 import { marketStore } from "../store/market";
+import { ajouterAWatchlist } from "../store/screener";
 import { watchlistStore } from "../store/watchlist";
+
+// store/screener tire lib/navigation (klinecharts, pont de dessin) : stubs inertes hors navigateur.
+vi.mock("klinecharts", () => ({ registerOverlay: () => {} }));
+vi.mock("../chart/drawing", () => ({ getActiveChart: () => null, setFocusChart: () => {} }));
 
 describe("lisibilité watchlist", () => {
   it("à 240 px (sidebar w-60) masque la sparkline et garde le Δ% 24h", () => {
@@ -35,30 +41,44 @@ const spot = (...entrees: Array<[ExchangeId, string]>): routing.MarketCatalog =>
 /** Twelve Data sans l'abonnement requis (WTI/USD en clé gratuite) : aucun prix, jamais. */
 const abonnementRequis = () => ({ code: 403, status: "error", message: "/quote is available exclusively with grow or pro plans" });
 
+/** Paires que sert le ticker spot groupé de Bybit dans ce réseau bouchonné. */
+const COTES_BYBIT = ["BTCUSDT", "ETHUSDT", "HYPEUSDT"];
+
 /**
- * Réseau bouchonné : prix Binance 24 h, OKX par instrument et /quote Twelve Data ;
- * `okxSansPrix` simule un prix OKX absent.
+ * Réseau bouchonné : prix Binance 24 h, OKX par instrument, liste spot Bybit et /quote Twelve Data ;
+ * `sansPrix` (« place:SYMBOLE ») simule un prix absent, `delaiMs` une réponse lente.
  */
-function reseau(okxSansPrix = new Set<string>(), quoteTd: (url: string) => unknown = abonnementRequis) {
+function reseau(sansPrix = new Set<string>(), quoteTd: (url: string) => unknown = abonnementRequis, delaiMs = 0) {
   const urls: string[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: string) => {
     const url = String(input);
     urls.push(url);
+    if (delaiMs) await new Promise((fin) => setTimeout(fin, delaiMs));
     const params = new URL(url, "http://local").searchParams;
     if (url.startsWith("/tdapi/quote?")) return reponse(quoteTd(url));
     if (url.startsWith("https://api.binance.com/api/v3/ticker/24hr")) {
+      const symbol = params.get("symbol") ?? "";
+      if (sansPrix.has(`binance:${symbol}`)) return new Response("{}", { status: 503 });
       // Binance ne cote pas CARDS : son ticker répond « Invalid symbol », comme en réel.
-      if (params.get("symbol") === "CARDSUSDT") return new Response(JSON.stringify({ code: -1121, msg: "Invalid symbol." }), { status: 400 });
-      return reponse({ symbol: params.get("symbol"), lastPrice: "100", priceChangePercent: "1" });
+      if (symbol === "CARDSUSDT") return new Response(JSON.stringify({ code: -1121, msg: "Invalid symbol." }), { status: 400 });
+      return reponse({ symbol, lastPrice: "100", priceChangePercent: "1" });
     }
     if (url.startsWith("https://www.okx.com/api/v5/market/ticker?")) {
       const instId = params.get("instId") ?? "";
-      return reponse({ code: "0", data: okxSansPrix.has(instId) ? [] : [{ instType: "SPOT", instId, last: "0.12", open24h: "0.1" }] });
+      return reponse({ code: "0", data: sansPrix.has(`okx:${instId.replace("-", "")}`) ? [] : [{ instType: "SPOT", instId, last: "0.12", open24h: "0.1" }] });
+    }
+    if (url === "https://api.bybit.com/v5/market/tickers?category=spot") {
+      const list = COTES_BYBIT.filter((symbol) => !sansPrix.has(`bybit:${symbol}`)).map((symbol) => ({ symbol, lastPrice: "40", prevPrice24h: "39" }));
+      return reponse({ retCode: 0, result: { category: "spot", list } });
     }
     return new Response("{}", { status: 503 });
   }));
   return urls;
 }
+
+const BINANCE = (symbol: string) => `https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`;
+const OKX = (instId: string) => `https://www.okx.com/api/v5/market/ticker?instId=${instId}`;
+const BYBIT = "https://api.bybit.com/v5/market/tickers?category=spot";
 
 /** Catalogue servi sans réseau ; `publier` simule une republication (autre surface, réessai). */
 function catalogue(initial: routing.MarketCatalog) {
@@ -71,9 +91,40 @@ function catalogue(initial: routing.MarketCatalog) {
   return { publier: (catalog: routing.MarketCatalog) => listener?.(catalog) };
 }
 
+const date = (iso: string) => Date.parse(`${iso}T00:00:00Z`);
+/**
+ * Cache de profondeur simulé : début d'historique accessible par « place:SYMBOLE » (par unité
+ * de temps au besoin) ; clé absente : mesure inconnue, comme une sonde en échec.
+ */
+function profondeurs(table: Record<string, number | Partial<Record<Timeframe, number>>>) {
+  vi.spyOn(profondeur, "debutAccessible").mockImplementation((exchange, symbol, timeframe) => {
+    const debut = table[`${exchange}:${symbol}`];
+    return typeof debut === "object" ? debut[timeframe] : debut;
+  });
+}
+/**
+ * Mesure LENTE, pas en échec (cache froid : nouvel appareil, entrées expirées) : `mesures` entre au
+ * cache au bout de `ms` ; chaque attente est bornée par son délai et une mesure finie n'est pas
+ * refaite, comme dans le vrai module.
+ */
+function mesureLente(mesures: Record<string, number>, ms: number) {
+  const table: Record<string, number> = {};
+  profondeurs(table);
+  let fin: Promise<void> | undefined;
+  vi.mocked(profondeur.mesurerProfondeurs).mockImplementation((_places, delai = 2_500) => {
+    fin ??= new Promise((ok) => setTimeout(() => { Object.assign(table, mesures); ok(); }, ms));
+    return Promise.race([fin, new Promise<void>((ok) => setTimeout(ok, delai))]);
+  });
+}
+/** Premières bougies relevées le 26/09/2026 : Binance n'a pas une semaine d'historique HYPEUSDT. */
+const P_HYPE = { "binance:HYPEUSDT": date("2026-09-24"), "bybit:HYPEUSDT": date("2025-07-11"), "okx:HYPEUSDT": date("2025-11-04") };
+const HYPE = () => spot(["binance", "HYPEUSDT"], ["bybit", "HYPEUSDT"], ["okx", "HYPEUSDT"]);
+/** BTCUSDT : Binance et OKX au même début accessible, profondeur équivalente. */
+const P_BTC = { "binance:BTCUSDT": date("2024-06-15"), "okx:BTCUSDT": date("2024-06-15") };
+
 /** Graphe prêt sur `exchange:symbol` (vrai cycle du store, sans backfill réseau). */
-function graphePret(exchange: ExchangeId, symbol: string) {
-  const identity = { exchange, symbol, timeframe: "1h" as const };
+function graphePret(exchange: ExchangeId, symbol: string, timeframe: Timeframe = "1h") {
+  const identity = { exchange, symbol, timeframe };
   marketStore.getState().setMarket(identity);
   const requestId = marketStore.getState().startDataLoad(identity);
   if (requestId === null) throw new Error("backfill refusé");
@@ -85,6 +136,8 @@ describe("provenances des favoris", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    // Profondeur d'historique : aucune sonde de bougies dans le réseau bouchonné (cache simulé au besoin).
+    vi.spyOn(profondeur, "mesurerProfondeurs").mockResolvedValue();
     // Actif affiché hors watchlist et pas encore prêt : aucun raccourci « graphe prêt ».
     marketStore.getState().setMarket({ exchange: "binance", symbol: "XRPUSDT", timeframe: "1h" });
   });
@@ -105,7 +158,7 @@ describe("provenances des favoris", () => {
     stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
     expect(sonde).toHaveBeenCalledTimes(1);
-    expect(urls).toEqual(["https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT"]);
+    expect(urls).toEqual([BINANCE("ETHUSDT")]);
     await vi.advanceTimersByTimeAsync(90_000);
     // Les synthétiques restent sans prix de favoris : ni sondés, ni réessayés.
     expect(sonde).toHaveBeenCalledTimes(1);
@@ -114,24 +167,25 @@ describe("provenances des favoris", () => {
   });
 
   it("une republication du catalogue ne resonde pas un favori confirmé", async () => {
-    watchlistStore.getState().setAll(["BTCUSDT", "CARDSUSDT"], { BTCUSDT: "binance", CARDSUSDT: "okx" });
+    watchlistStore.getState().setAll(["BTCUSDT", "CARDSUSDT"], { BTCUSDT: "binance" });
     const initial = spot(["binance", "BTCUSDT"], ["okx", "CARDSUSDT"]);
     const { publier } = catalogue(initial);
     const urls = reseau();
     stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
-    expect(urls).toEqual(["https://www.okx.com/api/v5/market/ticker?instId=CARDS-USDT"]);
+    expect(urls).toEqual([OKX("CARDS-USDT")]);
     publier({ ...initial, instruments: [...initial.instruments] });
     publier({ ...initial, instruments: [...initial.instruments] });
     await vi.advanceTimersByTimeAsync(0);
     expect(urls).toHaveLength(1);
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance", CARDSUSDT: "okx" });
   });
 
   it("un favori sans prix est resondé seul, à la republication et toutes les 30 s, jusqu'à son prix", async () => {
-    watchlistStore.getState().setAll(["BTCUSDT", "CARDSUSDT"], { BTCUSDT: "binance", CARDSUSDT: "okx" });
+    watchlistStore.getState().setAll(["BTCUSDT", "CARDSUSDT"], { BTCUSDT: "binance" });
     const initial = spot(["binance", "BTCUSDT"], ["okx", "CARDSUSDT"]);
     const { publier } = catalogue(initial);
-    const sansPrix = new Set(["CARDS-USDT"]);
+    const sansPrix = new Set(["okx:CARDSUSDT"]);
     const urls = reseau(sansPrix);
     stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
@@ -147,23 +201,83 @@ describe("provenances des favoris", () => {
     expect(cards()).toBe(4);
     await vi.advanceTimersByTimeAsync(90_000);
     expect(cards()).toBe(4);
-    expect(urls.every((url) => url === "https://www.okx.com/api/v5/market/ticker?instId=CARDS-USDT")).toBe(true);
+    expect(urls.every((url) => url === OKX("CARDS-USDT"))).toBe(true);
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance", CARDSUSDT: "okx" });
   });
 
-  it("okx:BTCUSDT revient à Binance quand son catalogue le liste ; CARDSUSDT, propre à OKX, reste sur OKX", async () => {
+  it.each([["binance:HYPEUSDT enregistré", { HYPEUSDT: "binance" }], ["HYPEUSDT ajouté sans source", {}]] as const)(
+    "%s passe sur Bybit (historique depuis 2025-07-11) après un vrai prix Bybit, dès la première session",
+    async (_cas, sources) => {
+      watchlistStore.getState().setAll(["HYPEUSDT"], sources);
+      catalogue(HYPE());
+      profondeurs(P_HYPE);
+      const urls = reseau();
+      stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "bybit" });
+      expect(urls).toEqual([BYBIT]);
+      // Bybit, désormais en tête et listé : plus aucune sonde de la session.
+      await vi.advanceTimersByTimeAsync(90_000);
+      expect(urls).toHaveLength(1);
+    },
+  );
+
+  it("un résultat du screener entre sans source et se classe comme tout favori : HYPEUSDT → Bybit", async () => {
+    ajouterAWatchlist("HYPEUSDT");
+    expect(watchlistStore.getState().sources).toEqual({});
+    catalogue(HYPE());
+    profondeurs(P_HYPE);
+    const urls = reseau();
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "bybit" });
+    expect(urls).toEqual([BYBIT]);
+  });
+
+  it("okx:BTCUSDT revient à Binance (profondeur équivalente, Binance départage) ; okx:CARDSUSDT, absent de Binance, reste sur OKX sans sonde", async () => {
     watchlistStore.getState().setAll(["BTCUSDT", "CARDSUSDT"], { BTCUSDT: "okx", CARDSUSDT: "okx" });
     catalogue(spot(["binance", "BTCUSDT"], ["okx", "BTCUSDT"], ["okx", "CARDSUSDT"]));
+    profondeurs(P_BTC);
     const urls = reseau();
     stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance", CARDSUSDT: "okx" });
-    expect(urls.sort()).toEqual([
-      "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT",
-      "https://www.okx.com/api/v5/market/ticker?instId=CARDS-USDT",
-    ]);
+    expect(urls).toEqual([BINANCE("BTCUSDT")]);
   });
 
-  it("sans prix Binance, okx:BTCUSDT garde sa place d'origine, jamais une troisième", async () => {
+  it("binance:HYPEUSDT sans prix Bybit : la place suivante du classement (OKX) confirme la migration", async () => {
+    watchlistStore.getState().setAll(["HYPEUSDT"], { HYPEUSDT: "binance" });
+    catalogue(HYPE());
+    profondeurs(P_HYPE);
+    const urls = reseau(new Set(["bybit:HYPEUSDT"]));
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(urls).toEqual([BYBIT, OKX("HYPE-USDT")]);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "okx" });
+  });
+
+  it("okx:HYPEUSDT sans aucun prix : Binance, classé sous OKX, n'est jamais sondé ; OKX conservé puis confirmé par son prix", async () => {
+    watchlistStore.getState().setAll(["HYPEUSDT"], { HYPEUSDT: "okx" });
+    catalogue(HYPE());
+    profondeurs(P_HYPE);
+    const sansPrix = new Set(["bybit:HYPEUSDT", "okx:HYPEUSDT"]);
+    const urls = reseau(sansPrix);
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(urls).toEqual([BYBIT, OKX("HYPE-USDT")]);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "okx" });
+    // Non confirmé : réessayé à 30 s, toujours jusqu'à OKX inclus.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(urls).toEqual([BYBIT, OKX("HYPE-USDT"), BYBIT, OKX("HYPE-USDT")]);
+    sansPrix.delete("okx:HYPEUSDT");
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(urls).toHaveLength(6);
+    expect(urls.some((url) => url.includes("binance"))).toBe(false);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "okx" });
+  });
+
+  it("sans prix Binance, okx:BTCUSDT garde sa place d'origine ; Kraken, classé sous elle, n'est jamais sondé", async () => {
     watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "okx" });
     catalogue(spot(["binance", "BTCUSDT"], ["kraken", "BTCUSDT"], ["okx", "BTCUSDT"]));
     const urls: string[] = [];
@@ -176,22 +290,81 @@ describe("provenances des favoris", () => {
     stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "okx" });
-    expect(urls.some((url) => url.includes("kraken"))).toBe(false);
+    expect(urls).toEqual([BINANCE("BTCUSDT"), OKX("BTC-USDT")]);
   });
 
-  it("favori Binance que Binance liste : jamais sondé, un ticker Binance en panne ne le déplace pas", async () => {
-    watchlistStore.getState().setAll(["ETHUSDT"], { ETHUSDT: "binance" });
-    catalogue(spot(["binance", "ETHUSDT"], ["kraken", "ETHUSDT"], ["okx", "ETHUSDT"]));
-    const urls: string[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
-      urls.push(String(input));
-      if (String(input).startsWith("https://www.okx.com/")) return reponse({ code: "0", data: [{ instType: "SPOT", instId: "ETH-USDT", last: "3000" }] });
-      return new Response("{}", { status: 503 });
-    }));
+  it.each([
+    ["binance:ETHUSDT (profondeur inconnue, Binance départage)", "ETHUSDT", "binance", spot(["binance", "ETHUSDT"], ["kraken", "ETHUSDT"], ["okx", "ETHUSDT"]), {}],
+    ["bybit:HYPEUSDT (la plus profonde)", "HYPEUSDT", "bybit", HYPE(), P_HYPE],
+    ["okx:CARDSUSDT (Kraken à égalité, provenance)", "CARDSUSDT", "okx", spot(["kraken", "CARDSUSDT"], ["okx", "CARDSUSDT"]), {}],
+  ] as const)("%s en tête de son classement et listée : confirmée sans sonde, son ticker en panne ne la déplace pas", async (_cas, symbol, source, courant, table) => {
+    watchlistStore.getState().setAll([symbol], { [symbol]: source });
+    catalogue(courant);
+    profondeurs(table);
+    const urls = reseau(new Set([`${source}:${symbol}`]));
     stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(90_000);
-    expect(watchlistStore.getState().sources).toEqual({ ETHUSDT: "binance" });
+    expect(watchlistStore.getState().sources).toEqual({ [symbol]: source });
     expect(urls).toEqual([]);
+  });
+
+  it("mesure partielle : bybit:HYPEUSDT mesuré, Binance inconnu — le bénéfice du doute ne déplace pas le favori", async () => {
+    // Sonde Binance échouée ou encore en file : Binance garde la tête du classement (départage),
+    // mais sans mesure il ne prouve pas plus d'historique que Bybit.
+    watchlistStore.getState().setAll(["HYPEUSDT"], { HYPEUSDT: "bybit" });
+    catalogue(HYPE());
+    profondeurs({ "bybit:HYPEUSDT": P_HYPE["bybit:HYPEUSDT"], "okx:HYPEUSDT": P_HYPE["okx:HYPEUSDT"] });
+    const urls = reseau();
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "bybit" });
+    expect(urls).toEqual([]);
+  });
+
+  it.each([
+    ["binance:HYPEUSDT reste sur Binance, sans sonde", { HYPEUSDT: "binance" }, []],
+    ["okx:HYPEUSDT revient à Binance après son prix", { HYPEUSDT: "okx" }, [BINANCE("HYPEUSDT")]],
+    ["HYPEUSDT sans source part sur Binance", {}, [BINANCE("HYPEUSDT")]],
+  ] as const)("toutes les sondes de profondeur en échec, comportement d'avant : %s", async (_cas, sources, attendues) => {
+    watchlistStore.getState().setAll(["HYPEUSDT"], sources);
+    catalogue(HYPE());
+    const urls = reseau();
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "binance" });
+    expect(urls).toEqual(attendues);
+  });
+
+  it("mesure de profondeur lente (4 s, cache froid), pas en échec : bybit:HYPEUSDT l'attend et reste sur Bybit d'une session à l'autre, sans sonde Binance", async () => {
+    watchlistStore.getState().setAll(["HYPEUSDT"], { HYPEUSDT: "bybit" });
+    catalogue(HYPE());
+    mesureLente(P_HYPE, 4_000);
+    const urls = reseau();
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "bybit" });
+    stop();
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "bybit" });
+    expect(urls).toEqual([]);
+  });
+
+  it.each([
+    ["mesurée à 20 s : Bybit confirmé au réessai, sans sonde", P_HYPE, "bybit", []],
+    ["en échec à 20 s : Binance départage au réessai, comme avant", {}, "binance", [BINANCE("HYPEUSDT")]],
+  ] as const)("mesure au-delà de l'attente (15 s), bybit:HYPEUSDT et Binance inconnus : aucune décision sur ce doute ; %s", async (_cas, mesures, attendue, sondes) => {
+    watchlistStore.getState().setAll(["HYPEUSDT"], { HYPEUSDT: "bybit" });
+    catalogue(HYPE());
+    mesureLente(mesures, 20_000);
+    const urls = reseau();
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(urls).toEqual([]);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "bybit" });
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: attendue });
+    expect(urls).toEqual(sondes);
   });
 
   it("catalogue Binance indisponible : un favori Binance n'est sondé que sur Binance, sa source ne change jamais", async () => {
@@ -207,10 +380,10 @@ describe("provenances des favoris", () => {
     stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance" });
-    expect(urls).toEqual(["https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT"]);
+    expect(urls).toEqual([BINANCE("BTCUSDT")]);
     // Sans prix Binance : non confirmé, réessayé à 30 s, toujours sur Binance seul.
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(urls).toEqual(Array(2).fill("https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT"));
+    expect(urls).toEqual(Array(2).fill(BINANCE("BTCUSDT")));
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance" });
     // Le catalogue Binance revenu le liste : confirmé sans sonde.
     publier(spot(["binance", "BTCUSDT"], ["kraken", "BTCUSDT"], ["okx", "BTCUSDT"]));
@@ -219,32 +392,33 @@ describe("provenances des favoris", () => {
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance" });
   });
 
-  it("panne passagère du catalogue Binance : les favoris confirmés sur OKX reviennent à Binance dans la même session", async () => {
-    watchlistStore.getState().setAll(["BTCUSDT", "VIRTUALUSDT", "CARDSUSDT"], { BTCUSDT: "okx", VIRTUALUSDT: "okx", CARDSUSDT: "okx" });
-    const panne = { ...spot(["okx", "BTCUSDT"], ["okx", "VIRTUALUSDT"], ["okx", "CARDSUSDT"]), unavailableSources: ["binance" as const] };
+  it("panne passagère du catalogue Binance : les replis confirmés entre-temps sont reclassés à son retour (BTCUSDT y revient, HYPEUSDT reste sur Bybit)", async () => {
+    watchlistStore.getState().setAll(["BTCUSDT", "VIRTUALUSDT", "CARDSUSDT", "HYPEUSDT"], { BTCUSDT: "okx", VIRTUALUSDT: "okx", CARDSUSDT: "okx", HYPEUSDT: "bybit" });
+    const panne = { ...spot(["bybit", "HYPEUSDT"], ["okx", "BTCUSDT"], ["okx", "VIRTUALUSDT"], ["okx", "CARDSUSDT"], ["okx", "HYPEUSDT"]), unavailableSources: ["binance" as const] };
     const { publier } = catalogue(panne);
+    profondeurs({ ...P_HYPE, ...P_BTC });
     const urls = reseau();
     stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
-    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "okx", VIRTUALUSDT: "okx", CARDSUSDT: "okx" });
-    // Catalogue partiel : relu à chaque réessai (son rafraîchissement republie un retour de Binance).
+    // Chaque source enregistrée est en tête de son classement (Binance n'y est qu'un essai) : sans sonde.
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "okx", VIRTUALUSDT: "okx", CARDSUSDT: "okx", HYPEUSDT: "bybit" });
+    expect(urls).toEqual([]);
+    // Confirmations provisoires : catalogue partiel relu à chaque réessai (son rafraîchissement republie un retour de Binance).
     const lectures = vi.mocked(routing.fetchMarketCatalog).mock.calls.length;
     await vi.advanceTimersByTimeAsync(30_000);
     expect(vi.mocked(routing.fetchMarketCatalog).mock.calls.length).toBeGreaterThan(lectures);
-    expect(urls).toHaveLength(3);
-    // Binance republié : BTC et VIRTUAL, qu'il liste, y reviennent ; CARDS, absent, reste sur OKX.
-    publier(spot(["binance", "BTCUSDT"], ["binance", "VIRTUALUSDT"], ["okx", "BTCUSDT"], ["okx", "VIRTUALUSDT"], ["okx", "CARDSUSDT"]));
+    expect(urls).toEqual([]);
+    // Binance republié : BTC (profondeur équivalente) et VIRTUAL (inconnue) y reviennent ; HYPE,
+    // plus profond sur Bybit, y reste sans sonde ; CARDS, absent de Binance, reste sur OKX.
+    publier(spot(["binance", "BTCUSDT"], ["binance", "VIRTUALUSDT"], ["binance", "HYPEUSDT"], ...panne.instruments.map((i): [ExchangeId, string] => [i.exchange, i.symbol])));
     await vi.advanceTimersByTimeAsync(0);
-    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance", VIRTUALUSDT: "binance", CARDSUSDT: "okx" });
-    expect(urls.slice(3).sort()).toEqual([
-      "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT",
-      "https://api.binance.com/api/v3/ticker/24hr?symbol=VIRTUALUSDT",
-    ]);
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance", VIRTUALUSDT: "binance", CARDSUSDT: "okx", HYPEUSDT: "bybit" });
+    expect(urls.sort()).toEqual([BINANCE("BTCUSDT"), BINANCE("VIRTUALUSDT")]);
     // Catalogue complet : plus aucune relecture ni sonde.
     const apres = vi.mocked(routing.fetchMarketCatalog).mock.calls.length;
     await vi.advanceTimersByTimeAsync(90_000);
     expect(vi.mocked(routing.fetchMarketCatalog).mock.calls.length).toBe(apres);
-    expect(urls).toHaveLength(5);
+    expect(urls).toHaveLength(2);
   });
 
   it("place hors Binance en échec durable, favoris confirmés : aucune relecture du catalogue après le démarrage", async () => {
@@ -279,30 +453,7 @@ describe("provenances des favoris", () => {
     publier(spot(["binance", "BTCUSDT"], ["okx", "BTCUSDT"]));
     await vi.advanceTimersByTimeAsync(0);
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance" });
-    expect(urls.filter((url) => url.includes("binance"))).toEqual(["https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT"]);
-  });
-
-  it("échec OKX passager : CARDSUSDT(okx) n'est jamais sondé sur une troisième place et reste sur OKX", async () => {
-    watchlistStore.getState().setAll(["CARDSUSDT"], { CARDSUSDT: "okx" });
-    catalogue(spot(["kraken", "CARDSUSDT"], ["okx", "CARDSUSDT"]));
-    let okxPrix = false;
-    const urls: string[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
-      urls.push(String(input));
-      if (String(input).startsWith("https://api.kraken.com/")) return reponse({ error: [], result: { CARDSUSDT: { c: ["0.12"], o: "0.1" } } });
-      if (String(input).startsWith("https://www.okx.com/")) return reponse({ code: "0", data: okxPrix ? [{ instType: "SPOT", instId: "CARDS-USDT", last: "0.12" }] : [] });
-      return new Response("{}", { status: 503 });
-    }));
-    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
-    await vi.advanceTimersByTimeAsync(0);
-    expect(watchlistStore.getState().sources).toEqual({ CARDSUSDT: "okx" });
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(urls).toEqual(Array(2).fill("https://www.okx.com/api/v5/market/ticker?instId=CARDS-USDT"));
-    okxPrix = true;
-    await vi.advanceTimersByTimeAsync(30_000);
-    await vi.advanceTimersByTimeAsync(90_000);
-    expect(urls).toEqual(Array(3).fill("https://www.okx.com/api/v5/market/ticker?instId=CARDS-USDT"));
-    expect(watchlistStore.getState().sources).toEqual({ CARDSUSDT: "okx" });
+    expect(urls.filter((url) => url.includes("binance"))).toEqual([BINANCE("BTCUSDT")]);
   });
 
   it("provenance Binance démentie par son catalogue (CARDSUSDT absent) : réparée vers la place qui le liste", async () => {
@@ -312,7 +463,7 @@ describe("provenances des favoris", () => {
     stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
     expect(watchlistStore.getState().sources).toEqual({ CARDSUSDT: "okx" });
-    expect(urls).toEqual(["https://www.okx.com/api/v5/market/ticker?instId=CARDS-USDT"]);
+    expect(urls).toEqual([OKX("CARDS-USDT")]);
   });
 
   it("paire Binance suspendue (absente de son catalogue TRADING, ticker REST figé) : le favori passe sur la place qui la cote, sans sonde Binance", async () => {
@@ -324,7 +475,7 @@ describe("provenances des favoris", () => {
     stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
     expect(watchlistStore.getState().sources).toEqual({ LRCUSDT: "okx" });
-    expect(urls).toEqual(["https://www.okx.com/api/v5/market/ticker?instId=LRC-USDT"]);
+    expect(urls).toEqual([OKX("LRC-USDT")]);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(urls.some((url) => url.includes("api.binance.com"))).toBe(false);
   });
@@ -332,6 +483,7 @@ describe("provenances des favoris", () => {
   it("une source confirmée, changée hors de la watchlist sans changer la liste, est resondée", async () => {
     watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "binance" });
     catalogue(spot(["binance", "BTCUSDT"], ["okx", "BTCUSDT"]));
+    profondeurs(P_BTC);
     const urls = reseau();
     stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
@@ -340,25 +492,90 @@ describe("provenances des favoris", () => {
     watchlistStore.setState({ sources: { BTCUSDT: "okx" } });
     await vi.advanceTimersByTimeAsync(0);
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance" });
-    expect(urls).toEqual(["https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT"]);
+    expect(urls).toEqual([BINANCE("BTCUSDT")]);
     await vi.advanceTimersByTimeAsync(90_000);
     expect(urls).toHaveLength(1);
   });
 
-  it("une confirmation interne (graphe prêt sur un repli) ne relance pas les sondes en vol", async () => {
-    watchlistStore.getState().setAll(["BTCUSDT", "ETHUSDT"], { BTCUSDT: "binance" });
+  it("une confirmation interne (graphe prêt sur un favori sans source) ne relance pas les sondes en vol", async () => {
+    watchlistStore.getState().setAll(["BTCUSDT", "ETHUSDT"]);
     catalogue(spot(["binance", "BTCUSDT"], ["bybit", "BTCUSDT"], ["binance", "ETHUSDT"]));
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
     stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
     graphePret("bybit", "BTCUSDT");
     await vi.advanceTimersByTimeAsync(0);
-    const [url, init] = vi.mocked(fetch).mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT");
-    expect(init.signal?.aborted).toBe(false);
-    expect(fetch).toHaveBeenCalledTimes(1);
+    const appels = vi.mocked(fetch).mock.calls as unknown as Array<[string, RequestInit]>;
+    expect(appels.map(([url]) => url).sort()).toEqual([BINANCE("BTCUSDT"), BINANCE("ETHUSDT")]);
+    expect(appels.every(([, init]) => init.signal?.aborted === false)).toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(2);
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "bybit" });
+  });
+
+  it("graphe prêt sur une autre place (HYPEUSD Kraken en 1d) : la source enregistrée (Coinbase, la plus profonde en 1h) n'est jamais écrasée", async () => {
+    watchlistStore.getState().setAll(["HYPEUSD"], { HYPEUSD: "coinbase" });
+    catalogue(spot(["kraken", "HYPEUSD"], ["coinbase", "HYPEUSD"]));
+    // Kraken ne sert que ses 720 dernières bougies : 30 jours en 1h, depuis sa cotation en 1d.
+    profondeurs({ "kraken:HYPEUSD": { "1d": date("2026-01-22"), "1h": date("2026-08-27") }, "coinbase:HYPEUSD": date("2026-02-05") });
+    const urls = reseau();
+    graphePret("kraken", "HYPEUSD", "1d");
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSD: "coinbase" });
+    // Nouveau chargement prêt sur Kraken, favori déjà confirmé : toujours rien d'écrit.
+    marketStore.getState().setMarket({ exchange: "binance", symbol: "XRPUSDT", timeframe: "1h" });
+    graphePret("kraken", "HYPEUSD", "1d");
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSD: "coinbase" });
+    expect(urls).toEqual([]);
+  });
+
+  it("graphe prêt sur une autre place pendant la sonde : la sonde de la source enregistrée décide", async () => {
+    watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "okx" });
+    catalogue(spot(["binance", "BTCUSDT"], ["bybit", "BTCUSDT"], ["okx", "BTCUSDT"]));
+    profondeurs(P_BTC);
+    let repondre = () => {};
+    vi.stubGlobal("fetch", vi.fn((input: string) => new Promise<Response>((resolve) => {
+      repondre = () => resolve(reponse({ symbol: new URL(input).searchParams.get("symbol"), lastPrice: "60000", priceChangePercent: "1" }));
+    })));
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetch).toHaveBeenCalledWith(BINANCE("BTCUSDT"), expect.anything());
+    graphePret("bybit", "BTCUSDT");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "okx" });
+    repondre();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance" });
+  });
+
+  it("graphe prêt sur la source enregistrée (binance:HYPEUSDT en 1s, propre à Binance, restauré) : ni au départ ni pendant la sonde il ne bloque la migration vers Bybit", async () => {
+    watchlistStore.getState().setAll(["HYPEUSDT"], { HYPEUSDT: "binance" });
+    catalogue(HYPE());
+    profondeurs(P_HYPE);
+    // Ticker Bybit en 1 s : le graphe redevient prêt sur Binance pendant la sonde.
+    const urls = reseau(new Set(), abonnementRequis, 1_000);
+    graphePret("binance", "HYPEUSDT", "1s");
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(500);
+    expect(urls).toEqual([BYBIT]);
+    graphePret("binance", "HYPEUSDT", "1m");
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "bybit" });
+    expect(urls).toEqual([BYBIT]);
+  });
+
+  it("okx:HYPEUSDT sans aucun prix, graphe prêt sur OKX : Bybit, au-dessus, est sondé ; le graphe prouve ensuite OKX, confirmé sans réessai", async () => {
+    watchlistStore.getState().setAll(["HYPEUSDT"], { HYPEUSDT: "okx" });
+    catalogue(HYPE());
+    profondeurs(P_HYPE);
+    const urls = reseau(new Set(["bybit:HYPEUSDT", "okx:HYPEUSDT"]));
+    graphePret("okx", "HYPEUSDT");
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "okx" });
+    expect(urls).toEqual([BYBIT, OKX("HYPE-USDT")]);
   });
 
   it("sans Binance au catalogue, okx:BTCUSDT garde sa place", async () => {
@@ -370,7 +587,7 @@ describe("provenances des favoris", () => {
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "okx" });
   });
 
-  it("le graphe prêt sur un repli garde sa provenance, sans sonde", async () => {
+  it("graphe prêt sur un favori sans source : sa place est confirmée, sans sonde", async () => {
     watchlistStore.getState().setAll(["BTCUSDT"]);
     graphePret("bybit", "BTCUSDT");
     catalogue(spot(["binance", "BTCUSDT"], ["bybit", "BTCUSDT"]));
@@ -382,16 +599,13 @@ describe("provenances des favoris", () => {
   });
 
   it("un remontage (sortie du plein écran) ne resonde aucun favori confirmé de la session", async () => {
-    watchlistStore.getState().setAll(["LINKUSDT", "CARDSUSDT"], { CARDSUSDT: "okx" });
+    watchlistStore.getState().setAll(["LINKUSDT", "CARDSUSDT"]);
     catalogue(spot(["binance", "LINKUSDT"], ["okx", "CARDSUSDT"]));
     const urls = reseau();
     // Session par défaut, au niveau du module : celle que le composant garde d'un montage à l'autre.
     stop = suivreProvenancesFavoris();
     await vi.advanceTimersByTimeAsync(0);
-    expect(urls.sort()).toEqual([
-      "https://api.binance.com/api/v3/ticker/24hr?symbol=LINKUSDT",
-      "https://www.okx.com/api/v5/market/ticker?instId=CARDS-USDT",
-    ]);
+    expect(urls.sort()).toEqual([BINANCE("LINKUSDT"), OKX("CARDS-USDT")]);
     stop();
     stop = suivreProvenancesFavoris();
     await vi.advanceTimersByTimeAsync(90_000);
@@ -401,11 +615,11 @@ describe("provenances des favoris", () => {
 
   it("Twelve Data sans source : sondé au montage et aux changements de liste, jamais au réessai ni au catalogue", async () => {
     vi.setSystemTime(new Date("2026-09-23T14:00:00Z")); // mercredi : forex ouvert
-    watchlistStore.getState().setAll(["WTI/USD", "CARDSUSDT"], { CARDSUSDT: "okx" });
+    watchlistStore.getState().setAll(["WTI/USD", "CARDSUSDT"]);
     const initial = spot(["okx", "CARDSUSDT"], ["binance", "ETHUSDT"]);
     const { publier } = catalogue(initial);
     // CARDS reste sans prix : le réessai crypto à 30 s tourne pendant tout le test.
-    const urls = reseau(new Set(["CARDS-USDT"]));
+    const urls = reseau(new Set(["okx:CARDSUSDT"]));
     const quotes = () => urls.filter((url) => url.startsWith("/tdapi/quote?"));
     stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
@@ -417,7 +631,7 @@ describe("provenances des favoris", () => {
     watchlistStore.getState().add("ETHUSDT");
     await vi.advanceTimersByTimeAsync(60 * 60_000);
     expect(quotes()).toHaveLength(2);
-    expect(watchlistStore.getState().sources).toEqual({ CARDSUSDT: "okx", ETHUSDT: "binance" });
+    expect(watchlistStore.getState().sources).toEqual({ ETHUSDT: "binance" });
   });
 
   it("une sonde Twelve Data en vol n'est pas doublée par un changement de liste", async () => {
@@ -435,7 +649,7 @@ describe("provenances des favoris", () => {
     await vi.advanceTimersByTimeAsync(0);
     watchlistStore.getState().add("ETHUSDT");
     await vi.advanceTimersByTimeAsync(0);
-    expect(urls.sort()).toEqual(["/tdapi/quote?symbol=WTI%2FUSD", "https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT"]);
+    expect(urls.sort()).toEqual(["/tdapi/quote?symbol=WTI%2FUSD", BINANCE("ETHUSDT")]);
   });
 
   it("un actif TradFi sans prix n'est pas resondé au remontage, mais l'est au changement de liste", async () => {
@@ -538,8 +752,8 @@ describe("provenances des favoris", () => {
     stop = suivreProvenancesFavoris(session);
     await vi.advanceTimersByTimeAsync(90_000);
     expect(urls.sort()).toEqual([
-      "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT",
-      "https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT",
+      BINANCE("BTCUSDT"),
+      BINANCE("ETHUSDT"),
     ]);
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance", ETHUSDT: "binance" });
   });
@@ -552,7 +766,7 @@ describe("provenances des favoris", () => {
     await vi.advanceTimersByTimeAsync(0);
     watchlistStore.getState().add("ETHUSDT");
     await vi.advanceTimersByTimeAsync(0);
-    expect(urls).toEqual(["https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT"]);
+    expect(urls).toEqual([BINANCE("ETHUSDT")]);
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance", ETHUSDT: "binance" });
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
     watchlistStore.getState().add("SOLUSDT");

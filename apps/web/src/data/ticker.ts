@@ -498,14 +498,16 @@ function bounded<T>(work: (signal: AbortSignal) => Promise<T>, timeoutMs: number
  * une source spéculative ne reste pas marquée ainsi une fois son prix réellement reçu.
  * `catalog` : celui que l'appelant a déjà reçu ; la sonde ne relance alors pas le
  * rafraîchissement commun (dont la republication relancerait les sondes de l'appelant).
+ * `candidats` : liste déjà classée (et bornée) par l'appelant, sondée telle quelle.
  */
 export function resolveTickerMarket(
   identity: { exchange?: ExchangeId; symbol: string; timeframe: Timeframe },
   signal?: AbortSignal,
   catalog?: MarketCatalog,
+  candidats?: ResolvedMarket[],
 ): Promise<ResolvedMarket | undefined> {
   return bounded(async (active) => {
-    const candidates = await resolveMarketCandidates(identity, catalog);
+    const candidates = candidats ?? await resolveMarketCandidates(identity, catalog);
     for (const candidate of candidates) {
       if (active.aborted) return undefined;
       if (!isTickerSource(candidate.exchange)) continue;

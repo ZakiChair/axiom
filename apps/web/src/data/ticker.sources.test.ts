@@ -150,6 +150,20 @@ describe("résolution vérifiée du ticker", () => {
     expect(candidates).toHaveBeenCalledWith({ symbol: "CARDSUSDT", timeframe: "1h" }, catalog);
   });
 
+  it("des candidats déjà classés (jusqu'à la source d'un favori) sont sondés dans leur ordre, sans nouvelle résolution", async () => {
+    const candidates = vi.spyOn(routing, "resolveMarketCandidates");
+    const fetcher = vi.fn(async (url: string) => url.includes("bybit.com")
+      ? response({ retCode: 0, result: { category: "spot", list: [] } })
+      : response({ code: "0", data: [{ ...cards, instId: "HYPE-USDT", last: "40" }] }));
+    vi.stubGlobal("fetch", fetcher);
+    const classes = [{ exchange: "bybit", symbol: "HYPEUSDT", timeframe: "1h" }, { exchange: "okx", symbol: "HYPEUSDT", timeframe: "1h" }] as const;
+    expect(await resolveTickerMarket({ exchange: "okx", symbol: "HYPEUSDT", timeframe: "1h" }, undefined, undefined, [...classes])).toEqual(classes[1]);
+    expect(candidates).not.toHaveBeenCalled();
+    expect(fetcher.mock.calls.map((call) => String((call as unknown as [string])[0]))).toEqual([
+      "https://api.bybit.com/v5/market/tickers?category=spot", "https://www.okx.com/api/v5/market/ticker?instId=HYPE-USDT",
+    ]);
+  });
+
   it("n'attribue aucune source lorsque tous les prix sont absents", async () => {
     vi.spyOn(routing, "resolveMarketCandidates").mockResolvedValue([{ exchange: "binance", symbol: "CARDSUSDT", timeframe: "1h" }]);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ code: -1121, msg: "Invalid symbol" })));

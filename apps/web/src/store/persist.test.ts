@@ -418,6 +418,12 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(priceScaleStore.getState().type).toBe("log");
   });
 
+  it.each(["OR", "SP500", "CHF", "JPY"])("restaure le dénominateur marché ou devise %s", (denominateur) => {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ denominateur }));
+    hydrateStores();
+    expect(denominateurStore.getState().denominateur).toBe(denominateur);
+  });
+
   it("ignore les valeurs de session invalides (types incorrects)", () => {
     localStorage.setItem(
       SESSION_KEY,

@@ -152,3 +152,59 @@ test("bandeau tradfi : ÷BTC apparaît sur GLD, pose le SYN cross-source, détog
   await expect(page.getByLabel("Source automatique", { exact: true })).toContainText("Twelve Data");
   await expect(boutonBtc).toBeVisible();
 });
+
+// ───────── Demande du 26/09/2026 — dénominateurs marchés et devises (jambe Twelve Data) ─────────
+
+test("bandeau : BTCUSDT ÷Or puis en CHF, jambe Twelve Data demandée, détoggle vers BTCUSDT", async ({
+  page,
+}) => {
+  const demandes: string[] = [];
+  await page.route("**/tdapi/time_series*", (route) => {
+    demandes.push(new URL(route.request().url()).searchParams.get("symbol") ?? "");
+    return route.fulfill({ json: SERIE_TD });
+  });
+  await page.route("**/tdapi/quote*", (route) => route.fulfill({ json: QUOTE_TD }));
+  await page.goto("/");
+
+  // Menu groupé : les marchés et les devises s'ajoutent à ETH et SOL.
+  await page.getByRole("button", { name: "Choisir l'actif de comparaison" }).click();
+  await expect(page.getByRole("group", { name: "Crypto" }).getByRole("button", { name: "÷SOL" })).toBeEnabled();
+  await expect(page.getByRole("group", { name: "Marchés" }).getByRole("button", { name: "÷S&P 500 (SPY)" })).toBeEnabled();
+  await expect(page.getByRole("group", { name: "Devises" }).getByRole("button", { name: "en JPY" })).toBeEnabled();
+  await page.getByRole("group", { name: "Marchés" }).getByRole("button", { name: "÷Or" }).click();
+  await expect(page.getByText("BTCUSDT ÷Or", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect.poll(() => demandes).toContain("XAU/USD");
+
+  // Depuis le ratio actif, la devise se recompose depuis la jambe A.
+  await page.getByRole("button", { name: "Choisir l'actif de comparaison" }).click();
+  await page.getByRole("group", { name: "Devises" }).getByRole("button", { name: "en CHF" }).click();
+  await expect(page.getByText("BTCUSDT en CHF", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect.poll(() => demandes).toContain("CHF/USD");
+  await expect(page.locator("[data-chart-status]")).toHaveCount(0);
+
+  // « en CHF » est le ratio actif : un clic le détoggle vers BTCUSDT.
+  await page.getByRole("button", { name: "en CHF", exact: true }).click();
+  await expect(page.getByText("BTCUSDT en CHF", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("BTCUSDT", { exact: true }).first()).toBeVisible();
+});
+
+test("bandeau : un actif non coté en dollar (BTCEUR) n'offre ni ÷Or ni devise", async ({ page }) => {
+  await page.route("**/api.kraken.com/0/public/AssetPairs*", (route) => route.fulfill({
+    json: { error: [], result: { XXBTZEUR: { altname: "XBTEUR", wsname: "XBT/EUR", base: "XXBT", quote: "ZEUR", status: "online" } } },
+  }));
+  await page.route("**/api.kraken.com/0/public/OHLC*", (route) => route.fulfill({
+    json: { error: [], result: { XXBTZEUR: [28, 29, 30].map((day) => {
+      const t = Date.UTC(2026, 6, day) / 1_000;
+      return [t, "55000", "55100", "54900", "55050", "55000", "10", 5];
+    }), last: 0 } },
+  }));
+  await page.addInitScript(() => {
+    window.localStorage.setItem("axiom:chartState:v1", JSON.stringify({ exchange: "kraken", symbol: "BTCEUR", timeframe: "1d" }));
+  });
+  await page.goto("/");
+  const menu = page.getByRole("button", { name: "Choisir l'actif de comparaison" });
+  await expect(menu).toBeVisible({ timeout: 15_000 });
+  await menu.click();
+  await expect(page.getByRole("group", { name: "Marchés" }).getByRole("button", { name: "÷Or" })).toBeDisabled();
+  await expect(page.getByRole("group", { name: "Devises" }).getByRole("button", { name: "en CHF" })).toBeDisabled();
+});

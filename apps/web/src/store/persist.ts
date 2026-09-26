@@ -438,7 +438,7 @@ interface PersistedSession {
   /** Bascule de la ligne « Coût Strategy » sur le chart maître (chart/niveauxOverlays). */
   prixRevientTresoreries: boolean;
   macroOverlays: MacroOverlayId[];
-  /** Dénominateur choisi pour le bouton de ratio scindé du bandeau (÷ETH / ÷SOL). */
+  /** Dénominateur choisi pour le bouton de ratio scindé du bandeau (÷ETH, ÷Or, en CHF…). */
   denominateur: DenominateurId;
   /** État replié des sections de la sidebar (clé = titre ; carte creuse). */
   sections: Record<string, boolean>;

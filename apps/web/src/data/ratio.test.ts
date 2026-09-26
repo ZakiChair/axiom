@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DENOMINATEURS, estRatio, symboleRatio } from "./ratio";
+import { DENOMINATEURS, detailDenominateur, estRatio, libelleDenominateur, symboleRatio } from "./ratio";
 
 describe("symboleRatio — cible SYN X/DENOM pour le marché courant", () => {
   it("compose le ratio ÷BTC sur binance (réf BTCUSDT)", () => {
@@ -59,12 +59,13 @@ describe("symboleRatio — cible SYN X/DENOM pour le marché courant", () => {
     );
   });
 
-  it("refuse une source sans réf ni composition cross-source (bybit, okx, hyperliquid)", () => {
-    for (const denom of DENOMINATEURS) {
-      expect(symboleRatio("ETHUSDT", "bybit", denom)).toBeNull();
-      expect(symboleRatio("ETHUSDT", "okx", denom)).toBeNull();
-      expect(symboleRatio("ETH", "hyperliquid", denom)).toBeNull();
-    }
+  it("compose aussi sur Bybit, OKX et les perps Hyperliquid (HYPEUSDT routé sur Bybit le 26/09)", () => {
+    expect(symboleRatio("HYPEUSDT", "bybit", "BTC")).toBe("bybit:HYPEUSDT|/|bybit:BTCUSDT");
+    expect(symboleRatio("HYPEUSDT", "okx", "ETH")).toBe("okx:HYPEUSDT|/|okx:ETHUSDT");
+    expect(symboleRatio("HYPE-PERP", "hyperliquid", "SOL")).toBe("hyperliquid:HYPE-PERP|/|hyperliquid:SOL-PERP");
+    expect(symboleRatio("BTC-PERP", "hyperliquid", "BTC")).toBeNull();
+    // Coin Hyperliquid nu (ancienne session) : pas de désignation -PERP, pas de ratio.
+    expect(symboleRatio("ETH", "hyperliquid", "BTC")).toBeNull();
   });
 
   it("compose TOTAL, TOTAL2 et TOTAL3 contre les références canoniques", () => {
@@ -197,5 +198,70 @@ describe("garde cross-source : paires crypto en saisie libre Twelve Data (revue 
     expect(symboleRatio("ETH/BTC", "twelvedata", "SOL")).toBe(
       "twelvedata:ETH/BTC|/|binance:SOLUSDT",
     );
+  });
+});
+
+describe("dénominateurs marchés et devises (demande du 26/09/2026) : jambe Twelve Data unique", () => {
+  it("divise un actif coté en dollar par l'or spot, le Nasdaq 100 (QQQ) et le S&P 500 (SPY)", () => {
+    expect(symboleRatio("BTCUSDT", "binance", "OR")).toBe("binance:BTCUSDT|/|twelvedata:XAU/USD");
+    expect(symboleRatio("HYPEUSDT", "bybit", "NASDAQ")).toBe("bybit:HYPEUSDT|/|twelvedata:QQQ");
+    expect(symboleRatio("BTCUSD", "kraken", "SP500")).toBe("kraken:BTCUSD|/|twelvedata:SPY");
+    expect(symboleRatio("ETHUSDC", "coinbase", "OR")).toBe("coinbase:ETHUSDC|/|twelvedata:XAU/USD");
+    expect(symboleRatio("HYPE-PERP", "hyperliquid", "OR")).toBe("hyperliquid:HYPE-PERP|/|twelvedata:XAU/USD");
+    expect(symboleRatio("AAPL", "twelvedata", "SP500")).toBe("twelvedata:AAPL|/|twelvedata:SPY");
+    expect(symboleRatio("TOTAL", "synthetic", "OR")).toBe("mcap:TOTAL|/|twelvedata:XAU/USD");
+  });
+
+  it("exprime un actif en devise par sa paire CCY/USD (BTC en CHF = BTCUSDT ÷ CHF/USD)", () => {
+    expect(symboleRatio("BTCUSDT", "binance", "CHF")).toBe("binance:BTCUSDT|/|twelvedata:CHF/USD");
+    expect(symboleRatio("BTCUSDT", "binance", "JPY")).toBe("binance:BTCUSDT|/|twelvedata:JPY/USD");
+    expect(symboleRatio("SPY", "twelvedata", "EUR")).toBe("twelvedata:SPY|/|twelvedata:EUR/USD");
+    // EUR/USD ÷ CHF/USD = EUR/CHF : une paire X/USD reste divisible.
+    expect(symboleRatio("EUR/USD", "twelvedata", "CHF")).toBe("twelvedata:EUR/USD|/|twelvedata:CHF/USD");
+  });
+
+  it("refuse un actif qui n'est pas coté en dollar : deux devises mélangées", () => {
+    expect(symboleRatio("BTCEUR", "kraken", "OR")).toBeNull();
+    expect(symboleRatio("ETHBTC", "binance", "CHF")).toBeNull();
+    expect(symboleRatio("USD/JPY", "twelvedata", "CHF")).toBeNull();
+    expect(symboleRatio("EUR/GBP", "twelvedata", "SP500")).toBeNull();
+  });
+
+  it("refuse l'actif divisé par lui-même ou par sa propre devise", () => {
+    expect(symboleRatio("XAU/USD", "twelvedata", "OR")).toBeNull();
+    expect(symboleRatio("SPY", "twelvedata", "SP500")).toBeNull();
+    expect(symboleRatio("QQQ", "twelvedata", "NASDAQ")).toBeNull();
+    expect(symboleRatio("EUR/USD", "twelvedata", "EUR")).toBeNull();
+    expect(symboleRatio("EURUSDT", "binance", "EUR")).toBeNull();
+    expect(symboleRatio("binance:ETHUSDT|/|binance:BTCUSDT", "synthetic", "OR")).toBeNull();
+  });
+
+  it("estRatio reconnaît la jambe Twelve Data et permet le retour à la jambe A", () => {
+    const or = estRatio("binance:BTCUSDT|/|twelvedata:XAU/USD", "synthetic");
+    expect(or?.denom).toBe("OR");
+    expect(or?.spec).toMatchObject({ exA: "binance", legA: "BTCUSDT" });
+    expect(estRatio("bybit:HYPEUSDT|/|twelvedata:CHF/USD", "synthetic")?.denom).toBe("CHF");
+    expect(estRatio("mcap:TOTAL|/|twelvedata:SPY", "synthetic")?.denom).toBe("SP500");
+    // Jambe Twelve Data étrangère aux dénominateurs : non reconnue.
+    expect(estRatio("binance:BTCUSDT|/|twelvedata:GLD", "synthetic")).toBeNull();
+    // Réf Twelve Data posée sur une autre source : non reconnue.
+    expect(estRatio("binance:BTCUSDT|/|binance:XAU/USD", "synthetic")).toBeNull();
+  });
+
+  it("recomposition : d'un ratio en CHF à un ratio ÷Or, puis ÷BTC, depuis la jambe A", () => {
+    const actif = estRatio("binance:SOLUSDT|/|twelvedata:CHF/USD", "synthetic");
+    if (actif === null || actif.spec.exA === "mcap") throw new Error("ratio attendu");
+    expect(symboleRatio(actif.spec.legA, actif.spec.exA, "OR")).toBe("binance:SOLUSDT|/|twelvedata:XAU/USD");
+    expect(symboleRatio(actif.spec.legA, actif.spec.exA, "BTC")).toBe("binance:SOLUSDT|/|binance:BTCUSDT");
+  });
+
+  it("libellés : ÷BTC, ÷Or, ETF nommé pour les indices, « en CHF » pour les devises", () => {
+    expect(libelleDenominateur("BTC")).toBe("÷BTC");
+    expect(libelleDenominateur("OR")).toBe("÷Or");
+    expect(libelleDenominateur("SP500")).toBe("÷S&P 500 (SPY)");
+    expect(libelleDenominateur("NASDAQ")).toBe("÷Nasdaq 100 (QQQ)");
+    expect(libelleDenominateur("CHF")).toBe("en CHF");
+    expect(detailDenominateur("SP500")).toContain("SPY");
+    for (const denom of DENOMINATEURS) expect(libelleDenominateur(denom).length).toBeGreaterThan(0);
   });
 });

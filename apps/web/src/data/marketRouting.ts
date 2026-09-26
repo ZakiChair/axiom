@@ -1,12 +1,11 @@
 /** Catalogue et sélection automatiques : une seule paire, une seule devise, un seul marché. */
 import type { ExchangeId, Timeframe } from "@axiom/types";
 import { fetchPairs, isTradfiMarketSymbol, pairsCacheExpiresAt, TRADFI_SEARCH_METADATA, TWELVEDATA_SYMBOLS } from "./pairs";
-import { supportedTimeframesFor } from "./adapters";
+import { supportedTimeframesFor, timeframeProche } from "./adapters";
 import { debutAccessible, lireProfondeur, mesurerProfondeurs, plancherAccessible, toleranceProfondeurMs, type PrioriteMesure } from "./profondeurHistorique";
 import { estSymboleCapitalisation, SYMBOLES_CAPITALISATION } from "./mcap";
 import { parseSyntheticSymbol } from "./synthetic";
 import { basePerp, splitSymbol } from "./symbol";
-import { timeframeProche } from "./adapters";
 
 export interface MarketCandidate {
   exchange: ExchangeId;

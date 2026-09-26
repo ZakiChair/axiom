@@ -111,6 +111,35 @@ export function verifierPaire(
   return { ok: true, paire, exchange: premiere };
 }
 
+/** Dépendances d'un clic (injectées : adaptateurs, mesure de profondeur, résolveur du graphe). */
+export interface DepsClic {
+  prix: (exchange: ExchangeId, paire: string) => Promise<number | undefined>;
+  mesurer: (places: ExchangeId[], paire: string) => void;
+  premiere: (paire: string) => Promise<ExchangeId | undefined>;
+  /** Faux si un clic plus récent ou le démontage a dépassé celui-ci. */
+  courant: () => boolean;
+}
+
+/**
+ * Clic sur une ligne : les mesures de profondeur partent dès le clic, en parallèle des prix ;
+ * un refus d'identité (prix connu hors bande) tombe AVANT le résolveur, qui ne sert qu'à
+ * désigner la place que le graphe essaiera d'abord. `null` : clic dépassé.
+ */
+export async function verifierClic(
+  ligne: { symbol: string; name: string; price: number },
+  places: ExchangeId[],
+  deps: DepsClic,
+): Promise<VerdictPaire | null> {
+  const paire = `${ligne.symbol}USDT`;
+  deps.mesurer(places, paire);
+  const cotations = await Promise.all(places.map(async (exchange) => ({ exchange, prix: await deps.prix(exchange, paire) })));
+  if (!deps.courant()) return null;
+  const identite = verifierPaire(ligne, cotations, undefined);
+  if (!identite.ok && identite.motif === "identite") return identite;
+  const premiere = await deps.premiere(paire);
+  return deps.courant() ? verifierPaire(ligne, cotations, premiere) : null;
+}
+
 /** Refus mémorisés après un verdict : seul un refus d'identité désactive la ligne. */
 export function refusesApres(refusees: ReadonlyMap<string, string>, id: string, verdict: VerdictPaire): ReadonlyMap<string, string> {
   return verdict.ok || verdict.motif !== "identite" ? refusees : new Map(refusees).set(id, verdict.raison);

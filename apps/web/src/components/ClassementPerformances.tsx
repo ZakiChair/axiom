@@ -10,6 +10,7 @@ import type { ExchangeId } from "@axiom/types";
 import { getAdapter } from "../data/adapters";
 import type { CoinTile } from "../data/marketOverview";
 import { fetchMarketCatalog, resolveMarketCandidates, subscribeMarketCatalog, type MarketCatalog } from "../data/marketRouting";
+import { mesurerProfondeurs } from "../data/profondeurHistorique";
 import { chartLayoutStore } from "../store/chart-layout";
 import { marketStore } from "../store/market";
 import { formatPct, formatPrice, formatUsd } from "../lib/format";
@@ -25,7 +26,7 @@ import {
   type PeriodeClassement,
   type SensClassement,
   refusesApres,
-  verifierPaire,
+  verifierClic,
 } from "./classementPerformances.util";
 
 /** Unité de temps du slot focus, celui que `navigateTo` modifiera. */
@@ -91,6 +92,7 @@ export function ClassementPerformances({ coins, loading }: { coins: readonly Coi
   const [refusees, setRefusees] = useState<ReadonlyMap<string, string>>(new Map());
   const [etat, setEtat] = useState<string | null>(null);
   const clic = useRef(0);
+  const abandon = useRef<AbortController | null>(null);
 
   // Paires spot cotées (tous catalogues, republiés à leur retour) : un clic n'ouvre qu'un instrument réel.
   useEffect(() => {
@@ -98,23 +100,28 @@ export function ClassementPerformances({ coins, loading }: { coins: readonly Coi
     const recevoir = (c: MarketCatalog) => { if (actif) { catalogue.current = c; setPaires(placesParPaire(c)); } };
     const stop = subscribeMarketCatalog(recevoir);
     void fetchMarketCatalog().then(recevoir).catch(() => { /* sans catalogue, lignes consultables mais non navigables */ });
-    return () => { actif = false; clic.current += 1; stop(); };
+    return () => { actif = false; clic.current += 1; abandon.current?.abort(); stop(); };
   }, []);
 
   const ouvrir = async (l: LigneClassement) => {
     const places = paires?.get(`${l.symbol}USDT`);
     if (!places) return;
     const n = ++clic.current;
-    const paire = `${l.symbol}USDT`;
-    setEtat(`Vérification du prix de ${paire}…`);
-    const cotations = await Promise.all(places.map(async (exchange) => ({ exchange, prix: await dernierPrix(exchange, paire) })));
-    if (n !== clic.current) return; // clic plus récent ou démontage
-    // Place que le graphe essaiera d'abord : même résolveur que lui, aucun ordre réimplémenté ici.
-    // Appelé APRÈS les prix : les mesures qu'il déclenche éventuellement ont profité de l'attente.
-    const candidats = await resolveMarketCandidates({ symbol: paire, timeframe: timeframeFocus() }, catalogue.current ?? undefined).catch(() => []);
-    if (n !== clic.current) return;
-    const premiere = candidats.find((c) => !c.speculative)?.exchange;
-    const verdict = verifierPaire(l, cotations, premiere);
+    abandon.current?.abort();
+    const controleur = new AbortController();
+    abandon.current = controleur;
+    setEtat(`Vérification du prix de ${l.symbol}USDT…`);
+    const verdict = await verifierClic(l, places, {
+      prix: dernierPrix,
+      // Rang « graphe » : le graphe ouvert ensuite rejoint ces mêmes sondes ; un clic plus récent
+      // ou le démontage retire celles qui n'ont pas encore démarré.
+      mesurer: (ps, paire) => void mesurerProfondeurs(ps.map((exchange) => ({ exchange, symbol: paire })), 2_500, { priorite: "graphe", signal: controleur.signal }),
+      // Place que le graphe essaiera d'abord : même résolveur que lui, aucun ordre réimplémenté ici.
+      premiere: (paire) => resolveMarketCandidates({ symbol: paire, timeframe: timeframeFocus() }, catalogue.current ?? undefined)
+        .then((candidats) => candidats.find((c) => !c.speculative)?.exchange, () => undefined),
+      courant: () => n === clic.current,
+    });
+    if (!verdict) return; // clic plus récent ou démontage
     setRefusees((m) => refusesApres(m, l.id, verdict));
     setEtat(verdict.ok ? null : verdict.raison);
     if (verdict.ok) navigateTo({ symbol: verdict.paire, exchange: verdict.exchange, source: "map" });

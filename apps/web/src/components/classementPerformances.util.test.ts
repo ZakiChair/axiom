@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { CoinTile } from "../data/marketOverview";
-import { classerPerformances, estStablecoin, refusesApres, resumePerformances, valeurPeriode, verifierPaire } from "./classementPerformances.util";
+import { classerPerformances, estStablecoin, refusesApres, resumePerformances, valeurPeriode, verifierClic, verifierPaire } from "./classementPerformances.util";
 
 /** Tuile de fixture, rangée par capitalisation décroissante comme parseMarkets. */
 function tuile(symbol: string, mcapUsd: number, p: Partial<CoinTile> = {}): CoinTile {
@@ -102,5 +102,45 @@ describe("garde du clic : la paire ouverte est bien l'actif de la ligne", () => 
     expect(refusesApres(refusees, "artificial-inu-3", incomplet).has("artificial-inu-3")).toBe(false);
     const identite = verifierPaire(ai, [{ exchange: "binance", prix: 0.0203 }], "binance");
     expect(refusesApres(refusees, "artificial-inu-3", identite).has("artificial-inu-3")).toBe(true);
+  });
+});
+
+describe("clic sur une ligne : mesures dès le clic, refus d'identité avant le résolveur (fusion avec le routage par profondeur)", () => {
+  const ai = { symbol: "AI", name: "Sleepless AI", price: 0.3 };
+  const hype = { symbol: "HYPE", name: "Hyperliquid", price: 92 };
+  const deps = (prix: Record<string, number | undefined>, premiere: string | undefined, courant = () => true) => ({
+    prix: vi.fn(async (exchange: string) => prix[exchange]),
+    mesurer: vi.fn(),
+    premiere: vi.fn(async () => premiere as never),
+    courant,
+  });
+
+  it("AIUSDT dont un prix connu désigne un autre actif : refus d'identité SANS appeler le résolveur", async () => {
+    const d = deps({ binance: 0.0203, okx: 0.0217 }, "binance");
+    const v = await verifierClic(ai, ["binance", "okx"], d);
+    expect(v).toMatchObject({ ok: false, motif: "identite" });
+    expect(d.premiere).not.toHaveBeenCalled();
+  });
+
+  it("les mesures de profondeur partent dès le clic, avant la réponse des prix", async () => {
+    let repondre!: () => void;
+    const attente = new Promise<void>((ok) => { repondre = ok; });
+    const d = { ...deps({}, "bybit"), prix: vi.fn(async () => { await attente; return 92; }) };
+    const promesse = verifierClic(hype, ["bybit", "okx", "binance"], d);
+    expect(d.mesurer).toHaveBeenCalledWith(["bybit", "okx", "binance"], "HYPEUSDT");
+    repondre();
+    expect(await promesse).toEqual({ ok: true, paire: "HYPEUSDT", exchange: "bybit" });
+  });
+
+  it("clic dépassé (clic plus récent ou démontage) : aucun verdict, résolveur jamais appelé", async () => {
+    const d = deps({ bybit: 92 }, "bybit", () => false);
+    expect(await verifierClic(hype, ["bybit"], d)).toBeNull();
+    expect(d.premiere).not.toHaveBeenCalled();
+  });
+
+  it("prix cohérents : la place validée est la première du résolveur (HYPEUSDT → Bybit)", async () => {
+    const d = deps({ bybit: 92.1, okx: 92, binance: 91.9 }, "bybit");
+    expect(await verifierClic(hype, ["bybit", "okx", "binance"], d)).toEqual({ ok: true, paire: "HYPEUSDT", exchange: "bybit" });
+    expect(d.premiere).toHaveBeenCalledWith("HYPEUSDT");
   });
 });

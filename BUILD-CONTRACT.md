@@ -1071,10 +1071,13 @@ angles, constats contre-vérifiés) a été suivie d'un second commit de correct
      - La navigation passe cette place en provenance. Les lignes non cotées ou refusées sont
        estompées, avec une infobulle ; une ligne refusée reste focalisable (`tabIndex=-1`,
        `aria-disabled`), le focus clavier n'est pas perdu.
-     - Le résolveur est interrogé APRÈS les prix. Limite résiduelle : une fois fusionné avec le
-       routage par profondeur d'historique, une place dont la mesure de profondeur est encore
-       en vol au clic peut ensuite passer en tête et être ouverte sans prix vérifié. Le refus
-       d'identité reste garanti pour toute place dont le prix est connu.
+     - Intégration avec le routage par profondeur d'historique (`verifierClic`) : les mesures
+       de profondeur des places cotées partent dès le clic, au rang « graphe », en parallèle
+       des prix (abandonnées au clic suivant et au démontage) ; le refus d'identité tombe
+       AVANT le résolveur, qui n'est interrogé qu'ensuite. Limite résiduelle : une place dont
+       la mesure est encore en vol au moment du résolveur peut ensuite passer en tête et être
+       ouverte sans prix vérifié. Le refus d'identité reste garanti pour toute place dont le
+       prix est connu.
    - `MAP` et `IMAP` rouvrent sur la carte ; `TOP` ouvre sur le classement sans fermer la
      fenêtre.
 2. **Impression de stablecoins : `stablecoinPrint`, pane séparé, unité 1d SEULEMENT.**

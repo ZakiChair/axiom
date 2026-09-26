@@ -703,10 +703,11 @@ export const commandesSignaux: Commande[] = [
     motsCles: ["signaux", "setup", "confluence", "inbox", "divergence", "squeeze", "build-up", "crowded", "quadrant"],
     apercu: "Ouvre le screener en vue Signaux (détection de setups)",
     action: () => {
-      void import("../store/signaux").then(({ signauxStore }) => {
-        signauxStore.getState().setVue("signaux");
-        windowManagerStore.getState().openWindow("screener");
-      });
+      // Chunk introuvable (déploiement, réseau) : EQS s'ouvre quand même, sur sa vue courante.
+      void import("../store/signaux")
+        .then(({ signauxStore }) => signauxStore.getState().setVue("signaux"))
+        .catch((erreur: unknown) => console.warn("[AXIOM] SIG : vue Signaux non chargée", erreur))
+        .finally(() => windowManagerStore.getState().openWindow("screener"));
     },
   },
 ];

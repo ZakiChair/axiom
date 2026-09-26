@@ -479,10 +479,11 @@ export function construireRegistre(): Commande[] {
       // paresseuses : chargés ici à la demande, hors du chargement initial (garde-fou :
       // chargementInitial.test.ts). La requête d'indicateurs précède l'ouverture.
       action: () => {
-        void import("../store/macroRatesView").then(({ macroRatesViewStore }) => {
-          macroRatesViewStore.getState().demanderIndicateurs();
-          windowManagerStore.getState().openWindow("macroRates");
-        });
+        // Chunk introuvable (déploiement, réseau) : la fenêtre s'ouvre quand même.
+        void import("../store/macroRatesView")
+          .then(({ macroRatesViewStore }) => macroRatesViewStore.getState().demanderIndicateurs())
+          .catch((erreur: unknown) => console.warn("[AXIOM] MACRO : vue macro non chargée", erreur))
+          .finally(() => windowManagerStore.getState().openWindow("macroRates"));
       },
     },
     {

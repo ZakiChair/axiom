@@ -8,7 +8,7 @@
  * 39ᵉ fenêtre serait donc muette au ⌘K sans que rien ne le signale.
  *
  * Ce fichier ferme le trou : toute fenêtre du registre DOIT être ouvrable par une commande,
- * soit de `windowPanelCommands` (ou de `commandesBacktest`, même module), soit — liste explicite
+ * soit de `windowPanelCommands` (ou de `commandesBacktest` / `commandesSignaux`, même module), soit — liste explicite
  * ci-dessous — d'un autre module.
  *
  * Méthode : les ids couverts sont obtenus en EXÉCUTANT chaque action contre un

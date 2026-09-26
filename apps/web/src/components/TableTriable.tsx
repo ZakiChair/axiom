@@ -103,7 +103,7 @@ export function TableTriable<L>({
             onClick={active ? () => surClicLigne(l) : undefined}
             onKeyDown={active ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); surClicLigne(l); } } : undefined}
             className={`grid items-center gap-2 border-b border-border/50 px-3 py-1.5 text-[11px] last:border-b-0 ${
-              active ? "cursor-pointer outline-none hover:bg-surface focus-visible:bg-surface" : surClicLigne !== undefined ? "opacity-60" : ""
+              active ? "cursor-pointer outline-none hover:bg-surface focus-visible:bg-surface focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent" : surClicLigne !== undefined ? "opacity-60" : ""
             }`}
             style={{ gridTemplateColumns: grille }}
           >
@@ -127,15 +127,20 @@ export function TableTriable<L>({
       >
         {colonnes.map((c) =>
           c.triable === true && c.valeurTri !== undefined && onTri !== undefined ? (
-            <button
+            <span
               key={c.id}
-              type="button"
-              onClick={() => onTri(basculerTri(tri, c.id))}
-              className={`flex w-full items-center gap-0.5 text-[10px] uppercase tracking-wide text-text-dim transition hover:text-text ${alignementBouton(c)}`}
+              role={ariaLabel ? "columnheader" : undefined}
+              aria-sort={ariaLabel ? (tri?.colonne === c.id ? (tri.dir === -1 ? "descending" : "ascending") : "none") : undefined}
             >
-              {c.label}
-              {tri !== null && tri.colonne === c.id && <span>{tri.dir === -1 ? "▾" : "▴"}</span>}
-            </button>
+              <button
+                type="button"
+                onClick={() => onTri(basculerTri(tri, c.id))}
+                className={`flex w-full items-center gap-0.5 text-[10px] uppercase tracking-wide text-text-dim transition hover:text-text ${alignementBouton(c)}`}
+              >
+                {c.label}
+                {tri !== null && tri.colonne === c.id && <span aria-hidden="true">{tri.dir === -1 ? "▾" : "▴"}</span>}
+              </button>
+            </span>
           ) : (
             <span
               key={c.id}

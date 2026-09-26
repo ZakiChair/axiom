@@ -16,8 +16,8 @@ function tuile(partiel: Partial<CoinTile> & Pick<CoinTile, "id" | "symbol">): Co
     changePct7j: 0,
     changePct30j: 0,
     changePct1h: null,
-    changePct24hConnu: 0,
     ...partiel,
+    changePct24hConnu: partiel.changePct24hConnu !== undefined ? partiel.changePct24hConnu : partiel.changePct24h ?? 0,
   };
 }
 
@@ -48,7 +48,7 @@ const GROUPE_FIXTURE: Secteur = {
 const TUILES_FIXTURE: CoinTile[] = [
   tuile({ id: "coin-a", symbol: "AAA", mcapUsd: 100e9, price: 10, changePct24h: 2, changePct7j: 10, changePct30j: 20 }),
   // `changePct30j` volontairement ABSENT : simule une entrée de cache antérieure au champ.
-  { id: "coin-b", symbol: "BBB", name: "Coin B", mcapUsd: 50e9, price: 5, changePct24h: -1, changePct7j: 4 } as CoinTile,
+  { id: "coin-b", symbol: "BBB", name: "Coin B", mcapUsd: 50e9, price: 5, changePct24h: -1, changePct24hConnu: -1, changePct7j: 4 } as CoinTile,
   tuile({ id: "hors-groupe", symbol: "ZZZ", mcapUsd: 7e9 }),
 ];
 
@@ -58,6 +58,13 @@ describe("agregerSecteur", () => {
   it("perf pondérée par capitalisation vérifiée à la main (1 j / 7 j)", () => {
     expect(agregat.changePct24h).toBeCloseTo(1, 10);
     expect(agregat.changePct7j).toBeCloseTo(8, 10);
+  });
+
+  it("Δ24 h inconnu (0 de convention treemap, FIGR_HELOC) : écarté de la moyenne 24 h, pas compté pour 0 %", () => {
+    const tuiles = [TUILES_FIXTURE[0]!, tuile({ id: "coin-b", symbol: "BBB", mcapUsd: 50e9, changePct24h: 0, changePct24hConnu: null, changePct7j: 4 })];
+    const agr = agregerSecteur(GROUPE_FIXTURE, indexerTuiles(tuiles));
+    expect(agr.changePct24h).toBeCloseTo(2, 10);
+    expect(agr.membres[1]?.changePct24h).toBeNull();
   });
 
   it("une valeur non finie (vieux cache sans 30 j) est écartée de SA moyenne seulement", () => {

@@ -131,6 +131,9 @@ test("Top 20 → matrice 20×20 sans saisie ; univers, 7 j, tri et onglet retrou
   // 3. Fermer puis RECHARGER la page : le vrai critère est l'hydratation localStorage
   //    (sans rechargement, le store module survivrait et le test ne prouverait rien).
   await fenetre.getByTitle("Fermer").click();
+  // Pointeur hors de la zone de la palette ⌘K : immobile au-dessus de sa liste après le
+  // rechargement, il y déclencherait un survol qui change la sélection avant Entrée.
+  await page.mouse.move(0, 0);
   await expect(fenetre).toHaveCount(0);
   await page.reload();
   const fenetre2 = await ouvrirCorr(page);

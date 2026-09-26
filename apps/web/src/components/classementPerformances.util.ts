@@ -82,23 +82,36 @@ export function resumePerformances(lignes: readonly CoinTile[], periode: Periode
 /** Nom lisible d'une place (message du garde). */
 const NOM_PLACE: Record<string, string> = { binance: "Binance", bybit: "Bybit", okx: "OKX", mexc: "MEXC", kraken: "Kraken", coinbase: "Coinbase" };
 
-export type VerdictPaire = { ok: true; paire: string; exchange: ExchangeId } | { ok: false; paire: string; raison: string };
+export type VerdictPaire =
+  | { ok: true; paire: string; exchange: ExchangeId }
+  | { ok: false; paire: string; motif: "identite" | "indisponible"; raison: string };
 
 /**
  * Garde du clic : un ticker CoinGecko n'est pas unique (AIUSDT est Sleepless AI, pas Artificial
- * Inu). La paire USDT n'est ouverte que si CHAQUE place qui la cote, et dont le prix est connu,
- * reste dans ×0,8 – ×1,25 du prix CoinGecko de la ligne : le routage pourrait choisir n'importe
- * laquelle. Aucun prix connu : pas de navigation (identité invérifiable).
+ * Inu). `premiere` est la place que le graphe essaiera d'abord (premier candidat confirmé du
+ * résolveur commun, jamais un ordre réimplémenté ici). Refus d'IDENTITÉ, collant, dès qu'une
+ * place au prix connu sort de ×0,8 – ×1,25 du prix CoinGecko. Vérification INCOMPLÈTE, non
+ * collante, si la première place n'a pas de prix (le graphe l'ouvrirait sans contrôle).
  */
-export function verifierPaire(ligne: { symbol: string; name: string; price: number }, cotations: ReadonlyArray<{ exchange: ExchangeId; prix: number | undefined }>): VerdictPaire {
+export function verifierPaire(
+  ligne: { symbol: string; name: string; price: number },
+  cotations: ReadonlyArray<{ exchange: ExchangeId; prix: number | undefined }>,
+  premiere: ExchangeId | undefined,
+): VerdictPaire {
   const paire = `${ligne.symbol}USDT`;
-  const connues = cotations.filter((c): c is { exchange: ExchangeId; prix: number } => typeof c.prix === "number" && Number.isFinite(c.prix) && c.prix > 0);
-  if (connues.length === 0 || !(ligne.price > 0)) {
-    return { ok: false, paire, raison: `${paire} : prix indisponible, impossible de vérifier qu'il s'agit bien de ${ligne.name}. Ouverture annulée.` };
-  }
-  const ecart = connues.find((c) => c.prix < ligne.price * 0.8 || c.prix > ligne.price * 1.25);
+  const connu = (p: number | undefined): p is number => typeof p === "number" && Number.isFinite(p) && p > 0;
+  const ecart = ligne.price > 0 ? cotations.find((c) => connu(c.prix) && (c.prix < ligne.price * 0.8 || c.prix > ligne.price * 1.25)) : undefined;
   if (ecart) {
-    return { ok: false, paire, raison: `${paire} (${NOM_PLACE[ecart.exchange] ?? ecart.exchange}) cote ${formatPrice(ecart.prix)} $ contre ${formatPrice(ligne.price)} $ pour ${ligne.name} : ce ticker désigne un autre actif. Ouverture annulée.` };
+    return { ok: false, paire, motif: "identite", raison: `${paire} (${NOM_PLACE[ecart.exchange] ?? ecart.exchange}) cote ${formatPrice(ecart.prix)} $ contre ${formatPrice(ligne.price)} $ pour ${ligne.name} : ce ticker désigne un autre actif. Ouverture annulée.` };
   }
-  return { ok: true, paire, exchange: connues[0]!.exchange };
+  if (premiere === undefined || !(ligne.price > 0) || !connu(cotations.find((c) => c.exchange === premiere)?.prix)) {
+    const place = premiere ? ` sur ${NOM_PLACE[premiere] ?? premiere}` : "";
+    return { ok: false, paire, motif: "indisponible", raison: `${paire} : prix indisponible${place}, vérification incomplète (${ligne.name}). Réessayez.` };
+  }
+  return { ok: true, paire, exchange: premiere };
+}
+
+/** Refus mémorisés après un verdict : seul un refus d'identité désactive la ligne. */
+export function refusesApres(refusees: ReadonlyMap<string, string>, id: string, verdict: VerdictPaire): ReadonlyMap<string, string> {
+  return verdict.ok || verdict.motif !== "identite" ? refusees : new Map(refusees).set(id, verdict.raison);
 }

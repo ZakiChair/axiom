@@ -87,11 +87,15 @@ describe("TableTriable (markup)", () => {
     const headerCells = (headerDiv?.props.children ?? []) as Array<{
       type: string;
       key: string;
-      props: { onClick?: () => void };
+      props: { role?: string; "aria-sort"?: string; children: { type: string; props: { onClick?: () => void } } };
     }>;
     const prixHeader = headerCells.find((c) => c.key === "prix");
-    expect(prixHeader?.type).toBe("button"); // type "button"
-    prixHeader?.props.onClick?.(); // appelle le handler
+    // En-tête d'une table accessible : columnheader + aria-sort, qui enveloppe le bouton de tri.
+    expect(prixHeader?.type).toBe("span");
+    // Sans ariaLabel (pas de role=table), aucun rôle ARIA ; aria-sort est vérifié par MineursCotes.
+    expect(prixHeader?.props["aria-sort"]).toBeUndefined();
+    expect(prixHeader?.props.children.type).toBe("button");
+    prixHeader?.props.children.props.onClick?.(); // appelle le handler
     expect(recu).toEqual({ colonne: "prix", dir: -1 }); // basculerTri(null, "prix")
   });
 });

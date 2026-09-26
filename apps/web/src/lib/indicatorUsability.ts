@@ -1,5 +1,5 @@
 import type { ExchangeId, IndicatorDef, Timeframe } from "@axiom/types";
-import { supportsIndicatorTimeframe, TIMEFRAME_REQUIS } from "@axiom/indicators";
+import { TIMEFRAME_REQUIS } from "@axiom/indicators";
 import { tfAtLeast } from "../chart/tfOrder";
 import { coinalyzeKeyStore } from "../store/coinalyze";
 import { daemonSupporte } from "../data/daemon";
@@ -115,7 +115,9 @@ export function raisonUnusableIndicateur(
   def: IndicatorDef,
   { exchange, symbol, timeframe }: ContexteIndicateur,
 ): string | null {
-  if (def.minTimeframe !== undefined && !tfAtLeast(timeframe, def.minTimeframe)) {
+  // Unité exacte requise : elle seule parle (« ≥ 1d » laisserait croire que 1w convient).
+  const requis = TIMEFRAME_REQUIS[def.id];
+  if (requis === undefined && def.minTimeframe !== undefined && !tfAtLeast(timeframe, def.minTimeframe)) {
     return `Nécessite ≥ ${def.minTimeframe}`;
   }
   if (exchange === "synthetic" && VOLUME_REEL.has(def.id)) {
@@ -131,10 +133,8 @@ export function raisonUnusableIndicateur(
   ) {
     return "Twelve Data ne fournit pas de volume pour le forex";
   }
-  if (!supportsIndicatorTimeframe(def.id, timeframe)) {
-    return def.id === "rvolSeasonal"
-      ? "RVOL saisonnier : nécessite l’intervalle 1h (références en UTC)"
-      : `Nécessite l’intervalle ${TIMEFRAME_REQUIS[def.id]} (données quotidiennes)`;
+  if (requis !== undefined && timeframe !== requis) {
+    return def.id === "rvolSeasonal" ? "RVOL saisonnier : nécessite l’intervalle 1h (références en UTC)" : `Nécessite l’intervalle ${requis}`;
   }
   if (def.aux?.includes("mark") && ["3M", "6M", "12M"].includes(timeframe)) {
     return "Mark perp indisponible pour cet intervalle";

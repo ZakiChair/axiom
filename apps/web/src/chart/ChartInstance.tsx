@@ -34,6 +34,7 @@ import { useStore } from "zustand";
 import type { Candle, ExchangeId, Timeframe, Unsubscribe } from "@axiom/types";
 import { getAdapter, supportedTimeframesFor } from "../data/adapters";
 import { resolveMarketCandidatesProgressifs } from "../data/marketRouting";
+import { PLAFOND_BOUGIES_GRAPHE } from "../data/profondeurHistorique";
 import { fetchKlinesTwelveData } from "../data/twelvedata";
 import { chargerAuCreneau, chargerAvecRepli, chargerPageAncienne, type MarcheCharge } from "./routageMarche";
 import { prepareResyncApply } from "../data/resync";
@@ -153,8 +154,6 @@ const CANDLE_PANE_ID = "candle_pane";
 const PAGINATION_LIMIT = 500;
 const PAGINATION_MCAP_LIMIT = 10_000;
 const PAGINATION_MCAP_RATIO_LIMIT = 1_000;
-/** Plafond du buffer marché au fil des paginations (borne mémoire session longue). */
-const PAGINATION_MAX_CANDLES = 20_000;
 const PAGINATION_MCAP_MAX_CANDLES = 150_000;
 
 const JOUR_MS = 86_400_000;
@@ -586,7 +585,7 @@ export function ChartInstance({
       : PAGINATION_MCAP_RATIO_LIMIT;
   const paginationMaxCandles = estSerieCapitalisation
     ? PAGINATION_MCAP_MAX_CANDLES
-    : PAGINATION_MAX_CANDLES;
+    : PLAFOND_BOUGIES_GRAPHE; // borne mémoire session longue, partagée avec le routage par profondeur
   // Seul ce petit objet basse fréquence déclenche un rendu React ; `candles` reste hors
   // render-loop. Il porte la provenance du dernier succès et l'état de la requête courante.
   const dataLoad = useStore(store, (s) => s.dataLoad);

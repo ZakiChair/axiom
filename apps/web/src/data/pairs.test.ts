@@ -150,6 +150,8 @@ it("échec passager du catalogue Binance : sa dernière liste reste servie et Bi
   vi.stubGlobal("fetch", fetch);
   const { fetchPairs, pairsCacheExpiresAt } = await import("./pairs");
   const routing = await import("./marketRouting");
+  // Profondeur d'historique inconnue : aucune sonde de bougies comptée parmi les appels Binance.
+  vi.spyOn(await import("./profondeurHistorique"), "mesurerProfondeurs").mockResolvedValue();
   await routing.fetchMarketCatalog();
   // Six minutes plus tard, le rafraîchissement de exchangeInfo reçoit une 503.
   panne = true;

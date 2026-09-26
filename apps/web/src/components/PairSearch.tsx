@@ -8,6 +8,7 @@ import { estSymboleCapitalisation } from "../data/mcap";
 import { TWELVEDATA_SYMBOLS } from "../data/pairs";
 import { encodeSyntheticSymbol, formatSyntheticLabel, parseSyntheticSymbol, type SyntheticLegSource } from "../data/synthetic";
 import { fetchMarketCatalog, subscribeMarketCatalog, searchMarkets, resolveMarketCandidates, type MarketCandidate, type MarketCatalog } from "../data/marketRouting";
+import { abonnerProfondeurs, mesurerProfondeurs } from "../data/profondeurHistorique";
 import { CLASSES_CHAMP } from "./ui";
 
 export interface PairSearchProps {
@@ -22,10 +23,29 @@ function sourceLabel(source: ExchangeId): string {
   return source === "okx" ? "OKX" : source === "mexc" ? "MEXC" : source[0]?.toUpperCase() + source.slice(1);
 }
 
+/** Source d'un résultat : « Auto » tant qu'une de ses places reste sans mesure de profondeur. */
+export const libelleSource = (m: MarketCandidate) => (m.kind === "perp" ? "Perp · " : "") + (m.profondeurIncomplete ? "Auto" : sourceLabel(m.exchange));
+/** Places classées ; pendant la mesure, par ordre alphabétique (aucun gagnant présumé). */
+export const titreSource = (m: MarketCandidate) => m.places && (m.profondeurIncomplete
+  ? `${m.places.map(sourceLabel).sort().join(", ")} — mesure de l'historique en cours`
+  : `${m.places.map(sourceLabel).join(", ")} — la plus profonde est retenue`);
+/** Parmi les 12 premiers résultats (visibles sans défiler), ceux dont une place reste à mesurer. */
+export const resultatsAMesurer = (resultats: readonly MarketCandidate[]) =>
+  resultats.slice(0, 12).filter((m): m is MarketCandidate & { places: ExchangeId[] } => !!m.profondeurIncomplete && !!m.places);
+
+/** Mesure (sans attendre) ces résultats après un anti-rebond ; renvoie l'annulation. */
+export function planifierMesures(resultats: readonly MarketCandidate[], delai = 250): () => void {
+  const liste = resultatsAMesurer(resultats);
+  if (!liste.length) return () => {};
+  const t = setTimeout(() => { for (const m of liste) void mesurerProfondeurs(m.places.map((exchange) => ({ exchange, symbol: m.symbol }))); }, delai);
+  return () => clearTimeout(t);
+}
+
 export const JAMBE_B_TRADFI_DEFAUT = "GLD";
 
 export function PairSearch({ onPick, placeholder = "Rechercher une paire" }: PairSearchProps = {}) {
   const exchange = useStore(marketStore, (s) => s.exchange);
+  const timeframe = useStore(marketStore, (s) => s.timeframe);
   const recents = useStore(syntheticsStore, (s) => s.recents);
   const [query, setQuery] = useState("");
   // Ce catalogue local ne dépend d'aucun appel crypto. Il reste propre à l'affichage :
@@ -101,8 +121,18 @@ export function PairSearch({ onPick, placeholder = "Rechercher une paire" }: Pai
   // Le moteur de comparaison garde son périmètre réel : aucune sélection d'un actif
   // d'une autre source qui serait ensuite chargé avec le mauvais adaptateur.
   const searchable = onPick ? { ...catalog, instruments: catalog.instruments.filter((m) => m.exchange === exchange) } : catalog;
-  const matches = query.trim() ? searchMarkets(searchable, query, 30) : [];
+  const matches = query.trim() ? searchMarkets(searchable, query, 30, timeframe) : [];
   const listeVisible = open && !syntheticOpen && matches.length > 0;
+  // Liste ouverte : les premiers résultats « Auto » sont mesurés, puis affichent la place retenue.
+  const aMesurer = listeVisible ? resultatsAMesurer(matches) : [];
+  const cleMesure = aMesurer.map((m) => `${m.kind}:${m.symbol}`).join();
+  const [, setMesures] = useState(0);
+  useEffect(() => {
+    if (!cleMesure) return;
+    const desabonner = abonnerProfondeurs(() => setMesures((n) => n + 1));
+    const annuler = planifierMesures(aMesurer);
+    return () => { annuler(); desabonner(); };
+  }, [cleMesure, query]);
 
   useEffect(() => {
     listeRef.current?.querySelector<HTMLElement>(`[data-idx="${indexActif}"]`)?.scrollIntoView({ block: "nearest" });
@@ -176,10 +206,10 @@ export function PairSearch({ onPick, placeholder = "Rechercher une paire" }: Pai
 
     {open && !syntheticOpen && (query.trim() || listeVisible || loading || error || catalog.unavailableSources.length > 0) && <div className="absolute left-0 top-full z-30 mt-1 w-72 rounded border border-neutral-700 bg-neutral-900 shadow-lg">
       {listeVisible && <ul ref={listeRef} id={idListe} role="listbox" aria-label="Résultats de paires" className="max-h-72 overflow-y-auto py-1">
-        {matches.map((m, i) => <li key={`${m.kind}:${m.symbol}`} role="none"><button id={`${idListe}-opt-${i}`} data-idx={i} type="button" role="option" aria-selected={i === indexActif}
+        {matches.map((m, i) => <li key={`${m.kind}:${m.symbol}`} role="none"><button id={`${idListe}-opt-${i}`} data-idx={i} type="button" role="option" aria-selected={i === indexActif} title={titreSource(m)}
           onMouseDown={(e) => { e.preventDefault(); choose(m); }} onMouseEnter={() => setIndexActif(i)}
           className={`flex w-full items-center justify-between gap-2 px-2 py-1 text-left text-xs text-neutral-200 ${i === indexActif ? "bg-neutral-800" : "hover:bg-neutral-800"}`}>
-          <span><span>{m.symbol}</span>{m.label && <span className="block text-[10px] text-text-dim">{m.label}</span>}</span><span className="shrink-0 text-[10px] text-text-dim">{m.kind === "perp" ? "Perp · " : ""}{sourceLabel(m.exchange)}</span>
+          <span><span>{m.symbol}</span>{m.label && <span className="block text-[10px] text-text-dim">{m.label}</span>}</span><span className="shrink-0 text-[10px] text-text-dim">{libelleSource(m)}</span>
         </button></li>)}
       </ul>}
       {loading && <p className="px-2 py-1 text-[10px] text-text-dim">Recherche des actifs disponibles…</p>}

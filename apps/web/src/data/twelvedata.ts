@@ -627,7 +627,8 @@ function sondageBougieCourante(symbol: string, tf: Timeframe, cb: (candle: Candl
 /**
  * Toute jambe Twelve Data d'un synthétique (÷Or, ÷S&P 500, en CHF, GLD÷BTC…) : amorçage
  * immédiat, réessayé (backoff de pollLoop) même marché fermé tant que rien n'est livré — sinon le
- * ratio n'émettrait rien jusqu'à la réouverture. Ensuite, sondage seulement marché ouvert, au plus
+ * ratio n'émettrait rien jusqu'à la réouverture. Ensuite, sondage seulement marché ouvert, plus un
+ * dernier au premier passage fermé (clôture captée), au plus
  * toutes les 5 min, 15 min dès 1d : forex et or ≈ 288 crédits par jour ouvré (≈ 96 dès 1d),
  * actions ≈ 82 (≈ 28), sous le plafond de 800 crédits/jour.
  */
@@ -635,8 +636,14 @@ export function souscrireJambeTwelveData(symbol: string, tf: Timeframe, cb: (can
   const sonder = sondageBougieCourante(symbol, tf, cb);
   const intraday = /^\d+[smh]$/.test(tf);
   let amorce = false;
+  let ouvertAvant = false;
   return pollLoop(async (signal, isCancelled) => {
-    if (amorce && !isMarketOpen(classifyTradfi(symbol), new Date())) return;
+    const ouvert = isMarketOpen(classifyTradfi(symbol), new Date());
+    // Premier sondage marché fermé : la clôture (16:00 à New York pour SPY) est captée même si
+    // le sondage précédent l'avait devancée ; ensuite, plus rien jusqu'à la réouverture.
+    const fermeture = ouvertAvant && !ouvert;
+    ouvertAvant = ouvert;
+    if (amorce && !ouvert && !fermeture) return;
     if (await sonder(signal, isCancelled)) amorce = true;
   }, (intraday ? 5 : 15) * 60_000, { immediate: true });
 }

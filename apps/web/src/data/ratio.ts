@@ -27,7 +27,7 @@
 import type { ExchangeId } from "@axiom/types";
 import { encodeSyntheticSymbol, parseSyntheticSymbol, type SyntheticLegSource, type SyntheticSpec } from "./synthetic";
 import { estSymboleCapitalisation } from "./mcap";
-import { basePerp, splitSymbol } from "./symbol";
+import { basePerp, COTATIONS_USD, splitSymbol } from "./symbol";
 
 export const DENOMINATEURS_CRYPTO = ["BTC", "ETH", "SOL"] as const;
 export const DENOMINATEURS_MARCHES = ["OR", "NASDAQ", "SP500"] as const;
@@ -106,7 +106,7 @@ function decouper(symbol: string, exchange: ExchangeId): { base: string; quote: 
   }
 }
 
-const COTATIONS_DOLLAR = ["USD", "USDT", "USDC", "FDUSD"];
+const COTATIONS_DOLLAR = COTATIONS_USD;
 
 /**
  * Ratio ÷ marché ou devise : jambe B Twelve Data unique. Actifs cotés en dollar seulement

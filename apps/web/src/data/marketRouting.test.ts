@@ -574,3 +574,10 @@ describe("ratio dont l'unité est retirée (grille Twelve Data à :30) : l'unit�
       .toEqual([{ exchange: "synthetic", symbol: "binance:BTCUSDT|/|twelvedata:SPY", timeframe: attendue }]);
   });
 });
+
+describe("Twelve Data au numérateur (sondé toutes les 5 min) : le 1m devient 5m", () => {
+  it("GLD÷BTC demandé en 1m → 5m", async () => {
+    expect(await resolveMarketCandidates({ exchange: "synthetic", symbol: "twelvedata:GLD|/|binance:BTCUSDT", timeframe: "1m" }))
+      .toEqual([{ exchange: "synthetic", symbol: "twelvedata:GLD|/|binance:BTCUSDT", timeframe: "5m" }]);
+  });
+});

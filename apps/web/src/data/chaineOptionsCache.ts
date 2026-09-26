@@ -9,7 +9,7 @@
  */
 import type { ExchangeId } from "@axiom/types";
 import { fetchDeribitOptionChain, type OptionPoint } from "./deribit";
-import { basePerp, splitSymbol } from "./symbol";
+import { basePerp, COTATIONS_USD, splitSymbol } from "./symbol";
 
 export const TTL_CHAINE_MS = 600_000;
 
@@ -54,7 +54,7 @@ export function spotDeChaine(chaine: readonly { underlying: number }[]): number 
 }
 
 /** Cotations assimilées au dollar des chaînes Deribit (index BTC-USD / ETH-USD). */
-const COTATIONS_DOLLAR = ["USDT", "USDC", "USD", "USDE", "DAI", "TUSD", "USDD"];
+const COTATIONS_DOLLAR = COTATIONS_USD; // constante unique de data/symbol.ts
 
 /**
  * Devise Deribit d'un marché du chart : BTC (alias Kraken XBT) ou ETH coté en dollar sur une

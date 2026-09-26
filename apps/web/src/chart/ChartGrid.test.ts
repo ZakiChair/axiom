@@ -68,3 +68,11 @@ describe("ChartGrid — liaison d'un ratio dont l'unité est retirée", () => {
     });
   });
 });
+
+describe("ChartGrid — liaison : l'unité de la source reste le premier repli", () => {
+  it("TOTAL propagé depuis un slot en 1d vers un maître en 1m garde 1d", () => {
+    marketStore.getState().setMarket({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1m" });
+    propagerMarche(1, { exchange: "synthetic", symbol: "TOTAL", timeframe: "1d" });
+    expect(marketStore.getState().timeframe).toBe("1d");
+  });
+});

@@ -42,7 +42,7 @@ import {
   type EtatHeat,
   type InstantaneHlHeat,
 } from "../data/hyperliquidHeat";
-import { basePerp, splitSymbol } from "../data/symbol";
+import { basePerp, COTATIONS_USD as COTATIONS_DOLLAR_SYMBOL, splitSymbol } from "../data/symbol";
 import type { Commande } from "../commands/registry";
 import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
@@ -665,8 +665,8 @@ export function libelleLegendeHl(
   return `${base} · ↑ ${formatUsd(cumuls.auDessus)} · ↓ ${formatUsd(cumuls.enDessous)}`;
 }
 
-/** Cotations assimilées au dollar : USD et stablecoins USD de `QUOTE_ASSETS` (data/symbol.ts). */
-const COTATIONS_USD: ReadonlySet<string> = new Set(["USD", "USDT", "USDC", "USDD", "TUSD", "USDE", "DAI"]);
+/** Cotations assimilées au dollar : constante unique de data/symbol.ts. */
+const COTATIONS_USD: ReadonlySet<string> = new Set(COTATIONS_DOLLAR_SYMBOL);
 
 /**
  * Raison de TAIRE la couche HL sur ce symbole, ou `null` quand ses niveaux sont affichables.

@@ -16,7 +16,7 @@
  * au lieu de base "FOO" / quote "TUSD".
  */
 export const QUOTE_ASSETS = [
-  // Stablecoins / cotations crypto (5 et 4 caractères)
+  // Stablecoins / cotations crypto (5 et 4 caractères ; FDUSD : Binance seulement, cf. splitSymbol)
   "FDUSD", "USDT", "USDC", "USDD", "TUSD", "USDE", "EURC",
   // Fiat + stablecoin 3 lettres + cryptos de cotation
   "DAI", "USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "TRY", "BRL", "BTC", "ETH",
@@ -43,12 +43,18 @@ export function splitSymbol(symbol: string, exchangeLabel: string): { base: stri
   }
 
   // Format concaténé : suffixe de cotation reconnu, le plus LONG d'abord (cf. tri ci-dessus).
-  const quote = QUOTE_ASSETS.find((q) => s.endsWith(q) && s.length > q.length);
+  // FDUSD n'est une cotation que chez Binance (WFDUSD = W/FDUSD) : ailleurs, UFD/USD de
+  // Kraken (« UFDUSD ») reste UFD / USD.
+  const binance = /binance/i.test(exchangeLabel);
+  const quote = QUOTE_ASSETS.find((q) => s.endsWith(q) && s.length > q.length && (q !== "FDUSD" || binance));
   if (quote === undefined) {
     throw new Error(`${exchangeLabel}: format de symbole inattendu '${symbol}' (devise de cotation inconnue)`);
   }
   return { base: s.slice(0, s.length - quote.length), quote };
 }
+
+/** Cotations assimilées au dollar : USD et stablecoins USD (1 stablecoin compté pour 1 USD). */
+export const COTATIONS_USD: readonly string[] = ["USD", "USDT", "USDC", "FDUSD", "USDD", "TUSD", "USDE", "DAI"];
 
 /** Alias d'actif propres à un exchange → ticker canonique (Kraken code le bitcoin « XBT »). */
 const ALIAS_BASE: Record<string, string> = { XBT: "BTC" };

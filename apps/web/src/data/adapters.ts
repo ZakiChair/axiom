@@ -133,7 +133,9 @@ export function supportedTimeframesFor(exchange: ExchangeId, symbol: string): Ti
   if (estSymboleCapitalisation(symbol)) return TIMEFRAMES_CAPITALISATION;
   const spec = parseSyntheticSymbol(symbol);
   if (spec === null) return [];
-  const communes = syntheticTimeframes(spec.exA, spec.exB);
+  // Twelve Data au numérateur, sondé toutes les 5 min (souscrireJambeTwelveData) : un 1m
+  // n'avancerait que toutes les 5 min, minutes intermédiaires absentes jusqu'au rechargement.
+  const communes = syntheticTimeframes(spec.exA, spec.exB).filter((tf) => spec.exA !== "twelvedata" || tf !== "1m");
   // Deux jambes Twelve Data de même nature partagent leur grille.
   if (spec.exA === spec.exB && spec.legA.includes("/") === spec.legB.includes("/")) return communes;
   const exclues = [...grilleDecalee(spec.exA, spec.legA), ...grilleDecalee(spec.exB, spec.legB)];

@@ -108,9 +108,15 @@ describe("identité perp explicite", () => {
   });
 });
 
-describe("splitSymbol — FDUSD (contre-revue du 26/09)", () => {
-  it("découpe BTCFDUSD en BTC / FDUSD, et FDUSDUSDT en FDUSD / USDT", () => {
+describe("splitSymbol — FDUSD, coté par Binance seulement (revues du 26/09)", () => {
+  it("chez Binance : BTCFDUSD → BTC / FDUSD, WFDUSD → W / FDUSD, FDUSDUSDT → FDUSD / USDT", () => {
     expect(splitSymbol("BTCFDUSD", "binance")).toEqual({ base: "BTC", quote: "FDUSD" });
+    expect(splitSymbol("WFDUSD", "Binance spot")).toEqual({ base: "W", quote: "FDUSD" });
     expect(splitSymbol("FDUSDUSDT", "binance")).toEqual({ base: "FDUSD", quote: "USDT" });
+  });
+
+  it("ailleurs, FDUSD n'est pas une cotation : UFD/USD de Kraken reste UFDUSD → UFD / USD", () => {
+    expect(splitSymbol("UFDUSD", "Kraken")).toEqual({ base: "UFD", quote: "USD" });
+    expect(basePerp("UFDUSD")).toBe("UFD");
   });
 });

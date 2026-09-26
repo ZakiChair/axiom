@@ -1143,5 +1143,14 @@ compensation vient de deux commandes de palette qui tiraient des stores de fenê
   importe `data/macro/fred` et `data/macro/stablecoins` sans le baril `data/macro`, qui tirait
   `catalogueMacro` (≈ −4,9 Ko gzip).
 
-Budget : **1 180 508 / 351 567** (plafonds 1 220 000 / 360 000 inchangés). Le garde-fou
-`src/chargementInitial.test.ts` interdit le retour de ces trois modules.
+Budget mesuré à ce commit (e19de6e) : **1 180 508 / 351 567**. Le garde-fou
+`src/chargementInitial.test.ts` interdit le retour de ces trois modules. Si le chunk d'un de
+ces stores est introuvable (déploiement, réseau), SIG et MACRO ouvrent quand même leur fenêtre
+et signalent l'échec en console (fbd4c61).
+
+État final de l'intégration (toutes les corrections des trois branches et des interactions
+fusionnées) : chargement initial **1 185 189 / 353 279** (Node 24.13.0, zlib 1.3.1), plafonds
+1 220 000 / 360 000 inchangés, marge gzip 6 721 octets. `pnpm check` vert (indicateurs 844,
+alertes 62, backtest 114, daemon 756, web 5 648 tests ; typage monorepo) et `pnpm check:e2e`
+142/142 (mesuré avant le dernier correctif d'interaction, bba3c7b, que couvrent ses tests
+unitaires et la suite web).

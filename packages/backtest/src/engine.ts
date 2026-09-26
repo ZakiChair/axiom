@@ -26,7 +26,7 @@
  */
 
 import type { Candle, IndicatorResult } from "@axiom/types";
-import { computeIndicator, getIndicator, supportsIndicatorTimeframe } from "@axiom/indicators";
+import { computeIndicator, getIndicator, supportsIndicatorTimeframe, TIMEFRAME_REQUIS } from "@axiom/indicators";
 import type {
   ChampPrix,
   Comparateur,
@@ -668,7 +668,9 @@ export function raisonTimeframeBacktest(conditions: readonly Condition[], timefr
   for (const condition of conditions) {
     const operandes = condition.type === "comparaison" ? [condition.gauche, condition.droite] : [condition.a, condition.b];
     for (const op of operandes) {
-      if (op.type === "indicateur" && !supportsIndicatorTimeframe(op.indicateurId, timeframe)) return "RVOL saisonnier : intervalle 1h requis.";
+      if (op.type === "indicateur" && !supportsIndicatorTimeframe(op.indicateurId, timeframe)) {
+        return op.indicateurId === "rvolSeasonal" ? "RVOL saisonnier : intervalle 1h requis." : `${op.indicateurId} : intervalle ${TIMEFRAME_REQUIS[op.indicateurId]} requis.`;
+      }
     }
   }
   return null;

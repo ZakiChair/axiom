@@ -156,7 +156,7 @@ describe("raisonUnusableIndicateur", () => {
   });
 
   it("laisse les métriques globales utilisables quel que soit l'actif", () => {
-    for (const id of ["btcDominance", "fearGreed", "stablecoinSupply"]) {
+    for (const id of ["btcDominance", "fearGreed", "stablecoinSupply", "stablecoinPrint"]) {
       expect(
         raisonUnusableIndicateur(def(id), {
           exchange: "twelvedata",
@@ -288,10 +288,20 @@ describe("raisonUnusableIndicateur", () => {
     daemonSupporteMock.mockReturnValue(false);
   });
 
-  it("accepte les 214 définitions sans lever", () => {
-    expect(INDICATORS).toHaveLength(214);
+  it("accepte les 215 définitions sans lever", () => {
+    expect(INDICATORS).toHaveLength(215);
     for (const indicateur of INDICATORS) {
       expect(() => raisonUnusableIndicateur(indicateur, binanceBtc), indicateur.id).not.toThrow();
     }
+  });
+});
+
+describe("impression de stablecoins : unité 1d seulement", () => {
+  it("inutilisable sous 1d (anticipation) et au-dessus (période précédente), utilisable en 1d", () => {
+    const def = INDICATORS.find((d) => d.id === "stablecoinPrint")!;
+    const ctx = { exchange: "binance" as const, symbol: "BTCUSDT" };
+    expect(raisonUnusableIndicateur(def, { ...ctx, timeframe: "1h" })).toBe("Nécessite ≥ 1d");
+    expect(raisonUnusableIndicateur(def, { ...ctx, timeframe: "1w" })).toBe("Nécessite l’intervalle 1d (données quotidiennes)");
+    expect(raisonUnusableIndicateur(def, { ...ctx, timeframe: "1d" })).toBeNull();
   });
 });

@@ -91,6 +91,7 @@ describe("parseMarkets", () => {
         name: "A",
         market_cap: 100,
         price_change_percentage_24h: 1.5,
+        price_change_percentage_1h_in_currency: 0.35,
         price_change_percentage_7d_in_currency: -4.2,
         price_change_percentage_30d_in_currency: 12.75,
       },
@@ -98,6 +99,9 @@ describe("parseMarkets", () => {
     ]);
     expect(at(tiles, 0).changePct7j).toBeCloseTo(-4.2, 10);
     expect(at(tiles, 0).changePct30j).toBeCloseTo(12.75, 10);
+    // Période 1 h (classement MAP) : même convention null que 7 j/30 j.
+    expect(at(tiles, 0).changePct1h).toBeCloseTo(0.35, 10);
+    expect(at(tiles, 1).changePct1h).toBeNull();
     // Réponse SANS le paramètre de périodes (ou null) : NULL préservé — un 0
     // fabriqué diluerait les moyennes pondérées de SECT vers 0 et s'afficherait
     // « +0.00% » en vert (revue Lot 3). Le Δ24 h garde sa convention 0 (MAP).
@@ -191,7 +195,7 @@ describe("fetchMarketOverview — budget strict de requêtes (critère SECT no 2
     vi.unstubAllGlobals();
   });
 
-  it("un refresh = EXACTEMENT 3 requêtes, et /coins/markets épingle 24h,7d,30d", async () => {
+  it("un refresh = EXACTEMENT 3 requêtes, et /coins/markets épingle 1h,24h,7d,30d", async () => {
     // En env node (pas de localStorage) le cache 5 min est inopérant : le fetch a
     // toujours lieu — parfait pour compter les requêtes d'un refresh complet.
     const urls: string[] = [];
@@ -223,9 +227,38 @@ describe("fetchMarketOverview — budget strict de requêtes (critère SECT no 2
     // Budget strict : SECT n'ajoute AUCUN appel — toujours 3 requêtes par refresh.
     expect(bouchon).toHaveBeenCalledTimes(3);
     const marches = urls.find((u) => u.includes("/coins/markets"));
-    expect(marches).toContain("price_change_percentage=24h,7d,30d");
+    expect(marches).toContain("price_change_percentage=1h,24h,7d,30d");
     // Les périodes voyagent bien jusqu'aux tuiles (mêmes octets, zéro requête en plus).
     expect(overview.coins[0]?.changePct7j).toBe(2);
     expect(overview.coins[0]?.changePct30j).toBe(3);
+  });
+});
+
+describe("Δ24 h inconnu et cache d'un ancien schéma (classement MAP)", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("Δ24 h null : changePct24hConnu reste null ; la treemap garde sa convention 0", () => {
+    const [t] = parseMarkets([{ id: "figure-heloc", symbol: "figr_heloc", market_cap: 23.7e9, current_price: 1.02, price_change_percentage_24h: null }]);
+    expect(t?.changePct24hConnu).toBeNull();
+    expect(t?.changePct24h).toBe(0);
+    const [u] = parseMarkets([{ id: "bitcoin", symbol: "btc", market_cap: 1e12, price_change_percentage_24h: -0.8 }]);
+    expect(u?.changePct24hConnu).toBe(-0.8);
+  });
+
+  it("cache frais d'un ancien schéma (sans Δ24 h nullable) : rechargé, pas servi", async () => {
+    const stock = new Map<string, string>([["axiom.marketmap.overview.v1", JSON.stringify({
+      global: { totalMcapUsd: 1, totalVolumeUsd: 1, btcDominance: 1, ethDominance: 1, mcapChangePct24h: 0 },
+      coins: [{ id: "bitcoin", symbol: "BTC", name: "Bitcoin", mcapUsd: 2, price: 1, changePct24h: 0, changePct7j: null, changePct30j: null }],
+      sectors: [], fetchedAt: Date.now(),
+    })]]);
+    vi.stubGlobal("localStorage", { getItem: (k: string) => stock.get(k) ?? null, setItem: (k: string, v: string) => void stock.set(k, v), removeItem: (k: string) => void stock.delete(k) });
+    const bouchon = vi.fn(async (url: string) => ({
+      ok: true, status: 200, statusText: "OK",
+      json: async () => url.includes("/coins/markets") ? [{ id: "bitcoin", symbol: "btc", name: "Bitcoin", market_cap: 2, price_change_percentage_24h: 1.5 }] : url.includes("/global") ? { data: {} } : [],
+    }) as Response);
+    vi.stubGlobal("fetch", bouchon);
+    const overview = await fetchMarketOverview();
+    expect(bouchon).toHaveBeenCalledTimes(3);
+    expect(overview.coins[0]?.changePct24hConnu).toBe(1.5);
   });
 });

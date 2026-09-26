@@ -113,6 +113,7 @@ export const SOUS_GROUPES_DERIVES: Record<string, "perp" | "onchain" | "position
   realizedPrice: "onchain",
   ssr: "onchain",
   stablecoinSupply: "onchain",
+  stablecoinPrint: "onchain",
   lsAccountRatio: "positionnement",
   lsTopTraderRatio: "positionnement",
   takerBuySellRatio: "positionnement",

@@ -175,6 +175,7 @@ import { mvrv } from "./derivatives/mvrv";
 import { nvt } from "./derivatives/nvt";
 import { openInterest } from "./derivatives/openInterest";
 import { stablecoinSupply } from "./derivatives/stablecoinSupply";
+import { stablecoinPrint } from "./derivatives/stablecoinPrint";
 import { fundingApr } from "./derivatives/fundingApr";
 import { oiChange } from "./derivatives/oiChange";
 import { basisPct } from "./derivatives/basisPct";
@@ -409,6 +410,7 @@ export const INDICATORS: IndicatorDef[] = [
   openInterest,
   fundingRate,
   stablecoinSupply,
+  stablecoinPrint,
   nvt,
   mvrv,
   fundingZScore,

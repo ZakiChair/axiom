@@ -15,6 +15,8 @@ function tuile(partiel: Partial<CoinTile> & Pick<CoinTile, "id" | "symbol">): Co
     changePct24h: 0,
     changePct7j: 0,
     changePct30j: 0,
+    changePct1h: null,
+    changePct24hConnu: 0,
     ...partiel,
   };
 }

@@ -11,7 +11,7 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 - **Cible** : terminal pour UN utilisateur (ses propres clés). PAS de multi-tenant, PAS d'auth réseau, PAS de SaaS. Crypto d'abord (spot + perp) ; tradfi/commodités en complément.
 - **Renderer-first** : le premier livrable à valeur est un graphe live à l'écran. **AUCUN backend réseau/multi-tenant (Docker/TimescaleDB/Redis interdits). Un daemon localhost mono-process (`apps/daemon`, Bun + SQLite, port 8787) est autorisé depuis la Phase 2 — proxy/cache/persistance/alertes UNIQUEMENT, jamais sur le chemin chaud du renderer (les WS de marché du front restent directs).** Le front parle directement aux WS publics des exchanges (mode mono-utilisateur assumé) et reste **100 % fonctionnel SANS daemon** (feature-detect `/health` + repli localStorage/proxy Vite). Déviation assumée vs roadmap E1 : les proxys Vite restent en dev (dev sans daemon), le daemon est le chemin de PROD + services additionnels.
 - **Chart** : **KLineChart** figé (pas de lightweight-charts, pas d'abstraction `IChartRenderer` « swap de moteur »). L'overlay orderflow se synchronise sur le viewport de KLineChart. Multi-chart 2×2 : un store par slot ; les overlays doivent être scellés au slot (voir plan 2026-08-24, Lot 3).
-- **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**214 indicateurs** depuis le 2026-09-23, cf. « Quatre lots complémentaires du 23 septembre 2026 »). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
+- **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**215 indicateurs** depuis le 2026-09-26, cf. « Demandes du 26 septembre 2026 » ; 214 au 2026-09-23). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
 - **Données dérivées (OI/funding/L-S/liquidations)** : **ACHETER** via un `IDerivedDataProvider` (Coinalyze **câblé**, M6 atteint) — NE PAS construire d'AggregationEngine multi-exchange. Trois couches de liquidations distinctes et étiquetées : heatmap *exécutée*, niveaux **EST.** (modèle levier), niveaux **HL réels** (Hyperliquid, non exhaustif). Depuis le 2026-09-21, la heatmap exécutée reçoit aussi une venue `hyperliquid` **PARTIELLE** (fills des makers suivis, couverture mesurée affichée — cf. « Corrections et extension demandées le 21 septembre 2026 »). Depuis le 2026-09-22, la couche HL réels est aussi une **heatmap temps × prix des instantanés** collectés par le daemon (opt-in, couverture mesurée en % de l'OI — cf. « Revue et extension du 22 septembre 2026 »).
 - **Trading** : **PAS d'exécution d'ordres** — aucune clé de trading. Le paper trading (`PAPER`) est une simulation locale (hors gate G100/K8). Ne rien implémenter qui touche à des clés de trading réelles.
 - **Sources** : **9 identifiants** (`EXCHANGE_IDS` dans `@axiom/types`) — Binance, Bybit, OKX, Hyperliquid, Coinbase, Kraken, Twelve Data, MEXC, synthetic. Ne pas en ajouter sans nécessité démontrée (non-objectif avant G100).
@@ -52,7 +52,7 @@ personnelles et la provenance historique conservent leur sens. Voir la
 
 ## État actuel (2026-09-04)
 - **Chart** live multi-exchange (spot + perp), multi-grille 1/2h/2v/2×2, orderflow/CVD/footprint, volume profile, fibo, dessins.
-- **214 indicateurs** TS purs dans `@axiom/indicators` (dont 30 stratégies étiquetées « non validé ») ; **4 golden tests** pandas-ta (ADX, SuperTrend, Ichimoku, PSAR) — le reste est couvert par tests unitaires/structurels.
+- **215 indicateurs** TS purs dans `@axiom/indicators` (dont 30 stratégies étiquetées « non validé ») ; **4 golden tests** pandas-ta (ADX, SuperTrend, Ichimoku, PSAR) — le reste est couvert par tests unitaires/structurels.
 - **39 fenêtres** à mnémonique (`WINDOW_REGISTRY`) — dont WHALES (mouvements baleines on-chain + positions top comptes Hyperliquid), ajoutée le 2026-08-25 sur décision utilisateur, et BPL (Bitcoin Power Law), ajoutée le 2026-09-01 avec les séries TOTAL/TOTAL2/TOTAL3 chartables (chantier CAP/BPL) : **écarts ASSUMÉS** au gel « aucune nouvelle fenêtre avant le verdict G100 » (§ ci-dessous).
 - **Daemon** `axiomd` : proxy+cache SQLite, KV/snapshots, candles, alertes (macOS + Telegram), replay dumps Binance, couches GDELT/UCDP, LIQHL Hyperliquid paresseux, collecteur whales (blocs confirmés blockchain.info + Etherscan stables, table `whale_moves`, rétention 30 j). Bind `127.0.0.1:8787`, whitelist `/extapi`, garde Host/Origin/DNS-rebinding.
 - **Vercel** : front + proxy serverless sans secret partagé, whitelist/MIME/DNS durcis ; depuis le 2026-09-25, fonction `api/hlpool.ts` sans secret (pool réduit LIQHL, CDN 6 h). Les clés personnelles restent dans le navigateur. **Exception ACTÉE le 2026-09-14** (demande utilisateur, test communautaire) : une seule variable serveur, `BGEOMETRICS_API_KEY`, portée par `api/proxy.ts` vers bitcoin-data.com quand le client n'envoie aucune clé — clé gratuite et révocable, plafonds de l'offre gratuite (10 req/heure et 15 req/jour) partagés par les visiteurs, jamais exposée au navigateur ; toute autre clé reste personnelle (test structurel `apps/daemon/src/vercelProxy.test.ts`). Toute fonction strictement locale est marquée `UNUSABLE`, toute fenêtre partielle `PARTIAL` ; jamais de pane muet. La clé CryptoQuant (2026-09-16) relève de cette règle : personnelle, saisie dans les Réglages, repli `.env` pour le proxy Vite et le daemon `127.0.0.1` uniquement, JAMAIS de variable serveur sur Vercel (le test structurel continue d'exiger exactement une lecture d'environnement).
@@ -61,14 +61,14 @@ personnelles et la provenance historique conservent leur sens. Voir la
 
 ## Jalons historiques (atteints — ne pas rejouer, ne pas prendre comme périmètre actuel)
 - **M1 — Chart live** (`apps/web`) : Vite+React+TS+Tailwind ; client WS Binance + backfill REST ; rendu KLineChart live ; sélecteur symbole + timeframe ; crosshair. Store marché vanilla. **Atteint.**
-- **M2 — Moteur + 7 indicateurs** (`packages/indicators`) : `IndicatorDef`/`engine.ts` (calcul, helpers SMA/EMA/RMA dans `utils.ts`) ; SMA, EMA, RSI, MACD, Bollinger Bands, Volume, VWAP avec tests vs valeurs de référence (Wilder pour RSI). **Atteint et dépassé** (le catalogue est désormais à 214).
+- **M2 — Moteur + 7 indicateurs** (`packages/indicators`) : `IndicatorDef`/`engine.ts` (calcul, helpers SMA/EMA/RMA dans `utils.ts`) ; SMA, EMA, RSI, MACD, Bollinger Bands, Volume, VWAP avec tests vs valeurs de référence (Wilder pour RSI). **Atteint et dépassé** (le catalogue est désormais à 215).
 - M3 watchlist+persistance locale, M4 spike sync WebGL, M5 CVD+footprint (aggTrade), M6 `IDerivedDataProvider`→Coinalyze : **tous atteints.**
 
 ## Anti-objectifs (NE PAS faire)
 - Ne pas créer de backend **réseau/multi-tenant**, de docker-compose, de schéma DB serveur (le daemon localhost mono-process de la Phase 2 est la SEULE exception, cf. Décisions verrouillées).
 - **Avant le verdict G100** : pas de nouvelle fenêtre, pas de nouveau fournisseur sans remplacement direct d'une source défaillante (exceptions ACTÉES : fournisseurs de capitalisation CMC/CCData, fournisseurs statistiques publics OCDE/Eurostat/ONS le 2026-09-06, et CryptoQuant BASIC le 2026-09-16 sur décision explicite du propriétaire — **sans source défaillante remplacée**, l'exception est nommée comme telle — cf. Décisions verrouillées), pas de migration React/Vite/Zustand/KLineChart majeure (plan 2026-08-24, §12).
 - Ne pas « améliorer » `@axiom/types` ni les configs racine.
-- Ne pas étendre le catalogue d'indicateurs sans nécessité démontrée (le contrat est à 214, pas « plus de 7 » — l'ancien jalon M2 est historique, cf. ci-dessus).
+- Ne pas étendre le catalogue d'indicateurs sans nécessité démontrée (le contrat est à 215, pas « plus de 7 » — l'ancien jalon M2 est historique, cf. ci-dessus).
 
 ### Garde-fous reportés de la roadmap (docs/research/03, §Anti-recommandations)
 Les anti-recommandations #2 (Docker/Redis/TimescaleDB), #3 (proxifier les WS via le daemon) et #6 (abstraction de moteur de chart) sont déjà couvertes ci-dessus et dans les Décisions verrouillées. Les 6 restantes, à respecter tout autant :
@@ -833,3 +833,75 @@ clavier échouent sans leurs gardes). Budget d'entrée **1 195 412 octets bruts 
 plafonds 1 220 000 / 360 000 inchangés. Revue indépendante sous trois angles (calcul,
 robustesse, contrat et budget), puis contre-revue ; leurs points bloquant, importants
 et mineurs retenus sont corrigés ci-dessus.
+
+## Classement, impression de stablecoins et dessins (26 septembre 2026)
+
+Le propriétaire a demandé trois changements : un classement des actifs les plus performants
+(comme l'accueil de CoinGlass), l'impression quotidienne de stablecoins sous le graphique, et
+la correction des rectangles qui se déplacent en passant d'un graphique à un autre. **39
+fenêtres, 215 indicateurs (+1), 9 identifiants de marché. Aucune dépendance, aucun hôte ni
+fournisseur, aucune règle de proxy ; `@axiom/types` inchangé.** Une revue indépendante (trois
+angles, constats contre-vérifiés) a été suivie d'un second commit de corrections.
+
+1. **Classement : onglet « Classement » de MAP, mnémonique `TOP`.** C'est un onglet, pas une
+   nouvelle fenêtre.
+   - Données : les tuiles CoinGecko de la carte (top 250, cache 5 min). La requête
+     `/coins/markets` ajoute seulement la période `1h` : toujours 3 requêtes par
+     rafraîchissement.
+   - Affichage : rang, prix, Δ 1 h / 24 h / 7 j / 30 j, volume 24 h, capitalisation ; choix
+     hausses ou baisses, top 100 ou 250, « Hors stablecoins » (liste connue, ancrages non USD
+     et jetons de trésorerie compris, ou prix ancré à 1 $ sans mouvement) ; nombre de hausses,
+     de baisses et médiane.
+   - Un actif sans variation connue sur la période sort du classement, sans 0 inventé. Le Δ24 h
+     a pour cela un champ nullable dédié (`changePct24hConnu`) ; la treemap garde sa convention
+     0. Un cache d'un ancien schéma est rechargé au lieu d'être servi.
+   - Clic ou Entrée sur une ligne : la paire `SYMBOLEUSDT` ne s'ouvre que si un catalogue la
+     cote ET si son dernier prix sur CHAQUE place qui la cote reste dans ×0,8 – ×1,25 du prix
+     CoinGecko. Un ticker n'est pas unique : AIUSDT est Sleepless AI, pas Artificial Inu. Sinon,
+     aucune navigation, et la raison est affichée. Les lignes non navigables sont estompées, avec
+     une infobulle.
+   - `MAP` et `IMAP` rouvrent sur la carte ; `TOP` ouvre sur le classement sans fermer la
+     fenêtre.
+2. **Impression de stablecoins : `stablecoinPrint`, pane séparé, unité 1d SEULEMENT.**
+   - Mesure : variation nette quotidienne du stock circulant de stablecoins valorisé en USD
+     (DefiLlama, série auxiliaire `stablecoins` existante, tous ancrages convertis en USD).
+   - Ce n'est PAS une mesure des mint/burn. La variation inclut les effets de change et les
+     changements de couverture. Les sorties s'appellent « Hausse nette de l'offre » et « Baisse
+     nette de l'offre » (règle « ni d'interprétation mint/burn » ci-dessus) ; le nom
+     « Impression de stablecoins (Δ offre / jour) » reprend le mot du propriétaire.
+   - Unité : `minTimeframe` 1d, et `supportsIndicatorTimeframe` n'admet que 1d (table
+     `TIMEFRAME_REQUIS`, commune au graphe, aux alertes et au backtest, avec le RVOL saisonnier
+     en 1h). Le point DefiLlama daté D porte la dernière valeur du jour D : en intrajournalier,
+     il serait lu dès 00:00 (anticipation) ; en 1w, la bougie du lundi lirait la semaine
+     précédente.
+   - Une valeur reportée à l'identique ne fait aucune barre. La bougie non clôturée (point
+     réécrit en cours de journée) va dans « Jour en cours (partiel) », en gris, hors de la
+     moyenne.
+   - Moyenne au plus 60 jours (la série couvre 90 jours) ; légende et axe abrégés (K/M/B),
+     comme pour l'offre de stablecoins.
+3. **Dessins dont un point est hors des bougies chargées.** Dans klinecharts 9.8, un point
+   posé à droite de la dernière bougie (ou avant la première) n'a qu'un `dataIndex`.
+   - Cause : la sauvegarde ne gardait que `{timestamp, value}`. Le point revenait donc sans
+     abscisse au rejeu (changement d'actif, d'unité de temps, de disposition, rechargement), et
+     le dessin se déformait vers le bord gauche.
+   - Sauvegarde : l'instant est extrapolé (mois UTC en 1M et au-delà ; sinon au pas des bougies,
+     ou à la durée de l'unité de temps s'il y a moins de deux bougies).
+   - Rejeu : un instant hors des bougies devient un indice extrapolé, que klinecharts rabattait
+     sur la première ou la dernière bougie.
+   - Historique préfixé : quand la première bougie change (extension de session, resync,
+     pagination), TOUS les dessins sont rejoués depuis leurs instants. klinecharts ne décale pas
+     l'indice en `applyNewData`. Parcours `e2e/dessins-hors-bougies` : −1 661 barres sans ce
+     rejeu, 0 avec.
+   - Le VPFR borne une plage dont un bord n'a qu'un indice (bougies chargées) au lieu de
+     disparaître.
+   - Limites :
+     - en TradFi, nuits et week-ends sont extrapolés comme des bougies de même durée (instant
+       approché), et un instant futur peut ensuite être rabattu sur la bougie la plus proche ;
+     - un dessin déjà sauvegardé par l'ancien code a perdu l'abscisse de son point futur et doit
+       être retracé ;
+     - les dessins restent indexés par slot, place et symbole (changer de place masque ceux de
+       l'ancienne).
+
+Validation : indicateurs 844, backtest 114, alertes 62, web 5 429 tests, typage
+monorepo, e2e `dessins-hors-bougies` et `multivue` deux fois de suite. Budget d'entrée en
+Node 24 (zlib 1.3.x) : voir le commit de corrections ; plafonds 1 220 000 / 360 000 inchangés.

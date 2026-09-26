@@ -1,12 +1,14 @@
 /**
  * Panneau « Vue marché » (IMAP) — dockable à droite, NON MODAL (pas d'overlay).
  *
- * Deux onglets :
+ * Trois onglets :
  *   • Carte    : treemap canvas des ~100 premières cryptos par capitalisation.
  *                Taille de tuile = mcap ; couleur = Δ24 h (dégradé down→up, tokens de
  *                thème). Survol = détails (tooltip) ; CLIC = ouvre la paire sur le chart
  *                (résolution symbole→USDT Binance best-effort, sinon rien).
  *   • Secteurs : barres de performance 24 h par catégorie CoinGecko.
+ *   • Classement : actifs les plus performants sur 1 h / 24 h / 7 j / 30 j (façon accueil
+ *                CoinGlass), mêmes tuiles — ouvert aussi par le mnémonique TOP.
  * En-tête : mcap total, dominance BTC/ETH, volume 24 h, Fear & Greed.
  *
  * Données via data/marketOverview (CoinGecko public + F&G proxifié /extapi), cache
@@ -22,6 +24,7 @@ import { useStore } from "zustand";
 import type { Commande } from "../commands/registry"; // type-only : aucune dépendance runtime croisée
 import { themeStore } from "../store/theme";
 import { marketMapUiStore } from "../store/marketmap-ui";
+import { ClassementPerformances } from "./ClassementPerformances";
 import { fetchPairs } from "../data/pairs";
 import { squarify, type Rect, type Tuile } from "../lib/treemap";
 import { formatPct, formatPourcentage, formatUsd } from "../lib/format";
@@ -227,7 +230,8 @@ export function MarketMapWindow() {
   const open = useStore(marketMapUiStore, (s) => s.open);
   const themeId = useStore(themeStore, (s) => s.theme); // redessine au changement de thème
 
-  const [tab, setTab] = useState<"carte" | "secteurs">("carte");
+  const tab = useStore(marketMapUiStore, (s) => s.onglet);
+  const setTab = marketMapUiStore.getState().setOnglet;
   const [overview, setOverview] = useState<MarketOverview | null>(null);
   const [fng, setFng] = useState<FearGreed | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -426,6 +430,7 @@ export function MarketMapWindow() {
         options={[
           { id: "carte", label: "Carte" },
           { id: "secteurs", label: "Secteurs" },
+          { id: "classement", label: "Classement" },
         ]}
         actif={tab}
         onChange={setTab}
@@ -453,9 +458,13 @@ export function MarketMapWindow() {
             />
           )}
         </div>
-      ) : (
+      ) : tab === "secteurs" ? (
         <div className="min-h-0 flex-1 overflow-hidden">
           <SectorsTab overview={overview} />
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <ClassementPerformances coins={overview?.coins ?? []} loading={loading} />
         </div>
       )}
 

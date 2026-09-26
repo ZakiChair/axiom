@@ -38,7 +38,7 @@ const rsi: ActiveIndicator = { instanceId: "gn-rsi", defId: "rsi", params: { len
 
 afterEach(() => vi.restoreAllMocks());
 
-describe("pont — abréviation réservée au volume piégé", () => {
+describe("pont — abréviation réservée aux séries à très grands nombres", () => {
   it("template trappedVolume `shouldFormatBigNumber`, sans toucher au formateur du graphe", () => {
     const { chart, indicators } = monter();
     indicators.sync([rsi, piege], [], "binance");
@@ -47,6 +47,17 @@ describe("pont — abréviation réservée au volume piégé", () => {
     // « -20.795K ») dès que trappedVolume y avait été ajouté, et le gardait après son retrait.
     indicators.sync([rsi], [], "binance");
     expect(chart.setCustomApi).not.toHaveBeenCalled();
+  });
+
+  it("impression et offre de stablecoins (milliards de $) : abrégées aussi", () => {
+    const { indicators } = monter();
+    indicators.setMarket("BTCUSDT", "1d");
+    indicators.sync([
+      { instanceId: "gn-stbl", defId: "stablecoinPrint", params: {}, couleurIdx: 2 },
+      { instanceId: "gn-offre", defId: "stablecoinSupply", params: {}, couleurIdx: 3 },
+    ], [], "binance");
+    expect(enregistres.find((t) => t.name === "AXIOM_gn-stbl")?.shouldFormatBigNumber).toBe(true);
+    expect(enregistres.find((t) => t.name === "AXIOM_gn-offre")?.shouldFormatBigNumber).toBe(true);
   });
 
   it("les autres indicateurs gardent l'affichage KLineChart par défaut", () => {

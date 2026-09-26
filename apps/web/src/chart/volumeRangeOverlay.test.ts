@@ -6,7 +6,7 @@
  * OUVERTE avant lui (dernier index dont l'open <= t).
  */
 import { describe, expect, it, vi } from "vitest";
-import { rangeIndices } from "./volumeRangeOverlay";
+import { instantBorne, rangeIndices } from "./volumeRangeOverlay";
 
 // volumeRangeOverlay.ts appelle `registerOverlay` au chargement du module ; le build
 // UMD de klinecharts ne s'évalue pas hors navigateur (pas de `window`), donc on stub
@@ -47,5 +47,30 @@ describe("rangeIndices", () => {
 
   it("plage réduite à une seule bougie", () => {
     expect(rangeIndices(times, 22, 28)).toEqual({ from: 1, to: 1 });
+  });
+});
+
+describe("instantBorne — borne d'un VPFR rejouée hors des bougies chargées", () => {
+  const times = [1000, 2000, 3000, 4000];
+  it("instant présent : utilisé tel quel", () => {
+    expect(instantBorne({ timestamp: 2500, dataIndex: 1 }, times)).toBe(2500);
+  });
+  it("indice seul dans la plage : instant de sa bougie", () => {
+    expect(instantBorne({ dataIndex: 2 }, times)).toBe(3000);
+  });
+  it("indice avant la première bougie / après la dernière : juste hors plage (bornée, pas disparue)", () => {
+    const avant = instantBorne({ dataIndex: -4320 }, times)!;
+    const apres = instantBorne({ dataIndex: 529 }, times)!;
+    expect(avant).toBeLessThan(1000);
+    expect(apres).toBeGreaterThan(4000);
+    // Rejeu en 1m d'un VPFR tracé en 1h : bord gauche avant le backfill → plage sur toutes les bougies chargées.
+    expect(rangeIndices(times, avant, 3000)).toEqual({ from: 0, to: 2 });
+    expect(rangeIndices(times, 2000, apres)).toEqual({ from: 1, to: 3 });
+    // Les deux bords du même côté : toujours hors données.
+    expect(rangeIndices(times, avant, instantBorne({ dataIndex: -2 }, times)!)).toBeNull();
+  });
+  it("ni instant ni indice : aucune borne", () => {
+    expect(instantBorne({}, times)).toBeUndefined();
+    expect(instantBorne({ dataIndex: 1 }, [])).toBeUndefined();
   });
 });

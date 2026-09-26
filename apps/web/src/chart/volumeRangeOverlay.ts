@@ -51,6 +51,19 @@ export function rangeIndices(
   return { from: lastIndexLE(times, lo), to: lastIndexLE(times, hi) };
 }
 
+/**
+ * Instant d'une borne. Un point rejoué hors des bougies chargées n'a qu'un `dataIndex`
+ * (cf. drawing.ts) : sa bougie s'il est dans la plage, sinon un instant juste avant la
+ * première ou après la dernière, que `rangeIndices` borne. `undefined` si rien d'exploitable.
+ */
+export function instantBorne(p: { timestamp?: number; dataIndex?: number } | undefined, times: readonly number[]): number | undefined {
+  if (typeof p?.timestamp === "number") return p.timestamp;
+  const i = p?.dataIndex;
+  const n = times.length;
+  if (typeof i !== "number" || n === 0) return undefined;
+  return i < 0 ? times[0]! - 1 : i >= n ? times[n - 1]! + 1 : times[i];
+}
+
 /** Dernier index i tel que times[i] <= t (0 si aucun — appelant garant hi >= first). */
 function lastIndexLE(times: readonly number[], t: number): number {
   let res = 0;
@@ -108,14 +121,7 @@ function buildFigures(params: OverlayCreateFiguresCallbackParams): OverlayFigure
   const p1 = overlay.points[1];
   const c0 = coordinates[0];
   const c1 = coordinates[1];
-  if (
-    p0?.timestamp === undefined ||
-    p1?.timestamp === undefined ||
-    c0 === undefined ||
-    c1 === undefined
-  ) {
-    return [];
-  }
+  if (c0 === undefined || c1 === undefined) return [];
   if (!isVpfrChart(overlay.extendData)) return [];
   const chart = overlay.extendData;
 
@@ -126,7 +132,10 @@ function buildFigures(params: OverlayCreateFiguresCallbackParams): OverlayFigure
     if (typeof d.timestamp === "number") times.push(d.timestamp);
   }
 
-  const range = rangeIndices(times, p0.timestamp, p1.timestamp);
+  const t0 = instantBorne(p0, times);
+  const t1 = instantBorne(p1, times);
+  if (t0 === undefined || t1 === undefined) return [];
+  const range = rangeIndices(times, t0, t1);
   if (range === null) return [];
 
   const candles: Candle[] = [];

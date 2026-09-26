@@ -172,7 +172,7 @@ const listeParBinance = (catalog: MarketCatalog, symbol: string) =>
 const REESSAI_PROVENANCE_MS = 30_000;
 /** Attente des mesures de profondeur d'un favori (une sonde de bougies est bornée à 15 s). */
 const ATTENTE_PROFONDEUR_MS = 15_000;
-/** Doute borné (une autre place reste sans mesure) : 5 min, soit 10 réessais de 30 s. */
+/** Doute borné (une place reste sans mesure) : 5 min, soit 10 réessais de 30 s. */
 const DUREE_DOUTE_MS = 5 * 60_000;
 /** Un actif TradFi sans source attend l'ouverture de son marché : vérifiée chaque minute, sans réseau. */
 const ATTENTE_OUVERTURE_TRADFI_MS = 60_000;
@@ -186,7 +186,7 @@ export interface SessionProvenances {
   tradfiEnVol: Set<string>;
   /** Replis confirmés pendant une panne du catalogue Binance : reclassés quand il les liste. */
   provisoires: Set<string>;
-  /** Début du doute d'un favori (une autre place sans mesure), borné à 5 min, remontage compris. */
+  /** Début du doute d'un favori (une place sans mesure), borné à 5 min, remontage compris ; oublié à son retrait. */
   doutes: Map<string, number>;
 }
 export const nouvelleSessionProvenances = (): SessionProvenances => ({ confirmees: new Map(), tradfiSondes: new Set(), tradfiEnVol: new Set(), provisoires: new Set(), doutes: new Map() });
@@ -206,14 +206,18 @@ const SESSION_PROVENANCES = nouvelleSessionProvenances();
  *    prix est retenu ;
  *  - les mesures de profondeur sont attendues 15 s (une panne revient vite), au rang des favoris :
  *    derrière celles du graphe, devant celles de la recherche ;
- *  - une autre place confirmée sans mesure (échec gardé 60 s, mesure encore en vol) pourrait afficher
- *    plus d'historique que la place retenue ; par prudence elle compte même quand le plafond de ses
- *    bougies la classe dessous (OKX 1 440, Kraken 500 : le doute ne coûte alors qu'un report). Rien
- *    n'est alors confirmé : une source enregistrée reste la sienne, sans sonde ; un favori sans source
+ *  - une place confirmée sans mesure (échec gardé 60 s, mesure encore en vol), dès que le favori en a
+ *    deux, peut changer la tête. Une autre pourrait afficher plus d'historique que la place retenue ;
+ *    par prudence elle compte même quand le plafond de ses bougies la classe dessous (OKX 1 440,
+ *    Kraken 500 : le doute ne coûte alors qu'un report). La place retenue elle-même, en tête au
+ *    bénéfice du doute, pourrait en afficher moins (binance:HYPEUSDT, sonde Binance encore en vol
+ *    après 15 s : Bybit dès sa mesure). Rien n'est alors confirmé : une source enregistrée reste la
+ *    sienne, sans sonde ; un favori sans source
  *    (ou démentie par son catalogue) affiche, à titre provisoire, le prix de la place retenue. Réessai
  *    à chaque passe (30 s), 5 min au plus depuis le premier doute, puis confirmation définitive :
  *    binance:HYPEUSDT, sonde Bybit en échec une fois, passe sur Bybit à la première passe après
- *    l'expiration de l'échec (60 à 90 s), jamais sur OKX entre-temps ;
+ *    l'expiration de l'échec (60 à 90 s), jamais sur OKX entre-temps. Un favori retiré oublie son
+ *    doute : rajouté, il retrouve ses 5 min ;
  *  - une source enregistrée en tête et confirmée par son catalogue l'est sans sonde : un ticker en
  *    panne ou lent ne la déplace jamais. Sinon ne sont sondées que les places classées au-dessus
  *    d'elle, puis elle, jamais une place classée dessous ; sans prix, le favori garde sa source,
@@ -226,7 +230,8 @@ const SESSION_PROVENANCES = nouvelleSessionProvenances();
  *    candidate : classement complet sans elle (un ticker Binance d'une paire suspendue répond
  *    encore, à un prix figé) ;
  *  - un graphe prêt ne retient la place d'un favori sans source que si elle est en tête du
- *    classement 1h (graphe binance:HYPEUSDT en 1s, propre à Binance : le favori va sur Bybit). Une
+ *    classement 1h, même quand aucun ticker ne répond (graphe binance:HYPEUSDT en 1s, propre à
+ *    Binance : le favori va sur Bybit) ; un graphe prêt hors watchlist n'est ni classé ni mesuré. Une
  *    source enregistrée est classée comme les autres : un graphe prêt sur elle (1s, restauré à chaque
  *    session) ne prouve que son prix, retenu si aucune place au-dessus n'en a ; ailleurs (autre unité
  *    de temps : HYPEUSD OKX en 1d, Coinbase en 1h), il ne l'écrase jamais ;
@@ -282,22 +287,32 @@ export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => v
     return affiche === symbol && dataLoad.status === "ready" && (source ?? exchange) === exchange ? exchange : undefined;
   };
   const connue = (c: ResolvedMarket) => debutAccessible(c.exchange, c.symbol, "1h") !== undefined;
+  /** Favori d'un groupe quelconque : `setSource` ignore tout autre actif. */
+  const favori = (symbol: string) => watchlistStore.getState().groups.some((g) => g.symbols.includes(symbol));
+  /** Doute d'un favori retiré de tous les groupes oublié : rajouté, il retrouve ses 5 min. */
+  const oublierRetires = () => {
+    for (const symbol of doutes.keys()) if (!favori(symbol)) doutes.delete(symbol);
+  };
   /**
-   * Une autre place du favori reste sans mesure : classée au-dessus de `place` ou à égalité avec
-   * elle au palier 0, elle pourrait afficher plus d'historique. Par prudence, toute place confirmée
-   * sans mesure compte, même classée dessous (le plafond de ses bougies peut l'exclure de la tête :
-   * le doute ne coûte alors qu'un report). Vrai pendant 5 min depuis le premier doute (des passes
-   * rapprochées, ajouts ou catalogue republié, ne l'écourtent pas) ; un essai spéculatif (catalogue
-   * en panne), jamais mesuré ici, ne compte pas.
+   * Une place du favori reste sans mesure, dès qu'il en a au moins deux :
+   *  - une autre, classée au-dessus de `place` ou à égalité avec elle au palier 0, pourrait afficher
+   *    plus d'historique. Par prudence, elle compte même classée dessous (le plafond de ses bougies
+   *    peut l'exclure de la tête : le doute ne coûte alors qu'un report) ;
+   *  - `place` elle-même, en tête au bénéfice du doute (binance:HYPEUSDT, sonde Binance encore en vol
+   *    après 15 s) : rien ne prouve qu'elle passe devant Bybit, mesuré.
+   * Vrai pendant 5 min depuis le premier doute (des passes rapprochées, ajouts ou catalogue
+   * republié, ne l'écourtent pas) ; un essai spéculatif (catalogue en panne), jamais mesuré ici,
+   * ne compte pas.
    */
   const enDoute = (symbol: string, place: WatchlistSource, classes: readonly ResolvedMarket[]): boolean => {
-    if (!classes.some((c) => c.exchange !== place && !c.speculative && !connue(c))) return false;
+    const mesurables = classes.filter((c) => !c.speculative);
+    if (!mesurables.some((c) => c.exchange !== place) || mesurables.every(connue)) return false;
     const depuis = doutes.get(symbol) ?? Date.now();
     doutes.set(symbol, depuis);
     return Date.now() - depuis < DUREE_DOUTE_MS;
   };
   /**
-   * Place retenue par une passe : confirmée, ou seulement affichée tant qu'une autre place reste sans
+   * Place retenue par une passe : confirmée, ou seulement affichée tant qu'une place reste sans
    * mesure (`provisoire` : favori sans source valide ; une source enregistrée reste la sienne).
    */
   const retenir = (symbol: string, initialSource: WatchlistSource | undefined, place: WatchlistSource, classes: readonly ResolvedMarket[], provisoire: boolean) => {
@@ -337,7 +352,7 @@ export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => v
       if (signal?.aborted) return;
       const rang = classes.findIndex((c) => c.exchange === initialSource);
       const source = classes[rang];
-      // Source enregistrée, une autre place encore sans mesure : gardée, sans sonde, jusqu'à la passe suivante.
+      // Source enregistrée, une place encore sans mesure (elle comprise) : gardée, sans sonde, jusqu'à la passe suivante.
       if (source && enDoute(symbol, source.exchange, classes)) return;
       // Sans source (ou démentie), un graphe prêt ne vaut preuve qu'en tête du classement 1h.
       const graphe = source ? undefined : placeDuGraphe(symbol);
@@ -347,8 +362,10 @@ export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => v
         : essais[0] === source && !source?.speculative ? source
         : await resolveTickerMarket(identite, signal, courant, essais);
       if (signal?.aborted) return;
-      // Un vrai prix l'emporte ; sinon un graphe prêt sur la source (ou sur un favori sans source) la prouve.
-      const retenue = resolved?.exchange ?? placeDuGraphe(symbol, initialSource);
+      // Un vrai prix l'emporte ; sinon un graphe prêt prouve la source, ou la place d'un favori sans
+      // source si elle est en tête du classement 1h (sinon, réessai dans 30 s).
+      const repli = placeDuGraphe(symbol, initialSource);
+      const retenue = resolved?.exchange ?? (source || repli === classes[0]?.exchange ? repli : undefined);
       if (retenue) retenir(symbol, initialSource, retenue, classes, !source);
     } catch { /* Sans prix confirmé : crypto réessayée au catalogue ou dans 30 s, TradFi à la liste. */ }
   }
@@ -404,8 +421,9 @@ export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => v
     ajusterAttente(enAttente);
   }
 
-  // Démenties pendant le démontage (favori retiré puis rajouté) : oubliées avant la 1re passe.
+  // Démenties ou retirées pendant le démontage : oubliées avant la 1re passe.
   oublierDementies();
+  oublierRetires();
   const recevoir = (value: MarketCatalog) => {
     // Catalogue Binance revenu : les replis provisoires qu'il liste sont reclassés (resondés).
     if (!value.unavailableSources.includes("binance")) {
@@ -421,6 +439,7 @@ export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => v
   const cleListe = (symbols: readonly string[]) => symbols.slice().sort().join(",");
   let liste = cleListe(watchlistStore.getState().symbols);
   const stopListe = watchlistStore.subscribe((state) => {
+    oublierRetires();
     const suivante = cleListe(state.symbols);
     // Une source confirmée changée ailleurs (réhydratation daemon, autre appareil) est resondée.
     if (!oublierDementies() && suivante === liste) return;
@@ -430,8 +449,10 @@ export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => v
     sonderTradfi();
   });
   // Graphe devenu prêt sur un favori sans source : sa place, si elle est en tête du classement 1h
-  // (jamais de sonde de prix ici : celles de la passe en cours restent en vol).
+  // (jamais de sonde de prix ici : celles de la passe en cours restent en vol). Un actif hors
+  // watchlist n'est ni classé ni mesuré.
   const stopMarche = marketStore.subscribe((state, avant) => {
+    if (!favori(state.symbol)) return;
     const place = watchlistStore.getState().sources[state.symbol] ? undefined : placeDuGraphe(state.symbol);
     const dejaPret = avant.dataLoad.status === "ready" && avant.symbol === state.symbol && avant.exchange === state.exchange;
     if (place && !dejaPret && catalog && passe) void grapheEnTete(state.symbol, place, passe.signal, catalog);

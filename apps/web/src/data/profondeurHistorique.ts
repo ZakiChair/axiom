@@ -1,7 +1,8 @@
 /**
  * Profondeur d'historique par place spot : date de la plus ancienne bougie que SON adaptateur
  * sait servir. Sert au routage (la place la plus profonde passe devant). Simple CACHE (mémoire +
- * localStorage 25 à 35 j), pas une donnée personnelle : hors sauvegarde locale et daemon.
+ * localStorage 25 à 35 j), pas une donnée personnelle : non recopié par le daemon ; inclus dans
+ * l'export JSON comme les autres caches (eco, cot).
  */
 import type { ExchangeId, Timeframe } from "@axiom/types";
 import { getAdapter } from "./adapters";
@@ -34,9 +35,10 @@ const SONDES: Partial<Record<ExchangeId, [Timeframe, number, number?]>> = {
 const AFFINAGE: Partial<Record<ExchangeId, number>> = { binance: 1_000, bybit: 1_000, mexc: 1_000, kraken: 720, okx: 300 };
 /**
  * Bougies que le graphe obtient au plus : OKX /market/candles (1 440 dernières), Kraken (backfill
- * de 500, sans pagination : endTime ignoré), Hyperliquid.
+ * de 500, sans pagination : endTime ignoré). Hyperliquid, sans sonde et seul classé pour son perp,
+ * n'en a pas besoin.
  */
-const PLAFONDS: Partial<Record<ExchangeId, number>> = { okx: 1_440, kraken: 500, hyperliquid: 5_000 };
+const PLAFONDS: Partial<Record<ExchangeId, number>> = { okx: 1_440, kraken: 500 };
 /** Écart minimal entre deux départs de sonde sur une même place (ms) ; 50 ms ailleurs. */
 const ESPACEMENTS: Partial<Record<ExchangeId, number>> = { kraken: 1_000, coinbase: 200, okx: 70 };
 const RANGS: Record<PrioriteMesure, number> = { graphe: 0, favoris: 1, recherche: 2 };

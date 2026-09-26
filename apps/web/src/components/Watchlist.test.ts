@@ -12,7 +12,7 @@ import * as profondeur from "../data/profondeurHistorique";
 import * as ticker from "../data/ticker";
 import { marketStore } from "../store/market";
 import { ajouterAWatchlist } from "../store/screener";
-import { watchlistStore } from "../store/watchlist";
+import { PRINCIPAL_GROUP_ID, watchlistStore } from "../store/watchlist";
 
 // store/screener tire lib/navigation (klinecharts, pont de dessin) : stubs inertes hors navigateur.
 vi.mock("klinecharts", () => ({ registerOverlay: () => {} }));
@@ -407,6 +407,48 @@ describe("provenances des favoris", () => {
     expect(urls).toHaveLength(1);
   });
 
+  it.each([
+    ["binance:HYPEUSDT enregistré, gardé sans sonde", { HYPEUSDT: "binance" }, []],
+    ["HYPEUSDT sans source, prix Binance affiché à titre provisoire", {}, [BINANCE("HYPEUSDT")]],
+  ] as const)("mesure Binance encore en vol après 15 s, Bybit et OKX mesurés : Binance, en tête au bénéfice du doute, n'est pas confirmé (%s) ; Bybit dès que la mesure Binance entre", async (_cas, sources, avant) => {
+    watchlistStore.getState().setAll(["HYPEUSDT"], sources);
+    catalogue(HYPE());
+    const table: Record<string, number> = { "bybit:HYPEUSDT": P_HYPE["bybit:HYPEUSDT"], "okx:HYPEUSDT": P_HYPE["okx:HYPEUSDT"] };
+    profondeurs(table);
+    const urls = reseau();
+    const session = nouvelleSessionProvenances();
+    stop = suivreProvenancesFavoris(session);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "binance" });
+    expect(session.confirmees.has("HYPEUSDT")).toBe(false);
+    expect(urls).toEqual(avant);
+    // Sonde Binance finie à 20 s : sa semaine d'historique la classe sous Bybit.
+    table["binance:HYPEUSDT"] = P_HYPE["binance:HYPEUSDT"];
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "bybit" });
+    expect(urls).toEqual([...avant, BYBIT]);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(urls).toHaveLength(avant.length + 1);
+  });
+
+  it("binance:HYPEUSDT, mesure Binance toujours en échec, Bybit et OKX mesurés : 5 min sans confirmation (10 réessais), puis Binance confirmé définitivement, sans sonde", async () => {
+    watchlistStore.getState().setAll(["HYPEUSDT"], { HYPEUSDT: "binance" });
+    catalogue(HYPE());
+    profondeurs({ "bybit:HYPEUSDT": P_HYPE["bybit:HYPEUSDT"], "okx:HYPEUSDT": P_HYPE["okx:HYPEUSDT"] });
+    const urls = reseau();
+    const session = nouvelleSessionProvenances();
+    stop = suivreProvenancesFavoris(session);
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1_000);
+    expect(session.confirmees.has("HYPEUSDT")).toBe(false);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "binance" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(session.confirmees.get("HYPEUSDT")).toBe("binance");
+    expect(session.doutes.size).toBe(0);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "binance" });
+    expect(urls).toEqual([]);
+  });
+
   it("HYPEUSDT ajouté sans source, toutes les mesures en échec : prix Binance affiché à titre provisoire, Bybit dès que sa mesure revient", async () => {
     watchlistStore.getState().setAll(["HYPEUSDT"]);
     catalogue(HYPE());
@@ -454,6 +496,38 @@ describe("provenances des favoris", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "okx" });
     expect(urls).toEqual([OKX("HYPE-USDT")]);
+  });
+
+  it("binance:HYPEUSDT retiré pendant son doute (Bybit sans mesure) puis rajouté 2 min plus tard : 5 min de doute complètes, pas une fenêtre déjà échue", async () => {
+    watchlistStore.getState().setAll(["HYPEUSDT"], { HYPEUSDT: "binance" });
+    catalogue(HYPE());
+    profondeurs({ "binance:HYPEUSDT": P_HYPE["binance:HYPEUSDT"], "okx:HYPEUSDT": P_HYPE["okx:HYPEUSDT"] });
+    const urls = reseau();
+    const session = nouvelleSessionProvenances();
+    stop = suivreProvenancesFavoris(session);
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    expect(session.doutes.has("HYPEUSDT")).toBe(true);
+    watchlistStore.getState().remove("HYPEUSDT");
+    expect(session.doutes.has("HYPEUSDT")).toBe(false);
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    watchlistStore.getState().add("HYPEUSDT", "binance");
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1_000);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "binance" });
+    expect(urls).toEqual([]);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "okx" });
+    expect(urls).toEqual([OKX("HYPE-USDT")]);
+  });
+
+  it("un favori retiré pendant le démontage (plein écran) oublie son doute au remontage ; celui d'un favori resté est gardé", async () => {
+    const session = nouvelleSessionProvenances();
+    session.doutes.set("HYPEUSDT", Date.now() - 4 * 60_000);
+    session.doutes.set("VIRTUALUSDT", Date.now() - 4 * 60_000);
+    watchlistStore.getState().setAll(["VIRTUALUSDT"], { VIRTUALUSDT: "okx" });
+    catalogue(spot(["binance", "VIRTUALUSDT"], ["okx", "VIRTUALUSDT"]));
+    reseau();
+    stop = suivreProvenancesFavoris(session);
+    expect([...session.doutes.keys()]).toEqual(["VIRTUALUSDT"]);
   });
 
   it("catalogue Binance indisponible : un favori Binance n'est sondé que sur Binance, sa source ne change jamais", async () => {
@@ -742,6 +816,25 @@ describe("provenances des favoris", () => {
     expect(urls).toEqual([BYBIT]);
   });
 
+  it("favori HYPEUSDT sans source, graphe prêt sur Binance en 1s, aucun ticker ne répond : la place du graphe, hors tête du classement 1h, n'est pas retenue ; Bybit à son retour", async () => {
+    watchlistStore.getState().setAll(["HYPEUSDT"]);
+    catalogue(HYPE());
+    profondeurs(P_HYPE);
+    const sansPrix = new Set(["binance:HYPEUSDT", "bybit:HYPEUSDT", "okx:HYPEUSDT"]);
+    const urls = reseau(sansPrix);
+    graphePret("binance", "HYPEUSDT", "1s");
+    const session = nouvelleSessionProvenances();
+    stop = suivreProvenancesFavoris(session);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(urls).toEqual([BYBIT, OKX("HYPE-USDT"), BINANCE("HYPEUSDT")]);
+    expect(watchlistStore.getState().sources).toEqual({});
+    expect(session.confirmees.size).toBe(0);
+    sansPrix.delete("bybit:HYPEUSDT");
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "bybit" });
+    expect(session.confirmees.get("HYPEUSDT")).toBe("bybit");
+  });
+
   it("les ticks d'un graphe prêt (binance:HYPEUSDT en 1s, une bougie par seconde) ne relancent pas le classement d'un favori sans source", async () => {
     watchlistStore.getState().setAll(["HYPEUSDT"]);
     catalogue(HYPE());
@@ -767,6 +860,42 @@ describe("provenances des favoris", () => {
     stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(90_000);
     expect(watchlistStore.getState().sources).toEqual({ HYPEUSDT: "bybit" });
+    expect(urls).toEqual([]);
+  });
+
+  it("graphe devenu prêt sur bybit:HYPEUSDT, hors watchlist : ni classement, ni mesure, ni doute amorcé pour un ajout ultérieur", async () => {
+    watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "binance" });
+    catalogue(spot(["binance", "BTCUSDT"], ...HYPE().instruments.map((i): [ExchangeId, string] => [i.exchange, i.symbol])));
+    // OKX sans mesure : un classement de HYPEUSDT ouvrirait sa fenêtre de doute.
+    profondeurs({ "binance:HYPEUSDT": P_HYPE["binance:HYPEUSDT"], "bybit:HYPEUSDT": P_HYPE["bybit:HYPEUSDT"] });
+    const urls = reseau();
+    const session = nouvelleSessionProvenances();
+    stop = suivreProvenancesFavoris(session);
+    await vi.advanceTimersByTimeAsync(0);
+    const classement = vi.spyOn(routing, "resolveMarketCandidates");
+    const mesures = vi.mocked(profondeur.mesurerProfondeurs).mock.calls.length;
+    graphePret("bybit", "HYPEUSDT");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(classement).not.toHaveBeenCalled();
+    expect(vi.mocked(profondeur.mesurerProfondeurs).mock.calls.length).toBe(mesures);
+    expect(session.doutes.size).toBe(0);
+    expect(urls).toEqual([]);
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance" });
+  });
+
+  it("graphe devenu prêt sur bybit:HYPEUSDT, favori sans source d'un autre groupe : Bybit, en tête du classement 1h, est retenu comme avant", async () => {
+    watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "binance" });
+    watchlistStore.getState().addGroup("Alts");
+    watchlistStore.getState().add("HYPEUSDT");
+    watchlistStore.getState().setActiveGroup(PRINCIPAL_GROUP_ID);
+    catalogue(spot(["binance", "BTCUSDT"], ...HYPE().instruments.map((i): [ExchangeId, string] => [i.exchange, i.symbol])));
+    profondeurs(P_HYPE);
+    const urls = reseau();
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(0);
+    graphePret("bybit", "HYPEUSDT");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance", HYPEUSDT: "bybit" });
     expect(urls).toEqual([]);
   });
 

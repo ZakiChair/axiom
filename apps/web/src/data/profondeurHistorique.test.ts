@@ -568,12 +568,11 @@ describe("cache persistant", () => {
 describe("historique accessible au graphe", () => {
   const precharger = (e: Record<string, [number, number, number]>) => stockage.set(CLE, JSON.stringify({ v: 1, e }));
 
-  it("plafond du graphe (20 000 bougies) et plafonds propres à OKX (1 440), Kraken (500 : backfill sans pagination), Hyperliquid", async () => {
+  it("plafond du graphe (20 000 bougies) et plafonds propres à OKX (1 440), Kraken (500 : backfill sans pagination)", async () => {
     precharger({
       "binance:BTCUSDT": [date("2017-08-17"), 1, MAINTENANT],
       "okx:BTCUSDT": [MAINTENANT - 300 * SEMAINE, 0, MAINTENANT],
       "kraken:BTCUSD": [MAINTENANT - 720 * SEMAINE, 0, MAINTENANT],
-      "hyperliquid:BTC-PERP": [date("2023-01-01"), 1, MAINTENANT],
     });
     const { profondeur } = await charger();
     expect(profondeur.PLAFOND_BOUGIES_GRAPHE).toBe(20_000);
@@ -584,7 +583,6 @@ describe("historique accessible au graphe", () => {
     expect(profondeur.debutAccessible("okx", "BTCUSDT", "1w")).toBe(MAINTENANT - 300 * SEMAINE);
     expect(profondeur.debutAccessible("kraken", "BTCUSD", "1d")).toBe(MAINTENANT - 500 * JOUR);
     expect(profondeur.debutAccessible("kraken", "BTCUSD", "1h")).toBe(MAINTENANT - 500 * 3_600_000);
-    expect(profondeur.debutAccessible("hyperliquid", "BTC-PERP", "1h")).toBe(MAINTENANT - 5_000 * 3_600_000);
     // Mois de 30 jours, trimestre/semestre/année proportionnels ; `maintenant` explicite.
     expect(profondeur.debutAccessible("kraken", "BTCUSD", "1M", MAINTENANT + JOUR)).toBe(MAINTENANT - 720 * SEMAINE);
     expect(profondeur.debutAccessible("okx", "BTCUSDT", "12M")).toBe(MAINTENANT - 300 * SEMAINE);

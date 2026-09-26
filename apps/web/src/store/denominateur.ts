@@ -2,8 +2,9 @@
  * Store du dénominateur CHOISI pour le bouton de ratio scindé (Zustand VANILLA).
  *
  * Réglage unique : l'actif servant de dénominateur au bouton « ÷X ▾ » du bandeau
- * (ETH par défaut, SOL au choix). Le ÷BTC a son propre bouton, un clic, et n'est PAS
- * concerné par cette préférence.
+ * (ETH par défaut ; SOL, or, Nasdaq 100, S&P 500 ou une devise au choix — cf.
+ * `DENOMINATEURS`). Le ÷BTC a son propre bouton, un clic, et n'est PAS concerné par
+ * cette préférence.
  *
  * ⚠️ Ce store ne dit PAS quel ratio est affiché : le ratio ACTIF se déduit du symbole
  * seul (`data/ratio.ts` → `estRatio`, sans état). Ici ne vit que la PRÉFÉRENCE, qui

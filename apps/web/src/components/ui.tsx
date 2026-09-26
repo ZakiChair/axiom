@@ -205,16 +205,26 @@ export function MenuDeroulant({
   const fermer = () => setOuvert(false);
 
   // Fermeture globale (quel que soit le focus) : clic extérieur (mousedown document)
-  // et touche Échap — Échap rend le focus au déclencheur.
+  // et touche Échap — Échap rend le focus au déclencheur. À l'ouverture, le focus entre dans
+  // le panneau (Safari/Firefox ne le donnent pas au bouton cliqué) ; une flèche reçue hors du
+  // panneau y ramène : dans les deux cas, elle ne change jamais la paire (raccourci global).
   useEffect(() => {
     if (!ouvert) return;
+    const actifs = () => Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])') ?? []);
+    (actifs()[0] ?? menuRef.current)?.focus();
     const surClicExterieur = (e: MouseEvent) => {
       if (!wrapperRef.current?.contains(e.target as Node)) setOuvert(false);
     };
     const surEchap = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        e.preventDefault(); // traitée ici : le raccourci global ne réduit pas la fenêtre focalisée
         setOuvert(false);
         declencheurRef.current?.focus();
+      } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !e.defaultPrevented
+        && !wrapperRef.current?.contains(document.activeElement)) {
+        e.preventDefault();
+        const items = actifs();
+        (e.key === "ArrowDown" ? items[0] : items.at(-1))?.focus();
       }
     };
     document.addEventListener("mousedown", surClicExterieur);
@@ -257,6 +267,7 @@ export function MenuDeroulant({
       {ouvert && (
         <div
           role="menu"
+          tabIndex={-1}
           ref={menuRef}
           className={`${classesPanneauMenu(align, direction)} ${classePanneau}`}
         >

@@ -107,3 +107,10 @@ describe("identité perp explicite", () => {
     expect(basePerp("-PERP")).toBeNull();
   });
 });
+
+describe("splitSymbol — FDUSD (contre-revue du 26/09)", () => {
+  it("découpe BTCFDUSD en BTC / FDUSD, et FDUSDUSDT en FDUSD / USDT", () => {
+    expect(splitSymbol("BTCFDUSD", "binance")).toEqual({ base: "BTC", quote: "FDUSD" });
+    expect(splitSymbol("FDUSDUSDT", "binance")).toEqual({ base: "FDUSD", quote: "USDT" });
+  });
+});

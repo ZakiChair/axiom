@@ -170,13 +170,26 @@ describe("chartLayoutStore — slots secondaires", () => {
   it("préserve les ids de source minuscules d'un symbole synthétique", () => {
     chartLayoutStore.getState().setSlotMarket(1, {
       exchange: "synthetic",
+      symbol: "binance:BTCUSDT|/|twelvedata:EUR/USD",
+      timeframe: "1h",
+    });
+    expect(chartLayoutStore.getState().slots[0]).toEqual({
+      exchange: "synthetic",
+      symbol: "binance:BTCUSDT|/|twelvedata:EUR/USD",
+      timeframe: "1h",
+    });
+  });
+
+  it("unité retirée d'un ratio (BTC/GLD en 1h, séance à :30) : la suivante proposée, pas la minute", () => {
+    chartLayoutStore.getState().setSlotMarket(1, {
+      exchange: "synthetic",
       symbol: "binance:BTCUSDT|/|twelvedata:GLD",
       timeframe: "1h",
     });
     expect(chartLayoutStore.getState().slots[0]).toEqual({
       exchange: "synthetic",
       symbol: "binance:BTCUSDT|/|twelvedata:GLD",
-      timeframe: "1h",
+      timeframe: "1d",
     });
   });
 

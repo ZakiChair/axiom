@@ -4,6 +4,7 @@ import {
   SUPPORTED_TIMEFRAMES,
   supportedTimeframesFor,
   syntheticTimeframes,
+  timeframeProche,
 } from "./adapters";
 
 describe("getAdapter — nouvelles sources câblées", () => {
@@ -53,7 +54,37 @@ describe("supportedTimeframesFor", () => {
     expect(supportedTimeframesFor("synthetic", "mcap:TOTAL2|/|binance:ETHUSDT")).toEqual(attendus);
   });
 
+  it("retire les unités où la grille Twelve Data n'est pas celle de l'autre jambe (aucune anticipation)", () => {
+    // Or et forex 4h : barres à 01/05/09…Z en heure d'été (grille saisonnière).
+    expect(supportedTimeframesFor("synthetic", "binance:BTCUSDT|/|twelvedata:XAU/USD")).toEqual([
+      "1m", "5m", "15m", "1h", "1d", "1w", "1M",
+    ]);
+    // SPY/QQQ 1h et 4h : séance à :30 (13:30, 14:30… UTC).
+    expect(supportedTimeframesFor("synthetic", "bybit:HYPEUSDT|/|twelvedata:SPY")).toEqual([
+      "1m", "5m", "15m", "1d", "1w", "1M",
+    ]);
+    expect(supportedTimeframesFor("synthetic", "twelvedata:GLD|/|binance:BTCUSDT")).toEqual([
+      "1m", "5m", "15m", "1d", "1w", "1M",
+    ]);
+    // Deux jambes Twelve Data de même nature : même grille, rien à retirer.
+    expect(supportedTimeframesFor("synthetic", "twelvedata:AAPL|/|twelvedata:SPY")).toContain("1h");
+    expect(supportedTimeframesFor("synthetic", "twelvedata:EUR/USD|/|twelvedata:CHF/USD")).toContain("4h");
+    // Natures différentes : les deux grilles se retirent.
+    expect(supportedTimeframesFor("synthetic", "twelvedata:SPY|/|twelvedata:EUR/USD")).not.toContain("1h");
+  });
+
   it("renvoie une liste vide pour un symbole synthetic invalide", () => {
     expect(supportedTimeframesFor("synthetic", "BTCUSDT")).toEqual([]);
+  });
+});
+
+describe("timeframeProche", () => {
+  it("garde l'unité proposée, sinon la suivante plus longue, sinon la plus longue", () => {
+    const spy = supportedTimeframesFor("synthetic", "binance:BTCUSDT|/|twelvedata:SPY");
+    expect(timeframeProche(spy, "15m")).toBe("15m");
+    expect(timeframeProche(spy, "1h")).toBe("1d");
+    expect(timeframeProche(spy, "4h")).toBe("1d");
+    expect(timeframeProche(["1m", "1h"], "1d")).toBe("1h");
+    expect(timeframeProche([], "1h")).toBeUndefined();
   });
 });

@@ -10,7 +10,7 @@
  *  - variation 24 h : abonnement `subscribeTickers` existant (data/ticker.ts) ;
  *  - prix / H-L / volume : dérivés du buffer de bougies (marketStore), fenêtre 24 h.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useStore } from "zustand";
 import type { Candle, ExchangeId, Timeframe, Unsubscribe } from "@axiom/types";
 import { marketStore } from "../store/market";
@@ -26,7 +26,19 @@ import {
 import { formatSyntheticLabel, parseSyntheticSymbol } from "../data/synthetic";
 import { estSymboleCapitalisation } from "../data/mcap";
 import { sourcesCapitalisationStore, type SourceCapitalisation } from "../data/mcapCandles";
-import { DENOMINATEURS, estRatio, symboleRatio, type DenominateurId } from "../data/ratio";
+import {
+  DENOMINATEURS_CRYPTO,
+  DENOMINATEURS_DEVISES,
+  DENOMINATEURS_MARCHES,
+  detailDenominateur,
+  estRatio,
+  libelleDenominateur,
+  noteDollar,
+  symboleRatio,
+  type DenominateurId,
+} from "../data/ratio";
+import { supportedTimeframesFor, timeframeProche } from "../data/adapters";
+import { MenuDeroulant } from "./ui";
 import { formatCompact, formatCountdown, formatPct, formatPrice } from "../lib/format";
 
 /** Durée (ms) d'une bougie pour les timeframes à pas FIXE. */
@@ -144,7 +156,8 @@ function classeBouton(actif: boolean): string {
 
 /**
  * Boutons de ratio du bandeau : « ÷BTC » (un clic, contrat inchangé) + un bouton SCINDÉ
- * « ÷ETH ▾ » dont le dénominateur se choisit dans un petit menu (ETH · SOL).
+ * « ÷ETH ▾ » dont le dénominateur se choisit dans un menu groupé : crypto (ETH, SOL),
+ * marchés (or, Nasdaq 100, S&P 500) et devises (« en CHF », « en JPY »…).
  *
  * Composant ENFANT à dessein : son état de menu (useState) ne doit pas re-rendre le
  * bandeau, dont le prix / H-L / volume sont écrits IMPÉRATIVEMENT dans le DOM.
@@ -154,7 +167,7 @@ function classeBouton(actif: boolean): string {
  *    bouton est en teinte pleine et vers quelle jambe le détoggle revient ;
  *  - quand un ratio est actif, les AUTRES dénominateurs se composent depuis sa jambe A
  *    (le symbole SYN courant, de source `synthetic`, n'est pas basculable tel quel) —
- *    d'où ÷BTC ⇄ ÷ETH ⇄ ÷SOL en un clic chacun ;
+ *    d'où ÷BTC ⇄ ÷ETH ⇄ ÷Or ⇄ en CHF en un clic chacun ;
  *  - le bouton scindé suit le ratio actif quand celui-ci n'est pas ÷BTC (sinon il
  *    deviendrait impossible de le détoggler), sinon la préférence persistée.
  */
@@ -167,7 +180,6 @@ function BoutonsRatio({
   symbol: string;
   timeframe: Timeframe;
 }) {
-  const [menuOuvert, setMenuOuvert] = useState(false);
   const choisi = useStore(denominateurStore, (s) => s.denominateur);
   const setChoisi = useStore(denominateurStore, (s) => s.setDenominateur);
 
@@ -180,12 +192,17 @@ function BoutonsRatio({
       : exchange;
   const baseSym = actif ? actif.spec.legA : symbol;
 
-  /** Pose le ratio ÷denom (sans jamais détoggler). Sans cible composable : rien. */
+  /**
+   * Pose le ratio ÷denom (sans jamais détoggler). Sans cible composable : rien. Unité de temps
+   * absente du ratio (ex. 4h, dont la grille Twelve Data diffère) : la suivante proposée, sinon
+   * la plus longue — jamais une chute vers la minute.
+   */
   const poser = (denom: DenominateurId): void => {
     const cible = symboleRatio(baseSym, baseEx, denom);
     if (cible === null) return;
+    const tf = timeframeProche(supportedTimeframesFor("synthetic", cible), timeframe) ?? timeframe;
     syntheticsStore.getState().addRecent(cible);
-    marketStore.getState().setMarket({ exchange: "synthetic", symbol: cible, timeframe });
+    marketStore.getState().setMarket({ exchange: "synthetic", symbol: cible, timeframe: tf });
   };
 
   /** Clic sur un bouton : détoggle si CE dénominateur est actif, sinon pose son ratio. */
@@ -203,13 +220,28 @@ function BoutonsRatio({
 
   const disponible = (denom: DenominateurId): boolean =>
     actif?.denom === denom || symboleRatio(baseSym, baseEx, denom) !== null;
+  /** Infobulle : jambe réellement divisée, stablecoin compté pour 1 USD s'il y a lieu. */
+  const note = noteDollar(baseSym, baseEx);
+  const detail = (denom: DenominateurId, prefixe = "Ratio vs"): string => {
+    const tradfi = !(DENOMINATEURS_CRYPTO as readonly string[]).includes(denom);
+    return `${prefixe} ${detailDenominateur(denom)}${tradfi && note ? ` — ${note}` : ""}`;
+  };
+  const raison = (denom: DenominateurId): string =>
+    (DENOMINATEURS_CRYPTO as readonly string[]).includes(denom)
+      ? `${libelleDenominateur(denom)} indisponible : l'actif est déjà ${denom} ou coté en ${denom}`
+      : `${libelleDenominateur(denom)} indisponible : actif non coté en dollar, ou déjà cette référence`;
+  // Puce du menu : le ratio affiché, sinon la préférence du bouton scindé.
+  const marque = actif?.denom ?? choisi;
 
-  // Bouton scindé : ETH · SOL (le BTC garde son bouton propre). Si le dénominateur
-  // préféré n'est pas composable ici (ex. ÷ETH sur ETHUSDT), on retombe sur le premier
-  // disponible plutôt que de faire disparaître le bouton.
-  // Type élargi à DenominateurId : TS 5.5 infère sinon un prédicat ("ETH"|"SOL") qui
-  // interdirait de tester la préférence (de type DenominateurId) contre cette liste.
-  const candidats: DenominateurId[] = DENOMINATEURS.filter((d) => d !== "BTC");
+  // Bouton scindé : tout sauf BTC, qui garde son bouton propre. Si le dénominateur
+  // préféré n'est pas composable ici (ex. ÷ETH sur ETHUSDT, ÷Or sur BTCEUR), on retombe
+  // sur le premier disponible plutôt que de faire disparaître le bouton.
+  const groupes: Array<[string, DenominateurId[]]> = [
+    ["Crypto", DENOMINATEURS_CRYPTO.filter((d) => d !== "BTC")],
+    ["Marchés", [...DENOMINATEURS_MARCHES]],
+    ["Devises", [...DENOMINATEURS_DEVISES]],
+  ];
+  const candidats = groupes.flatMap(([, liste]) => liste);
   const disponibles = candidats.filter(disponible);
   const denomScinde: DenominateurId | undefined =
     actif !== null && actif.denom !== "BTC"
@@ -238,60 +270,52 @@ function BoutonsRatio({
             title={
               actif?.denom === denomScinde
                 ? `Revenir à ${actif.spec.legA}`
-                : `Ratio vs ${denomScinde}`
+                : detail(denomScinde)
             }
             onClick={() => basculer(denomScinde)}
             className={`${classeBouton(actif?.denom === denomScinde)} rounded-r-none border-r-0`}
           >
-            ÷{denomScinde}
+            {libelleDenominateur(denomScinde)}
           </button>
-          <button
-            type="button"
-            aria-label="Choisir l'actif de comparaison"
-            aria-expanded={menuOuvert}
-            title="Choisir l'actif de comparaison"
-            onClick={() => setMenuOuvert((v) => !v)}
-            className={`${classeBouton(false)} rounded-l-none px-1`}
+          <MenuDeroulant
+            declencheur="▾"
+            chevron={false}
+            ariaLabel="Choisir l'actif de comparaison"
+            titre="Choisir l'actif de comparaison"
+            align="right"
+            classePanneau="w-56"
+            declencheurClasse={`${classeBouton(false)} rounded-l-none px-1`}
           >
-            ▾
-          </button>
-
-          {menuOuvert && (
-            <>
-              {/* Fermeture au clic extérieur (même mécanisme que les menus de la Toolbar). */}
-              <span
-                className="pointer-events-auto fixed inset-0 z-40"
-                onClick={() => setMenuOuvert(false)}
-              />
-              <span className="absolute right-0 top-full z-50 mt-1 flex w-28 flex-col rounded border border-border bg-surface py-1 shadow-xl">
-                {candidats.map((denom) => (
+            {(fermer) => groupes.map(([titre, liste]) => (
+              <div key={titre} role="group" aria-labelledby={`ratio-groupe-${titre}`} className="flex flex-col">
+                <span id={`ratio-groupe-${titre}`} className="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-dim">
+                  {titre}
+                </span>
+                {liste.map((denom) => (
                   <button
                     key={denom}
                     type="button"
+                    role="menuitem"
                     disabled={!disponible(denom)}
-                    title={
-                      disponible(denom)
-                        ? `Comparer vs ${denom}`
-                        : `${denom} indisponible sur ce marché`
-                    }
+                    title={disponible(denom) ? detail(denom, "Comparer vs") : raison(denom)}
                     onClick={() => {
                       setChoisi(denom);
                       poser(denom);
-                      setMenuOuvert(false);
+                      fermer();
                     }}
                     className={`flex items-center gap-1.5 px-2 py-1 text-left text-xs ${
                       disponible(denom)
-                        ? "text-text hover:bg-neutral-800"
+                        ? "text-text hover:bg-neutral-800 focus:bg-neutral-800 focus:outline-none"
                         : "cursor-not-allowed text-text-dim"
                     }`}
                   >
-                    <span className="w-2 text-accent">{choisi === denom ? "•" : ""}</span>
-                    <span>÷{denom}</span>
+                    <span aria-hidden className="w-2 text-accent">{marque === denom ? "•" : ""}</span>
+                    <span>{libelleDenominateur(denom)}</span>
                   </button>
                 ))}
-              </span>
-            </>
-          )}
+              </div>
+            ))}
+          </MenuDeroulant>
         </span>
       )}
     </>
@@ -304,7 +328,11 @@ export function SymbolBanner() {
   const timeframe = useStore(marketStore, (s) => s.timeframe);
   useStore(marketStore, (s) => s.dataLoad.status);
   const syntheticSpec = exchange === "synthetic" ? parseSyntheticSymbol(symbol) : null;
-  const bannerSymbol = syntheticSpec ? formatSyntheticLabel(syntheticSpec) : symbol;
+  // Ratio ÷ marché ou devise : « BTCUSDT ÷Or », « BTCUSDT en CHF » ; sinon le libellé SYN.
+  const ratioTradfi = syntheticSpec?.exB === "twelvedata" ? estRatio(symbol, exchange) : null;
+  const bannerSymbol = ratioTradfi
+    ? `${ratioTradfi.spec.legA} ${libelleDenominateur(ratioTradfi.denom)}`
+    : syntheticSpec ? formatSyntheticLabel(syntheticSpec) : symbol;
   const estCapitalisation =
     estSymboleCapitalisation(symbol) || syntheticSpec?.exA === "mcap" || syntheticSpec?.exB === "mcap";
   // Pour un ratio, la jambe mcap porte la provenance (fetchKlines est appelé avec elle).

@@ -928,3 +928,10 @@ describe("recherche : représentant par profondeur d'historique", () => {
     ]);
   });
 });
+
+describe("ratio dont l'unité est retirée (grille Twelve Data à :30) : l'unité suivante, jamais la minute", () => {
+  it.each([["4h", "1d"], ["1h", "1d"], ["30m", "1d"], ["15m", "15m"]] as const)("÷SPY demandé en %s → %s", async (demandee, attendue) => {
+    expect(await resolveMarketCandidates({ exchange: "synthetic", symbol: "binance:BTCUSDT|/|twelvedata:SPY", timeframe: demandee }))
+      .toEqual([{ exchange: "synthetic", symbol: "binance:BTCUSDT|/|twelvedata:SPY", timeframe: attendue }]);
+  });
+});

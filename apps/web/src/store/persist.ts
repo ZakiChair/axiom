@@ -44,7 +44,7 @@ import {
   type SnapshotKv,
   initialiserMiroirPersonnel,
 } from "../data/daemon";
-import { supportedTimeframesFor } from "../data/adapters";
+import { SUPPORTED_TIMEFRAMES, supportedTimeframesFor, timeframeProche } from "../data/adapters";
 import { defaultParams, migratePersistedIndicators, indicatorsStore } from "./indicators";
 import { indicatorSetsStore, migrerJeuxPersistes } from "./indicatorSets";
 import { exchangeForSymbol, marketStore } from "./market";
@@ -438,7 +438,7 @@ interface PersistedSession {
   /** Bascule de la ligne « Coût Strategy » sur le chart maître (chart/niveauxOverlays). */
   prixRevientTresoreries: boolean;
   macroOverlays: MacroOverlayId[];
-  /** Dénominateur choisi pour le bouton de ratio scindé du bandeau (÷ETH / ÷SOL). */
+  /** Dénominateur choisi pour le bouton de ratio scindé du bandeau (÷ETH, ÷Or, en CHF…). */
   denominateur: DenominateurId;
   /** État replié des sections de la sidebar (clé = titre ; carte creuse). */
   sections: Record<string, boolean>;
@@ -589,9 +589,14 @@ function hydrateChart(): void {
     // slots secondaires, cf. sanitizeSlotConfig) : un TF étranger (« 5x », ou retiré
     // d'une version future) ferait partir le backfill avec un interval invalide →
     // graphe maître en erreur à chaque boot. Hors référentiel → on garde le TF courant.
-    const supportes = supportedTimeframesFor(exchange, symbol) as readonly string[];
-    const timeframe = typeof persisted.timeframe === "string" && supportes.includes(persisted.timeframe)
-      ? persisted.timeframe as Timeframe : courant.timeframe;
+    const supportes = supportedTimeframesFor(exchange, symbol);
+    // Ratio dont l'unité connue est retirée (÷SPY 4h) : la suivante proposée, pas la minute.
+    const connue = typeof persisted.timeframe === "string" && (SUPPORTED_TIMEFRAMES.binance as readonly string[] | undefined)?.includes(persisted.timeframe);
+    const timeframe = typeof persisted.timeframe === "string" && (supportes as readonly string[]).includes(persisted.timeframe)
+      ? persisted.timeframe as Timeframe
+      : exchange === "synthetic" && connue
+        ? timeframeProche(supportes, persisted.timeframe as Timeframe) ?? courant.timeframe
+        : courant.timeframe;
     // Une identité restaurée porte déjà sa source : ne pas la réinterpréter via setSymbol.
     courant.setMarket({ exchange, symbol, timeframe });
     // Migration/validation des indicateurs (filtre les defId disparus, backfille les params,

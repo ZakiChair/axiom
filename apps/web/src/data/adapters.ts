@@ -16,7 +16,7 @@ import { okxAdapter } from "./okx";
 import { hyperliquidAdapter } from "./hyperliquid";
 import { krakenAdapter } from "./kraken";
 import { coinbaseAdapter } from "./coinbase";
-import { fetchKlinesTwelveData, twelveDataAdapter } from "./twelvedata";
+import { fetchKlinesTwelveData, souscrireJambeTwelveData, twelveDataAdapter } from "./twelvedata";
 import { mexcAdapter } from "./mexc";
 import { capitalisationAdapter, TIMEFRAMES_CAPITALISATION } from "./mcapCandles";
 import { estSymboleCapitalisation } from "./mcap";
@@ -31,10 +31,12 @@ import {
  * devant les cotations et, fenêtre 8/min pleine, est refusée d'emblée (« prochain créneau dans
  * N s ») au lieu d'attendre en file le chien de garde du graphe (20 s, armé dès le départ pour un
  * synthétique) puis de partir pour personne. 15 s : une jambe acceptée part avant ce délai.
+ * Son direct est sondé à la cadence d'un dénominateur (`souscrireJambeTwelveData`).
  */
 const jambeTwelveData: IExchangeAdapter = {
   ...twelveDataAdapter,
   fetchKlines: (symbol, tf, opts) => fetchKlinesTwelveData(symbol, tf, opts, { priorite: "graphe", attenteMaxMs: 15_000 }),
+  subscribeKline: souscrireJambeTwelveData,
 };
 
 /** Adaptateurs câblés (crypto : Binance/Bybit/OKX/Hyperliquid/Kraken/Coinbase/MEXC ; tradfi : Twelve Data). */
@@ -104,11 +106,36 @@ export function syntheticTimeframes(exA: SyntheticLegSource, exB: SyntheticLegSo
   return SYNTHETIC_TIMEFRAME_ORDER.filter((tf) => a.has(tf) && b.has(tf));
 }
 
+/**
+ * Unité offerte la plus proche de `tf` : elle-même, sinon la suivante plus longue, sinon la
+ * plus longue — une unité retirée (4h d'un ratio ÷Or) ne fait jamais chuter à la minute.
+ */
+export function timeframeProche(proposees: readonly Timeframe[], tf: Timeframe): Timeframe | undefined {
+  if (proposees.includes(tf)) return tf;
+  const rang = SYNTHETIC_TIMEFRAME_ORDER.indexOf(tf);
+  return proposees.find((t) => SYNTHETIC_TIMEFRAME_ORDER.indexOf(t) > rang) ?? proposees.at(-1);
+}
+
+/**
+ * Unités où la grille Twelve Data d'une jambe n'est pas la grille UTC des autres sources
+ * (mesuré le 26/09/2026, timezone=UTC) : or et forex 4h à 01/05/09…Z en heure d'été ;
+ * actions et ETF 1h/4h en séance à :30. Composée avec une autre grille, la barre B qui
+ * chevauche l'ouverture de A porterait un prix FUTUR : ces unités ne sont pas proposées.
+ */
+function grilleDecalee(ex: SyntheticLegSource, sym: string): Timeframe[] {
+  if (ex !== "twelvedata") return [];
+  return sym.includes("/") ? ["4h"] : ["1h", "4h"]; // « / » : forex (cf. classifyTradfi)
+}
+
 /** Point d'entrée unique du grisage TF : table statique, ou intersection si SYN. */
 export function supportedTimeframesFor(exchange: ExchangeId, symbol: string): Timeframe[] {
   if (exchange !== "synthetic") return SUPPORTED_TIMEFRAMES[exchange] ?? [];
   if (estSymboleCapitalisation(symbol)) return TIMEFRAMES_CAPITALISATION;
   const spec = parseSyntheticSymbol(symbol);
   if (spec === null) return [];
-  return syntheticTimeframes(spec.exA, spec.exB);
+  const communes = syntheticTimeframes(spec.exA, spec.exB);
+  // Deux jambes Twelve Data de même nature partagent leur grille.
+  if (spec.exA === spec.exB && spec.legA.includes("/") === spec.legB.includes("/")) return communes;
+  const exclues = [...grilleDecalee(spec.exA, spec.legA), ...grilleDecalee(spec.exB, spec.legB)];
+  return exclues.length ? communes.filter((tf) => !exclues.includes(tf)) : communes;
 }

@@ -288,6 +288,10 @@ export function gererRaccourciGlobal(e: KeyboardEvent): void {
   // Échap : quitte le plein écran s'il est actif, sinon range la fenêtre au premier
   // plan (⇧Échap la ferme). Avant, aucune touche ne ciblait une fenêtre : fermer ou
   // réduire imposait de viser une cible d'environ 14×18 px à la souris.
+  // Échap ou flèche déjà traitée par un menu déroulant ouvert (MenuDeroulant) : ni fenêtre
+  // réduite, ni paire changée pendant la navigation dans le menu.
+  if (e.defaultPrevented && (e.key === "Escape" || e.key === "ArrowUp" || e.key === "ArrowDown")) return;
+
   if (e.key === "Escape") {
     if (fullscreenStore.getState().plein) {
       fullscreenStore.getState().definir(false);

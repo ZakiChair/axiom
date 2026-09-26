@@ -98,7 +98,7 @@ test("bandeau : ÷BTC absent sur BTCUSDT, ÷ETH pose le ratio et le menu bascule
 
   // Depuis un ratio ACTIF, le menu recompose depuis la jambe A (pas depuis le SYN).
   await page.getByRole("button", { name: "Choisir l'actif de comparaison" }).click();
-  await page.getByRole("button", { name: "÷SOL" }).click();
+  await page.getByRole("menuitem", { name: "÷SOL" }).click();
   await expect(page.getByText("BTCUSDT / SOLUSDT")).toBeVisible({ timeout: 15_000 });
 
   // ÷SOL est maintenant le ratio actif : un clic dessus détoggle vers la jambe A.
@@ -151,4 +151,100 @@ test("bandeau tradfi : ÷BTC apparaît sur GLD, pose le SYN cross-source, détog
   await expect(page.getByText("GLD / BTCUSDT")).toHaveCount(0);
   await expect(page.getByLabel("Source automatique", { exact: true })).toContainText("Twelve Data");
   await expect(boutonBtc).toBeVisible();
+});
+
+// ───────── Demande du 26/09/2026 — dénominateurs marchés et devises (jambe Twelve Data) ─────────
+
+test("bandeau : BTCUSDT ÷Or puis en CHF, jambe Twelve Data demandée, détoggle vers BTCUSDT", async ({
+  page,
+}) => {
+  const demandes: string[] = [];
+  await page.route("**/tdapi/time_series*", (route) => {
+    demandes.push(new URL(route.request().url()).searchParams.get("symbol") ?? "");
+    return route.fulfill({ json: SERIE_TD });
+  });
+  await page.route("**/tdapi/quote*", (route) => route.fulfill({ json: QUOTE_TD }));
+  await page.goto("/");
+
+  // Menu groupé : les marchés et les devises s'ajoutent à ETH et SOL.
+  await page.getByRole("button", { name: "Choisir l'actif de comparaison" }).click();
+  await expect(page.getByRole("group", { name: "Crypto" }).getByRole("menuitem", { name: "÷SOL" })).toBeEnabled();
+  await expect(page.getByRole("group", { name: "Marchés" }).getByRole("menuitem", { name: "÷S&P 500 (SPY)" })).toBeEnabled();
+  await expect(page.getByRole("group", { name: "Devises" }).getByRole("menuitem", { name: "en JPY" })).toBeEnabled();
+  await page.getByRole("group", { name: "Marchés" }).getByRole("menuitem", { name: "÷Or" }).click();
+  await expect(page.getByText("BTCUSDT ÷Or", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect.poll(() => demandes).toContain("XAU/USD");
+
+  // Depuis le ratio actif, la devise se recompose depuis la jambe A.
+  await page.getByRole("button", { name: "Choisir l'actif de comparaison" }).click();
+  await page.getByRole("group", { name: "Devises" }).getByRole("menuitem", { name: "en CHF" }).click();
+  await expect(page.getByText("BTCUSDT en CHF", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect.poll(() => demandes).toContain("CHF/USD");
+  await expect(page.locator("[data-chart-status]")).toHaveCount(0);
+
+  // « en CHF » est le ratio actif : un clic le détoggle vers BTCUSDT.
+  await page.getByRole("button", { name: "en CHF", exact: true }).click();
+  await expect(page.getByText("BTCUSDT en CHF", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("BTCUSDT", { exact: true }).first()).toBeVisible();
+});
+
+test("bandeau : un actif non coté en dollar (BTCEUR) n'offre ni ÷Or ni devise", async ({ page }) => {
+  await page.route("**/api.kraken.com/0/public/AssetPairs*", (route) => route.fulfill({
+    json: { error: [], result: { XXBTZEUR: { altname: "XBTEUR", wsname: "XBT/EUR", base: "XXBT", quote: "ZEUR", status: "online" } } },
+  }));
+  await page.route("**/api.kraken.com/0/public/OHLC*", (route) => route.fulfill({
+    json: { error: [], result: { XXBTZEUR: [28, 29, 30].map((day) => {
+      const t = Date.UTC(2026, 6, day) / 1_000;
+      return [t, "55000", "55100", "54900", "55050", "55000", "10", 5];
+    }), last: 0 } },
+  }));
+  await page.addInitScript(() => {
+    window.localStorage.setItem("axiom:chartState:v1", JSON.stringify({ exchange: "kraken", symbol: "BTCEUR", timeframe: "1d" }));
+  });
+  await page.goto("/");
+  const menu = page.getByRole("button", { name: "Choisir l'actif de comparaison" });
+  await expect(menu).toBeVisible({ timeout: 15_000 });
+  await menu.click();
+  await expect(page.getByRole("group", { name: "Marchés" }).getByRole("menuitem", { name: "÷Or" })).toBeDisabled();
+  await expect(page.getByRole("group", { name: "Devises" }).getByRole("menuitem", { name: "en CHF" })).toBeDisabled();
+});
+
+test("menu des dénominateurs au clavier : ↓ parcourt le menu sans changer de paire, Échap le ferme", async ({ page }) => {
+  await page.goto("/");
+  const menu = page.getByRole("button", { name: "Choisir l'actif de comparaison" });
+  await expect(menu).toHaveAttribute("aria-haspopup", "menu");
+  await menu.focus();
+  await page.keyboard.press("Enter");
+  await expect(menu).toHaveAttribute("aria-expanded", "true");
+  // À l'ouverture, le focus entre dans le panneau, sur la première entrée active.
+  await expect(page.getByRole("menuitem", { name: "÷ETH" })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("menuitem", { name: "÷SOL" })).toBeFocused();
+  // La paire affichée n'a pas bougé : la flèche a servi au menu, pas à la watchlist.
+  await expect(page.getByText("BTCUSDT", { exact: true }).first()).toBeVisible();
+  const symbole = await page.evaluate(async () => {
+    const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{ marketStore: { getState: () => { symbol: string } } }>;
+    return (await importer()).marketStore.getState().symbol;
+  });
+  expect(symbole).toBe("BTCUSDT");
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveAttribute("aria-expanded", "false");
+  await expect(menu).toBeFocused();
+});
+
+test("menu ouvert à la souris, focus perdu (Safari/Firefox) : ↓ revient au menu sans changer de paire", async ({ page }) => {
+  await page.goto("/");
+  const symbole = () => page.evaluate(async () => {
+    const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{ marketStore: { getState: () => { symbol: string } } }>;
+    return (await importer()).marketStore.getState().symbol;
+  });
+  await expect.poll(symbole).toBe("BTCUSDT");
+  await page.getByRole("button", { name: "Choisir l'actif de comparaison" }).click();
+  await page.keyboard.press("ArrowDown");
+  expect(await symbole()).toBe("BTCUSDT");
+  // Émule un clic qui ne donne pas le focus : la flèche part alors du document.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("menuitem", { name: "÷ETH" })).toBeFocused();
+  expect(await symbole()).toBe("BTCUSDT");
 });

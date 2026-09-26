@@ -228,6 +228,12 @@ describe("hydrateStores — marché (exchange/symbole/timeframe)", () => {
     }
   });
 
+  it("restaure un ratio ÷SPY enregistré en 4h (unité retirée) sur l'unité suivante, pas la minute", () => {
+    localStorage.setItem(CHART_KEY, JSON.stringify({ exchange: "synthetic", symbol: "binance:BTCUSDT|/|twelvedata:SPY", timeframe: "4h", indicators: [] }));
+    hydrateStores();
+    expect(marketStore.getState().timeframe).toBe("1d");
+  });
+
   it("restaure exchange/symbole/timeframe valides", () => {
     localStorage.setItem(
       CHART_KEY,
@@ -416,6 +422,12 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(denominateurStore.getState().denominateur).toBe("SOL");
     expect(uiSectionsStore.getState().open).toEqual({ Alertes: true, Watchlist: false });
     expect(priceScaleStore.getState().type).toBe("log");
+  });
+
+  it.each(["OR", "SP500", "CHF", "JPY"])("restaure le dénominateur marché ou devise %s", (denominateur) => {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ denominateur }));
+    hydrateStores();
+    expect(denominateurStore.getState().denominateur).toBe(denominateur);
   });
 
   it("ignore les valeurs de session invalides (types incorrects)", () => {

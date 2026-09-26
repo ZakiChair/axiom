@@ -57,7 +57,7 @@ personnelles et la provenance historique conservent leur sens. Voir la
 - **Daemon** `axiomd` : proxy+cache SQLite, KV/snapshots, candles, alertes (macOS + Telegram), replay dumps Binance, couches GDELT/UCDP, LIQHL Hyperliquid paresseux, collecteur whales (blocs confirmés blockchain.info + Etherscan stables, table `whale_moves`, rétention 30 j). Bind `127.0.0.1:8787`, whitelist `/extapi`, garde Host/Origin/DNS-rebinding.
 - **Vercel** : front + proxy serverless sans secret partagé, whitelist/MIME/DNS durcis ; depuis le 2026-09-25, fonction `api/hlpool.ts` sans secret (pool réduit LIQHL, CDN 6 h). Les clés personnelles restent dans le navigateur. **Exception ACTÉE le 2026-09-14** (demande utilisateur, test communautaire) : une seule variable serveur, `BGEOMETRICS_API_KEY`, portée par `api/proxy.ts` vers bitcoin-data.com quand le client n'envoie aucune clé — clé gratuite et révocable, plafonds de l'offre gratuite (10 req/heure et 15 req/jour) partagés par les visiteurs, jamais exposée au navigateur ; toute autre clé reste personnelle (test structurel `apps/daemon/src/vercelProxy.test.ts`). Toute fonction strictement locale est marquée `UNUSABLE`, toute fenêtre partielle `PARTIAL` ; jamais de pane muet. La clé CryptoQuant (2026-09-16) relève de cette règle : personnelle, saisie dans les Réglages, repli `.env` pour le proxy Vite et le daemon `127.0.0.1` uniquement, JAMAIS de variable serveur sur Vercel (le test structurel continue d'exiger exactement une lecture d'environnement).
 - **Paper trading** (`PAPER`) : moteur de simulation locale présent, hors gate G100.
-- **Gate G100** : code-complete, e2e partiellement automatisés, **verdict manuel ouvert** (voir `docs/superpowers/plans/2026-07-22-gate-g100-qa.md` et plan d'action 2026-08-24). **Aucune nouvelle fenêtre ni fonctionnalité de surface avant le verdict** — des exceptions ACTÉES : le 2026-08-25 (fenêtre WHALES + alerte `whale-flux`, demande utilisateur explicite), le 2026-09-01 (fenêtre BPL + séries TOTAL/TOTAL2/TOTAL3 chartables, chantier CAP/BPL demandé par l'utilisateur) le 2026-09-02 (lot v2.7 « Décider » : alerte composite, backtest en R, coût d'exécution DOM — aucune fenêtre, aucun fournisseur, aucun indicateur, spec `docs/superpowers/specs/2026-09-02-lot-v27-decider-design.md`) et le 2026-09-04 (catalogue positionnement/orderflow et PLAY-POS, cf. Conventions), et le 2026-09-06 (onglet « Indicateurs » de la fenêtre RATE + trois fournisseurs statistiques publics sans clé — OCDE, Eurostat, ONS — au titre du remplacement des miroirs FRED internationaux démantelés ; spec `docs/superpowers/specs/2026-09-06-indicateurs-macro-mondiaux-design.md`), et le 2026-09-07 (fenêtre BPL : horizon de projection porté à +50 ans et navigation zoom/pan du graphe ; synchronisation des vues de la grille multi-chart — unités de temps, zoom/défilement, réticule — plan `docs/superpowers/plans/2026-09-07-synchronisation-multivue.md` ; demandes utilisateur explicites — aucune fenêtre, aucun fournisseur, aucun indicateur nouveau), et le 2026-09-14 (fenêtre BT : section « Tenue par moitié » — découpage walk-forward de lecture du run exécuté, `partagerResultatMoities` dans `@axiom/backtest`, frontière tracée sur l'équité ; excursions MAE/MFE par trade calculées par le moteur sur les barres détenues, colonnes de la table et moyennes de la grille ; demande utilisateur « nouvelle fonction pertinente » — aucune fenêtre, aucun fournisseur, aucun indicateur nouveau ; puis, le même jour, lot ON-CHAIN sur demande utilisateur « nouvelle fonction pertinente on-chain » + « Go » : sections « Mineurs » (Hash Ribbons SMA 30/60 j, hashprice) et « Activité DEX » (volume DEX 24 h, part du volume total) et tuile « Thermocap multiple » dans la fenêtre CHAIN, alerte globale `onchain-seuil` front-only sur six métriques quotidiennes — aucune fenêtre, aucun fournisseur (hôtes déjà autorisés : mempool.space, blockchain.info, Coin Metrics community, DefiLlama, CoinGecko), aucun indicateur graphique nouveau ; enfin, le même jour, chantier « indicateurs gratuits vérifiés » sur « Go pour tous les lots » du propriétaire après recherche sondée — cf. section « Chantier autorisé le 14 septembre 2026 » — aucune fenêtre, aucun fournisseur, aucun hôte, aucun indicateur graphique nouveau), et le 2026-09-16 (fournisseur CryptoQuant BASIC à clé personnelle sur décision du propriétaire : section repliable « Flux takers toutes places » dans DES et sous-section « Production des mineurs cotés » dans la section Mineurs de CHAIN — aucune fenêtre, aucun indicateur graphique, aucune dépendance, aucun hôte `/extapi` ; route dédiée `/cqapi` ; spec `docs/superpowers/specs/2026-09-16-cryptoquant-takers-mineurs-design.md`) ; le gel reste la règle pour toute autre surface.
+- **Gate G100** : code-complete, e2e partiellement automatisés, **verdict manuel ouvert** (voir `docs/superpowers/plans/2026-07-22-gate-g100-qa.md` et plan d'action 2026-08-24). **Aucune nouvelle fenêtre ni fonctionnalité de surface avant le verdict** — des exceptions ACTÉES : le 2026-08-25 (fenêtre WHALES + alerte `whale-flux`, demande utilisateur explicite), le 2026-09-01 (fenêtre BPL + séries TOTAL/TOTAL2/TOTAL3 chartables, chantier CAP/BPL demandé par l'utilisateur) le 2026-09-02 (lot v2.7 « Décider » : alerte composite, backtest en R, coût d'exécution DOM — aucune fenêtre, aucun fournisseur, aucun indicateur, spec `docs/superpowers/specs/2026-09-02-lot-v27-decider-design.md`) et le 2026-09-04 (catalogue positionnement/orderflow et PLAY-POS, cf. Conventions), et le 2026-09-06 (onglet « Indicateurs » de la fenêtre RATE + trois fournisseurs statistiques publics sans clé — OCDE, Eurostat, ONS — au titre du remplacement des miroirs FRED internationaux démantelés ; spec `docs/superpowers/specs/2026-09-06-indicateurs-macro-mondiaux-design.md`), et le 2026-09-07 (fenêtre BPL : horizon de projection porté à +50 ans et navigation zoom/pan du graphe ; synchronisation des vues de la grille multi-chart — unités de temps, zoom/défilement, réticule — plan `docs/superpowers/plans/2026-09-07-synchronisation-multivue.md` ; demandes utilisateur explicites — aucune fenêtre, aucun fournisseur, aucun indicateur nouveau), et le 2026-09-14 (fenêtre BT : section « Tenue par moitié » — découpage walk-forward de lecture du run exécuté, `partagerResultatMoities` dans `@axiom/backtest`, frontière tracée sur l'équité ; excursions MAE/MFE par trade calculées par le moteur sur les barres détenues, colonnes de la table et moyennes de la grille ; demande utilisateur « nouvelle fonction pertinente » — aucune fenêtre, aucun fournisseur, aucun indicateur nouveau ; puis, le même jour, lot ON-CHAIN sur demande utilisateur « nouvelle fonction pertinente on-chain » + « Go » : sections « Mineurs » (Hash Ribbons SMA 30/60 j, hashprice) et « Activité DEX » (volume DEX 24 h, part du volume total) et tuile « Thermocap multiple » dans la fenêtre CHAIN, alerte globale `onchain-seuil` front-only sur six métriques quotidiennes — aucune fenêtre, aucun fournisseur (hôtes déjà autorisés : mempool.space, blockchain.info, Coin Metrics community, DefiLlama, CoinGecko), aucun indicateur graphique nouveau ; enfin, le même jour, chantier « indicateurs gratuits vérifiés » sur « Go pour tous les lots » du propriétaire après recherche sondée — cf. section « Chantier autorisé le 14 septembre 2026 » — aucune fenêtre, aucun fournisseur, aucun hôte, aucun indicateur graphique nouveau), et le 2026-09-16 (fournisseur CryptoQuant BASIC à clé personnelle sur décision du propriétaire : section repliable « Flux takers toutes places » dans DES et sous-section « Production des mineurs cotés » dans la section Mineurs de CHAIN — aucune fenêtre, aucun indicateur graphique, aucune dépendance, aucun hôte `/extapi` ; route dédiée `/cqapi` ; spec `docs/superpowers/specs/2026-09-16-cryptoquant-takers-mineurs-design.md`), et le 2026-09-26 (ratios ÷ marchés et devises, cf. section dédiée) ; le gel reste la règle pour toute autre surface.
 
 ## Jalons historiques (atteints — ne pas rejouer, ne pas prendre comme périmètre actuel)
 - **M1 — Chart live** (`apps/web`) : Vite+React+TS+Tailwind ; client WS Binance + backfill REST ; rendu KLineChart live ; sélecteur symbole + timeframe ; crosshair. Store marché vanilla. **Atteint.**
@@ -755,3 +755,81 @@ plus lancer `vercel build` dans le checkout principal. Il écrase
 `apps/web/dist`, que le daemon sert (bundle Vercel en local : Twelve Data en
 direct sans la clé `.env`, WHALES et Replay coupés). Déployer par build distant,
 puis reconstruire `dist` par `pnpm --filter @axiom/web build`.
+
+
+## Ratios ÷ marchés et devises (demande du 26 septembre 2026)
+
+Le propriétaire a demandé de pouvoir diviser un actif par autre chose que BTC, ETH et
+SOL : l'or, le Nasdaq, le S&P 500, le franc suisse, le yen, etc. Exception au gel G100
+sur demande explicite, limitée aux ratios (bouton ÷ du bandeau, unités de temps des
+ratios Twelve Data mixtes, y compris ceux du lot D) et à la navigation clavier des menus
+déroulants. **39 fenêtres, 214 indicateurs, 9 identifiants de marché (`EXCHANGE_IDS`),
+aucune dépendance, aucun hôte ni fournisseur, aucune règle de proxy modifiée,
+`@axiom/types` inchangé.**
+
+1. **Dénominateurs.** Menu groupé Crypto (ETH, SOL ; ÷BTC garde son bouton), Marchés
+   (÷Or = or spot XAU/USD, en onces ; ÷Nasdaq 100 (QQQ) ; ÷S&P 500 (SPY)) et Devises
+   (en EUR, GBP, CHF, JPY, CAD, AUD, par la paire CCY/USD : BTC en CHF = BTCUSDT ÷
+   CHF/USD). Jambe B Twelve Data unique, quelle que soit la source de l'actif
+   (`data/ratio.ts`). Vérifiés sur l'offre du propriétaire le 26/09 : XAU/USD, EUR/USD,
+   GBP/USD, CHF/USD, JPY/USD, CAD/USD, AUD/USD, SPY et QQQ sont servis ; SPX, NDX et
+   XAG/USD exigent l'offre Grow. D'où les ETF SPY et QQQ, nommés dans le libellé et
+   l'infobulle (prix de l'ETF, pas le niveau de l'indice : ≈ SPX/10, ≈ NDX/41) : jamais
+   une substitution silencieuse.
+2. **Devise.** Réservé aux actifs cotés en dollar : USD, USDT, USDC et FDUSD (le
+   stablecoin est compté pour 1 USD, ce que dit l'infobulle ; FDUSD est désormais une
+   cotation connue de `splitSymbol`), perps Hyperliquid (USDC), TOTAL*, tickers Twelve
+   Data US sans place explicite (« RY:TSX » refusé) et paires X/USD. Jamais l'actif
+   divisé par lui-même ni par sa propre devise (EURUSDT en EUR). `estRatio` ne reconnaît
+   que ce que le bouton aurait posé.
+3. **÷BTC/ETH/SOL étendus** à Bybit et OKX (spot contre spot) et aux perps Hyperliquid
+   (perp contre perp) : un actif routé sur Bybit (HYPEUSDT) garde ses ratios.
+4. **Aucune anticipation en intrajournalier.** La grille Twelve Data n'est pas la grille
+   UTC (mesures du 26/09, `timezone=UTC`) : or et forex 4h à 01/05/09…Z en heure d'été,
+   actions et ETF 1h/4h en séance à :30. Composée à une autre grille, la barre B
+   chevauchant l'ouverture de A porterait un prix futur : ces unités ne sont pas
+   proposées (`supportedTimeframesFor`), y compris pour le lot D. Les préréglages
+   « BTC / OR (proxy GLD) » et « BTC / DXY (proxy UUP) » n'offrent donc plus 1h ni 4h. Une
+   unité retirée devient l'unité suivante proposée (`timeframeProche`, ex. ÷SPY 4h → 1d),
+   jamais la minute : bouton du bandeau, slots, routeur, liaison des graphes, espaces de
+   travail et session restaurée. En direct, une barre B ouverte après la bougie A (daily
+   forex/or daté J+1 dès 21:00Z) ne fige plus le ratio : la barre B précédente sert,
+   sinon la dernière clôture connue (au plus une barre d'avance), et la bougie A
+   clôturée est toujours émise. Twelve Data au numérateur (GLD ÷ BTC) : après la
+   clôture de séance, la dernière bougie tradfi n'est pas repeinte avec le cours crypto.
+5. **Quota Twelve Data.** Toute jambe Twelve Data d'un synthétique est amorcée
+   immédiatement (réessayée, même marché fermé, tant que rien n'est livré), puis sondée
+   seulement marché ouvert, au plus toutes les 5 min, toutes les 15 min dès 1d : environ
+   288 crédits par jour ouvré pour l'or et le forex (96 dès 1d), 82 pour les actions et
+   ETF (28 dès 1d). Avant : 60 s, 24 h/24, soit 1 440 crédits par jour pour un seul
+   ratio ouvert, au-delà du plafond de 800. La séance actions (`data/heuresMarche.ts`,
+   extrait de `data/ticker.ts` qui le réexporte) suit désormais l'heure de New York :
+   09:20-16:10 locales, soit 13:20-20:10Z en été et 14:20-21:10Z en hiver ; les
+   cotations TradFi de la watchlist en profitent aussi.
+6. **Clavier.** Le menu repose sur la primitive `MenuDeroulant` (`aria-haspopup`,
+   ↑/↓/Début/Fin, Échap). À l'ouverture, le focus entre dans le panneau, et une flèche
+   reçue hors du panneau y ramène (Safari et Firefox ne donnent pas le focus au bouton
+   cliqué). Le raccourci global ignore une flèche ou un Échap déjà traités par un menu :
+   ↓ ne change plus de paire menu ouvert, Échap ne réduit plus la fenêtre focalisée.
+
+Limites assumées :
+- Daily forex/or (J-1 21:00Z → J 21:00Z) apparié à la bougie crypto J : décalage de 3 h,
+  sans prix postérieur à la clôture de A.
+- 1d, 1w et 1M SPY/QQQ : l'ouverture du ratio divise par l'ouverture de séance,
+  postérieure à 00:00Z (anticipation assumée de l'ouverture, comme un ratio de séances) ;
+  clôture périmée de 3 à 4 h en 1d (16:00 à New York contre 00:00Z), jusqu'au week-end en
+  1w et 1M.
+- Un dénominateur Twelve Data périmé (quota épuisé, réseau) reste reporté sans signal
+  sur le graphique. C'est une dette antérieure, commune aux préréglages BTC/GLD et
+  BTC/UUP.
+- Sans clé Twelve Data en appel direct (Vercel), les entrées restent actives et l'erreur
+  « clé » s'affiche au chargement.
+
+Validation : **5 439 tests web** et typage de tous les paquets réussis ; parcours
+Chromium `gate-v24-macro-denominateur`, `gate-v25-cap-dominance`, `multivue`,
+`quatre-lots-indicateurs` et `niveaux-chart` : 33/33 deux fois de suite (les parcours
+clavier échouent sans leurs gardes). Budget d'entrée **1 195 412 octets bruts /
+356 842 gzip** (Node 24.13.0, zlib 1.3.1), contre 1 190 550 / 355 056 sur `main` ;
+plafonds 1 220 000 / 360 000 inchangés. Revue indépendante sous trois angles (calcul,
+robustesse, contrat et budget), puis contre-revue ; leurs points bloquant, importants
+et mineurs retenus sont corrigés ci-dessus.

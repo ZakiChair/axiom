@@ -35,7 +35,7 @@ import { uiSectionsStore } from "./ui-sections";
 import { themeStore, THEMES, type ThemeId } from "./theme";
 import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
 import { windowManagerStore, type EtatFenetre } from "./windowManager";
-import { supportedTimeframesFor } from "../data/adapters";
+import { SUPPORTED_TIMEFRAMES, supportedTimeframesFor, timeframeProche } from "../data/adapters";
 import { miroiterTravailPersonnel } from "../data/daemon";
 
 const STORAGE_KEY = "axiom:workspaces:v1";
@@ -199,14 +199,15 @@ function validateContent(raw: unknown): WorkspaceContent {
       : "binance";
   const symbol = isNonEmptyString(o.symbol) ? o.symbol : "BTCUSDT";
   // TF « TOUJOURS applicable » (docstring) : validé contre la source restaurée,
-  // repli 1h si supporté, sinon premier TF supporté.
+  // repli 1h si supporté, sinon premier TF supporté ; ratio dont l'unité est retirée
+  // (÷SPY 4h) : la suivante proposée.
   const supportes = supportedTimeframesFor(exchange, symbol);
+  const connue = isNonEmptyString(o.timeframe) && (SUPPORTED_TIMEFRAMES.binance as readonly string[] | undefined)?.includes(o.timeframe);
+  const proche = exchange === "synthetic" && connue ? timeframeProche(supportes, o.timeframe as Timeframe) : undefined;
   const timeframe =
     isNonEmptyString(o.timeframe) && (supportes as readonly string[]).includes(o.timeframe)
       ? (o.timeframe as Timeframe)
-      : supportes.includes("1h")
-        ? "1h"
-        : (supportes[0] ?? "1h");
+      : proche ?? (supportes.includes("1h") ? "1h" : (supportes[0] ?? "1h"));
   return {
     exchange,
     symbol,

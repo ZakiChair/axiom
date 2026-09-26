@@ -56,3 +56,15 @@ describe("ChartGrid — liaison d'identité", () => {
     });
   });
 });
+
+describe("ChartGrid — liaison d'un ratio dont l'unité est retirée", () => {
+  it("÷SPY propagé vers un maître en 4h : l'unité suivante (1d), pas la minute", () => {
+    marketStore.getState().setMarket({ exchange: "binance", symbol: "BTCUSDT", timeframe: "4h" });
+    propagerMarche(1, { exchange: "synthetic", symbol: "binance:ETHUSDT|/|twelvedata:SPY", timeframe: "4h" });
+    expect(marketIdentity(marketStore.getState())).toEqual({
+      exchange: "synthetic",
+      symbol: "binance:ETHUSDT|/|twelvedata:SPY",
+      timeframe: "1d",
+    });
+  });
+});

@@ -1,5 +1,5 @@
 /** Liaison atomique source + symbole entre les slots de la grille multi-chart. */
-import { supportedTimeframesFor } from "../data/adapters";
+import { supportedTimeframesFor, timeframeProche } from "../data/adapters";
 import { chartLayoutStore, linkedTargets } from "./chart-layout";
 import {
   marketIdentity,
@@ -21,11 +21,14 @@ export function masterLinkSource(
 function linkedIdentity(current: MarketIdentity, source: MarketIdentity): MarketIdentity {
   const symbol = normalizeMarketSymbol(source.symbol);
   const supported = supportedTimeframesFor(source.exchange, symbol);
+  // Ratio dont l'unité est retirée (÷SPY 4h) : la suivante proposée, pas la minute.
   const timeframe = supported.includes(current.timeframe)
     ? current.timeframe
-    : supported.includes(source.timeframe)
-      ? source.timeframe
-      : (supported[0] ?? source.timeframe);
+    : source.exchange === "synthetic"
+      ? (timeframeProche(supported, current.timeframe) ?? source.timeframe)
+      : supported.includes(source.timeframe)
+        ? source.timeframe
+        : (supported[0] ?? source.timeframe);
   return { exchange: source.exchange, symbol, timeframe };
 }
 

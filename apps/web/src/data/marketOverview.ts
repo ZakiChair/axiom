@@ -64,6 +64,8 @@ export interface CoinTile {
   changePct7j: number | null;
   /** Variation 30 j (%) — même convention que `changePct7j`. */
   changePct30j: number | null;
+  /** Variation 1 h (%) — classement MAP ; même convention null (absente d'un ancien cache). */
+  changePct1h: number | null;
 }
 
 /** Performance d'un secteur (catégorie CoinGecko). */
@@ -152,7 +154,8 @@ interface MarketRaw {
   current_price?: unknown;
   market_cap?: unknown;
   price_change_percentage_24h?: unknown;
-  /** Présents seulement avec `price_change_percentage=24h,7d,30d` dans la requête. */
+  /** Présents seulement avec `price_change_percentage=1h,24h,7d,30d` dans la requête. */
+  price_change_percentage_1h_in_currency?: unknown;
   price_change_percentage_7d_in_currency?: unknown;
   price_change_percentage_30d_in_currency?: unknown;
   total_volume?: unknown;
@@ -182,6 +185,7 @@ export function parseMarkets(json: unknown): CoinTile[] {
       changePct24h: num(raw.price_change_percentage_24h),
       changePct7j: numOuNull(raw.price_change_percentage_7d_in_currency),
       changePct30j: numOuNull(raw.price_change_percentage_30d_in_currency),
+      changePct1h: numOuNull(raw.price_change_percentage_1h_in_currency),
     });
   }
   out.sort((a, b) => b.mcapUsd - a.mcapUsd);
@@ -331,16 +335,16 @@ async function getJson(url: string, signal?: AbortSignal): Promise<unknown> {
 export async function fetchMarketOverview(signal?: AbortSignal): Promise<MarketOverview> {
   const cached = readCache<MarketOverview>(CACHE_KEY);
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
-    return { ...cached, coins: cached.coins.map((coin) => ({ ...coin, volume24hUsd: coin.volume24hUsd ?? null, observeLe: coin.observeLe ?? null })), stale: false };
+    return { ...cached, coins: cached.coins.map((coin) => ({ ...coin, volume24hUsd: coin.volume24hUsd ?? null, observeLe: coin.observeLe ?? null, changePct1h: coin.changePct1h ?? null })), stale: false };
   }
 
   const [globalR, marketsR, categoriesR] = await Promise.allSettled([
     getJson(withDemoKey(`${CG_BASE}/global`), signal),
     getJson(
-      // `price_change_percentage=24h,7d,30d` : périodes 7 j/30 j pour SECT — MÊME
-      // endpoint, MÊME requête : le budget strict de 3 req/refresh est inchangé.
+      // `price_change_percentage=1h,24h,7d,30d` : périodes 7 j/30 j pour SECT, 1 h pour le
+      // classement MAP — MÊME endpoint, MÊME requête : le budget de 3 req/refresh est inchangé.
       withDemoKey(
-        `${CG_BASE}/coins/markets?vs_currency=usd&per_page=${MARKETS_PER_PAGE}&page=1&price_change_percentage=24h,7d,30d`,
+        `${CG_BASE}/coins/markets?vs_currency=usd&per_page=${MARKETS_PER_PAGE}&page=1&price_change_percentage=1h,24h,7d,30d`,
       ),
       signal,
     ),
@@ -364,14 +368,14 @@ export async function fetchMarketOverview(signal?: AbortSignal): Promise<MarketO
   // Échec des données essentielles : santé en erreur, repli gracieux sur le cache périmé.
   const reason = globalR.status === "rejected" ? globalR.reason : (marketsR as PromiseRejectedResult).reason;
   healthStore.getState().marquerErreur(HEALTH_SOURCE, reason instanceof Error ? reason.message : String(reason));
-  if (cached) return { ...cached, coins: cached.coins.map((coin) => ({ ...coin, volume24hUsd: coin.volume24hUsd ?? null, observeLe: coin.observeLe ?? null })), stale: true };
+  if (cached) return { ...cached, coins: cached.coins.map((coin) => ({ ...coin, volume24hUsd: coin.volume24hUsd ?? null, observeLe: coin.observeLe ?? null, changePct1h: coin.changePct1h ?? null })), stale: true };
   throw reason instanceof Error ? reason : new Error(String(reason));
 }
 
 /** Dernier contexte marché déjà mis en cache, sans aucun appel réseau supplémentaire. */
 export function lireContexteMarcheCache(): { coins: CoinTile[]; fetchedAt: number } | null {
   const cached = readCache<MarketOverview>(CACHE_KEY);
-  return cached ? { fetchedAt: cached.fetchedAt, coins: cached.coins.map((coin) => ({ ...coin, volume24hUsd: coin.volume24hUsd ?? null, observeLe: coin.observeLe ?? null })) } : null;
+  return cached ? { fetchedAt: cached.fetchedAt, coins: cached.coins.map((coin) => ({ ...coin, volume24hUsd: coin.volume24hUsd ?? null, observeLe: coin.observeLe ?? null, changePct1h: coin.changePct1h ?? null })) } : null;
 }
 
 /**

@@ -13,6 +13,7 @@
 import type { Commande } from "./registry";
 import { cryptoquantUiStore, ENTREES_CQ, type CibleCq } from "../store/cryptoquantUi";
 import { windowManagerStore } from "../store/windowManager";
+import { marketMapUiStore } from "../store/marketmap-ui";
 
 /** Bascule d’ouverture d’une fenêtre du registre Launchpad. */
 function basculer(id: string): () => void {
@@ -57,6 +58,15 @@ export const windowPanelCommands: Commande[] = [
     motsCles: ["vue marche", "market map", "treemap", "heatmap", "alias map"],
     apercu: "Alias de MAP — ouvre / ferme la treemap de capitalisation du marché",
     action: basculer("marketMap"),
+  },
+  {
+    id: "panneau:classement-performances",
+    mnemonique: "TOP",
+    libelle: "Classement des performances (hausses / baisses)",
+    categorie: "panneau",
+    motsCles: ["classement", "top", "gainers", "losers", "movers", "hausses", "baisses", "performances", "coinglass"],
+    apercu: "Ouvre la vue marché sur les actifs les plus performants (1 h, 24 h, 7 j, 30 j)",
+    action: () => marketMapUiStore.getState().ouvrirClassement(),
   },
   {
     id: "panneau:term-structure",

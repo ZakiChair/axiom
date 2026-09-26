@@ -156,7 +156,7 @@ describe("raisonUnusableIndicateur", () => {
   });
 
   it("laisse les métriques globales utilisables quel que soit l'actif", () => {
-    for (const id of ["btcDominance", "fearGreed", "stablecoinSupply"]) {
+    for (const id of ["btcDominance", "fearGreed", "stablecoinSupply", "stablecoinPrint"]) {
       expect(
         raisonUnusableIndicateur(def(id), {
           exchange: "twelvedata",
@@ -288,8 +288,8 @@ describe("raisonUnusableIndicateur", () => {
     daemonSupporteMock.mockReturnValue(false);
   });
 
-  it("accepte les 214 définitions sans lever", () => {
-    expect(INDICATORS).toHaveLength(214);
+  it("accepte les 215 définitions sans lever", () => {
+    expect(INDICATORS).toHaveLength(215);
     for (const indicateur of INDICATORS) {
       expect(() => raisonUnusableIndicateur(indicateur, binanceBtc), indicateur.id).not.toThrow();
     }

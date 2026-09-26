@@ -91,6 +91,7 @@ describe("parseMarkets", () => {
         name: "A",
         market_cap: 100,
         price_change_percentage_24h: 1.5,
+        price_change_percentage_1h_in_currency: 0.35,
         price_change_percentage_7d_in_currency: -4.2,
         price_change_percentage_30d_in_currency: 12.75,
       },
@@ -98,6 +99,9 @@ describe("parseMarkets", () => {
     ]);
     expect(at(tiles, 0).changePct7j).toBeCloseTo(-4.2, 10);
     expect(at(tiles, 0).changePct30j).toBeCloseTo(12.75, 10);
+    // Période 1 h (classement MAP) : même convention null que 7 j/30 j.
+    expect(at(tiles, 0).changePct1h).toBeCloseTo(0.35, 10);
+    expect(at(tiles, 1).changePct1h).toBeNull();
     // Réponse SANS le paramètre de périodes (ou null) : NULL préservé — un 0
     // fabriqué diluerait les moyennes pondérées de SECT vers 0 et s'afficherait
     // « +0.00% » en vert (revue Lot 3). Le Δ24 h garde sa convention 0 (MAP).
@@ -223,7 +227,7 @@ describe("fetchMarketOverview — budget strict de requêtes (critère SECT no 2
     // Budget strict : SECT n'ajoute AUCUN appel — toujours 3 requêtes par refresh.
     expect(bouchon).toHaveBeenCalledTimes(3);
     const marches = urls.find((u) => u.includes("/coins/markets"));
-    expect(marches).toContain("price_change_percentage=24h,7d,30d");
+    expect(marches).toContain("price_change_percentage=1h,24h,7d,30d");
     // Les périodes voyagent bien jusqu'aux tuiles (mêmes octets, zéro requête en plus).
     expect(overview.coins[0]?.changePct7j).toBe(2);
     expect(overview.coins[0]?.changePct30j).toBe(3);

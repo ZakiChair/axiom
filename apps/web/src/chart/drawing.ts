@@ -219,6 +219,62 @@ interface SavedPoint {
   timestamp?: number;
   value?: number;
 }
+/** Point tel que klinecharts le manipule : instant OU indice de bougie. */
+interface PointGraphe extends SavedPoint {
+  dataIndex?: number;
+}
+type Bougies = ReadonlyArray<{ timestamp: number }>;
+
+/** Pas des bougies : plus petit écart positif des 20 dernières (un week-end ne le fausse pas). */
+function pasBougies(data: Bougies): number | null {
+  let pas = Infinity;
+  for (let i = Math.max(1, data.length - 20); i < data.length; i++) {
+    const ecart = data[i]!.timestamp - data[i - 1]!.timestamp;
+    if (ecart > 0 && ecart < pas) pas = ecart;
+  }
+  return Number.isFinite(pas) ? pas : null;
+}
+
+/**
+ * Point klinecharts → point sauvegardé. Posé à droite de la dernière bougie (ou avant la
+ * première), klinecharts ne lui donne qu'un `dataIndex` : son instant est extrapolé au pas des
+ * bougies. Sans cela il était sauvegardé sans abscisse et revenait au bord gauche au rejeu
+ * (rectangle « déplacé » en passant d'un graphe à un autre).
+ */
+export function versPointSauve(p: PointGraphe, data: Bougies): SavedPoint {
+  const out: SavedPoint = {};
+  let t = p.timestamp;
+  const pas = pasBougies(data);
+  if (typeof t !== "number" && typeof p.dataIndex === "number" && pas !== null) {
+    const bord = p.dataIndex < 0 ? 0 : data.length - 1;
+    t = data[bord]!.timestamp + (p.dataIndex - bord) * pas;
+  }
+  if (typeof t === "number") out.timestamp = t;
+  if (typeof p.value === "number") out.value = p.value;
+  return out;
+}
+
+/**
+ * Point sauvegardé → point klinecharts. Dans la plage des bougies : par instant (klinecharts
+ * cherche la plus proche à chaque rendu, d'une unité de temps à l'autre). Hors plage : par
+ * indice extrapolé, car klinecharts rabattrait l'instant sur la première ou la dernière bougie.
+ */
+export function versPointGraphe(p: SavedPoint, data: Bougies): PointGraphe {
+  const pas = pasBougies(data);
+  const t = p.timestamp;
+  if (typeof t !== "number" || pas === null) return { ...p };
+  const premier = data[0]!.timestamp;
+  const dernier = data[data.length - 1]!.timestamp;
+  if (t >= premier && t <= dernier) return { ...p };
+  const out: PointGraphe = t > dernier ? { dataIndex: data.length - 1 + Math.round((t - dernier) / pas) } : { dataIndex: Math.round((t - premier) / pas) };
+  if (typeof p.value === "number") out.value = p.value;
+  return out;
+}
+
+/** Bougies de l'instance (le double de test peut ne pas les exposer). */
+function bougiesDe(chart: KLineChartInstance): Bougies {
+  return (chart as { getDataList?: () => Bougies }).getDataList?.() ?? [];
+}
 /** Dessin persistable : nom d'overlay klinecharts + ses points. */
 interface SavedOverlay {
   name: string;
@@ -244,6 +300,10 @@ interface ChartEntry {
    * Posé à true à `unbindChart`, false à `bindChart`.
    */
   suppressPersist: boolean;
+  /** Première bougie vue : si elle change (historique préfixé), les points hors bougies sont réancrés. */
+  premiere?: number;
+  /** Abonnement klinecharts `onDataReady`, retiré à `unbindChart`. */
+  surDonnees?: () => void;
 }
 
 /** Registre chart → état de dessin (une entrée par slot monté). */
@@ -261,7 +321,7 @@ export function bindChart(
   meta: { exchange: string; symbol: string },
   slot: number,
 ): void {
-  registry.set(chart, {
+  const entry: ChartEntry = {
     chart,
     slot,
     exchange: meta.exchange,
@@ -269,9 +329,34 @@ export function bindChart(
     liveOverlays: new Map(),
     selectedOverlayId: null,
     suppressPersist: false,
-  });
+  };
+  // Historique préfixé par `applyNewData` (extension de session, resync) : klinecharts ne
+  // décale pas les points posés par indice (hors bougies) ; ils sont réancrés sur leur instant.
+  entry.surDonnees = () => reancrerHorsBougies(entry);
+  actionsDe(chart).subscribeAction?.("onDataReady", entry.surDonnees);
+  registry.set(chart, entry);
   // Première instance liée → devient le focus par défaut (typiquement le slot maître).
   if (activeChart === null) activeChart = chart;
+}
+
+/** Abonnements klinecharts, sans importer l'enum `ActionType` (absent du double de test). */
+function actionsDe(chart: KLineChartInstance) {
+  return chart as unknown as {
+    subscribeAction?: (type: string, cb: () => void) => void;
+    unsubscribeAction?: (type: string, cb: () => void) => void;
+  };
+}
+
+/** Réancre les dessins ayant un point hors bougies quand la première bougie change. */
+function reancrerHorsBougies(entry: ChartEntry): void {
+  const data = bougiesDe(entry.chart);
+  const premiere = data[0]?.timestamp;
+  if (premiere === entry.premiere) return; // simple tick ou bougie ajoutée : rien à faire
+  entry.premiere = premiere;
+  for (const [id, ov] of entry.liveOverlays) {
+    const points = ov.points.map((p) => versPointGraphe(p, data));
+    if (points.some((p) => p.dataIndex !== undefined)) entry.chart.overrideOverlay({ id, points });
+  }
 }
 
 /**
@@ -303,7 +388,10 @@ export function setFocusChart(slot: number): void {
  */
 export function unbindChart(chart: KLineChartInstance): void {
   const entry = registry.get(chart);
-  if (entry) entry.suppressPersist = true;
+  if (entry) {
+    entry.suppressPersist = true;
+    if (entry.surDonnees) actionsDe(chart).unsubscribeAction?.("onDataReady", entry.surDonnees);
+  }
   registry.delete(chart);
   if (activeChart === chart) {
     const next = registry.values().next();
@@ -367,9 +455,10 @@ function persistEntry(entry: ChartEntry): void {
   }
 }
 
-/** Ne garde que {timestamp, value} (ancrage stable, stockage léger). */
-function normalizePoints(points: ReadonlyArray<SavedPoint>): SavedPoint[] {
-  return points.map((p) => ({ timestamp: p.timestamp, value: p.value }));
+/** Ne garde que {timestamp, value} (ancrage stable, stockage léger), instant extrapolé hors bougies. */
+function normalizePoints(chart: KLineChartInstance, points: ReadonlyArray<PointGraphe>): SavedPoint[] {
+  const data = bougiesDe(chart);
+  return points.map((p) => versPointSauve(p, data));
 }
 
 /**
@@ -379,15 +468,16 @@ function normalizePoints(points: ReadonlyArray<SavedPoint>): SavedPoint[] {
  * interactif, `onDrawEnd` ne se déclenche pas).
  */
 function createTrackedOverlay(chart: KLineChartInstance, name: string, points?: SavedPoint[]): string | null {
-  const capture = (id: string, ovPoints: ReadonlyArray<SavedPoint>): void => {
+  const capture = (id: string, ovPoints: ReadonlyArray<PointGraphe>): void => {
     const entry = registry.get(chart);
     if (!entry) return;
-    entry.liveOverlays.set(id, { name, points: normalizePoints(ovPoints) });
+    entry.liveOverlays.set(id, { name, points: normalizePoints(chart, ovPoints) });
     persistEntry(entry);
   };
+  const data = points ? bougiesDe(chart) : [];
   const created = chart.createOverlay({
     name,
-    ...(points ? { points } : {}),
+    ...(points ? { points: points.map((p) => versPointGraphe(p, data)) } : {}),
     // L'overlay VPFR a besoin des bougies + de l'échelle prix du chart hôte :
     // le chart est passé par extendData (par overlay → sûr en multi-chart).
     ...(name === VPFR_NAME ? { extendData: chart } : {}),
@@ -451,6 +541,7 @@ export function restoreDrawings(chart: KLineChartInstance, exchange: string, sym
   entry.exchange = exchange;
   entry.symbol = symbol;
   entry.liveOverlays.clear();
+  entry.premiere = bougiesDe(chart)[0]?.timestamp; // points rejoués ci-dessous sur ces bougies
 
   const all = readAll();
   const key = storageKey(entry.slot, exchange, symbol);

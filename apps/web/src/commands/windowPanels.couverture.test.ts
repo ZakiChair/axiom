@@ -116,10 +116,11 @@ describe("couverture ⌘K du registre de fenêtres", () => {
   it("les navigations intra-fenêtre OUVRENT leur hôte sans la basculer", () => {
     // CQTAKR déplie une section de DES, CQMINE une sous-section de CHAIN : une bascule
     // FERMERAIT la fenêtre déjà ouverte (l'inverse de l'effet attendu) et compterait à tort
-    // comme couverture ⌘K de DES / CHAIN.
-    expect([...new Set(fenetresOuvertes)].sort()).toEqual(["derivatives", "onchain"]);
+    // comme couverture ⌘K de DES / CHAIN. TOP ouvre MAP sur son onglet « Classement ».
+    expect([...new Set(fenetresOuvertes)].sort()).toEqual(["derivatives", "marketMap", "onchain"]);
     expect(fenetresBasculees).not.toContain("derivatives");
     expect(fenetresBasculees).not.toContain("onchain");
+    expect(fenetresBasculees.filter((id) => id === "marketMap")).toHaveLength(2); // MAP et IMAP seulement
     // Toute fenêtre seulement ouverte doit exister dans le registre.
     expect([...new Set(fenetresOuvertes)].filter((id) => !idsRegistre.has(id))).toEqual([]);
   });

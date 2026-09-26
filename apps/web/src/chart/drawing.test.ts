@@ -19,6 +19,8 @@ import {
   selectTool,
   setFocusChart,
   unbindChart,
+  versPointGraphe,
+  versPointSauve,
 } from "./drawing";
 import { indicatorsStore } from "../store/indicators";
 
@@ -451,6 +453,105 @@ describe("drawing.ts — slots scellés : même actif affiché sur deux slots", 
     const all = JSON.parse(localStorage.getItem(DRAWINGS_KEY) ?? "{}") as Record<string, unknown[]>;
     expect(all["0:binance:BTCUSDT"]?.length).toBe(1); // copié vers la clé scellée au slot
     expect(all["binance:BTCUSDT"]?.length).toBe(1); // conservé : source d'héritage des AUTRES slots
+    unbindChart(a.chart);
+  });
+});
+
+// ───────────── Bogue « rectangles déplacés en passant d'un graphe à un autre » ─────────────
+//
+// klinecharts 9.8 : un point posé à droite de la dernière bougie (ou avant la première) n'a
+// qu'un `dataIndex` (`dataIndexToTimestamp` → null). L'ancienne sauvegarde ne gardait que
+// {timestamp, value} : ce point revenait sans abscisse au rejeu (changement d'actif, d'unité
+// de temps, de disposition ou rechargement) et le rectangle se déformait vers le bord gauche.
+
+const H = 3_600_000;
+/** 10 bougies 1h à partir de t0 (timestamps klinecharts). */
+const T0 = Date.UTC(2026, 8, 20, 0);
+const bougies = (n = 10, depuis = T0) => Array.from({ length: n }, (_, i) => ({ timestamp: depuis + i * H }));
+
+describe("versPointSauve / versPointGraphe — ancrage temporel hors des bougies", () => {
+  it("un point dans les bougies garde son instant ; un point dans le futur reçoit l'instant extrapolé", () => {
+    const data = bougies();
+    expect(versPointSauve({ timestamp: T0 + 3 * H, dataIndex: 3, value: 100 }, data)).toEqual({ timestamp: T0 + 3 * H, value: 100 });
+    // Dernière bougie à l'indice 9 (T0 + 9h) : l'indice 14 est 5 bougies plus loin.
+    expect(versPointSauve({ dataIndex: 14, value: 120 }, data)).toEqual({ timestamp: T0 + 14 * H, value: 120 });
+    // Avant la première bougie : extrapolation vers le passé.
+    expect(versPointSauve({ dataIndex: -2, value: 90 }, data)).toEqual({ timestamp: T0 - 2 * H, value: 90 });
+  });
+
+  it("le pas ignore un trou (week-end) : plus petit écart positif des dernières bougies", () => {
+    const data = [...bougies(5), { timestamp: T0 + 60 * H }];
+    expect(versPointSauve({ dataIndex: 7, value: 1 }, data)).toEqual({ timestamp: T0 + 62 * H, value: 1 });
+  });
+
+  it("sans bougies, un point sans instant reste tel quel (aucune invention)", () => {
+    expect(versPointSauve({ dataIndex: 3, value: 1 }, [])).toEqual({ value: 1 });
+  });
+
+  it("au rejeu : instant dans les bougies → par instant ; au-delà → indice extrapolé, jamais rabattu sur la dernière bougie", () => {
+    const data = bougies();
+    expect(versPointGraphe({ timestamp: T0 + 3 * H, value: 100 }, data)).toEqual({ timestamp: T0 + 3 * H, value: 100 });
+    expect(versPointGraphe({ timestamp: T0 + 14 * H, value: 120 }, data)).toEqual({ dataIndex: 14, value: 120 });
+    expect(versPointGraphe({ timestamp: T0 - 2 * H, value: 90 }, data)).toEqual({ dataIndex: -2, value: 90 });
+    // Autre unité de temps (4h) : même instant, indice recalculé sur ce pas.
+    const quatreHeures = Array.from({ length: 10 }, (_, i) => ({ timestamp: T0 + i * 4 * H }));
+    expect(versPointGraphe({ timestamp: T0 + 44 * H, value: 120 }, quatreHeures)).toEqual({ dataIndex: 11, value: 120 });
+  });
+});
+
+describe("drawing.ts — un rectangle prolongé dans le futur survit au changement de graphe", () => {
+  let localStorage: Storage;
+  beforeEach(() => { localStorage = installMockLocalStorage(); });
+  afterEach(() => { delete (globalThis as { localStorage?: Storage }).localStorage; });
+
+  /** Chart simulé avec bougies et abonnement aux actions (onDataReady). */
+  function chartAvecDonnees(data: Array<{ timestamp: number }>) {
+    const base = createMockChart();
+    const crees: Array<Record<string, unknown>> = [];
+    const surcharges: Array<Record<string, unknown>> = [];
+    const actions = new Map<string, () => void>();
+    const chart = base.chart as unknown as Record<string, unknown>;
+    const creer = chart.createOverlay as (opts: Record<string, unknown>) => string;
+    chart.createOverlay = (opts: Record<string, unknown>) => { crees.push(opts); return creer(opts); };
+    chart.overrideOverlay = (opts: Record<string, unknown>) => { surcharges.push(opts); };
+    chart.getDataList = () => data;
+    chart.subscribeAction = (type: string, cb: () => void) => { actions.set(type, cb); };
+    chart.unsubscribeAction = (type: string) => { actions.delete(type); };
+    return { ...base, crees, surcharges, donneesPretes: () => actions.get("onDataReady")?.(), setData: (d: typeof data) => { data = d; chart.getDataList = () => data; } };
+  }
+
+  it("le coin futur est sauvegardé avec son instant et rejoué à son indice (plus au bord gauche)", () => {
+    const a = chartAvecDonnees(bougies());
+    bindChart(a.chart, { exchange: EXCHANGE, symbol: SYMBOL }, 0);
+    setFocusChart(0);
+    restoreDrawings(a.chart, EXCHANGE, SYMBOL);
+    selectTool("rect");
+    a.finishDraw("ov-0", [{ timestamp: T0 + 2 * H, dataIndex: 2, value: 100 } as never, { dataIndex: 15, value: 120 } as never]);
+    const sauve = (JSON.parse(localStorage.getItem(DRAWINGS_KEY) ?? "{}") as Record<string, Array<{ points: unknown[] }>>)[SLOT0_KEY];
+    expect(sauve?.[0]?.points).toEqual([{ timestamp: T0 + 2 * H, value: 100 }, { timestamp: T0 + 15 * H, value: 120 }]);
+    unbindChart(a.chart);
+
+    // Autre graphe (remontage, rechargement) : une bougie de plus est arrivée entre-temps.
+    const b = chartAvecDonnees(bougies(11));
+    bindChart(b.chart, { exchange: EXCHANGE, symbol: SYMBOL }, 0);
+    restoreDrawings(b.chart, EXCHANGE, SYMBOL);
+    expect(b.crees.at(-1)?.points).toEqual([{ timestamp: T0 + 2 * H, value: 100 }, { dataIndex: 15, value: 120 }]);
+    unbindChart(b.chart);
+  });
+
+  it("historique préfixé par applyNewData (extension de session, resync) : le coin futur est réancré", () => {
+    const a = chartAvecDonnees(bougies());
+    bindChart(a.chart, { exchange: EXCHANGE, symbol: SYMBOL }, 0);
+    localStorage.setItem(DRAWINGS_KEY, JSON.stringify({ [SLOT0_KEY]: [{ name: "rect", points: [{ timestamp: T0 + 2 * H, value: 100 }, { timestamp: T0 + 15 * H, value: 120 }] }] }));
+    restoreDrawings(a.chart, EXCHANGE, SYMBOL);
+    const id = "ov-0";
+    // 100 bougies plus anciennes préfixées : l'indice 15 désignerait désormais une bougie passée.
+    a.setData(bougies(110, T0 - 100 * H));
+    a.donneesPretes();
+    expect(a.surcharges).toEqual([{ id, points: [{ timestamp: T0 + 2 * H, value: 100 }, { dataIndex: 115, value: 120 }] }]);
+    // Simple tick (même première bougie) : aucune surcharge supplémentaire.
+    a.donneesPretes();
+    expect(a.surcharges).toHaveLength(1);
     unbindChart(a.chart);
   });
 });

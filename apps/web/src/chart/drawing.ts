@@ -237,10 +237,11 @@ const UNITES: Record<string, number> = { s: 1e3, m: 6e4, h: 36e5, d: 864e5, w: 6
  */
 function pasDe(data: Bougies, timeframe?: string): Pas | null {
   const mois = /^(\d+)M$/.exec(timeframe ?? "");
-  // Mois civils seulement si les bougies s'ouvrent le 1er à 00:00 UTC : le « 1M » d'Hyperliquid
-  // est un paquet de 30 j aligné sur l'époque, que le pas mesuré ci-dessous suit exactement.
-  const derniere = data.at(-1)?.timestamp;
-  const auPremier = derniere === undefined || (new Date(derniere).getUTCDate() === 1 && derniere % 86_400_000 === 0);
+  // Mois civils seulement si TOUTES les bougies mesurées s'ouvrent le 1er à 00:00 UTC : le « 1M »
+  // d'Hyperliquid est un paquet de 30 j aligné sur l'époque (qui tombe parfois le 1er, ex. 2027-02-01),
+  // que le pas mesuré ci-dessous suit exactement.
+  const fenetre = data.slice(-20);
+  const auPremier = fenetre.every(({ timestamp: t }) => new Date(t).getUTCDate() === 1 && t % 86_400_000 === 0);
   if (mois && auPremier) return { mois: Number(mois[1]) };
   let pas = Infinity;
   for (let i = Math.max(1, data.length - 20); i < data.length; i++) {

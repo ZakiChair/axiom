@@ -787,8 +787,13 @@ angles, constats contre-vérifiés) a été suivie d'un second commit de correct
        résolveur commun `resolveMarketCandidates`, à l'unité de temps du slot focus, aucun ordre
        réimplémenté) doit avoir un prix connu et cohérent. Sinon, « vérification incomplète,
        réessayez », sans désactiver la ligne.
-     - La navigation passe cette place en provenance. Les lignes non cotées sont estompées, avec
-       une infobulle.
+     - La navigation passe cette place en provenance. Les lignes non cotées ou refusées sont
+       estompées, avec une infobulle ; une ligne refusée reste focalisable (`tabIndex=-1`,
+       `aria-disabled`), le focus clavier n'est pas perdu.
+     - Le résolveur est interrogé APRÈS les prix. Limite résiduelle : une fois fusionné avec le
+       routage par profondeur d'historique, une place dont la mesure de profondeur est encore
+       en vol au clic peut ensuite passer en tête et être ouverte sans prix vérifié. Le refus
+       d'identité reste garanti pour toute place dont le prix est connu.
    - `MAP` et `IMAP` rouvrent sur la carte ; `TOP` ouvre sur le classement sans fermer la
      fenêtre.
 2. **Impression de stablecoins : `stablecoinPrint`, pane séparé, unité 1d SEULEMENT.**
@@ -815,8 +820,8 @@ angles, constats contre-vérifiés) a été suivie d'un second commit de correct
    - Cause : la sauvegarde ne gardait que `{timestamp, value}`. Le point revenait donc sans
      abscisse au rejeu (changement d'actif, d'unité de temps, de disposition, rechargement), et
      le dessin se déformait vers le bord gauche.
-   - Sauvegarde : l'instant est extrapolé. Mois UTC en 1M et au-delà quand les bougies s'ouvrent
-     le 1er à 00:00 UTC. Sinon, au plus petit écart mesuré : c'est le cas du « 1M » d'Hyperliquid,
+   - Sauvegarde : l'instant est extrapolé. Mois UTC en 1M et au-delà quand TOUTES les bougies
+     mesurées (20 dernières au plus) s'ouvrent le 1er à 00:00 UTC. Sinon, au plus petit écart mesuré : c'est le cas du « 1M » d'Hyperliquid,
      des paquets de 30 j alignés sur l'époque. Avec moins de deux bougies, la durée de l'unité de
      temps.
    - Rejeu : un instant hors des bougies devient un indice extrapolé, que klinecharts rabattait
@@ -835,9 +840,9 @@ angles, constats contre-vérifiés) a été suivie d'un second commit de correct
      - les dessins restent indexés par slot, place et symbole (changer de place masque ceux de
        l'ancienne).
 
-Validation après deux tours de revue : indicateurs 844, backtest 114, alertes 62, web 5 435
+Validation après trois tours de revue : indicateurs 844, backtest 114, alertes 62, web 5 438
 tests ; typage monorepo ; e2e `dessins-hors-bougies`, `multivue`, `gate-g7-liens`,
-`gate-lot3-corr` (×3), `quatre-lots-backtest` et `revue-outils-avances`, deux fois de suite.
-Budget d'entrée en Node 24 (zlib 1.3.x) : **1 195 461 / 356 742** octets (bruts/gzip), soit
-+4 911 / +1 686 par rapport à `main` (1 190 550 / 355 056) ; marge gzip 3 258 octets.
+`gate-lot3-corr` (×3), `quatre-lots-backtest` et `revue-outils-avances`. Budget d'entrée en
+Node 24 (zlib 1.3.x) : **1 195 440 / 356 742** octets (bruts/gzip), soit +4 890 / +1 686 par
+rapport à `main` (1 190 550 / 355 056) ; marge gzip 3 258 octets.
 Plafonds 1 220 000 / 360 000 inchangés.

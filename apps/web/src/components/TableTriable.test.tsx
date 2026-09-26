@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
 import { basculerTri, trierLignes, TableTriable, type ColonneTable } from "./TableTriable";
 
 interface Ligne { sym: string; prix: number | null; }
@@ -97,5 +98,20 @@ describe("TableTriable (markup)", () => {
     expect(prixHeader?.props.children.type).toBe("button");
     prixHeader?.props.children.props.onClick?.(); // appelle le handler
     expect(recu).toEqual({ colonne: "prix", dir: -1 }); // basculerTri(null, "prix")
+  });
+});
+
+describe("TableTriable — lignes inactives (refus d'identité du classement)", () => {
+  it("une ligne inactive reste focalisable (tabIndex -1, aria-disabled) sans action ; une active garde Tab + clic", () => {
+    const html = renderToStaticMarkup(TableTriable({
+      colonnes: COLS, lignes: LIGNES, cle: (l) => l.sym, ariaLabel: "Test",
+      surClicLigne: () => {}, ligneActive: (l) => l.sym !== "XRP",
+    }));
+    const ligne = (sym: string) => html.split('role="row"').find((r) => r.includes(`>${sym}<`)) ?? "";
+    // Le focus posé sur la ligne au moment du refus y reste : pas d'élément retiré de l'ordre de focus du DOM.
+    expect(ligne("XRP")).toMatch(/tabindex="-1"/);
+    expect(ligne("XRP")).toMatch(/aria-disabled="true"/);
+    expect(ligne("BTC")).toMatch(/tabindex="0"/);
+    expect(ligne("BTC")).not.toMatch(/aria-disabled/);
   });
 });

@@ -107,12 +107,12 @@ export function ClassementPerformances({ coins, loading }: { coins: readonly Coi
     const n = ++clic.current;
     const paire = `${l.symbol}USDT`;
     setEtat(`Vérification du prix de ${paire}…`);
-    // Place que le graphe essaiera d'abord : même résolveur que lui, aucun ordre réimplémenté ici.
-    const [candidats, cotations] = await Promise.all([
-      resolveMarketCandidates({ symbol: paire, timeframe: timeframeFocus() }, catalogue.current ?? undefined).catch(() => []),
-      Promise.all(places.map(async (exchange) => ({ exchange, prix: await dernierPrix(exchange, paire) }))),
-    ]);
+    const cotations = await Promise.all(places.map(async (exchange) => ({ exchange, prix: await dernierPrix(exchange, paire) })));
     if (n !== clic.current) return; // clic plus récent ou démontage
+    // Place que le graphe essaiera d'abord : même résolveur que lui, aucun ordre réimplémenté ici.
+    // Appelé APRÈS les prix : les mesures qu'il déclenche éventuellement ont profité de l'attente.
+    const candidats = await resolveMarketCandidates({ symbol: paire, timeframe: timeframeFocus() }, catalogue.current ?? undefined).catch(() => []);
+    if (n !== clic.current) return;
     const premiere = candidats.find((c) => !c.speculative)?.exchange;
     const verdict = verifierPaire(l, cotations, premiere);
     setRefusees((m) => refusesApres(m, l.id, verdict));

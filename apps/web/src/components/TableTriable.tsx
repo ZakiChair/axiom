@@ -98,8 +98,10 @@ export function TableTriable<L>({
             key={cle(l)}
             role={ariaLabel ? "row" : undefined}
             title={titreLigne?.(l)}
-            // Cliquable = atteignable au clavier : Tab, puis Entrée ou Espace.
-            tabIndex={active ? 0 : undefined}
+            // Cliquable = atteignable au clavier : Tab, puis Entrée ou Espace. Désactivée (ex. refus
+            // d'identité au clic) : encore focalisable, pour que le focus clavier ne tombe pas au body.
+            tabIndex={active ? 0 : surClicLigne !== undefined ? -1 : undefined}
+            aria-disabled={surClicLigne !== undefined && !active ? true : undefined}
             onClick={active ? () => surClicLigne(l) : undefined}
             onKeyDown={active ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); surClicLigne(l); } } : undefined}
             className={`grid items-center gap-2 border-b border-border/50 px-3 py-1.5 text-[11px] last:border-b-0 ${

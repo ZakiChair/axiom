@@ -261,4 +261,17 @@ describe("Δ24 h inconnu et cache d'un ancien schéma (classement MAP)", () => {
     expect(bouchon).toHaveBeenCalledTimes(3);
     expect(overview.coins[0]?.changePct24hConnu).toBe(1.5);
   });
+
+  it("cache frais à liste vide (/coins/markets → []) : servi, pas de nouvelles requêtes", async () => {
+    const stock = new Map<string, string>([["axiom.marketmap.overview.v1", JSON.stringify({
+      global: { totalMcapUsd: 1, totalVolumeUsd: 1, btcDominance: 1, ethDominance: 1, mcapChangePct24h: 0 },
+      coins: [], sectors: [], fetchedAt: Date.now(),
+    })]]);
+    vi.stubGlobal("localStorage", { getItem: (k: string) => stock.get(k) ?? null, setItem: (k: string, v: string) => void stock.set(k, v), removeItem: (k: string) => void stock.delete(k) });
+    const bouchon = vi.fn();
+    vi.stubGlobal("fetch", bouchon);
+    const overview = await fetchMarketOverview();
+    expect(bouchon).not.toHaveBeenCalled();
+    expect(overview.coins).toEqual([]);
+  });
 });

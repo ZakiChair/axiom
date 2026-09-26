@@ -9,7 +9,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ExchangeId } from "@axiom/types";
 import { getAdapter } from "../data/adapters";
 import type { CoinTile } from "../data/marketOverview";
-import { fetchMarketCatalog, subscribeMarketCatalog, type MarketCatalog } from "../data/marketRouting";
+import { fetchMarketCatalog, resolveMarketCandidates, subscribeMarketCatalog, type MarketCatalog } from "../data/marketRouting";
+import { chartLayoutStore } from "../store/chart-layout";
+import { marketStore } from "../store/market";
 import { formatPct, formatPrice, formatUsd } from "../lib/format";
 import { navigateTo } from "../lib/navigation";
 import { TableTriable, trierLignes, type ColonneTable, type TriTable } from "./TableTriable";
@@ -22,8 +24,15 @@ import {
   type LigneClassement,
   type PeriodeClassement,
   type SensClassement,
+  refusesApres,
   verifierPaire,
 } from "./classementPerformances.util";
+
+/** Unité de temps du slot focus, celui que `navigateTo` modifiera. */
+function timeframeFocus() {
+  const { focus, slots } = chartLayoutStore.getState();
+  return (focus === 0 ? undefined : slots[focus - 1]?.timeframe) ?? marketStore.getState().timeframe;
+}
 
 /** Places spot cotant chaque paire, d'après le catalogue commun. */
 function placesParPaire(c: MarketCatalog): ReadonlyMap<string, ExchangeId[]> {
@@ -77,7 +86,8 @@ export function ClassementPerformances({ coins, loading }: { coins: readonly Coi
   const [sansStables, setSansStables] = useState(true);
   const [tri, setTri] = useState<TriTable | null>(null);
   const [paires, setPaires] = useState<ReadonlyMap<string, ExchangeId[]> | null>(null);
-  /** Lignes dont la paire désigne un autre actif (raison affichée en infobulle). */
+  const catalogue = useRef<MarketCatalog | null>(null);
+  /** Lignes dont la paire désigne un autre actif (raison affichée en infobulle) : refus d'identité seulement. */
   const [refusees, setRefusees] = useState<ReadonlyMap<string, string>>(new Map());
   const [etat, setEtat] = useState<string | null>(null);
   const clic = useRef(0);
@@ -85,7 +95,7 @@ export function ClassementPerformances({ coins, loading }: { coins: readonly Coi
   // Paires spot cotées (tous catalogues, republiés à leur retour) : un clic n'ouvre qu'un instrument réel.
   useEffect(() => {
     let actif = true;
-    const recevoir = (c: MarketCatalog) => { if (actif) setPaires(placesParPaire(c)); };
+    const recevoir = (c: MarketCatalog) => { if (actif) { catalogue.current = c; setPaires(placesParPaire(c)); } };
     const stop = subscribeMarketCatalog(recevoir);
     void fetchMarketCatalog().then(recevoir).catch(() => { /* sans catalogue, lignes consultables mais non navigables */ });
     return () => { actif = false; clic.current += 1; stop(); };
@@ -95,17 +105,19 @@ export function ClassementPerformances({ coins, loading }: { coins: readonly Coi
     const places = paires?.get(`${l.symbol}USDT`);
     if (!places) return;
     const n = ++clic.current;
-    setEtat(`Vérification du prix de ${l.symbol}USDT…`);
-    const cotations = await Promise.all(places.map(async (exchange) => ({ exchange, prix: await dernierPrix(exchange, `${l.symbol}USDT`) })));
+    const paire = `${l.symbol}USDT`;
+    setEtat(`Vérification du prix de ${paire}…`);
+    const cotations = await Promise.all(places.map(async (exchange) => ({ exchange, prix: await dernierPrix(exchange, paire) })));
     if (n !== clic.current) return; // clic plus récent ou démontage
-    const verdict = verifierPaire(l, cotations);
-    if (verdict.ok) {
-      setEtat(null);
-      navigateTo({ symbol: verdict.paire, exchange: verdict.exchange, source: "map" });
-    } else {
-      setEtat(verdict.raison);
-      setRefusees((m) => new Map(m).set(l.id, verdict.raison));
-    }
+    // Place que le graphe essaiera d'abord : même résolveur que lui, aucun ordre réimplémenté ici.
+    // Appelé APRÈS les prix : les mesures qu'il déclenche éventuellement ont profité de l'attente.
+    const candidats = await resolveMarketCandidates({ symbol: paire, timeframe: timeframeFocus() }, catalogue.current ?? undefined).catch(() => []);
+    if (n !== clic.current) return;
+    const premiere = candidats.find((c) => !c.speculative)?.exchange;
+    const verdict = verifierPaire(l, cotations, premiere);
+    setRefusees((m) => refusesApres(m, l.id, verdict));
+    setEtat(verdict.ok ? null : verdict.raison);
+    if (verdict.ok) navigateTo({ symbol: verdict.paire, exchange: verdict.exchange, source: "map" });
   };
   const titreLigne = (l: LigneClassement) => refusees.get(l.id)
     ?? (paires === null ? "Catalogue des paires en chargement…"
@@ -164,7 +176,8 @@ export function ClassementPerformances({ coins, loading }: { coins: readonly Coi
           <span className={classeVariation(resume.mediane)}>{formatPct(resume.mediane)}</span>
         </span>
       </div>
-      {etat && <p role="status" className="text-[11px] text-text-dim">{etat}</p>}
+      {/* Hauteur réservée : la ligne d'état n'éclate pas le tableau pendant la vérification. */}
+      <p role="status" className="min-h-[1rem] text-[11px] text-text-dim">{etat}</p>
       {coins.length === 0 && loading ? (
         <Chargement />
       ) : (

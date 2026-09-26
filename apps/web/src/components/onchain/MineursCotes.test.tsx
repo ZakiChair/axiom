@@ -665,9 +665,10 @@ describe("production des mineurs cotés : vue, en-tête et conteneur", () => {
     expect(parSociete.indexOf(">RIOT<")).toBeLessThan(parSociete.indexOf(">WULF<"));
     const cliquable = vue({ chargements: tous(), onTri: () => {} });
     expect(cliquable.match(/<button/g)).toHaveLength(5);
-    expect(cliquable).toContain("BTC J-1<span>▾</span>");
+    expect(cliquable).toContain("BTC J-1<span aria-hidden=\"true\">▾</span>");
+    expect(cliquable).toContain('aria-sort="descending"');
     expect(vue({ chargements: tous(), tri: { colonne: "usd", dir: 1 }, onTri: () => {} })).toContain(
-      "USD J-1<span>▴</span>",
+      "USD J-1<span aria-hidden=\"true\">▴</span>",
     );
     // Une société sans ligne reste en fin de liste, quel que soit le sens.
     const partielle = tous();

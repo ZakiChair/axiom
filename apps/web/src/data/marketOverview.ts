@@ -345,7 +345,7 @@ export async function fetchMarketOverview(signal?: AbortSignal): Promise<MarketO
   const cached = readCache<MarketOverview>(CACHE_KEY);
   // Un cache frais d'un ancien schéma (sans Δ24 h nullable) est rechargé : servi, il viderait
   // le classement 24 h pendant 5 min. Il reste un repli si le réseau échoue.
-  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS && cached.coins[0]?.changePct24hConnu !== undefined) {
+  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS && (cached.coins.length === 0 || cached.coins[0]?.changePct24hConnu !== undefined)) {
     return { ...cached, coins: cached.coins.map(normaliserTuile), stale: false };
   }
 

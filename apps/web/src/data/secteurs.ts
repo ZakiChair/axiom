@@ -308,7 +308,7 @@ export function agregerSecteur(secteur: Secteur, parId: ReadonlyMap<string, Coin
       nom: tuile.name,
       mcapUsd: tuile.mcapUsd,
       prixUsd: tuile.price,
-      changePct24h: fini(tuile.changePct24h),
+      changePct24h: fini(tuile.changePct24hConnu), // Δ24 h inconnu : null, jamais le 0 de la treemap
       changePct7j: fini(tuile.changePct7j),
       changePct30j: fini(tuile.changePct30j),
       poidsPct: null, // rempli ci-dessous, une fois la cap totale connue

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CoinTile } from "../data/marketOverview";
-import { classerPerformances, estStablecoin, resumePerformances, valeurPeriode, verifierPaire } from "./classementPerformances.util";
+import { classerPerformances, estStablecoin, refusesApres, resumePerformances, valeurPeriode, verifierPaire } from "./classementPerformances.util";
 
 /** Tuile de fixture, rangée par capitalisation décroissante comme parseMarkets. */
 function tuile(symbol: string, mcapUsd: number, p: Partial<CoinTile> = {}): CoinTile {
@@ -69,24 +69,38 @@ describe("classement des performances (façon accueil CoinGlass)", () => {
 
 describe("garde du clic : la paire ouverte est bien l'actif de la ligne", () => {
   const ai = { symbol: "AI", name: "Artificial Inu", price: 0.258 };
-  it("prix cohérent sur toutes les places qui cotent la paire : navigation, première place cohérente en provenance", () => {
-    expect(verifierPaire({ symbol: "ETH", name: "Ethereum", price: 2_690 }, [{ exchange: "binance", prix: 2_687 }, { exchange: "okx", prix: 2_688 }]))
+  it("première place du routage cotée et cohérente, autres places cohérentes : navigation sur cette place", () => {
+    expect(verifierPaire({ symbol: "ETH", name: "Ethereum", price: 2_690 }, [{ exchange: "okx", prix: 2_688 }, { exchange: "binance", prix: 2_687 }], "binance"))
       .toEqual({ ok: true, paire: "ETHUSDT", exchange: "binance" });
   });
-  it("ticker partagé par un autre actif (AIUSDT = Sleepless AI à 0,0203 $) : aucune navigation, raison explicite", () => {
-    const v = verifierPaire(ai, [{ exchange: "binance", prix: 0.0203 }, { exchange: "okx", prix: 0.0217 }]);
-    expect(v.ok).toBe(false);
+  it("ticker partagé par un autre actif (AIUSDT = Sleepless AI à 0,0203 $) : refus d'IDENTITÉ, raison explicite", () => {
+    const v = verifierPaire(ai, [{ exchange: "binance", prix: 0.0203 }, { exchange: "okx", prix: 0.0217 }], "binance");
+    expect(v).toMatchObject({ ok: false, motif: "identite" });
     expect(v.ok === false && v.raison).toMatch(/AIUSDT.*Binance.*Artificial Inu/);
   });
-  it("une seule place incohérente suffit à bloquer (le routage pourrait la choisir)", () => {
-    expect(verifierPaire({ symbol: "FRAX", name: "Legacy Frax Dollar", price: 0.99 }, [{ exchange: "coinbase", prix: 0.99 }, { exchange: "bybit", prix: 0.306 }]).ok).toBe(false);
+  it("une seule place incohérente suffit, même si ce n'est pas la première du routage", () => {
+    expect(verifierPaire({ symbol: "FRAX", name: "Legacy Frax Dollar", price: 0.99 }, [{ exchange: "coinbase", prix: 0.99 }, { exchange: "bybit", prix: 0.306 }], "coinbase"))
+      .toMatchObject({ ok: false, motif: "identite" });
   });
-  it("bande ×0,8 – ×1,25 : bornes incluses ; places sans prix ignorées ; aucun prix → pas de navigation", () => {
-    expect(verifierPaire(ai, [{ exchange: "binance", prix: 0.258 * 0.8 }, { exchange: "okx", prix: undefined }]).ok).toBe(true);
-    expect(verifierPaire(ai, [{ exchange: "binance", prix: 0.258 * 1.25 }]).ok).toBe(true);
-    expect(verifierPaire(ai, [{ exchange: "binance", prix: 0.258 * 1.26 }]).ok).toBe(false);
-    const sansPrix = verifierPaire(ai, [{ exchange: "binance", prix: undefined }]);
-    expect(sansPrix.ok === false && sansPrix.raison).toMatch(/prix indisponible/i);
-    expect(verifierPaire(ai, []).ok).toBe(false);
+  it("prix inconnu sur la première place du routage (Binance muet, autres cohérents) : vérification incomplète, NON collante", () => {
+    const v = verifierPaire(ai, [{ exchange: "binance", prix: undefined }, { exchange: "kraken", prix: 0.26 }], "binance");
+    expect(v).toMatchObject({ ok: false, motif: "indisponible" });
+    expect(v.ok === false && v.raison).toMatch(/incomplète.*réessayez/i);
+  });
+  it("aucune place confirmée par le routage, ou aucun prix : vérification incomplète", () => {
+    expect(verifierPaire(ai, [{ exchange: "binance", prix: 0.258 }], undefined)).toMatchObject({ ok: false, motif: "indisponible" });
+    expect(verifierPaire(ai, [], "binance")).toMatchObject({ ok: false, motif: "indisponible" });
+  });
+  it("bande ×0,8 – ×1,25, bornes incluses", () => {
+    expect(verifierPaire(ai, [{ exchange: "binance", prix: 0.258 * 0.8 }], "binance").ok).toBe(true);
+    expect(verifierPaire(ai, [{ exchange: "binance", prix: 0.258 * 1.25 }], "binance").ok).toBe(true);
+    expect(verifierPaire(ai, [{ exchange: "binance", prix: 0.258 * 1.26 }], "binance")).toMatchObject({ ok: false, motif: "identite" });
+  });
+  it("seul un refus d'identité désactive la ligne ; une vérification incomplète laisse réessayer", () => {
+    const refusees = new Map<string, string>();
+    const incomplet = verifierPaire(ai, [{ exchange: "binance", prix: undefined }], "binance");
+    expect(refusesApres(refusees, "artificial-inu-3", incomplet).has("artificial-inu-3")).toBe(false);
+    const identite = verifierPaire(ai, [{ exchange: "binance", prix: 0.0203 }], "binance");
+    expect(refusesApres(refusees, "artificial-inu-3", identite).has("artificial-inu-3")).toBe(true);
   });
 });

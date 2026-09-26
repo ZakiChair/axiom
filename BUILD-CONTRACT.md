@@ -11,7 +11,7 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 - **Cible** : terminal pour UN utilisateur (ses propres clés). PAS de multi-tenant, PAS d'auth réseau, PAS de SaaS. Crypto d'abord (spot + perp) ; tradfi/commodités en complément.
 - **Renderer-first** : le premier livrable à valeur est un graphe live à l'écran. **AUCUN backend réseau/multi-tenant (Docker/TimescaleDB/Redis interdits). Un daemon localhost mono-process (`apps/daemon`, Bun + SQLite, port 8787) est autorisé depuis la Phase 2 — proxy/cache/persistance/alertes UNIQUEMENT, jamais sur le chemin chaud du renderer (les WS de marché du front restent directs).** Le front parle directement aux WS publics des exchanges (mode mono-utilisateur assumé) et reste **100 % fonctionnel SANS daemon** (feature-detect `/health` + repli localStorage/proxy Vite). Déviation assumée vs roadmap E1 : les proxys Vite restent en dev (dev sans daemon), le daemon est le chemin de PROD + services additionnels.
 - **Chart** : **KLineChart** figé (pas de lightweight-charts, pas d'abstraction `IChartRenderer` « swap de moteur »). L'overlay orderflow se synchronise sur le viewport de KLineChart. Multi-chart 2×2 : un store par slot ; les overlays doivent être scellés au slot (voir plan 2026-08-24, Lot 3).
-- **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**215 indicateurs** depuis le 2026-09-26, cf. « Demandes du 26 septembre 2026 » ; 214 au 2026-09-23). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
+- **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**215 indicateurs** depuis le 2026-09-26, cf. « Classement, impression de stablecoins et dessins (26 septembre 2026) » ; 214 au 2026-09-23). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
 - **Données dérivées (OI/funding/L-S/liquidations)** : **ACHETER** via un `IDerivedDataProvider` (Coinalyze **câblé**, M6 atteint) — NE PAS construire d'AggregationEngine multi-exchange. Trois couches de liquidations distinctes et étiquetées : heatmap *exécutée*, niveaux **EST.** (modèle levier), niveaux **HL réels** (Hyperliquid, non exhaustif). Depuis le 2026-09-21, la heatmap exécutée reçoit aussi une venue `hyperliquid` **PARTIELLE** (fills des makers suivis, couverture mesurée affichée — cf. « Corrections et extension demandées le 21 septembre 2026 »). Depuis le 2026-09-22, la couche HL réels est aussi une **heatmap temps × prix des instantanés** collectés par le daemon (opt-in, couverture mesurée en % de l'OI — cf. « Revue et extension du 22 septembre 2026 »).
 - **Trading** : **PAS d'exécution d'ordres** — aucune clé de trading. Le paper trading (`PAPER`) est une simulation locale (hors gate G100/K8). Ne rien implémenter qui touche à des clés de trading réelles.
 - **Sources** : **9 identifiants** (`EXCHANGE_IDS` dans `@axiom/types`) — Binance, Bybit, OKX, Hyperliquid, Coinbase, Kraken, Twelve Data, MEXC, synthetic. Ne pas en ajouter sans nécessité démontrée (non-objectif avant G100).
@@ -853,13 +853,25 @@ angles, constats contre-vérifiés) a été suivie d'un second commit de correct
      et jetons de trésorerie compris, ou prix ancré à 1 $ sans mouvement) ; nombre de hausses,
      de baisses et médiane.
    - Un actif sans variation connue sur la période sort du classement, sans 0 inventé. Le Δ24 h
-     a pour cela un champ nullable dédié (`changePct24hConnu`) ; la treemap garde sa convention
-     0. Un cache d'un ancien schéma est rechargé au lieu d'être servi.
-   - Clic ou Entrée sur une ligne : la paire `SYMBOLEUSDT` ne s'ouvre que si un catalogue la
-     cote ET si son dernier prix sur CHAQUE place qui la cote reste dans ×0,8 – ×1,25 du prix
-     CoinGecko. Un ticker n'est pas unique : AIUSDT est Sleepless AI, pas Artificial Inu. Sinon,
-     aucune navigation, et la raison est affichée. Les lignes non navigables sont estompées, avec
-     une infobulle.
+     a pour cela un champ nullable dédié (`changePct24hConnu`), aussi lu par SECT ; la treemap
+     garde sa convention 0. Un cache frais d'un ancien schéma est rechargé au lieu d'être servi
+     (un cache à liste vide reste servi).
+   - Clic, Entrée ou Espace sur une ligne : la paire `SYMBOLEUSDT` ne s'ouvre que si un
+     catalogue la cote, avec deux contrôles. Un ticker n'est pas unique : AIUSDT est Sleepless
+     AI, pas Artificial Inu.
+     - Identité : aucune place au prix connu ne sort de ×0,8 – ×1,25 du prix CoinGecko. Sinon,
+       refus collant : la ligne est estompée et l'infobulle donne la raison.
+     - Première place : la place que le graphe essaiera d'abord (premier candidat confirmé du
+       résolveur commun `resolveMarketCandidates`, à l'unité de temps du slot focus, aucun ordre
+       réimplémenté) doit avoir un prix connu et cohérent. Sinon, « vérification incomplète,
+       réessayez », sans désactiver la ligne.
+     - La navigation passe cette place en provenance. Les lignes non cotées ou refusées sont
+       estompées, avec une infobulle ; une ligne refusée reste focalisable (`tabIndex=-1`,
+       `aria-disabled`), le focus clavier n'est pas perdu.
+     - Le résolveur est interrogé APRÈS les prix. Limite résiduelle : une fois fusionné avec le
+       routage par profondeur d'historique, une place dont la mesure de profondeur est encore
+       en vol au clic peut ensuite passer en tête et être ouverte sans prix vérifié. Le refus
+       d'identité reste garanti pour toute place dont le prix est connu.
    - `MAP` et `IMAP` rouvrent sur la carte ; `TOP` ouvre sur le classement sans fermer la
      fenêtre.
 2. **Impression de stablecoins : `stablecoinPrint`, pane séparé, unité 1d SEULEMENT.**
@@ -876,7 +888,9 @@ angles, constats contre-vérifiés) a été suivie d'un second commit de correct
      précédente.
    - Une valeur reportée à l'identique ne fait aucune barre. La bougie non clôturée (point
      réécrit en cours de journée) va dans « Jour en cours (partiel) », en gris, hors de la
-     moyenne.
+     moyenne. Limite : « clos » désigne la bougie de prix. Juste après 00:00 UTC, le point de la
+     veille peut encore être partiel (cache de la série 1 h, publication DefiLlama) ; il se
+     corrige au rafraîchissement suivant.
    - Moyenne au plus 60 jours (la série couvre 90 jours) ; légende et axe abrégés (K/M/B),
      comme pour l'offre de stablecoins.
 3. **Dessins dont un point est hors des bougies chargées.** Dans klinecharts 9.8, un point
@@ -884,16 +898,18 @@ angles, constats contre-vérifiés) a été suivie d'un second commit de correct
    - Cause : la sauvegarde ne gardait que `{timestamp, value}`. Le point revenait donc sans
      abscisse au rejeu (changement d'actif, d'unité de temps, de disposition, rechargement), et
      le dessin se déformait vers le bord gauche.
-   - Sauvegarde : l'instant est extrapolé (mois UTC en 1M et au-delà ; sinon au pas des bougies,
-     ou à la durée de l'unité de temps s'il y a moins de deux bougies).
+   - Sauvegarde : l'instant est extrapolé. Mois UTC en 1M et au-delà quand TOUTES les bougies
+     mesurées (20 dernières au plus) s'ouvrent le 1er à 00:00 UTC. Sinon, au plus petit écart mesuré : c'est le cas du « 1M » d'Hyperliquid,
+     des paquets de 30 j alignés sur l'époque. Avec moins de deux bougies, la durée de l'unité de
+     temps.
    - Rejeu : un instant hors des bougies devient un indice extrapolé, que klinecharts rabattait
      sur la première ou la dernière bougie.
    - Historique préfixé : quand la première bougie change (extension de session, resync,
      pagination), TOUS les dessins sont rejoués depuis leurs instants. klinecharts ne décale pas
      l'indice en `applyNewData`. Parcours `e2e/dessins-hors-bougies` : −1 661 barres sans ce
      rejeu, 0 avec.
-   - Le VPFR borne une plage dont un bord n'a qu'un indice (bougies chargées) au lieu de
-     disparaître.
+   - Le VPFR borne aux bougies chargées une plage dont un bord n'a qu'un indice (hors des
+     bougies chargées), au lieu de disparaître.
    - Limites :
      - en TradFi, nuits et week-ends sont extrapolés comme des bougies de même durée (instant
        approché), et un instant futur peut ensuite être rabattu sur la bougie la plus proche ;
@@ -902,9 +918,12 @@ angles, constats contre-vérifiés) a été suivie d'un second commit de correct
      - les dessins restent indexés par slot, place et symbole (changer de place masque ceux de
        l'ancienne).
 
-Validation : indicateurs 844, backtest 114, alertes 62, web 5 429 tests, typage
-monorepo, e2e `dessins-hors-bougies` et `multivue` deux fois de suite. Budget d'entrée en
-Node 24 (zlib 1.3.x) : voir le commit de corrections ; plafonds 1 220 000 / 360 000 inchangés.
+Validation après trois tours de revue : indicateurs 844, backtest 114, alertes 62, web 5 438
+tests ; typage monorepo ; e2e `dessins-hors-bougies`, `multivue`, `gate-g7-liens`,
+`gate-lot3-corr` (×3), `quatre-lots-backtest` et `revue-outils-avances`. Budget d'entrée en
+Node 24 (zlib 1.3.x) : **1 195 440 / 356 742** octets (bruts/gzip), soit +4 890 / +1 686 par
+rapport à `main` (1 190 550 / 355 056) ; marge gzip 3 258 octets.
+Plafonds 1 220 000 / 360 000 inchangés.
 
 ## Budget d'entrée de l'intégration du 26 septembre 2026
 

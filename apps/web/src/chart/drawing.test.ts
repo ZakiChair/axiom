@@ -613,6 +613,21 @@ describe("drawing.ts — revue du 26/09 : réancrage, abonnements, calendrier", 
     expect(versPointGraphe({ timestamp: Date.UTC(2023, 9, 1), value: 1 }, trimestres, "3M")).toEqual({ dataIndex: -1, value: 1 });
   });
 
+  it("Hyperliquid « 1M » = paquets de 30 j alignés sur l'époque, pas des mois civils : pas mesuré conservé", () => {
+    const PAQUET = 2_592_000_000;
+    const hl = Array.from({ length: 20 }, (_, i) => ({ timestamp: (671 + i) * PAQUET }));
+    expect(versPointSauve({ dataIndex: 19 + 12, value: 1 }, hl, "1M")).toEqual({ timestamp: (690 + 12) * PAQUET, value: 1 });
+    expect(versPointGraphe({ timestamp: (690 + 12) * PAQUET, value: 1 }, hl, "1M")).toEqual({ dataIndex: 31, value: 1 });
+  });
+
+  it.each([695, 700])("Hyperliquid 1M finissant sur un paquet qui tombe le 1er (k=%i) : toujours le pas mesuré", (k) => {
+    const PAQUET = 2_592_000_000;
+    const hl = Array.from({ length: 20 }, (_, i) => ({ timestamp: (k - 19 + i) * PAQUET }));
+    expect(new Date(k * PAQUET).getUTCDate()).toBe(1);
+    expect(versPointSauve({ dataIndex: 19 + 12, value: 1 }, hl, "1M")).toEqual({ timestamp: (k + 12) * PAQUET, value: 1 });
+    expect(versPointGraphe({ timestamp: (k + 12) * PAQUET, value: 1 }, hl, "1M")).toEqual({ dataIndex: 31, value: 1 });
+  });
+
   it("une seule bougie : le pas vient de l'unité de temps, le coin futur garde un instant", () => {
     expect(versPointSauve({ dataIndex: 3, value: 1 }, [{ timestamp: T0 }], "1h")).toEqual({ timestamp: T0 + 3 * H, value: 1 });
     expect(versPointGraphe({ timestamp: T0 + 3 * H, value: 1 }, [{ timestamp: T0 }], "1h")).toEqual({ dataIndex: 3, value: 1 });

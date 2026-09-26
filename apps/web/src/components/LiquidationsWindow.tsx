@@ -252,7 +252,7 @@ function CollecteHeatmapHl({ now }: { now: number }) {
   useEffect(() => {
     if (IS_VERCEL) return;
     const demander = (): void => {
-      const coin = basePerp(marketStore.getState().symbol);
+      const coin = basePerp(marketStore.getState().symbol, marketStore.getState().exchange);
       if (coin !== null) {
         assurerHeat({ coin, pasMs: 5 * 60_000, depuisMs: Date.now() - 14 * 24 * 3_600_000 });
       }

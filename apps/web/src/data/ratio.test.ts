@@ -293,3 +293,11 @@ describe("revue du 26/09 : gardes et libellés des dénominateurs marchés et de
     expect(noteDollar("SPY", "twelvedata")).toBeNull();
   });
 });
+
+describe("vérification du 26/09 : une paire en dollar n'est pas annoncée en TUSD", () => {
+  it("Coinbase DOTUSD : ÷Or proposé, sans note de stablecoin", () => {
+    expect(symboleRatio("DOTUSD", "coinbase", "OR")).toBe("coinbase:DOTUSD|/|twelvedata:XAU/USD");
+    expect(noteDollar("DOTUSD", "coinbase")).toBeNull();
+    expect(noteDollar("BTCTUSD", "binance")).toBe("TUSD compté pour 1 USD");
+  });
+});

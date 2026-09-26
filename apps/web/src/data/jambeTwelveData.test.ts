@@ -82,6 +82,22 @@ describe("souscrireJambeTwelveData — cadence et heures de marché", () => {
     expect(heures.filter((h) => h > "20:12")).toEqual([]);
   });
 
+  it("sondage de fermeture en échec : réessayé à la cadence suivante jusqu'à sa réussite, puis plus rien", async () => {
+    vi.setSystemTime(new Date("2026-09-24T13:12:00Z"));
+    const heures: string[] = [];
+    const fetchOriginal = globalThis.fetch as unknown as (url: string) => Promise<unknown>;
+    vi.stubGlobal("fetch", vi.fn((url: string) => {
+      const hhmm = new Date().toISOString().slice(11, 16);
+      heures.push(hhmm);
+      return hhmm > "20:10" && hhmm < "20:30" ? Promise.reject(new Error("réseau")) : fetchOriginal(url);
+    }));
+    const { souscrireJambeTwelveData } = await import("./twelvedata");
+    const stop = souscrireJambeTwelveData("SPY", "1d", () => {});
+    await vi.advanceTimersByTimeAsync(10 * 60 * MINUTE);
+    stop();
+    expect(heures.filter((h) => h > "20:10")).toEqual(["20:12", "20:27", "20:42"]);
+  });
+
   it("jeudi 02:00Z, SPY hors séance : amorçage seul", async () => {
     await suivre("SPY", "1m", "2026-09-24T02:00:00Z", 30 * MINUTE);
     expect(requetes).toEqual(["SPY"]);

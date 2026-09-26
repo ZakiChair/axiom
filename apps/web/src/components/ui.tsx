@@ -249,7 +249,16 @@ export function MenuDeroulant({
   };
 
   return (
-    <div className="relative" ref={wrapperRef} onKeyDown={surTouche}>
+    <div
+      className="relative"
+      ref={wrapperRef}
+      onKeyDown={surTouche}
+      onBlur={(e) => {
+        // Focus parti vers un autre élément (Tab, « / ») : le menu se ferme, et ↓ retrouve son
+        // sens global sans menu fantôme. Focus perdu vers nulle part (clic Safari) : il reste.
+        if (ouvert && e.relatedTarget !== null && !wrapperRef.current?.contains(e.relatedTarget as Node)) setOuvert(false);
+      }}
+    >
       <button
         type="button"
         ref={declencheurRef}

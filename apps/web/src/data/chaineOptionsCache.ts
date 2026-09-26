@@ -68,7 +68,7 @@ export function actifDeribit(exchange: ExchangeId, symbol: string): DeviseDeribi
     return actif === "BTC" || actif === "ETH" ? actif : null;
   }
   try {
-    const { base, quote } = splitSymbol(symbol.trim().toUpperCase().replace("-", "/"), "Deribit");
+    const { base, quote } = splitSymbol(symbol.trim().toUpperCase().replace("-", "/"), exchange);
     const devise = base === "XBT" ? "BTC" : base;
     return (devise === "BTC" || devise === "ETH") && COTATIONS_DOLLAR.includes(quote) ? devise : null;
   } catch {

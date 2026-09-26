@@ -780,10 +780,16 @@ aucune dépendance, aucun hôte ni fournisseur, aucune règle de proxy modifiée
    FDUSD, USDD, TUSD, USDE, DAI ; un stablecoin est compté pour 1 USD, ce que dit
    l'infobulle), perps Hyperliquid (USDC), TOTAL*, tickers Twelve Data US sans place
    explicite (« RY:TSX » refusé) et paires X/USD. Liste unique `COTATIONS_USD`
-   (`data/symbol.ts`), partagée avec la couche HL et le cache d'options. FDUSD n'est
-   une cotation de `splitSymbol` que chez Binance (WFDUSD = W/FDUSD ; UFD/USD de Kraken
-   reste UFD/USD) : rejeu sur 7 529 symboles réels, 197 paires Binance corrigées, aucun
-   découpage juste devenu faux. Jamais l'actif
+   (`data/symbol.ts`), partagée avec la couche HL et le cache d'options. `splitSymbol`
+   tient compte de la place : FDUSD n'est une cotation que chez Binance (WFDUSD =
+   W/FDUSD ; UFD/USD de Kraken reste UFD/USD) ; TUSD ne l'est pas chez Kraken, Coinbase,
+   OKX et Bybit (DOT/USD reste DOT/USD, sans note « TUSD »). La place est transmise par
+   les ratios, la couche et la fenêtre de liquidations HL (`basePerp`,
+   `raisonCotationHl`) et `actifDeribit` ; les autres consommateurs, sans place, gardent
+   le découpage historique. Rejeu sur 7 529 symboles réels (catalogue de prix, 32 paires
+   FDUSD réellement TRADING) : découpages justes Binance 2 421 → 2 618, Kraken 1 272 →
+   1 336, Coinbase 462 → 509, OKX 1 378 → 1 406, Bybit 513 → 514 ; sans place, aucun
+   changement ; aucun découpage juste devenu faux. Jamais l'actif
    divisé par lui-même ni par sa propre devise (EURUSDT en EUR). `estRatio` ne reconnaît
    que ce que le bouton aurait posé.
 3. **÷BTC/ETH/SOL étendus** à Bybit et OKX (spot contre spot) et aux perps Hyperliquid
@@ -818,8 +824,11 @@ aucune dépendance, aucun hôte ni fournisseur, aucune règle de proxy modifiée
 6. **Clavier.** Le menu repose sur la primitive `MenuDeroulant` (`aria-haspopup`,
    ↑/↓/Début/Fin, Échap). À l'ouverture, le focus entre dans le panneau, et une flèche
    reçue quand le focus n'est nulle part y ramène (Safari et Firefox ne donnent pas le
-   focus au bouton cliqué) ; un champ qui a pris le focus (« / ») le garde. Le raccourci global ignore une flèche ou un Échap déjà traités par un menu :
-   ↓ ne change plus de paire menu ouvert, Échap ne réduit plus la fenêtre focalisée.
+   focus au bouton cliqué) ; un champ qui a pris le focus (« / ») le garde. Le menu se
+   ferme quand le focus part vers un autre élément (Tab, « / »), et ↓ retrouve alors
+   son sens global. Le raccourci global ignore une flèche ou un Échap déjà traités par un menu :
+   ↓ ne change plus de paire tant que le focus est dans le menu (ou nulle part), Échap
+   ne réduit plus la fenêtre focalisée.
 
 Limites assumées :
 - Daily forex/or (J-1 21:00Z → J 21:00Z) apparié à la bougie crypto J : décalage de 3 h,
@@ -836,13 +845,16 @@ Limites assumées :
 - Jours fériés US non gérés : SPY et QQQ y sont sondés pour rien (environ 82 crédits en
   intrajournalier, 28 dès 1d, par jour férié).
 - Clôture SPY/QQQ en direct : captée par le sondage de fermeture, au plus 5 min (15 min
-  dès 1d) après 16:10 à New York ; exacte au rechargement.
+  dès 1d) après 16:10 à New York, retenté à chaque cadence en cas d'échec ; exacte au
+  rechargement.
 
-Validation : **5 444 tests web** et typage de tous les paquets réussis ; parcours
+Validation : **5 449 tests web** et typage de tous les paquets réussis ; parcours
 Chromium `gate-v24-macro-denominateur`, `gate-v25-cap-dominance`, `multivue`,
-`quatre-lots-indicateurs` et `niveaux-chart` : 34/34 deux fois de suite (les parcours
-clavier échouent sans leurs gardes). Budget d'entrée **1 195 658 octets bruts /
-356 928 gzip** (Node 24.13.0, zlib 1.3.1), contre 1 190 550 / 355 056 sur `main` ;
-plafonds 1 220 000 / 360 000 inchangés. Revue indépendante sous trois angles (calcul,
-robustesse, contrat et budget), contre-revue puis vérification ; leurs points
-bloquant, importants et mineurs retenus sont corrigés ci-dessus.
+`quatre-lots-indicateurs` et `niveaux-chart` : 34/34 deux fois de suite au tour
+précédent, puis `gate-v24-macro-denominateur` et `multivue` 19/19 deux fois après le
+dernier tour (les parcours clavier échouent sans leurs gardes). Budget d'entrée
+**1 195 875 octets bruts / 356 997 gzip** (Node 24.13.0, zlib 1.3.1), contre
+1 190 550 / 355 056 sur `main` ; plafonds 1 220 000 / 360 000 inchangés. Revue
+indépendante sous trois angles (calcul, robustesse, contrat et budget), contre-revue
+puis deux vérifications ; leurs points bloquant, importants et mineurs retenus sont
+corrigés ci-dessus.

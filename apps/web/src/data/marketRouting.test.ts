@@ -616,7 +616,7 @@ const P_BTC: Profondeurs = { "binance:BTCUSDT": [date("2017-08-17"), 1], "bybit:
 const P_BTCUSD: Profondeurs = { "kraken:BTCUSD": [MAINTENANT - 719 * SEMAINE, 0], "coinbase:BTCUSD": [MAINTENANT - 1_400 * JOUR, 0] };
 const P_HYPEUSD: Profondeurs = { "kraken:HYPEUSD": [date("2026-01-22"), 1], "coinbase:HYPEUSD": [date("2026-02-05"), 1] };
 const PLACES = ["binance", "kraken", "coinbase", "bybit", "okx", "mexc", "hyperliquid", "twelvedata", "synthetic"] as const;
-type Sondes = Partial<Record<ExchangeId, (symbol: string) => Promise<Candle[]>>>;
+type Sondes = Partial<Record<ExchangeId, (symbol: string, timeframe: Timeframe, opts?: { limit?: number; endTime?: number }) => Promise<Candle[]>>>;
 
 /** Routage neuf : cache de profondeur pré-rempli (mesuré à l'instant) et sondes espionnées (échec par défaut). */
 async function routage(profondeurs: Profondeurs = {}, sondes: Sondes = {}) {
@@ -624,7 +624,7 @@ async function routage(profondeurs: Profondeurs = {}, sondes: Sondes = {}) {
   vi.stubGlobal("localStorage", { getItem: () => JSON.stringify({ v: 1, e }), setItem: () => {} });
   const { getAdapter } = await import("./adapters");
   const espions = Object.fromEntries(PLACES.map((place) => [place, vi.spyOn(getAdapter(place), "fetchKlines")
-    .mockImplementation((symbol) => (sondes[place] ?? (() => Promise.reject(new Error("sonde en échec"))))(symbol))]));
+    .mockImplementation((symbol, timeframe, opts) => (sondes[place] ?? (() => Promise.reject(new Error("sonde en échec"))))(symbol, timeframe, opts))]));
   const routing = await import("./marketRouting");
   const ordre = async (identity: { exchange?: ExchangeId; symbol: string; timeframe: Timeframe }, catalog: MarketCatalog) =>
     (await routing.resolveMarketCandidates(identity, catalog)).map((c) => `${c.exchange}${c.speculative ? "?" : ""}`);
@@ -670,28 +670,76 @@ describe("profondeur d'historique : la place qui affiche le plus d'historique pa
     expect(await ordre({ exchange: "okx", symbol: "BTCUSDT", timeframe: "1m" }, BTC)).toEqual(["binance", "bybit", "okx"]);
   });
 
-  it.each(["1d", "1h"] as const)("BTCUSD en %s : Coinbase devant Kraken (720 bougies seulement)", async (timeframe) => {
+  it.each(["1d", "1h"] as const)("BTCUSD en %s : Coinbase devant Kraken (500 bougies affichées seulement)", async (timeframe) => {
     const { ordre } = await routage(P_BTCUSD);
     expect(await ordre({ symbol: "BTCUSD", timeframe }, BTCUSD)).toEqual(["coinbase", "kraken"]);
     expect(await ordre({ exchange: "kraken", symbol: "BTCUSD", timeframe }, BTCUSD)).toEqual(["coinbase", "kraken"]);
   });
 
-  it("HYPEUSD : Kraken (2026-01-22) en 1d, Coinbase en 1h où Kraken ne couvre que 30 jours", async () => {
+  it("HYPEUSD limité à Kraken et Coinbase : Kraken (2026-01-22) en 1d, Coinbase en 1h où Kraken ne couvre que 500 heures", async () => {
     const { ordre } = await routage(P_HYPEUSD);
     expect(await ordre({ symbol: "HYPEUSD", timeframe: "1d" }, HYPEUSD)).toEqual(["kraken", "coinbase"]);
     expect(await ordre({ symbol: "HYPEUSD", timeframe: "1h" }, HYPEUSD)).toEqual(["coinbase", "kraken"]);
   });
 
-  it("sondes simulées : HYPEUSDT mesuré une fois par place (1w, affiné en 1d si la cotation est récente), puis classé par profondeur", async () => {
+  it("HYPEUSD sur API réelles (OKX coté le 04/11/2025) : OKX en 1d, Coinbase en 1h où OKX ne couvre que 1 440 heures", async () => {
+    const { ordre } = await routage({ ...P_HYPEUSD, "okx:HYPEUSD": [date("2025-11-03"), 1] });
+    const catalogue = spot(["kraken", "HYPEUSD"], ["coinbase", "HYPEUSD"], ["okx", "HYPEUSD"]);
+    expect(await ordre({ symbol: "HYPEUSD", timeframe: "1d" }, catalogue)).toEqual(["okx", "kraken", "coinbase"]);
+    expect(await ordre({ symbol: "HYPEUSD", timeframe: "1h" }, catalogue)).toEqual(["coinbase", "okx", "kraken"]);
+  });
+
+  it("Kraken plafonné à 500 bougies (backfill sans pagination) : PEPEUSD en 1d, Coinbase et OKX devant Kraken pourtant coté plus tôt", async () => {
+    const { ordre } = await routage({ "kraken:PEPEUSD": [date("2023-05-11"), 1], "coinbase:PEPEUSD": [date("2024-11-13"), 1], "okx:PEPEUSD": [date("2025-01-13"), 1] });
+    expect(await ordre({ symbol: "PEPEUSD", timeframe: "1d" }, spot(["kraken", "PEPEUSD"], ["coinbase", "PEPEUSD"], ["okx", "PEPEUSD"])))
+      .toEqual(["coinbase", "okx", "kraken"]);
+  });
+
+  it("une borne (exact:false) est « au moins aussi profonde » : Coinbase BTCEUR arrêté à 4 pages reste au palier de tête, Binance départage", async () => {
+    const { ordre } = await routage({
+      "binance:BTCEUR": [date("2019-12-30"), 1], "coinbase:BTCEUR": [MAINTENANT - 1_400 * JOUR, 0],
+      // Borne déjà plus ancienne que Binance au-delà de la tolérance : prouvée plus profonde.
+      "binance:XLMEUR": [date("2023-02-10"), 1], "coinbase:XLMEUR": [MAINTENANT - 1_400 * JOUR, 0],
+    });
+    for (const timeframe of ["1d", "6h", "4h"] as const) {
+      expect(await ordre({ exchange: "coinbase", symbol: "BTCEUR", timeframe }, spot(["binance", "BTCEUR"], ["coinbase", "BTCEUR"]))).toEqual(["binance", "coinbase"]);
+    }
+    expect(await ordre({ symbol: "XLMEUR", timeframe: "1d" }, spot(["binance", "XLMEUR"], ["coinbase", "XLMEUR"]))).toEqual(["coinbase", "binance"]);
+  });
+
+  it("une borne n'est jamais reléguée par un début exact plus ancien qu'elle : Coinbase BTCUSDC (réel : 2015) reste devant Bybit hors Binance", async () => {
+    const { ordre } = await routage({ "bybit:BTCUSDC": [date("2021-07-05"), 1], "coinbase:BTCUSDC": [MAINTENANT - 1_400 * JOUR, 0] });
+    const catalogue = spot(["coinbase", "BTCUSDC"], ["bybit", "BTCUSDC"]);
+    expect(await ordre({ symbol: "BTCUSDC", timeframe: "1d" }, catalogue)).toEqual(["coinbase", "bybit"]);
+    expect(await ordre({ exchange: "bybit", symbol: "BTCUSDC", timeframe: "1d" }, catalogue)).toEqual(["bybit", "coinbase"]);
+    // En 1h, la fenêtre de 20 000 bougies est couverte par les deux : l'ordre des sources départage.
+    expect(await ordre({ symbol: "BTCUSDC", timeframe: "1h" }, catalogue)).toEqual(["coinbase", "bybit"]);
+  });
+
+  it("une place sans mesure garde le doute jusqu'au plafond de sa place seulement : Kraken inconnu ne passe pas devant Coinbase (BTCUSD 1d), même en provenance", async () => {
+    const { ordre } = await routage({ "coinbase:BTCUSD": [MAINTENANT - 1_400 * JOUR, 0] });
+    expect(await ordre({ exchange: "kraken", symbol: "BTCUSD", timeframe: "1d" }, BTCUSD)).toEqual(["coinbase", "kraken"]);
+  });
+
+  it("une place sans l'unité demandée ne fixe pas le palier des autres : BTCUSDT en 1w, Coinbase (sans 1w) coté plus tôt ne fait pas passer Bybit, 3 jours avant Binance, devant lui", async () => {
+    const { ordre } = await routage({ "binance:BTCUSDT": [date("2017-08-17"), 1], "bybit:BTCUSDT": [date("2017-08-14"), 1], "coinbase:BTCUSDT": [date("2015-01-05"), 1] });
+    const catalogue = spot(["binance", "BTCUSDT"], ["coinbase", "BTCUSDT"], ["bybit", "BTCUSDT"]);
+    expect(await ordre({ symbol: "BTCUSDT", timeframe: "1w" }, catalogue)).toEqual(["binance", "bybit", "coinbase"]);
+    // En 1d, Coinbase sert l'unité : son historique plus ancien le place devant.
+    expect(await ordre({ symbol: "BTCUSDT", timeframe: "1d" }, catalogue)).toEqual(["coinbase", "bybit", "binance"]);
+  });
+
+  it("sondes simulées : HYPEUSDT mesuré une fois par place (1w affiné en 1d si la cotation est récente ; OKX 1M affiné au lundi), puis classé par profondeur", async () => {
     const { ordre, espions } = await routage({}, {
       binance: async () => serie(date("2026-09-24"), 1), bybit: async () => serie(date("2025-07-11"), 64), okx: async () => serie(date("2025-11-04"), 47),
     });
     expect(await ordre({ exchange: "binance", symbol: "HYPEUSDT", timeframe: "1h" }, HYPE)).toEqual(["bybit", "okx", "binance"]);
     expect(await ordre({ symbol: "HYPEUSDT", timeframe: "1d" }, HYPE)).toEqual(["bybit", "okx", "binance"]);
-    // OKX (04/11/2025) est hors de portée de sa sonde 1d de 300 bougies : pas d'affinage.
-    for (const place of ["binance", "bybit", "okx"] as const) {
-      expect(espions[place]!.mock.calls).toEqual([["HYPEUSDT", "1w", { limit: place === "okx" ? 300 : 1_000 }], ...(place === "okx" ? [] : [["HYPEUSDT", "1d", { limit: 1_000 }]])]);
+    for (const place of ["binance", "bybit"] as const) {
+      expect(espions[place]!.mock.calls).toEqual([["HYPEUSDT", "1w", { limit: 1_000 }], ["HYPEUSDT", "1d", { limit: 1_000 }]]);
     }
+    // OKX (04/11/2025) est hors de portée d'une sonde 1d de 300 bougies : page 1w autour du mois.
+    expect(espions.okx!.mock.calls).toEqual([["HYPEUSDT", "1M", { limit: 300 }], ["HYPEUSDT", "1w", { limit: 6, endTime: date("2025-11-04") + 5 * SEMAINE }]]);
   });
 
   it("toutes les sondes en échec : ordre actuel (Binance confirmé en tête), sans nouvelle sonde pendant 60 s", async () => {
@@ -742,6 +790,171 @@ describe("profondeur d'historique : la place qui affiche le plus d'historique pa
   });
 });
 
+describe("sortie anticipée : la mesure rend dès que la tête ne peut plus changer", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    vi.setSystemTime(MAINTENANT);
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("réseau interdit en test"))));
+  });
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+  const muette = () => new Promise<Candle[]>(() => {});
+  const BTC_CB = spot(["binance", "BTCUSDT"], ["coinbase", "BTCUSDT"], ["bybit", "BTCUSDT"], ["okx", "BTCUSDT"]);
+
+  it.each(["1m", "1h"] as const)("BTCUSDT en %s : Binance mesuré au plafond du graphe, décidé sans attendre Coinbase muet", async (timeframe) => {
+    const { routing, espions } = await routage({}, { binance: async () => serie(date("2017-08-14"), 476), coinbase: muette, bybit: muette, okx: muette });
+    let ordre: string[] | undefined;
+    void routing.resolveMarketCandidates({ exchange: "coinbase", symbol: "BTCUSDT", timeframe }, BTC_CB).then((liste) => { ordre = liste.map((c) => c.exchange); });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ordre).toEqual(["binance", "coinbase", "bybit", "okx"]);
+    // Les sondes parties finissent en fond ; aucune n'a été attendue.
+    expect(espions.coinbase).toHaveBeenCalledTimes(1);
+  });
+
+  it("BTCUSDT en 1d : Coinbase (sans plafond) pourrait être plus profond que Binance 2017, il est attendu jusqu'à la borne", async () => {
+    const { routing } = await routage({}, { binance: async () => serie(date("2017-08-14"), 476), coinbase: muette, bybit: muette, okx: muette });
+    let ordre: string[] | undefined;
+    void routing.resolveMarketCandidates({ symbol: "BTCUSDT", timeframe: "1d" }, BTC_CB).then((liste) => { ordre = liste.map((c) => c.exchange); });
+    await vi.advanceTimersByTimeAsync(2_499);
+    expect(ordre).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(ordre).toEqual(["binance", "coinbase", "bybit", "okx"]);
+  });
+
+  it("BTCUSDT en 1w : Coinbase (sans 1w) ne peut pas passer en tête, décidé sans attendre sa sonde muette", async () => {
+    const { routing, espions } = await routage({}, { binance: async () => serie(date("2017-08-14"), 476), bybit: async () => serie(date("2021-07-05"), 273), coinbase: muette });
+    let ordre: string[] | undefined;
+    void routing.resolveMarketCandidates({ symbol: "BTCUSDT", timeframe: "1w" }, spot(["binance", "BTCUSDT"], ["coinbase", "BTCUSDT"], ["bybit", "BTCUSDT"])).then((liste) => { ordre = liste.map((c) => c.exchange); });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ordre).toEqual(["binance", "bybit", "coinbase"]);
+    expect(espions.coinbase).toHaveBeenCalledTimes(1);
+  });
+
+  it("HYPEUSDT en 1d : OKX attendu tant qu'il peut passer devant Bybit", async () => {
+    const { routing } = await routage({}, {
+      binance: async () => serie(date("2026-09-24"), 1), bybit: async () => serie(date("2025-07-11"), 64),
+      // OKX répond en 1,5 s ; la page 1w d'affinage aussitôt.
+      okx: (_symbol, tf) => tf === "1M" ? new Promise((ok) => setTimeout(() => ok(serie(date("2025-11-01"), 11, 30 * JOUR)), 1_500)) : Promise.resolve(serie(date("2025-11-03"), 5)),
+    });
+    let ordre: string[] | undefined;
+    void routing.resolveMarketCandidates({ exchange: "binance", symbol: "HYPEUSDT", timeframe: "1d" }, HYPE).then((liste) => { ordre = liste.map((c) => c.exchange); });
+    await vi.advanceTimersByTimeAsync(1_499);
+    expect(ordre).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(ordre).toEqual(["bybit", "okx", "binance"]);
+  });
+
+  it("HYPEUSDT en 1h : OKX (1 440 bougies au plus) ne peut plus passer devant Bybit, décidé sans lui", async () => {
+    const { routing } = await routage({}, { binance: async () => serie(date("2026-09-24"), 1), bybit: async () => serie(date("2025-07-11"), 64), okx: muette });
+    let ordre: string[] | undefined;
+    void routing.resolveMarketCandidates({ exchange: "binance", symbol: "HYPEUSDT", timeframe: "1h" }, HYPE).then((liste) => { ordre = liste.map((c) => c.exchange); });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ordre).toEqual(["bybit", "okx", "binance"]);
+  });
+
+  it("HYPEUSDT : tête inconnue (Binance muet, bénéfice du doute) jamais décidée avant la borne", async () => {
+    const { routing } = await routage({}, { binance: muette, bybit: async () => serie(date("2025-07-11"), 64), okx: async () => serie(date("2025-11-03"), 47) });
+    let ordre: string[] | undefined;
+    void routing.resolveMarketCandidates({ symbol: "HYPEUSDT", timeframe: "1h" }, HYPE).then((liste) => { ordre = liste.map((c) => c.exchange); });
+    await vi.advanceTimersByTimeAsync(2_499);
+    expect(ordre).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(ordre).toEqual(["binance", "bybit", "okx"]);
+  });
+
+  it("12 résultats de recherche en file chez Binance, Bybit et OKX : la sonde du graphe passe devant, Bybit en tête sous la borne ; la recherche abandonnée ne sonde plus", async () => {
+    const RECHERCHE = ["HYPERUSDT", "HBARUSDT", "HOOKUSDT", "HOTUSDT", "HIGHUSDT", "HIFIUSDT", "HMSTRUSDT", "HAEDALUSDT", "HFTUSDT", "HIVEUSDT", "HOMEUSDT", "HYPEUSDT"];
+    /** 500 ms par requête ; paires anciennes sans affinage, HYPEUSDT comme sur API réelles. */
+    const place = (hype: (tf: Timeframe) => Candle[]) => (symbol: string, tf: Timeframe) =>
+      new Promise<Candle[]>((ok) => setTimeout(() => ok(symbol === "HYPEUSDT" ? hype(tf) : serie(date("2020-01-06"), 300)), 500));
+    const { routing, espions } = await routage({}, {
+      binance: place((tf) => tf === "1w" ? serie(date("2026-09-21"), 1) : serie(date("2026-09-24"), 3, JOUR)),
+      bybit: place((tf) => tf === "1w" ? serie(date("2025-07-07"), 64) : serie(date("2025-07-11"), 443, JOUR)),
+      okx: place((tf) => tf === "1M" ? serie(date("2025-11-01"), 11, 30 * JOUR) : serie(date("2025-11-03"), 5)),
+    });
+    const profondeur = await import("./profondeurHistorique");
+    const recherche = new AbortController();
+    for (const symbol of RECHERCHE) {
+      void profondeur.mesurerProfondeurs((["binance", "bybit", "okx"] as const).map((exchange) => ({ exchange, symbol })), 2_500, { priorite: "recherche", signal: recherche.signal });
+    }
+    let ordre: string[] | undefined;
+    void routing.resolveMarketCandidates({ symbol: "HYPEUSDT", timeframe: "1h" }, HYPE).then((liste) => { ordre = liste.map((c) => c.exchange); });
+    // Sans priorité, HYPEUSDT (12e) partirait après cinq tours de 500 ms : Binance resterait inconnu à la borne.
+    await vi.advanceTimersByTimeAsync(900);
+    // La requête de recherche change : ses sondes encore en file sont retirées (HYPEUSDT, attendue par le graphe, reste).
+    recherche.abort();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(ordre).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(ordre).toEqual(["bybit", "okx", "binance"]);
+    await vi.advanceTimersByTimeAsync(10_000);
+    // La recherche n'occupe qu'un des deux créneaux (l'autre reste au graphe) : seule HYPERUSDT,
+    // en tête de sa file, est partie avant l'abandon.
+    for (const exchange of ["binance", "bybit", "okx"] as const) {
+      expect(new Set(espions[exchange]!.mock.calls.map(([symbol]) => symbol))).toEqual(new Set(["HYPERUSDT", "HYPEUSDT"]));
+    }
+  });
+
+  it.each([true, false])("frappe « HYPE » (cotations récentes, 2 requêtes par sonde), Binance à 1 s par requête, clic sur HYPEUSDT (liste fermée : %s) : Bybit en tête sous la borne", async (fermee) => {
+    const RECHERCHE = ["HYPERUSDT", "HYPETRY", "HYPEUSDC", "HYPEUSDT"];
+    /** HYPEUSDT comme sur API réelles ; les autres paires cotées le 02/03/2026 (1w puis affinage 1d). */
+    const place = (ms: number, hype: (tf: Timeframe) => Candle[]) => (symbol: string, tf: Timeframe) =>
+      new Promise<Candle[]>((ok) => setTimeout(() => ok(symbol === "HYPEUSDT" ? hype(tf) : tf === "1d" ? serie(date("2026-03-02"), 208, JOUR) : tf === "1M" ? serie(date("2026-03-01"), 7, 30 * JOUR) : serie(date("2026-03-02"), 30)), ms));
+    const { routing } = await routage({}, {
+      binance: place(1_000, (tf) => tf === "1w" ? serie(date("2026-09-21"), 1) : serie(date("2026-09-24"), 3, JOUR)),
+      bybit: place(345, (tf) => tf === "1w" ? serie(date("2025-07-07"), 64) : serie(date("2025-07-11"), 443, JOUR)),
+      okx: place(540, (tf) => tf === "1M" ? serie(date("2025-11-01"), 11, 30 * JOUR) : serie(date("2025-11-03"), 5)),
+    });
+    const profondeur = await import("./profondeurHistorique");
+    const recherche = new AbortController();
+    for (const symbol of RECHERCHE) {
+      void profondeur.mesurerProfondeurs((["binance", "bybit", "okx"] as const).map((exchange) => ({ exchange, symbol })), 2_500, { priorite: "recherche", signal: recherche.signal });
+    }
+    // Clic 300 ms après le départ de la rafale : une sonde de recherche Binance court encore (2 s).
+    await vi.advanceTimersByTimeAsync(300);
+    if (fermee) recherche.abort();
+    let ordre: string[] | undefined;
+    void routing.resolveMarketCandidates({ exchange: "binance", symbol: "HYPEUSDT", timeframe: "1h" }, HYPE).then((liste) => { ordre = liste.map((c) => c.exchange); });
+    // Sans créneau réservé, le graphe attendrait la fin d'une sonde de recherche (2 s) puis ferait
+    // ses 2 requêtes : Binance inconnu à la borne garderait la tête.
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(ordre).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(ordre).toEqual(["bybit", "okx", "binance"]);
+  });
+
+  it("clic sur HYPEUSD en 1d derrière des sondes de recherche en cours (Coinbase 4 pages à 700 ms, Kraken 2 requêtes à 800 ms) : le graphe prend le second créneau, OKX en tête sous la borne", async () => {
+    const lente = (ms: number, bougies: (symbol: string, tf: Timeframe, opts?: { endTime?: number }) => Candle[]) =>
+      (symbol: string, tf: Timeframe, opts?: { endTime?: number }) => new Promise<Candle[]>((ok) => setTimeout(() => ok(bougies(symbol, tf, opts)), ms));
+    const { routing } = await routage({}, {
+      // HBARUSD coté en 2019 : quatre pages pleines ; HYPEUSD comme sur API réelles (05/02/2026, puis page vide).
+      coinbase: lente(700, (symbol, _tf, opts) => symbol !== "HYPEUSD" ? serie((opts?.endTime ?? MAINTENANT) - 350 * JOUR, 350, JOUR)
+        : opts?.endTime === undefined ? serie(date("2026-02-05"), 233, JOUR) : []),
+      // HYPEEUR et HYPEUSD cotés le 22/01/2026 : 1w, puis affinage 1d dans le même créneau.
+      kraken: lente(800, (_symbol, tf) => tf === "1w" ? serie(date("2026-01-19"), 36) : serie(date("2026-01-22"), 248, JOUR)),
+      okx: lente(600, (symbol, tf) => symbol === "HYPEUSD"
+        ? tf === "1M" ? serie(date("2025-11-01"), 11, 30 * JOUR) : serie(date("2025-11-03"), 5)
+        : tf === "1M" ? serie(date("2019-09-01"), 85, 30 * JOUR) : serie(date("2019-09-02"), 6)),
+    });
+    const profondeur = await import("./profondeurHistorique");
+    const recherche = new AbortController();
+    void profondeur.mesurerProfondeurs([{ exchange: "coinbase", symbol: "HBARUSD" }, { exchange: "kraken", symbol: "HYPEEUR" }, { exchange: "okx", symbol: "HBARUSD" }], 2_500, { priorite: "recherche", signal: recherche.signal });
+    // Clic 300 ms après le départ des sondes de recherche : la liste se ferme.
+    await vi.advanceTimersByTimeAsync(300);
+    recherche.abort();
+    let ordre: string[] | undefined;
+    void routing.resolveMarketCandidates({ symbol: "HYPEUSD", timeframe: "1d" }, spot(["kraken", "HYPEUSD"], ["coinbase", "HYPEUSD"], ["okx", "HYPEUSD"]))
+      .then((liste) => { ordre = liste.map((c) => c.exchange); });
+    // Sans créneau réservé, Coinbase attendrait la fin des 4 pages (2,8 s) et Kraken celle de
+    // HYPEEUR (1,6 s) : inconnus à la borne, ils passeraient devant OKX au départage.
+    // Coinbase 300 → 1 700 ms, OKX 300 → 1 500 ms, Kraken (espacement 1 s) 1 000 → 2 600 ms.
+    await vi.advanceTimersByTimeAsync(2_299);
+    expect(ordre).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(ordre).toEqual(["okx", "kraken", "coinbase"]);
+  });
+});
+
 describe("résolution progressive par profondeur d'historique", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -763,42 +976,108 @@ describe("résolution progressive par profondeur d'historique", () => {
     binance: async () => serie(date("2026-09-24"), 1), bybit: async () => serie(date("2025-07-11"), 64), okx: async () => serie(date("2025-11-04"), 47), mexc: async () => [],
   };
 
-  it("à froid, le cache de profondeur prouve la cotation : Bybit part tout de suite, sans attendre les catalogues", async () => {
-    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+  type Progressifs = Awaited<ReturnType<typeof import("./marketRouting").resolveMarketCandidatesProgressifs>>;
+
+  it("à froid, cache de profondeur complet : aucun raccourci, les catalogues sont lus ; Bybit part dès leur réponse, sans sonde", async () => {
+    const base = catalogues({ bybit: 300, okx: 400 });
+    vi.stubGlobal("fetch", vi.fn((url: string) => url.includes("mexc") ? Promise.reject(new Error("indisponible")) : base(url)));
     const { routing, appels } = await routage(P_HYPE);
-    let resolu: Awaited<ReturnType<typeof routing.resolveMarketCandidatesProgressifs>> | undefined;
+    let resolu: Progressifs | undefined;
     void routing.resolveMarketCandidatesProgressifs({ exchange: "binance", symbol: "HYPEUSDT", timeframe: "1h" }).then((value) => { resolu = value; });
+    await vi.advanceTimersByTimeAsync(399);
+    expect(resolu).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(resolu?.immediats.map((c) => c.exchange)).toEqual(["bybit", "okx", "binance"]);
+    expect(appels()).toBe(0);
+  });
+
+  it.each([undefined, "binance", "okx"] as const)("à froid, paire Binance suspendue mais encore mesurée en cache (STORJUSDT, provenance %s) : catalogue Binance lu, OKX retenu, jamais Binance", async (exchange) => {
+    // Binance sert encore des bougies figées d'une paire en BREAK ; son catalogue (TRADING seul) ne la cote plus.
+    vi.stubGlobal("fetch", vi.fn((url: string) => {
+      if (url.includes("api.binance.com")) return apres(0, { symbols: [{ symbol: "STORJUSDT", status: "BREAK" }, { symbol: "BTCUSDT", status: "TRADING" }] });
+      if (url.includes("okx")) return apres(300, { code: "0", data: [{ instId: "STORJ-USDT", instType: "SPOT", state: "live" }] });
+      return Promise.reject(new Error("indisponible"));
+    }));
+    const { routing, appels } = await routage({ "binance:STORJUSDT": [date("2019-02-18"), 1], "okx:STORJUSDT": [date("2019-05-20"), 1] });
+    let resolu: Progressifs | undefined;
+    void routing.resolveMarketCandidatesProgressifs({ exchange, symbol: "STORJUSDT", timeframe: "1d" }).then((value) => { resolu = value; });
+    await vi.advanceTimersByTimeAsync(299);
+    expect(resolu).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(resolu?.immediats).toEqual([{ exchange: "okx", symbol: "STORJUSDT", timeframe: "1d" }]);
+    expect(appels()).toBe(0);
+  });
+
+  it.each(["1m", "1h"] as const)("à froid, BTCUSDT en %s : Binance confirmé puis mesuré au plafond du graphe part aussitôt, sans attendre les catalogues muets", async (timeframe) => {
+    vi.stubGlobal("fetch", vi.fn((url: string) => url.includes("api.binance.com") ? apres(0, { symbols: [{ symbol: "BTCUSDT", status: "TRADING" }] }) : new Promise(() => {})));
+    const { routing, espions } = await routage({}, { binance: async () => serie(date("2017-08-14"), 476) });
+    let resolu: Progressifs | undefined;
+    void routing.resolveMarketCandidatesProgressifs({ exchange: "okx", symbol: "BTCUSDT", timeframe }).then((value) => { resolu = value; });
     await vi.advanceTimersByTimeAsync(0);
-    expect(resolu?.immediats).toEqual([{ exchange: "bybit", symbol: "HYPEUSDT", timeframe: "1h" }]);
+    expect(resolu?.immediats).toEqual([{ exchange: "binance", symbol: "BTCUSDT", timeframe }]);
+    expect(espions.binance!.mock.calls).toEqual([["BTCUSDT", "1w", { limit: 1_000 }]]);
+    for (const place of ["kraken", "coinbase", "bybit", "okx", "mexc"] as const) expect(espions[place]).not.toHaveBeenCalled();
+  });
+
+  it("à froid, BTCUSDT en 1d : Coinbase (sans plafond) pourrait être plus profond que Binance 2017 ; catalogues attendus jusqu'à l'échéance", async () => {
+    vi.stubGlobal("fetch", vi.fn((url: string) => url.includes("api.binance.com") ? apres(0, { symbols: [{ symbol: "BTCUSDT", status: "TRADING" }] }) : new Promise(() => {})));
+    const { routing } = await routage({}, { binance: async () => serie(date("2017-08-14"), 476) });
+    let resolu: Progressifs | undefined;
+    void routing.resolveMarketCandidatesProgressifs({ exchange: "okx", symbol: "BTCUSDT", timeframe: "1d" }).then((value) => { resolu = value; });
+    await vi.advanceTimersByTimeAsync(2_499);
+    expect(resolu).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(resolu?.immediats).toEqual([{ exchange: "binance", symbol: "BTCUSDT", timeframe: "1d" }]);
+  });
+
+  it("à froid, BTCUSDT en 1d : Binance mesuré est décidé dès que Coinbase, Bybit et MEXC refusent, sans attendre OKX ni Kraken muets (plafonnés)", async () => {
+    vi.stubGlobal("fetch", vi.fn((url: string) => url.includes("api.binance.com") ? apres(0, { symbols: [{ symbol: "BTCUSDT", status: "TRADING" }] })
+      : url.includes("okx") || url.includes("kraken") ? new Promise(() => {})
+        : new Promise((_, ko) => setTimeout(() => ko(new Error("indisponible")), 300))));
+    const { routing } = await routage({}, { binance: async () => serie(date("2017-08-14"), 476) });
+    let resolu: Progressifs | undefined;
+    void routing.resolveMarketCandidatesProgressifs({ symbol: "BTCUSDT", timeframe: "1d" }).then((value) => { resolu = value; });
+    await vi.advanceTimersByTimeAsync(299);
+    expect(resolu).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(resolu?.immediats).toEqual([{ exchange: "binance", symbol: "BTCUSDT", timeframe: "1d" }]);
+  });
+
+  it("à froid, HYPEUSDT sans cache (catalogues à 300 ms, 500 ms par requête) : la sonde Binance ne retarde pas les autres, Bybit en tête à 1,3 s", async () => {
+    const base = catalogues({ binance: 300, bybit: 300, okx: 300 });
+    vi.stubGlobal("fetch", vi.fn((url: string) => url.includes("mexc") ? Promise.reject(new Error("indisponible")) : base(url)));
+    const lent = (bougies: (tf: Timeframe) => Candle[]) => (_symbol: string, tf: Timeframe) => new Promise<Candle[]>((ok) => setTimeout(() => ok(bougies(tf)), 500));
+    const { routing } = await routage({}, {
+      binance: lent((tf) => tf === "1w" ? serie(date("2026-09-21"), 1) : serie(date("2026-09-24"), 3, JOUR)),
+      bybit: lent((tf) => tf === "1w" ? serie(date("2025-07-07"), 64) : serie(date("2025-07-11"), 443, JOUR)),
+      okx: lent((tf) => tf === "1M" ? serie(date("2025-11-01"), 11, 30 * JOUR) : serie(date("2025-11-03"), 5)),
+    });
+    let resolu: Progressifs | undefined;
+    void routing.resolveMarketCandidatesProgressifs({ exchange: "binance", symbol: "HYPEUSDT", timeframe: "1h" }).then((value) => { resolu = value; });
+    // Catalogues à 300 ms, puis les trois sondes en parallèle : 1w (ou 1M) et affinage, 2 × 500 ms.
+    await vi.advanceTimersByTimeAsync(1_299);
+    expect(resolu).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(resolu?.immediats.map((c) => c.exchange)).toEqual(["bybit", "okx", "binance"]);
+  });
+
+  it("à froid, Binance déjà mesuré au plafond : son catalogue confirme, il part sans sonde ni attente des autres", async () => {
+    vi.stubGlobal("fetch", vi.fn((url: string) => url.includes("api.binance.com") ? apres(200, { symbols: [{ symbol: "BTCUSDT", status: "TRADING" }] }) : new Promise(() => {})));
+    const { routing, appels } = await routage(P_BTC);
+    let resolu: Progressifs | undefined;
+    void routing.resolveMarketCandidatesProgressifs({ symbol: "BTCUSDT", timeframe: "1m" }).then((value) => { resolu = value; });
+    await vi.advanceTimersByTimeAsync(199);
+    expect(resolu).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(resolu?.immediats).toEqual([{ exchange: "binance", symbol: "BTCUSDT", timeframe: "1m" }]);
     expect(appels()).toBe(0);
   });
 
   const sansBinance = (profondeurs: Profondeurs) => Object.fromEntries(Object.entries(profondeurs).filter(([cle]) => !cle.startsWith("binance:"))) as Profondeurs;
-  it.each([
-    ["BTCUSDT", "2017-08-17", "binance", P_BTC], ["HYPEUSDT", "2026-09-24", "bybit", P_HYPE],
-    ["BTCUSDT", "échec", "binance", P_BTC], ["HYPEUSDT", "échec", "binance", P_HYPE],
-  ] as const)("à froid, %s sans mesure Binance en cache (sonde échouée, entrée élaguée), sonde Binance %s : %s en tête, comme la résolution complète", async (symbol, debutBinance, attendu, profondeurs) => {
-    // Seul Binance répond (il cote l'actif) : les autres catalogues muets ne sont pas attendus.
-    vi.stubGlobal("fetch", vi.fn((url: string) => url.includes("api.binance.com") ? apres(0, { symbols: [{ symbol, status: "TRADING" }] }) : new Promise(() => {})));
-    const { routing, espions } = await routage(sansBinance(profondeurs), debutBinance === "échec" ? {} : { binance: async () => serie(date(debutBinance), 1) });
-    let resolu: Awaited<ReturnType<typeof routing.resolveMarketCandidatesProgressifs>> | undefined;
-    void routing.resolveMarketCandidatesProgressifs({ exchange: "okx", symbol, timeframe: "1d" }).then((value) => { resolu = value; });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(resolu?.immediats).toEqual([{ exchange: attendu, symbol, timeframe: "1d" }]);
-    // Sonde Binance seule, une fois (échec mémorisé 60 s ; cotation récente affinée en 1d) ; la
-    // résolution complète conclut pareil.
-    expect(espions.binance!.mock.calls).toEqual([[symbol, "1w", { limit: 1_000 }], ...(debutBinance === "2026-09-24" ? [[symbol, "1d", { limit: 1_000 }]] : [])]);
-    expect(espions.bybit).not.toHaveBeenCalled();
-    const catalogue = spot(["binance", symbol], ["bybit", symbol], ["okx", symbol]);
-    expect((await routing.resolveMarketCandidates({ exchange: "okx", symbol, timeframe: "1d" }, catalogue))[0]?.exchange).toBe(attendu);
-    // Aucune nouvelle sonde pendant la résolution complète.
-    expect(espions.binance).toHaveBeenCalledTimes(debutBinance === "2026-09-24" ? 2 : 1);
-  });
-
   it("à froid, Binance sans mesure et sonde Binance muette : bornée à 2,5 s, Binance garde le bénéfice du doute", async () => {
     vi.stubGlobal("fetch", vi.fn((url: string) => url.includes("api.binance.com") ? apres(0, { symbols: [{ symbol: "HYPEUSDT", status: "TRADING" }] }) : new Promise(() => {})));
     const { routing } = await routage(sansBinance(P_HYPE), { binance: () => new Promise(() => {}) });
-    let resolu: Awaited<ReturnType<typeof routing.resolveMarketCandidatesProgressifs>> | undefined;
+    let resolu: Progressifs | undefined;
     void routing.resolveMarketCandidatesProgressifs({ symbol: "HYPEUSDT", timeframe: "1d" }).then((value) => { resolu = value; });
     await vi.advanceTimersByTimeAsync(2_499);
     expect(resolu).toBeUndefined();
@@ -806,13 +1085,16 @@ describe("résolution progressive par profondeur d'historique", () => {
     expect(resolu?.immediats).toEqual([{ exchange: "binance", symbol: "HYPEUSDT", timeframe: "1d" }]);
   });
 
-  it("à froid, Binance sans mesure et catalogue Binance en panne : la meilleure place connue part tout de suite, sans sonde", async () => {
+  it("à froid, catalogues en panne : le cache ne prouve aucune cotation, rien d'immédiat ; la liste complète classe les essais par profondeur connue", async () => {
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("indisponible"))));
     const { routing, appels } = await routage(sansBinance(P_BTC));
-    let resolu: Awaited<ReturnType<typeof routing.resolveMarketCandidatesProgressifs>> | undefined;
+    let resolu: Progressifs | undefined;
     void routing.resolveMarketCandidatesProgressifs({ symbol: "BTCUSDT", timeframe: "1d" }).then((value) => { resolu = value; });
     await vi.advanceTimersByTimeAsync(0);
-    expect(resolu?.immediats).toEqual([{ exchange: "bybit", symbol: "BTCUSDT", timeframe: "1d" }]);
+    expect(resolu?.immediats).toEqual([]);
+    // Binance, Coinbase et MEXC inconnus gardent le doute ; OKX et Kraken, plafonnés, sont prouvés moins profonds que Bybit.
+    expect((await resolu!.complets()).map((c) => `${c.exchange}${c.speculative ? "?" : ""}`))
+      .toEqual(["binance?", "coinbase?", "bybit?", "mexc?", "okx?", "kraken?"]);
     expect(appels()).toBe(0);
   });
 
@@ -829,8 +1111,9 @@ describe("résolution progressive par profondeur d'historique", () => {
     let complets: string[] | undefined;
     void resolu!.complets().then((liste) => { complets = liste.map((c) => `${c.exchange}${c.speculative ? "?" : ""}`); });
     await vi.advanceTimersByTimeAsync(1_500);
-    // MEXC mesuré à son tour (aucune bougie) ; Kraken et Coinbase, catalogues en panne, en essais.
-    expect(complets).toEqual(["bybit", "okx", "binance", "mexc", "kraken?", "coinbase?"]);
+    // MEXC mesuré à son tour (aucune bougie) ; Kraken et Coinbase, catalogues en panne, en essais :
+    // en 1h, Kraken inconnu (500 heures au plus) est prouvé moins profond que Bybit, Coinbase non.
+    expect(complets).toEqual(["bybit", "okx", "binance", "mexc", "coinbase?", "kraken?"]);
     expect(espions.mexc).toHaveBeenCalledTimes(1);
   });
 
@@ -902,7 +1185,7 @@ describe("recherche : représentant par profondeur d'historique", () => {
     expect(appels()).toBe(0);
   });
 
-  it("le représentant suit l'unité de temps : HYPEUSD Kraken en 1d, Coinbase en 1h (défaut)", async () => {
+  it("le représentant suit l'unité de temps : HYPEUSD limité à Kraken et Coinbase, Kraken en 1d, Coinbase en 1h (défaut)", async () => {
     const { routing } = await routage(P_HYPEUSD);
     expect(routing.searchMarkets(HYPEUSD, "HYPEUSD", 30, "1d")[0]).toMatchObject({ exchange: "kraken", places: ["kraken", "coinbase"] });
     expect(routing.searchMarkets(HYPEUSD, "HYPEUSD")[0]).toMatchObject({ exchange: "coinbase", places: ["coinbase", "kraken"] });

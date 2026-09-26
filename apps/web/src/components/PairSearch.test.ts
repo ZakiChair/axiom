@@ -1,6 +1,6 @@
 /** Recherche : défaut SYN, libellé/titre des résultats, sélection et anti-rebond des mesures ; gestes réels en E2E. */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { JAMBE_B_TRADFI_DEFAUT, libelleSource, planifierMesures, resultatsAMesurer, titreSource } from "./PairSearch";
+import { clesMesures, JAMBE_B_TRADFI_DEFAUT, libelleSource, planifierMesures, resultatsAMesurer, titreSource } from "./PairSearch";
 import { TWELVEDATA_SYMBOLS } from "../data/pairs";
 import type { MarketCandidate } from "../data/marketRouting";
 import * as profondeur from "../data/profondeurHistorique";
@@ -54,16 +54,17 @@ describe("recherche — mesure paresseuse des premiers résultats", () => {
   it("rien à mesurer quand toutes les places de BTCUSDT et HYPEUSDT sont déjà en cache", () => {
     expect(resultatsAMesurer([HYPE_MESURE, { exchange: "binance", symbol: "BTCUSDT", kind: "spot", places: ["binance", "bybit"] }])).toEqual([]);
   });
-  it("après 250 ms d'anti-rebond, une mesure par résultat incomplet, sur ses places", async () => {
+  it("après 250 ms d'anti-rebond, une mesure par résultat incomplet, sur ses places, au rang de la recherche (après graphe et favoris)", async () => {
     vi.useFakeTimers();
     const mesurer = vi.spyOn(profondeur, "mesurerProfondeurs").mockResolvedValue();
     planifierMesures([HYPE_MESURE, HYPE_INCOMPLET, incomplet("BTCUSDT")]);
     await vi.advanceTimersByTimeAsync(249);
     expect(mesurer).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
+    const options = { priorite: "recherche", signal: expect.any(AbortSignal) };
     expect(mesurer.mock.calls).toEqual([
-      [[{ exchange: "binance", symbol: "HYPEUSDT" }, { exchange: "bybit", symbol: "HYPEUSDT" }, { exchange: "okx", symbol: "HYPEUSDT" }]],
-      [[{ exchange: "binance", symbol: "BTCUSDT" }, { exchange: "bybit", symbol: "BTCUSDT" }]],
+      [[{ exchange: "binance", symbol: "HYPEUSDT" }, { exchange: "bybit", symbol: "HYPEUSDT" }, { exchange: "okx", symbol: "HYPEUSDT" }], undefined, options],
+      [[{ exchange: "binance", symbol: "BTCUSDT" }, { exchange: "bybit", symbol: "BTCUSDT" }], undefined, options],
     ]);
   });
   it("annulée avant l'échéance (nouvelle frappe, fermeture), aucune mesure ne part", async () => {
@@ -73,9 +74,58 @@ describe("recherche — mesure paresseuse des premiers résultats", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(mesurer).not.toHaveBeenCalled();
   });
+  it("annulée après l'échéance (nouvelle frappe, fermeture, démontage) : les sondes de HYPEUSDT pas encore parties sont abandonnées", async () => {
+    vi.useFakeTimers();
+    const mesurer = vi.spyOn(profondeur, "mesurerProfondeurs").mockResolvedValue();
+    const annuler = planifierMesures([HYPE_INCOMPLET, incomplet("BTCUSDT")]);
+    await vi.advanceTimersByTimeAsync(250);
+    const signaux = mesurer.mock.calls.map(([, , options]) => options?.signal);
+    expect(signaux).toHaveLength(2);
+    expect(signaux.some((signal) => signal?.aborted)).toBe(false);
+    annuler();
+    expect(signaux.every((signal) => signal?.aborted)).toBe(true);
+  });
   it("sans résultat incomplet, aucun minuteur n'est posé", () => {
     vi.useFakeTimers();
     planifierMesures([HYPE_MESURE]);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("recherche — abandon des mesures au changement de requête, à la fermeture et au démontage", () => {
+  const quinze = Array.from({ length: 15 }, (_, i) => incomplet(`HYPE${i}USDT`));
+
+  it("chaque frappe (HYPE puis HYPEU) change les deux clés : les mesures de la requête précédente sont abandonnées", () => {
+    const avant = clesMesures([HYPE_INCOMPLET], 0, "HYPE", true);
+    const apres = clesMesures([HYPE_INCOMPLET], 0, "HYPEU", true);
+    expect(avant.actif).not.toBe("");
+    expect(avant.liste).not.toBe("");
+    expect(apres.actif).not.toBe(avant.actif);
+    expect(apres.liste).not.toBe(avant.liste);
+  });
+  it("liste fermée (Échap, sélection, perte du focus) : clés vides, plus rien n'est mesuré", () => {
+    expect(clesMesures([HYPE_INCOMPLET], 0, "HYPE", false)).toEqual({ actif: "", liste: "" });
+  });
+  it("une mesure qui aboutit (HYPEUSDT passe d'« Auto » à Bybit, places reclassées) ne change aucune clé : rien n'est abandonné ni replanifié", () => {
+    expect(clesMesures([HYPE_MESURE], 0, "HYPE", true)).toEqual(clesMesures([HYPE_INCOMPLET], 0, "HYPE", true));
+  });
+  it("le résultat actif au-delà des 12 premiers (15e, au clavier ou au survol) a sa propre clé ; la liste des 12 ne bouge pas", () => {
+    const premier = clesMesures(quinze, 0, "HYPE", true);
+    const quinzieme = clesMesures(quinze, 14, "HYPE", true);
+    expect(quinzieme.actif).toContain("HYPE14USDT");
+    expect(quinzieme.liste).toBe(premier.liste);
+    expect(quinzieme.liste).not.toContain("HYPE14USDT");
+  });
+  it("une place seule (CARDSUSDT sur OKX) n'a rien à mesurer : clés vides", () => {
+    expect(clesMesures([{ exchange: "okx", symbol: "CARDSUSDT", kind: "spot" }], 0, "CARDS", true)).toEqual({ actif: "", liste: "" });
+  });
+  it("le résultat actif (15e) est mesuré sur ses places, comme les 12 premiers", async () => {
+    vi.useFakeTimers();
+    const mesurer = vi.spyOn(profondeur, "mesurerProfondeurs").mockResolvedValue();
+    planifierMesures([quinze[14]!]);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(mesurer.mock.calls.map(([places]) => places)).toEqual([[{ exchange: "binance", symbol: "HYPE14USDT" }, { exchange: "bybit", symbol: "HYPE14USDT" }]]);
+    vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 });

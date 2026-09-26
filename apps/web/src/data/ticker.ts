@@ -507,7 +507,8 @@ export function resolveTickerMarket(
   candidats?: ResolvedMarket[],
 ): Promise<ResolvedMarket | undefined> {
   return bounded(async (active) => {
-    const candidates = candidats ?? await resolveMarketCandidates(identity, catalog);
+    // Mesures de profondeur au rang des favoris : jamais devant celles du graphe.
+    const candidates = candidats ?? await resolveMarketCandidates(identity, catalog, { priorite: "favoris" });
     for (const candidate of candidates) {
       if (active.aborted) return undefined;
       if (!isTickerSource(candidate.exchange)) continue;

@@ -25,6 +25,7 @@ function point(partiel: Partial<OptionPoint> = {}): OptionPoint {
     markIv: 40,
     openInterest: 10,
     underlying: 79_000,
+    indexPrice: 79_000,
     interestRate: 0,
     volume24h: 1,
     markPrice: 0.02,
@@ -105,10 +106,14 @@ describe("chargerChaineOptions", () => {
   });
 });
 
-describe("spotDeChaine — définition spotChaine d'OMON", () => {
-  it("premier sous-jacent fini et > 0, NaN si aucun", () => {
-    expect(spotDeChaine([{ underlying: NaN }, { underlying: 0 }, { underlying: -1 }, { underlying: 79_145.62 }, { underlying: 80_000 }])).toBe(79_145.62);
-    expect(spotDeChaine([{ underlying: NaN }])).toBeNaN();
+describe("spotDeChaine — index réel indépendant de l’ordre des forwards", () => {
+  it("ne prend jamais un forward pour un spot, et refuse un index incohérent", () => {
+    const chain = [{ underlying: 80_000, indexPrice: 79_000 }, { underlying: 82_000, indexPrice: 79_000 }];
+    expect(spotDeChaine(chain)).toBe(79_000);
+    expect(spotDeChaine([...chain].reverse())).toBe(79_000);
+    expect(spotDeChaine([{ underlying: 80_000 }])).toBeNaN();
+    expect(spotDeChaine([{ underlying: 80_000, indexPrice: NaN }])).toBeNaN();
+    expect(spotDeChaine([...chain, { underlying: 80_000, indexPrice: 78_000 }])).toBeNaN();
     expect(spotDeChaine([])).toBeNaN();
   });
 });
@@ -140,5 +145,21 @@ describe("actifDeribit — marchés éligibles aux chaînes Deribit", () => {
 describe("actifDeribit — libellé de la place (vérification du 26/09)", () => {
   it("BTCFDUSD de Binance est du BTC coté en dollar", () => {
     expect(actifDeribit("binance", "BTCFDUSD")).toBe("BTC");
+  });
+});
+
+
+describe("cache à la frontière d’expiration", () => {
+  it("recharge dès 08:00 même si le TTL n’est pas écoulé", async () => {
+    const f = fetcherFactice(async () => [point({ expiryMs: NOW + 1_000 })]);
+    await chargerChaineOptions("BTC", NOW, f.fetcher);
+    await chargerChaineOptions("BTC", NOW + 999, f.fetcher);
+    expect(f.appels).toHaveLength(1);
+    expect(await chargerChaineOptions("BTC", NOW + 1_000, f.fetcher)).toBeNull();
+    expect(f.appels).toHaveLength(2);
+  });
+  it("date la réception effective, jamais le début d’une requête lente", async () => {
+    const f = fetcherFactice(async () => [point({ receivedAt: NOW + 2_000 })]);
+    expect((await chargerChaineOptions("BTC", NOW, f.fetcher))?.recupereLe).toBe(NOW + 2_000);
   });
 });

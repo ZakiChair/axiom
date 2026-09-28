@@ -16,8 +16,6 @@ import { createStore } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
 import {
   computeMaxPain,
-  fetchDeribitOptionChain,
-  fetchDvol,
   putCallRatioOi,
   type OptionPoint,
   type StrikeOi,
@@ -26,7 +24,6 @@ import {
   aggregateGexDex,
   comparerHypothesesGamma,
   comparerHypothesesGammaCrypto,
-  computeCryptoGexDex,
   gexParStrikeToutesEcheances,
   gammaFlip,
   mursGamma,
@@ -42,7 +39,9 @@ import { termStructureIv, type PointTermIv } from "../data/termIv";
 import { mouvementsAttendus, type PointMouvementAttendu } from "../data/mouvementAttendu";
 import { finCouvertureCalendrier, libelleCourtEvenement, volsForward, type SegmentVolForward } from "../data/volForward";
 import { courbeProbaImplicite, lireProbasNiveau, niveauParDefaut, prixCourant } from "../data/probaImplicite";
-import { histDvol } from "../data/referentiels";
+import { spotDeChaine } from "../data/chaineOptionsCache";
+import { resumerMarcheOptions } from "../data/marcheOptions";
+import { useOptionsDeribit } from "../hooks/useOptionsDeribit";
 import { ivRank } from "../data/ivRank";
 import { bandeStrikes, construireGrilleOi, type GrilleOi } from "../data/oiHeatmap";
 import {
@@ -88,6 +87,7 @@ import { VueSmile, type SurvolSmile } from "./omon/VueSmile";
 import { VueGexDex, type LectureEtf, type SurvolBarres } from "./omon/VueGexDex";
 import { VueHeatmap } from "./omon/VueHeatmap";
 import { VueTermIv } from "./omon/VueTermIv";
+import { ResumeMarcheOptions } from "./omon/ResumeMarcheOptions";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -153,8 +153,7 @@ type Devise = (typeof DEVISES)[number];
 // ─────────────────────────── Agrégations dérivées (pures, hors réseau) ───────────────────────────
 
 /** Échéances disponibles (futures), triées croissant, avec le nombre d'options. */
-function echeancesDispo(chain: OptionPoint[]): { expiryMs: number; count: number }[] {
-  const now = Date.now();
+function echeancesDispo(chain: OptionPoint[], now: number): { expiryMs: number; count: number }[] {
   const parExp = new Map<number, number>();
   for (const p of chain) {
     if (p.expiryMs <= now) continue;
@@ -205,15 +204,9 @@ export function OptionsWindow() {
   const heatmapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const termIvCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [devise, setDevise] = useState<Devise>("BTC");
-  const [chain, setChain] = useState<OptionPoint[]>([]);
-  const [dvol, setDvol] = useState<number | null>(null);
-  // Historique DVOL 90 j (valeurs seules) pour l'IV Rank — accesseur referentiels, cache TTL 1 h
-  // partagé avec le régime (data/regime.ts) : ZÉRO fetch dédié, rechargé au rythme du poll OMON.
-  const [dvolHistorique, setDvolHistorique] = useState<number[] | null>(null);
+  const { chaine: chain, dvol, dvolHistorique, loading, erreur, majTs, observedAt, nowMs, actualiser } = useOptionsDeribit(devise, open);
   const [expiry, setExpiry] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [erreur, setErreur] = useState<string | null>(null);
-  const [majTs, setMajTs] = useState<number | null>(null);
+  const [portee, setPortee] = useState<"toutes" | "selection">("toutes");
 
   // Vue : smile IV (existant), GEX/DEX, ou heatmap OI strike×échéance. En GEX/DEX : classe crypto
   // (Deribit) ou actions (CBOE).
@@ -236,44 +229,10 @@ export function OptionsWindow() {
   const [cboeChoix, setCboeChoix] = useState<number | null>(null);
   const [cboeErreur, setCboeErreur] = useState<string | null>(null);
   const [cboeLoading, setCboeLoading] = useState(false);
-
-  // Chargement + polling conditionnés à l'ouverture et à la devise.
-  useEffect(() => {
-    if (!open) return;
-    let ignore = false;
-
-    const charger = async () => {
-      setLoading(true);
-      const [chaine, vol, histVol] = await Promise.allSettled([
-        fetchDeribitOptionChain(devise),
-        fetchDvol(devise),
-        histDvol(devise),
-      ]);
-      if (ignore) return;
-      if (chaine.status === "fulfilled") {
-        setChain(chaine.value);
-        setErreur(chaine.value.length === 0 ? "Aucune option renvoyée par Deribit." : null);
-      } else {
-        setChain([]);
-        setErreur("Chaîne d'options Deribit indisponible.");
-      }
-      setDvol(vol.status === "fulfilled" ? vol.value : null);
-      const serie = histVol.status === "fulfilled" ? histVol.value : null;
-      setDvolHistorique(serie === null ? null : serie.map((p) => p.v));
-      setMajTs(Date.now());
-      setLoading(false);
-    };
-
-    void charger();
-    const timer = setInterval(charger, REFRESH_MS);
-    return () => {
-      ignore = true;
-      clearInterval(timer);
-    };
-  }, [open, devise]);
+  const [cboeMajTs, setCboeMajTs] = useState<number | null>(null);
 
   // Échéances disponibles (recalculées à chaque changement de chaîne).
-  const echeances = useMemo(() => echeancesDispo(chain), [chain]);
+  const echeances = useMemo(() => echeancesDispo(chain, nowMs), [chain, nowMs]);
 
   // Sélectionne l'échéance la plus proche si aucune valide n'est retenue.
   useEffect(() => {
@@ -301,8 +260,8 @@ export function OptionsWindow() {
   // Skew 25Δ (risk reversal) de l'échéance sélectionnée — deltas Black-Scholes côté client
   // (même injection du temps que computeCryptoGexDex). Null si pas de jambe proche de 25Δ.
   const skew25 = useMemo(
-    () => calculerSkew25d(pointsEcheance, underlying, Date.now()),
-    [pointsEcheance, underlying],
+    () => calculerSkew25d(pointsEcheance, spotDeChaine(pointsEcheance), nowMs),
+    [pointsEcheance, underlying, nowMs],
   );
   // IV Rank (90 j) : percentile du DVOL courant dans son historique — null tant que l'un des
   // deux manque (historique en cours de chargement, DVOL indisponible).
@@ -315,12 +274,12 @@ export function OptionsWindow() {
   // de data/probaImplicite, nowMs injecté au bord). Niveau saisi ; vide = forward arrondi, remis
   // à vide au changement de devise (un niveau BTC n'a pas de sens en ETH).
   const courbeProba = useMemo(
-    () => (vue === "smile" ? courbeProbaImplicite(pointsEcheance, Date.now()) : null),
-    [vue, pointsEcheance],
+    () => (vue === "smile" ? courbeProbaImplicite(pointsEcheance, nowMs) : null),
+    [vue, pointsEcheance, nowMs],
   );
   // P(toucher) part du prix COURANT (forward de l'échéance la plus proche ≈ index), pas du forward
   // de l'échéance sélectionnée (revue indépendante : +5 à 9 pts au-delà de 3 mois).
-  const prixProba = useMemo(() => (vue === "smile" ? prixCourant(chain, Date.now()) : null), [vue, chain]);
+  const prixProba = useMemo(() => (vue === "smile" ? prixCourant(chain, nowMs) : null), [vue, chain, nowMs]);
   const [niveauProba, setNiveauProba] = useState("");
   useEffect(() => setNiveauProba(""), [devise]);
   const niveauDefaut = courbeProba === null ? null : niveauParDefaut(courbeProba.forward);
@@ -361,6 +320,7 @@ export function OptionsWindow() {
           : null;
       if (ignore) return;
       setCboeChaine(chaine);
+      if (chaine) setCboeMajTs(Date.now());
       setCboeRefCrypto(ref);
       setCboeErreur(chaine ? null : "Chaîne CBOE indisponible (endpoint non contractuel).");
       setCboeLoading(false);
@@ -376,8 +336,8 @@ export function OptionsWindow() {
   // Échéances CBOE disponibles + échéance retenue : le choix manuel s'il est encore listé, sinon
   // la plus proche NON expirée (après 16:00 à New York, celle du jour reste listée, greeks résiduels).
   const cboeEcheances = useMemo(
-    () => (cboeChaine ? cboeExpiries(cboeChaine.options, Date.now()) : []),
-    [cboeChaine],
+    () => (cboeChaine ? cboeExpiries(cboeChaine.options, nowMs) : []),
+    [cboeChaine, nowMs],
   );
   const cboeExpiry = useMemo(
     () => echeanceCboeRetenue(cboeEcheances, cboeChoix),
@@ -385,49 +345,22 @@ export function OptionsWindow() {
   );
   const cboeExpiree = cboeEcheances.some((e) => e.expiryMs === cboeExpiry && e.expiree);
 
-  // Exposition GEX/DEX par strike : crypto (Black-Scholes client-side) ou actions (greeks CBOE).
-  const gexDexSpot = classe === "crypto" ? underlying : (cboeChaine?.spot ?? NaN);
+  // Un index commun pour les USD ; les forwards de chaque maturité restent portés
+  // par OptionPoint pour les greeks. Une seule portée alimente graphique et tuiles.
+  const spotChaine = useMemo(() => spotDeChaine(chain), [chain]);
+  const resumeMarche = useMemo(() => resumerMarcheOptions(chain, spotChaine, nowMs), [chain, spotChaine, nowMs]);
+  const pointsPortee = portee === "toutes" ? chain : pointsEcheance;
+  const gexDexSpot = classe === "crypto" ? spotChaine : (cboeChaine?.spot ?? NaN);
   const gexDexPoints = useMemo<GexDexPoint[]>(() => {
     if (vue !== "gexdex") return [];
-    if (classe === "crypto") {
-      if (!Number.isFinite(underlying)) return [];
-      return computeCryptoGexDex(pointsEcheance, underlying, Date.now());
-    }
+    if (classe === "crypto") return gexParStrikeToutesEcheances(pointsPortee, spotChaine, nowMs);
     if (!cboeChaine || cboeExpiry === null) return [];
-    return aggregateGexDex(
-      cboeOptionsToLegs(cboeChaine.options, cboeExpiry),
-      cboeChaine.spot,
-      EQUITY_CONTRACT_MULTIPLIER,
-    );
-  }, [vue, classe, pointsEcheance, underlying, cboeChaine, cboeExpiry]);
-
-  // Spot valable pour TOUTES les échéances (le sous-jacent est indépendant de l'échéance) : pris
-  // sur la chaîne complète, pas sur `pointsEcheance` (limité à l'échéance sélectionnée). Remonté
-  // ici (revue finale) car gexDexTout, qui agrège aussi TOUTE la chaîne, doit s'ancrer dessus —
-  // pas sur `underlying`, qui ne vaut que pour l'échéance sélectionnée et peut être NaN tant
-  // qu'elle n'est pas chargée, faisant disparaître à tort le net/gamma flip toutes-éch.
-  // NB revue : quasi-duplication avec `underlying` (spot mono-échéance, cf. plus haut) — à
-  // envisager de fusionner si un troisième usage apparaît.
-  const spotChaine = useMemo(() => {
-    const u = chain.map((p) => p.underlying).find((v) => Number.isFinite(v) && v > 0);
-    return u ?? NaN;
-  }, [chain]);
-
-  // GEX/DEX crypto agrégé sur TOUTES les échéances (Task 4) — alimente le net et le gamma flip
-  // « toutes éch. ». Crypto seulement : le CBOE reste mono-échéance (portée affichée tuile par
-  // tuile, Lot E). Date.now() au bord comme gexDexPoints/grilleOi ; la logique pure reçoit nowMs.
-  const gexDexTout = useMemo<GexDexPoint[]>(() => {
-    if (vue !== "gexdex" || classe !== "crypto") return [];
-    if (!Number.isFinite(spotChaine)) return [];
-    return gexParStrikeToutesEcheances(chain, spotChaine, Date.now());
-  }, [vue, classe, chain, spotChaine]);
-
-  // Source des métriques nettes + du gamma flip : toutes échéances en crypto, mono-échéance en
-  // actions (le CBOE n'a pas d'agrégation toutes échéances). L'histogramme et le pic |GEX| restent
-  // sur gexDexPoints (mono) — le net « toutes éch. » côtoie donc volontairement le pic mono.
-  const sourceNet = classe === "crypto" ? gexDexTout : gexDexPoints;
-  const gexNet = useMemo(() => sourceNet.reduce((s, p) => s + p.gex, 0), [sourceNet]);
-  const dexNet = useMemo(() => sourceNet.reduce((s, p) => s + p.dex, 0), [sourceNet]);
+    return aggregateGexDex(cboeOptionsToLegs(cboeChaine.options, cboeExpiry), cboeChaine.spot, EQUITY_CONTRACT_MULTIPLIER);
+  }, [vue, classe, pointsPortee, spotChaine, nowMs, cboeChaine, cboeExpiry]);
+  const sourceNet = gexDexPoints;
+  // Aucun contrat calculable ≠ exposition réellement nulle.
+  const gexNet = useMemo(() => sourceNet.length ? sourceNet.reduce((s, p) => s + p.gex, 0) : NaN, [sourceNet]);
+  const dexNet = useMemo(() => sourceNet.length ? sourceNet.reduce((s, p) => s + p.dex, 0) : NaN, [sourceNet]);
   const flip = useMemo(() => gammaFlip(sourceNet), [sourceNet]);
   const strikePicGex = useMemo(() => {
     let best: GexDexPoint | null = null;
@@ -439,16 +372,14 @@ export function OptionsWindow() {
 
   // Σ|GEX| par strike du MÊME périmètre que le net — échelle du seuil relatif d'indétermination.
   const sommeAbsGex = useMemo(() => sourceNet.reduce((s, p) => s + Math.abs(p.gex), 0), [sourceNet]);
-  // Spot du périmètre du verdict : en crypto le net/flip sont ancrés sur spotChaine (toutes
-  // échéances, cf. gexDexTout — fix de revue d800ad1), PAS sur underlying (mono-échéance,
-  // NaN tant que l'échéance sélectionnée n'est pas chargée). En actions : spot CBOE.
+  // Index commun à la portée crypto choisie ; spot fourni par CBOE en actions.
   const spotVerdict = classe === "crypto" ? spotChaine : gexDexSpot;
   // Verdict market maker (fonction pure verdictGamma) — régime, phrase d'action, distance au flip.
   const verdict = useMemo(
     () => verdictGamma(gexNet, spotVerdict, flip, sommeAbsGex),
     [gexNet, spotVerdict, flip, sommeAbsGex],
   );
-  // Murs de gamma nommés — même périmètre que le net (toutes éch. crypto / éch. sélectionnée actions).
+  // Murs de gamma nommés — même périmètre que le graphique et le net.
   const murs = useMemo(() => mursGamma(sourceNet), [sourceNet]);
 
   // Lecture ETF spot crypto (IBIT/ETHA) : ratio de conversion, P/C et notionnel de la chaîne
@@ -471,7 +402,7 @@ export function OptionsWindow() {
   const scenariosGamma = useMemo<ScenarioGamma[]>(() => {
     if (vue !== "gexdex" || !Number.isFinite(spotVerdict)) return [];
     if (classe === "crypto") {
-      return comparerHypothesesGammaCrypto(chain, spotVerdict, Date.now());
+      return comparerHypothesesGammaCrypto(pointsPortee, spotVerdict, nowMs);
     }
     if (!cboeChaine || cboeExpiry === null) return [];
     return comparerHypothesesGamma(
@@ -479,24 +410,24 @@ export function OptionsWindow() {
       spotVerdict,
       EQUITY_CONTRACT_MULTIPLIER,
     );
-  }, [vue, classe, chain, spotVerdict, cboeChaine, cboeExpiry]);
+  }, [vue, classe, pointsPortee, spotVerdict, nowMs, cboeChaine, cboeExpiry]);
 
   // Profil GEX(S) — crypto uniquement : GEX net recalculé par Black-Scholes sur 41 spots
-  // simulés ±15 % autour du spot de la chaîne (IV/échéances inchangées ; Date.now() au bord
+  // simulés ±15 % autour du spot de la chaîne (IV/échéances inchangées ; nowMs au bord
   // comme gexDexPoints, nowMs injecté dans la logique pure). Les actions n'en ont pas : les
   // greeks CBOE sont pré-calculés, non re-simulables à spot déplacé.
   const profilGex = useMemo<ProfilGexSpot | null>(() => {
     if (vue !== "gexdex" || classe !== "crypto") return null;
-    if (!Number.isFinite(spotChaine) || chain.length === 0) return null;
+    if (!Number.isFinite(spotChaine) || pointsPortee.length === 0) return null;
     const spots: number[] = [];
     for (let i = 0; i <= 40; i++) spots.push(spotChaine * (0.85 + (0.3 * i) / 40));
-    return profilGexSpot(chain, spots, Date.now());
-  }, [vue, classe, chain, spotChaine]);
+    return profilGexSpot(pointsPortee, spots, nowMs);
+  }, [vue, classe, pointsPortee, spotChaine, nowMs]);
 
   // Barres effectivement tracées (même base filtrerAuSeuil que dessinerBarres) — candidates du survol.
   const barresSeuil = useMemo(() => filtrerAuSeuil(gexDexPoints, metrique), [gexDexPoints, metrique]);
 
-  // OI calls/puts par strike de l'HISTOGRAMME (mono-échéance, comme gexDexPoints) — lignes OI
+  // OI calls/puts par strike du même périmètre que l’histogramme — lignes OI
   // de l'infobulle. Crypto : unités de base Deribit ; actions : contrats CBOE.
   const oiParStrikeHisto = useMemo(() => {
     const parStrike = new Map<number, { call: number; put: number }>();
@@ -507,21 +438,19 @@ export function OptionsWindow() {
       parStrike.set(strike, cur);
     };
     if (classe === "crypto") {
-      for (const p of pointsEcheance) ajouter(p.strike, p.type, p.openInterest);
+      for (const p of pointsPortee) ajouter(p.strike, p.type, p.openInterest);
     } else if (cboeChaine && cboeExpiry !== null) {
       for (const l of cboeOptionsToLegs(cboeChaine.options, cboeExpiry)) {
         ajouter(l.strike, l.type, l.openInterest);
       }
     }
     return parStrike;
-  }, [classe, pointsEcheance, cboeChaine, cboeExpiry]);
+  }, [classe, pointsPortee, cboeChaine, cboeExpiry]);
 
-  // Domaine de l'histogramme GEX/DEX : en crypto, MÊME domaine que le smile (même univers de
-  // strikes Deribit — zoom/pan du smile pilote les deux). En actions (CBOE, strikes SPX/NDX/VIX
-  // sans rapport avec les strikes crypto), domaine local plein cadre non zoomable — inchangé
-  // vis-à-vis du comportement d'avant cette tâche.
-  const domaineActionsGexDex = useMemo<Domaine | null>(() => {
-    if (classe !== "actions" || gexDexPoints.length === 0) return null;
+  // L'histogramme possède son domaine : la portée globale ne doit pas être
+  // tronquée par le domaine de l'échéance du smile.
+  const domaineGexDex = useMemo<Domaine | null>(() => {
+    if (gexDexPoints.length === 0) return null;
 
     // Domaine basé sur le sous-ensemble filtré au seuil (même base que le tracé, via
     // filtrerAuSeuil, partagée avec dessinerBarres).
@@ -535,19 +464,17 @@ export function OptionsWindow() {
     if (max === min) max = min + 1;
     return { min, max };
   }, [classe, gexDexPoints, gexDexSpot, metrique]);
-  const domaineBarres = classe === "crypto" ? domaine : domaineActionsGexDex;
+  const domaineBarres = domaineGexDex;
 
   // Redessine le smile à chaque changement de données (fenêtre ouverte, vue smile).
   useEffect(() => {
     if (!open || vue !== "smile") return;
     const canvas = refCanvas.current;
     if (canvas && domaine) dessinerSmile(canvas, pointsEcheance, underlying, maxPain, domaine);
+    else if (canvas) canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
   }, [open, vue, pointsEcheance, underlying, maxPain, domaine]);
 
-  // Repère « γ flip » du canvas : cumul des barres AFFICHÉES (mono-échéance),
-  // pas le flip toutes-échéances des tuiles — l'histogramme est étiqueté
-  // « échéance sélectionnée », son repère doit l'être aussi (revue v2.6 no 7).
-  // En actions, sourceNet === gexDexPoints : identique au flip des tuiles.
+  // Le repère cumulé emploie exactement les mêmes contrats que les tuiles.
   const flipBarres = useMemo(() => gammaFlip(gexDexPoints), [gexDexPoints]);
 
   // Redessine l'histogramme GEX/DEX (fenêtre ouverte, vue gexdex).
@@ -556,6 +483,7 @@ export function OptionsWindow() {
     const canvas = barCanvasRef.current;
     if (canvas && domaineBarres)
       dessinerBarres(canvas, gexDexPoints, gexDexSpot, metrique, domaineBarres, flipBarres);
+    else if (canvas) canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
   }, [open, vue, gexDexPoints, gexDexSpot, metrique, domaineBarres, flipBarres]);
 
   // Redessine le profil GEX(S) (fenêtre ouverte, vue gexdex crypto) — canvas monté
@@ -577,6 +505,13 @@ export function OptionsWindow() {
   // (BARRES_PAD_L/R, cf. dessinerBarres — leçon HEATMAP_PAD : dessin et survol doivent
   // partager leur géométrie, sinon l'infobulle dérive des barres). Candidates = barres
   // réellement tracées (filtrées au seuil 0,5 % ET dans le domaine visible).
+  useEffect(() => {
+    setSurvolBarres(null);
+    setSurvolSmile(null);
+    setSurvolHeatmap(null);
+    setSurvolTermIv(null);
+  }, [devise, expiry, portee, cboeTicker]);
+
   const onSurvolBarres = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (domaineBarres === null || barresSeuil.length === 0) {
       setSurvolBarres(null);
@@ -614,8 +549,6 @@ export function OptionsWindow() {
 
   // ─────────────────────────── Heatmap OI strike × échéance ───────────────────────────
 
-  // spotChaine défini plus haut (remonté au-dessus de gexDexTout, revue finale).
-
   // Flux du jour (métriques d'en-tête Smile, agrégées sur TOUTE la chaîne — lecture globale du
   // marché, indépendante de l'échéance sélectionnée). P/C (Vol) : ratio put/call sur le volume
   // 24h (même patron que putCallRatioOi, appliqué à volume24h). NaN si aucun volume call.
@@ -640,11 +573,11 @@ export function OptionsWindow() {
     return somme;
   }, [chain, spotChaine]);
 
-  // Grille OI/GEX (toutes échéances) — recalculée quand la vue heatmap est active. Date.now() au
+  // Grille OI/GEX (toutes échéances) — recalculée quand la vue heatmap est active. nowMs au
   // bord du composant (comme gexDexPoints/skew25) ; la logique pure reçoit nowMs injecté.
   const grilleOi = useMemo<GrilleOi | null>(
-    () => (vue === "heatmap" ? construireGrilleOi(chain, spotChaine, Date.now()) : null),
-    [vue, chain, spotChaine],
+    () => (vue === "heatmap" ? construireGrilleOi(chain, spotChaine, nowMs) : null),
+    [vue, chain, spotChaine, nowMs],
   );
   const bandeOi = useMemo(
     () => (grilleOi ? bandeStrikes(grilleOi.strikes, spotChaine) : []),
@@ -662,7 +595,7 @@ export function OptionsWindow() {
     const canvas = heatmapCanvasRef.current;
     if (canvas && grilleOi) {
       dessinerHeatmapOi(canvas, grilleOi, bandeOiDesc, heatmapMetrique, spotChaine, survolHeatmap);
-    }
+    } else if (canvas) canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
   }, [open, vue, grilleOi, bandeOiDesc, heatmapMetrique, spotChaine, survolHeatmap, majTs]);
 
   // Cellule survolée : inverse la géométrie (colonne/ligne depuis les pixels) vers échéance/strike.
@@ -717,15 +650,15 @@ export function OptionsWindow() {
   // Points de la term structure — recalculés seulement quand la vue est active (fonction pure de
   // data/termIv, nowMs injecté au bord comme grilleOi/gexDexPoints). Spot commun à la chaîne.
   const termIvPoints = useMemo<PointTermIv[]>(
-    () => (vue === "termiv" ? termStructureIv(chain, spotChaine, Date.now()) : []),
-    [vue, chain, spotChaine],
+    () => (vue === "termiv" ? termStructureIv(chain, spotChaine, nowMs) : []),
+    [vue, chain, spotChaine, nowMs],
   );
 
   // Mouvement attendu par échéance (straddle ATM au forward + EM IV) — même garde de vue que la
   // term structure ; fonction pure de data/mouvementAttendu, nowMs injecté au bord.
   const mouvements = useMemo<PointMouvementAttendu[]>(
-    () => (vue === "termiv" ? mouvementsAttendus(chain, Date.now()) : []),
-    [vue, chain],
+    () => (vue === "termiv" ? mouvementsAttendus(chain, nowMs) : []),
+    [vue, chain, nowMs],
   );
 
   // Calendrier ECO (store déjà partagé avec la fenêtre ECO et les marqueurs chart) : chargé
@@ -747,8 +680,8 @@ export function OptionsWindow() {
   // Vol forward entre échéances consécutives de la courbe (mêmes IV ATM que le tracé) et part
   // d'événement — fonction pure de data/volForward, nowMs injecté au bord.
   const segmentsFwd = useMemo<SegmentVolForward[]>(
-    () => (vue === "termiv" ? volsForward(termIvPoints, Date.now(), evenementsVol, finCouvertureEco) : []),
-    [vue, termIvPoints, evenementsVol, finCouvertureEco],
+    () => (vue === "termiv" ? volsForward(termIvPoints, nowMs, evenementsVol, finCouvertureEco) : []),
+    [vue, termIvPoints, evenementsVol, finCouvertureEco, nowMs],
   );
 
   // Redessine la term structure (données/vue/DVOL/survol ; thème repeint via majTs, tokens lus au dessin).
@@ -882,7 +815,7 @@ export function OptionsWindow() {
             />
             <Select
               value={expiry ?? ""}
-              onChange={(e) => setExpiry(Number(e.target.value))}
+              onChange={(e) => { setExpiry(Number(e.target.value)); if (vue === "gexdex") setPortee("selection"); }}
               aria-label="Échéance"
               className="flex-1"
             >
@@ -893,12 +826,26 @@ export function OptionsWindow() {
                     day: "2-digit",
                     month: "short",
                     year: "2-digit",
+                    timeZone: "UTC",
                   })}{" "}
                   · {joursAvant(e.expiryMs)} · {e.count} opt
                 </option>
               ))}
             </Select>
           </div>
+        )}
+
+        {vue === "gexdex" && classe === "crypto" && (
+          <div className="mb-3">
+            <Segmente options={[
+              { id: "toutes", label: "Toutes échéances" },
+              { id: "selection", label: "Échéance sélectionnée" },
+            ] as const} actif={portee} onChange={setPortee} />
+          </div>
+        )}
+        {(vue !== "gexdex" || classe === "crypto") && (
+          <ResumeMarcheOptions devise={devise} resume={resumeMarche} loading={loading} erreur={erreur}
+            majTs={majTs} observedAt={observedAt} nowMs={nowMs} onRefresh={actualiser} />
         )}
 
         {/* Sélecteurs ticker + échéance CBOE (gex/dex actions) */}
@@ -926,6 +873,7 @@ export function OptionsWindow() {
                     day: "2-digit",
                     month: "short",
                     year: "2-digit",
+                    timeZone: "UTC",
                   })}{" "}
                   · {joursAvant(e.expiryMs)} · {e.count} opt
                 </option>
@@ -967,9 +915,10 @@ export function OptionsWindow() {
           <VueGexDex
             metrique={metrique}
             classe={classe}
+            portee={portee}
             loading={loading}
             cboeLoading={cboeLoading}
-            majTs={majTs}
+            majTs={classe === "crypto" ? majTs : cboeMajTs}
             erreur={erreur}
             cboeErreur={cboeErreur}
             barCanvasRef={barCanvasRef}

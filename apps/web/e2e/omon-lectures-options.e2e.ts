@@ -29,6 +29,10 @@ async function routerDeribit(page: Page, options: OptionFixture[], instant: numb
       await route.fulfill({ json: { jsonrpc: "2.0", result: options } });
       return;
     }
+    if (methode === "get_index_price") {
+      await route.fulfill({ json: { result: { index_price: 100_000 } } });
+      return;
+    }
     if (methode === "get_volatility_index_data") {
       await route.fulfill({ json: { jsonrpc: "2.0", result: { data: [[instant, 40, 41, 39, 40]] } } });
       return;
@@ -291,9 +295,9 @@ test("GEX/DEX Actions : IBIT différé converti en niveaux BTC au dernier échan
   await expect(tuile("Call wall")).toContainText("≈ $88,889 BTC");
   await expect(tuile("Put wall")).toContainText("$44.5");
   await expect(tuile("Put wall")).toContainText("≈ $79,111 BTC");
-  await expect(tuile("Gamma flip")).toContainText("$48.32");
-  await expect(tuile("Gamma flip")).toContainText("indicatif");
-  await expect(tuile("Gamma flip")).toContainText("≈ $85,896 BTC");
+  await expect(tuile("Flip cumulé par strike")).toContainText("$48.32");
+  await expect(tuile("Flip cumulé par strike")).toContainText("indicatif");
+  await expect(tuile("Flip cumulé par strike")).toContainText("≈ $85,896 BTC");
   // P/C de la chaîne complète (strike 30 compris) : OI 8 600 / 6 200 ; volume 140 / 50.
   await expect(tuile("P/C \\(OI\\)")).toContainText("1.39");
   await expect(tuile("P/C \\(Vol\\)")).toContainText("2.80");

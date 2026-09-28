@@ -1,23 +1,16 @@
 /**
- * Verdict gamma BTC sous conventions de signe pour le régime composite et BRIEF.
- *
- * Câblage du verdict OMON v2.6 (data/gexDex.ts) hors de la fenêtre options : la chaîne
- * Deribit BTC complète (1 appel agrégé, throttle géré par data/deribit.ts) est agrégée
- * en GEX par strike TOUTES échéances, puis résumée en verdict (long/short gamma) via la
- * même mécanique pure que OptionsWindow — spot pris sur la chaîne (premier `underlying`
- * fini > 0, définition identique à `spotChaine`).
- *
- * Cache module TTL 10 min (patron memo de data/referentiels.ts : SUCCÈS seulement, un
- * échec renvoie null sans être caché — retenté au tick suivant, jamais bloquant). Avec le
- * poller REGIME à 15 min, cela garantit au plus 1 appel Deribit par cycle. La santé de la
- * source est déjà signalée par fetchDeribitOptionChain (id « deribit ») — rien à ajouter.
- *
- * La composition chaîne→verdict est PURE et testée (gammaRegime.test.ts) ; seul le
- * fetch reste impur.
+ * Verdict gamma BTC pour REGIME/BRIEF : indice réel + forwards par échéance.
+ * Trois hypothèses de signe partagent les mêmes contrats valides. Le verdict principal
+ * mesure la distance au zéro du profil en spot (41 points à ±15 %), comme OMON/le chart.
+ * Cache 10 min borné par la première expiration, requêtes simultanées coalescées.
+ * Une chaîne vide/inexploitable ou un échec donne null, jamais un faux régime neutre.
  */
 import { fetchDeribitOptionChain } from "./deribit";
+import { spotDeChaine, limiteChaineOptions } from "./chaineOptionsCache";
 import {
   comparerHypothesesGammaCrypto,
+  profilGexSpot,
+  verdictGamma,
   type CryptoOptionInput,
   type ScenarioGamma,
   type VerdictGamma,
@@ -25,7 +18,7 @@ import {
 
 /** Point de chaîne minimal pour le verdict : inputs GEX + spot porté par l'instrument. */
 export type PointChaineGamma = CryptoOptionInput & {
-  /** Prix du sous-jacent (index) au moment du résumé — porte le spot de la chaîne. */
+  /** Forward propre à l’échéance, distinct de l’index spot. */
   underlying: number;
 };
 
@@ -44,20 +37,23 @@ export interface VerdictGammaBtc {
 
 /**
  * Composition chaîne→verdict. Fonction PURE (nowMs injecté) : spot de la chaîne →
- * GEX par strike toutes échéances → gamma flip → verdict. Renvoie null si aucun
- * spot exploitable (chaîne vide ou `underlying` jamais fini > 0).
+ * GEX par strike toutes échéances → profil en spot → verdict. Renvoie null si aucun
+ * index exploitable ou aucune option valide.
  */
 export function verdictGammaDepuisChaine(
   chaine: readonly PointChaineGamma[],
   nowMs: number,
 ): VerdictGammaBtc | null {
-  const spot = chaine.map((p) => p.underlying).find((v) => Number.isFinite(v) && v > 0) ?? NaN;
+  const spot = spotDeChaine(chaine);
   if (!Number.isFinite(spot)) return null;
   const scenarios = comparerHypothesesGammaCrypto([...chaine], spot, nowMs);
   const convention = scenarios.find((s) => s.hypothese === "convention");
   if (!convention) return null;
+  const spots = Array.from({ length: 41 }, (_, i) => spot * (0.85 + 0.3 * i / 40));
+  const flipProfil = profilGexSpot([...chaine], spots, nowMs).flipReel;
+  const sommeAbs = convention.points.reduce((somme, p) => somme + Math.abs(p.gex), 0);
   return {
-    verdict: convention.verdict,
+    verdict: verdictGamma(convention.gexNet, spot, flipProfil, sommeAbs),
     gexNetUsd: convention.gexNet,
     spot,
     scenarios,
@@ -65,35 +61,35 @@ export function verdictGammaDepuisChaine(
   };
 }
 
-/** TTL du cache (10 min) : < poll REGIME 15 min → au plus 1 appel Deribit par cycle. */
-const TTL_MS = 600_000;
-
 export interface VerdictGammaBtcCharge extends VerdictGammaBtc {
   /** Réception réelle de la chaîne ; une lecture du cache conserve cette date. */
   recupereLe: number;
 }
 
-let cache: { t: number; data: VerdictGammaBtcCharge } | null = null;
+let cache: { t: number; fin: number; data: VerdictGammaBtcCharge } | null = null;
+let enVol: Promise<VerdictGammaBtcCharge | null> | null = null;
 
 /** Vide le cache (tests). */
 export function _viderCacheGammaRegime(): void {
   cache = null;
+  enVol = null;
 }
 
 /**
  * Verdict gamma BTC courant sous trois hypothèses : chaîne Deribit → verdicts.
- * Succès mémoïsé TTL_MS ; échec → null (jamais caché, jamais d'exception propagée).
+ * Succès mémoïsé jusqu’au TTL ou à la première expiration ; échec → null (jamais caché, jamais d'exception propagée).
  */
-export async function chargerVerdictGammaBtc(nowMs: number): Promise<VerdictGammaBtcCharge | null> {
-  if (cache !== null && nowMs >= cache.t && nowMs - cache.t < TTL_MS) return cache.data;
-  try {
-    const chaine = await fetchDeribitOptionChain("BTC");
-    const res = verdictGammaDepuisChaine(chaine, nowMs);
+export function chargerVerdictGammaBtc(nowMs: number): Promise<VerdictGammaBtcCharge | null> {
+  if (cache !== null && nowMs >= cache.t && nowMs < cache.fin) return Promise.resolve(cache.data);
+  if (enVol !== null) return enVol;
+  enVol = fetchDeribitOptionChain("BTC").then((chaine) => {
+    const recupereLe = Date.now();
+    const heureCalcul = Math.max(nowMs, recupereLe);
+    const res = verdictGammaDepuisChaine(chaine, heureCalcul);
     if (res === null) return null;
-    const data = { ...res, recupereLe: Date.now() };
-    cache = { t: nowMs, data };
+    const data = { ...res, recupereLe };
+    cache = { t: recupereLe, fin: limiteChaineOptions({ chaine, recupereLe }), data };
     return data;
-  } catch {
-    return null;
-  }
+  }).catch(() => null).finally(() => { enVol = null; });
+  return enVol;
 }

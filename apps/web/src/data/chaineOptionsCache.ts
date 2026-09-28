@@ -17,7 +17,7 @@ export type DeviseDeribit = "BTC" | "ETH";
 
 export interface ChaineOptionsChargee {
   chaine: OptionPoint[];
-  /** Instant (nowMs de la demande) où cette chaîne a été téléchargée ; conservé en cache. */
+  /** Instant de réception de la chaîne (ou horloge injectée des anciens fetchers) ; conservé en cache. */
   recupereLe: number;
 }
 
@@ -30,15 +30,17 @@ export function chargerChaineOptions(
   fetcher: (devise: DeviseDeribit) => Promise<OptionPoint[]> = fetchDeribitOptionChain,
 ): Promise<ChaineOptionsChargee | null> {
   const memo = cache.get(devise);
-  if (memo !== undefined && nowMs >= memo.recupereLe && nowMs - memo.recupereLe < TTL_CHAINE_MS) {
+  if (memo !== undefined && nowMs >= memo.recupereLe && nowMs < limiteChaineOptions(memo)) {
     return Promise.resolve(memo);
   }
   const existante = enVol.get(devise);
   if (existante !== undefined) return existante;
   const promesse = fetcher(devise)
     .then((chaine) => {
-      if (chaine.length === 0) return null;
-      const res = { chaine, recupereLe: nowMs };
+      const recupereLe = Math.max(nowMs, ...chaine.map((p) => Number.isFinite(p.receivedAt) ? p.receivedAt! : nowMs));
+      const actives = chaine.filter((p) => Number.isFinite(p.expiryMs) && p.expiryMs > recupereLe);
+      if (actives.length === 0) return null;
+      const res = { chaine: actives, recupereLe };
       cache.set(devise, res);
       return res;
     })
@@ -48,9 +50,16 @@ export function chargerChaineOptions(
   return promesse;
 }
 
-/** Spot de la chaîne : premier `underlying` fini > 0, NaN sinon (= `spotChaine` d'OMON). */
-export function spotDeChaine(chaine: readonly { underlying: number }[]): number {
-  return chaine.map((p) => p.underlying).find((v) => Number.isFinite(v) && v > 0) ?? NaN;
+/** Première expiration de la chaîne, bornée par son TTL : jamais de cache au-delà de 08:00 UTC. */
+export function limiteChaineOptions({ chaine, recupereLe }: ChaineOptionsChargee): number {
+  return chaine.reduce((fin, p) => Number.isFinite(p.expiryMs) && p.expiryMs > recupereLe ? Math.min(fin, p.expiryMs) : fin, recupereLe + TTL_CHAINE_MS);
+}
+
+/** Index réel commun ; un forward d’échéance ne permet pas de reconstituer le spot. */
+export function spotDeChaine(chaine: readonly { underlying?: number; indexPrice?: number }[]): number {
+  const indices = chaine.map((p) => p.indexPrice).filter((v): v is number => typeof v === "number" && Number.isFinite(v) && v > 0);
+  const index = indices[0];
+  return index !== undefined && indices.every((v) => v === index) ? index : NaN;
 }
 
 /** Cotations assimilées au dollar des chaînes Deribit (index BTC-USD / ETH-USD). */

@@ -1156,3 +1156,34 @@ alertes 62, backtest 114, daemon 756, web 5 648 tests ; typage monorepo) et `pnp
 Bybit (443 bougies 1d depuis le 2025-07-11, contre 3 sur main), ratios ÷Or et en CHF exacts,
 classement TOP, impression de stablecoins en 1d, rectangle à coin futur stable ; démarrage à
 froid sans cache de profondeur environ +400 ms (1 618 contre 1 138 ms en médiane), à chaud égal.
+
+## Options BTC et ETH après expiration (demande du 28 septembre 2026)
+
+Le propriétaire demande une vérification DEX/GEX et une meilleure lecture du marché des
+options après la grande expiration récente. Le chantier porte sur OMON et ses consommateurs
+existants (régime, niveaux du graphique). **Aucune fenêtre, aucun fournisseur, aucune
+dépendance, aucun hôte proxy ni modification de `@axiom/types` supplémentaires.**
+
+- Le prix `underlying_price` Deribit reste le **forward de son échéance**. Le véritable index
+  BTC/USD ou ETH/USD vient de `get_index_price`. Le calcul des greeks utilise le forward de
+  chaque instrument et l'index commun ; permuter la chaîne ne doit changer aucun résultat.
+  Le profil de prix conserve la base forward/index et l'IV constantes.
+- Les options échues sortent des agrégats à 08:00 UTC, même sans succès réseau. Les caches
+  s'arrêtent à la première expiration et les niveaux graphiques périmés sont retirés.
+- Observation fournisseur, réception locale et horloge de calcul ont des rôles distincts.
+  Un échec ne crée pas une nouvelle date de succès ; BTC et ETH ne partagent jamais leurs
+  valeurs affichées pendant une transition. Les appels Deribit sont bornés dans le temps.
+- La vue crypto distingue une portée toutes échéances et une portée sélectionnée, appliquées
+  aux graphiques et aux métriques. La synthèse présente OI, P/C, concentration, court terme,
+  couverture et échéances actives. OI inconnu, zéro observé et donnée périmée restent explicites.
+- GEX en USD pour un mouvement de 1 %, DEX en USD notionnels. Les conventions de signe ne
+  constituent pas une observation des portefeuilles dealers. Le cumul par strike reste
+  distinct du zéro du profil GEX simulé. Aucun montant d'expiration passé n'est reconstruit
+  depuis la seule chaîne courante.
+
+Diagnostic, comparaison indépendante sur données publiques et résultats de validation :
+[`docs/revue-2026-09-28-options-btc-eth.md`](docs/revue-2026-09-28-options-btc-eth.md).
+Revue indépendante favorable ; `pnpm check` réussi (8 139 tests et typage monorepo),
+18 parcours Chromium réussis. Entrée : **1 188 014 / 354 233** octets bruts/gzip
+(Node 24, zlib 1.3.1), plafonds inchangés. Les six nouveaux parcours de fraîcheur
+sont inclus dans `pnpm check:e2e`. Le max pain sans OI positif exploitable est absent.

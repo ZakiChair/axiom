@@ -1,7 +1,7 @@
 /**
  * Skew 25Δ (risk reversal) — RR25 = IV(call 25Δ) − IV(put 25Δ) d'une échéance (fonction PURE).
  *
- * Le delta de chaque option est calculé côté client par Black-Scholes (bsGreeks) avec l'IV mark
+ * Le delta de chaque option est calculé avec le modèle commun index/forward et l’IV mark
  * PROPRE au point — même approche que gexDex.ts (le résumé de carnet Deribit ne renvoie pas les
  * greeks). Choix documenté : sélection PLUS-PROCHE-VOISIN, pas d'interpolation entre strikes —
  * aucun calcul d'options du dépôt n'interpole (max pain et GEX/DEX travaillent sur strikes
@@ -11,10 +11,7 @@
  *
  * `nowMs` est injecté par l'appelant (fonction PURE — convention du dépôt). Testé (skew.test.ts).
  */
-import { bsGreeks } from "./blackScholes";
-
-/** Millisecondes dans une année (base 365 j — convention du dépôt). */
-const MS_PAR_AN = 365 * 24 * 60 * 60 * 1000;
+import { greeksOptionCrypto, type OptionCryptoModele } from "./greeksDeribit";
 
 /** Cible de delta du risk reversal : +0,25 pour le call, −0,25 pour le put. */
 const DELTA_CIBLE = 0.25;
@@ -26,15 +23,8 @@ const DELTA_CIBLE = 0.25;
 const TOLERANCE_DELTA = 0.1;
 
 /** Input minimal d'une option pour le calcul du skew (compatible OptionPoint). */
-export interface OptionSkewInput {
-  strike: number;
+export interface OptionSkewInput extends OptionCryptoModele {
   type: "call" | "put";
-  /** Volatilité implicite mark en POURCENTAGE (Deribit renvoie déjà en %). */
-  markIv: number;
-  /** Taux sans risque en fraction (Deribit `interest_rate`, ex. 0). */
-  interestRate: number;
-  /** Échéance (ms epoch). */
-  expiryMs: number;
 }
 
 /** Résultat du skew 25Δ d'une échéance : RR25 en points d'IV + jambes retenues. */
@@ -74,8 +64,8 @@ export function calculerSkew25d(
   let put: Candidat | null = null;
   for (const p of points) {
     if (!Number.isFinite(p.markIv) || p.markIv <= 0) continue;
-    const t = (p.expiryMs - nowMs) / MS_PAR_AN;
-    const g = bsGreeks(spot, p.strike, t, p.markIv / 100, p.interestRate);
+    const g = greeksOptionCrypto(p, spot, nowMs);
+    if (g === null) continue;
     const delta = p.type === "call" ? g.deltaCall : g.deltaPut;
     if (!Number.isFinite(delta)) continue;
     const ecart = Math.abs(delta - (p.type === "call" ? DELTA_CIBLE : -DELTA_CIBLE));

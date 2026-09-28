@@ -20,6 +20,7 @@ function pt(over: Partial<OptionPoint>): OptionPoint {
     markIv: 50,
     openInterest: 1,
     underlying: 100,
+    indexPrice: 100,
     interestRate: 0,
     volume24h: NaN,
     markPrice: NaN,

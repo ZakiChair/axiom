@@ -19,7 +19,7 @@ if [[ "${1:-}" == "--e2e" && "$#" == 1 ]]; then
     gate-g3-playbooks corrections-revue macro-globale dom-microstructure onchain-complements dessins-hors-bougies \
     revue-evenements qualite-fraicheur revue-outils-avances \
     revue-chain-rotation revue-macro-vintage revue-economie-chaines macro-dette-long-terme multivue \
-    niveaux-chart omon-lectures-options revue-cycle term-portage-tbill des-oi-perps-dex des-flux-takers chain-mineurs-cotes \
+    niveaux-chart omon-lectures-options options-fraicheur revue-cycle term-portage-tbill des-oi-perps-dex des-flux-takers chain-mineurs-cotes \
     sources-automatiques \
     quatre-lots-sauvegardes quatre-lots-backtest quatre-lots-funding-indicateurs \
     quatre-lots-decisions quatre-lots-alertes quatre-lots-indicateurs quatre-lots-data \

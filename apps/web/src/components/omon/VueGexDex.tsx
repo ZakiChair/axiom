@@ -51,6 +51,7 @@ export interface LectureEtf {
 interface Props {
   metrique: "gex" | "dex";
   classe: "crypto" | "actions";
+  portee: "toutes" | "selection";
   loading: boolean;
   cboeLoading: boolean;
   majTs: number | null;
@@ -86,6 +87,7 @@ interface Props {
 export function VueGexDex({
   metrique,
   classe,
+  portee,
   loading,
   cboeLoading,
   majTs,
@@ -107,10 +109,8 @@ export function VueGexDex({
   onSurvolBarres,
   onSortieBarres,
 }: Props) {
-  // Portée du net/flip/murs/verdict : TOUTES les échéances en crypto (agrégation gexDexTout),
-  // échéance sélectionnée en actions (le CBOE reste mono-échéance). L'histogramme et le pic
-  // |GEX|, eux, sont TOUJOURS mono-échéance — la portée est affichée tuile par tuile.
-  const porteeNet = classe === "crypto" ? "toutes échéances" : "échéance sélectionnée";
+  // Histogramme, net, murs, verdict et profil partagent la portée choisie.
+  const porteeNet = classe === "crypto" && portee === "toutes" ? "toutes échéances actives" : "échéance sélectionnée";
 
   // Libellé + ton de la tuile verdict : long gamma = marché amorti (up), short gamma =
   // amplifié (down), indéterminé = neutre (pas de ton).
@@ -139,8 +139,7 @@ export function VueGexDex({
     <>
       <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
         <span>
-          {metrique === "gex" ? "Gamma exposure" : "Delta exposure"} par strike · échéance
-          sélectionnée
+          {metrique === "gex" ? "Gamma exposure ($/1 %)" : "Delta exposure ($)"} par strike · {porteeNet}
         </span>
         <Fraicheur loading={classe === "crypto" ? loading : cboeLoading} majTs={majTs} />
       </div>
@@ -207,12 +206,12 @@ export function VueGexDex({
       </div>
 
       {/* Profil GEX(S) — crypto uniquement : GEX net recalculé à spot simulé (±15 %),
-          zéro du profil = « flip réel ». Pas d'équivalent actions (greeks CBOE figés). */}
+          zéro du profil modélisé. Pas d'équivalent actions (greeks CBOE figés). */}
       {classe === "crypto" && (
         <div className="mt-2 rounded-md border border-border bg-bg p-2">
           <div className="mb-1 flex items-center justify-between text-[10px] text-text-dim">
-            <span>Profil GEX net (spot simulé ±15 %) · toutes échéances</span>
-            <span>flip réel : {formatUsdExact(flipReel)}</span>
+            <span>Profil GEX net (spot simulé ±15 %) · {porteeNet}</span>
+            <span>Zéro du profil modélisé : {formatUsdExact(flipReel)}</span>
           </div>
           <canvas ref={profilCanvasRef} className="h-[90px] w-full" />
         </div>
@@ -223,15 +222,22 @@ export function VueGexDex({
         <div className="col-span-2">
           <TuileStat
             label="Verdict sous hypothèse gamma"
-            valeur={libelleVerdict}
+            valeur={Number.isFinite(gexNet) ? libelleVerdict : "Indisponible"}
             ton={tonVerdict}
             badge={<Badge>{porteeNet}</Badge>}
-            pied={<span>{verdict.action}</span>}
+            pied={<span>{!Number.isFinite(gexNet)
+              ? "Aucune exposition calculable sur cette portée."
+              : verdict.regime === "long-gamma"
+                ? "Sous cette convention, une couverture delta-neutre pourrait amortir les variations. Les positions des dealers ne sont pas observées."
+                : verdict.regime === "short-gamma"
+                  ? "Sous cette convention, une couverture delta-neutre pourrait amplifier les variations. Les positions des dealers ne sont pas observées."
+                  : "Le GEX net ne permet pas de trancher sous cette convention."}</span>}
           />
         </div>
         <TuileStat
           disposition="inline"
           label="GEX net"
+          title="USD de variation du delta notionnel pour un mouvement de +1 % du sous-jacent"
           badge={<Badge>{porteeNet}</Badge>}
           valeur={formatUsd(gexNet)}
           couleur={gexNet !== 0 ? (gexNet > 0 ? "var(--up)" : "var(--down)") : undefined}
@@ -239,6 +245,7 @@ export function VueGexDex({
         <TuileStat
           disposition="inline"
           label="DEX net"
+          title="Delta agrégé signé, en USD notionnels ; aucune position dealer observée"
           badge={<Badge>{porteeNet}</Badge>}
           valeur={formatUsd(dexNet)}
           couleur={dexNet !== 0 ? (dexNet > 0 ? "var(--up)" : "var(--down)") : undefined}
@@ -252,7 +259,7 @@ export function VueGexDex({
         />
         <TuileStat
           disposition="inline"
-          label="Gamma flip"
+          label="Flip cumulé par strike"
           badge={
             <>
               <Badge>{porteeNet}</Badge>
@@ -271,7 +278,8 @@ export function VueGexDex({
         />
         <TuileStat
           disposition="inline"
-          label="Spot↔flip"
+          label="Spot↔flip cumulé"
+          title="Distance au passage à zéro du cumul par strike, pas un seuil de bascule du prix"
           badge={<Badge>{porteeNet}</Badge>}
           valeur={formatPct(verdict.distanceFlipPct, 1)}
           couleur={
@@ -299,7 +307,7 @@ export function VueGexDex({
         <TuileStat
           disposition="inline"
           label="Strike |GEX| max"
-          badge={<Badge>échéance sélectionnée</Badge>}
+          badge={<Badge>{porteeNet}</Badge>}
           valeur={formatUsdExact(strikePicGex)}
           extra={converti(strikePicGex)}
         />
@@ -361,7 +369,7 @@ export function VueGexDex({
       <div className="mt-3">
         <NoteSource>
           {classe === "crypto"
-            ? "GEX/DEX calculés côté client (Black-Scholes sur IV mark Deribit, OI en unités de base, multiplicateur 1). La convention calls+/puts− et les variantes tous-long/tous-short sont des hypothèses, pas une observation des portefeuilles dealers. Histogramme et pic |GEX| : échéance sélectionnée. Net, flip cumul/strike, murs, verdict et profil GEX(S) : toutes échéances ; le flip réel du profil est le zéro du GEX recalculé en spot."
+            ? `GEX/DEX modélisés à partir des IV mark et forwards de chaque maturité, avec l’index Deribit pour la valorisation USD. OI en unités de base, multiplicateur 1. La convention calls+/puts− et les variantes tous-long/tous-short sont des hypothèses, pas une observation des portefeuilles dealers. Histogramme, net, murs, pic, verdict et profil : ${porteeNet}. GEX en USD par +1 % ; DEX en USD notionnels. Le flip cumulé par strike est distinct du zéro du profil modélisé ; aucun des deux n’est une prévision de prix.`
             : "Greeks pré-calculés CBOE (multiplicateur 100) — toutes les métriques portent sur l'échéance sélectionnée. Convention : dealers long les calls, short les puts — le signe du GEX en dépend. GEX = Σ(Γc·OIc − Γp·OIp)·S²·0,01·mult ; DEX = Σ(Δ·OI)·S·mult. Histogramme : strikes < 0,5 % du max masqués. Pas de profil GEX(S) : greeks figés, non re-simulables."}
           {etf &&
             ` ETF ${etf.sousJacent} : strikes conservés à ±25 % du prix de l'ETF (P/C et notionnel sur la chaîne complète) ; OI OCC mis à jour une fois par jour ; volume consolidé ou propre au CBOE : non vérifié. Niveau ≈ ${etf.sousJacent} = strike × clôture Binance 1 min au dernier échange ÷ prix courant de l'ETF (hors séance, il peut s'écarter de la clôture de séance) : approximation, pas la NAV (frais, prime ou décote) ; « — » si la bougie manque, jamais le cours crypto courant.`}

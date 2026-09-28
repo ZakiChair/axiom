@@ -202,6 +202,10 @@ test("niveaux d'options : activation palette, murs, flips et max pain accrochabl
     const optionsBtc = url.pathname.endsWith("/get_book_summary_by_currency")
       && url.searchParams.get("kind") === "option"
       && url.searchParams.get("currency") === "BTC";
+    if (url.pathname.endsWith("/get_index_price") && url.searchParams.get("index_name") === "btc_usd") {
+      await route.fulfill({ json: { result: { index_price: 79_000 } } });
+      return;
+    }
     if (optionsBtc) await route.fulfill({ json: { jsonrpc: "2.0", result: OPTIONS_BTC } });
     else await route.fulfill({ status: 503, json: { error: "fixture Deribit absente" } });
   });

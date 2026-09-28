@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { annualiserBasis, computeQuarterlyBasisPoints, parseCoinMContrats } from "./binanceDapi";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fetchJsonExt, annualiserBasis, computeQuarterlyBasisPoints, parseCoinMContrats } from "./binanceDapi";
 
 /** 182,5 jours ≈ demi-année → facteur d'annualisation 2. */
 const DEMI_AN_MS = 182.5 * 24 * 60 * 60 * 1000;
@@ -79,5 +79,26 @@ describe("parseCoinMContrats", () => {
 
   it("gère une réponse sans symboles", () => {
     expect(parseCoinMContrats({}, "BTCUSD")).toEqual([]);
+  });
+});
+
+
+describe("fetchJsonExt — appels bornés", () => {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+  it("direct bloqué → proxy, proxy bloqué → rejet, même si fetch ignore abort", async () => {
+    vi.useFakeTimers();
+    const appels: { url: string; signal: AbortSignal | undefined }[] = [];
+    vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+      appels.push({ url, signal: init?.signal as AbortSignal | undefined });
+      return new Promise(() => {});
+    });
+    let erreur: unknown;
+    void fetchJsonExt("www.deribit.com", "api/v2/public/test", 1_000).catch((e: unknown) => { erreur = e; });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(erreur).toBeInstanceOf(Error);
+    expect(String(erreur)).toMatch(/délai/i);
+    expect(appels).toHaveLength(2);
+    expect(appels.every((a) => a.signal?.aborted)).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

@@ -7,7 +7,7 @@
  * GEX(S) sur 41 spots à ±15 % et max pain. Convention de signe d'OMON : calls +, puts −
  * (hypothèse sur la position des dealers, rappelée par la commande). Deux flips distincts :
  * « Flip GEX(S) » est le zéro du profil recalculé en spot ; « Flip cumulé » le changement de
- * signe du GEX cumulé par strike, celui dont REGIME et BRIEF affichent la distance.
+ * signe du GEX cumulé par strike, affiché uniquement sous son nom de cumul.
  * Le max pain est celui de l'échéance au plus grand open interest, date dans l'étiquette.
  */
 import type { Unsubscribe } from "@axiom/types";
@@ -17,17 +17,14 @@ import {
   TTL_CHAINE_MS,
   actifDeribit,
   chargerChaineOptions,
+  limiteChaineOptions,
   spotDeChaine,
   type ChaineOptionsChargee,
   type DeviseDeribit,
 } from "../../data/chaineOptionsCache";
-import { formatDateHeure } from "../../lib/format";
 import { pousserToast } from "../../store/toasts";
 import type { FournisseurLignes, LigneNiveau } from "../niveauxLignes";
 import type { ContexteNiveaux } from "../niveauxOverlays";
-
-/** Marge du rafraîchissement : le tick doit trouver la chaîne en cache déjà périmée. */
-const MARGE_RAFRAICHISSEMENT_MS = 1_000;
 
 export interface NiveauxOptions {
   spot: number;
@@ -115,10 +112,9 @@ export interface DepsSourceNiveauxOptions {
 }
 
 /**
- * Source « niveaux d'options » d'un slot : chaîne chargée au subscribe puis à chaque TTL, calcul
- * fait UNE fois par chaîne reçue (jamais dans `getLignes`). Un échec garde les dernières lignes
- * et dit de quand elles datent ; un marché non éligible ou une chaîne sans niveau calculable
- * est expliqué par toast (jamais d'overlay muet).
+ * Source « niveaux d’options » d’un slot : chargement sérialisé, renouvelé au TTL ou à
+ * l’expiration la plus proche. Les lignes sont retirées à cette frontière même si le réseau
+ * bloque ; aucun calcul dans getLignes. Un échec ou un marché non éligible est expliqué.
  */
 export function creerSourceNiveauxOptions(ctx: ContexteNiveaux, deps: DepsSourceNiveauxOptions = {}): FournisseurLignes {
   const charger = deps.charger ?? chargerChaineOptions;
@@ -137,35 +133,55 @@ export function creerSourceNiveauxOptions(ctx: ContexteNiveaux, deps: DepsSource
       }
       let annule = false;
       let echecSignale = false;
+      let enChargement = false;
+      let minuteur: ReturnType<typeof setTimeout> | undefined;
+      const effacerPerimes = (): void => {
+        if (calculeSur !== null && maintenant() >= limiteChaineOptions(calculeSur)) {
+          calculeSur = null;
+          niveaux = null;
+          onChange();
+        }
+      };
+      const programmer = (): void => {
+        clearTimeout(minuteur);
+        const fin = calculeSur === null ? maintenant() + TTL_CHAINE_MS : limiteChaineOptions(calculeSur);
+        minuteur = setTimeout(() => {
+          effacerPerimes();
+          charge();
+        }, Math.max(1, fin - maintenant()));
+      };
       const charge = (): void => {
-        const now = maintenant();
-        void charger(devise, now).then((res) => {
+        if (annule || enChargement) return;
+        enChargement = true;
+        void charger(devise, maintenant()).catch(() => null).then((res) => {
           if (annule) return;
+          const now = maintenant();
+          effacerPerimes();
           if (res === null) {
-            const conservees =
-              calculeSur !== null && lignesNiveauxOptions(niveaux).length > 0
-                ? `, lignes du ${formatDateHeure(calculeSur.recupereLe)} conservées`
-                : "";
-            if (!echecSignale) toast(`Niveaux d'options : chaîne Deribit ${devise} indisponible${conservees}, nouvel essai dans 10 min`);
+            if (!echecSignale) toast(`Niveaux d'options : chaîne Deribit ${devise} indisponible, nouvel essai dans 10 min`);
             echecSignale = true;
             return;
           }
           echecSignale = false;
-          if (res.chaine !== calculeSur?.chaine) {
-            calculeSur = res;
-            niveaux = calculerNiveauxOptions(res.chaine, now);
-            if (lignesNiveauxOptions(niveaux).length === 0) {
-              toast(`Niveaux d'options : aucun niveau calculable sur la chaîne Deribit ${devise}`);
-            }
+          // L’horloge est relue APRÈS le réseau : aucune option expirée pendant l’attente.
+          calculeSur = now < limiteChaineOptions(res) ? res : null;
+          niveaux = calculeSur === null ? null : calculerNiveauxOptions(res.chaine, now);
+          if (lignesNiveauxOptions(niveaux).length === 0) {
+            toast(`Niveaux d'options : aucun niveau calculable sur la chaîne Deribit ${devise}`);
           }
           onChange();
+        }).finally(() => {
+          enChargement = false;
+          if (!annule) programmer();
         });
       };
+      // Un overlay peut être réactivé avec un ancien snapshot : purger/réarmer avant le réseau.
+      effacerPerimes();
+      if (calculeSur !== null) programmer();
       charge();
-      const minuteur = setInterval(charge, TTL_CHAINE_MS + MARGE_RAFRAICHISSEMENT_MS);
       return () => {
         annule = true;
-        clearInterval(minuteur);
+        clearTimeout(minuteur);
       };
     },
   };

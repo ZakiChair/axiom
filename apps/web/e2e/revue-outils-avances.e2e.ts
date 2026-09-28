@@ -137,6 +137,10 @@ test("OMON rend les trois hypothèses gamma sur la même chaîne Deribit", async
       await route.fulfill({ json: { jsonrpc: "2.0", result: resumeOptions } });
       return;
     }
+    if (methode === "get_index_price") {
+      await route.fulfill({ json: { result: { index_price: 100_000 } } });
+      return;
+    }
     if (methode === "get_volatility_index_data") {
       await route.fulfill({ json: { jsonrpc: "2.0", result: { data: [[INSTANT_FIXE, 50, 55, 48, 52]] } } });
       return;

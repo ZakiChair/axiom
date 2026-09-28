@@ -60,7 +60,7 @@ interface DeribitEnveloppe<T> {
 async function appelDeribit<T>(methode: string, params: Record<string, string>): Promise<T> {
   await creneau();
   const chemin = `api/v2/public/${methode}?${new URLSearchParams(params).toString()}`;
-  const corps = (await fetchJsonExt("www.deribit.com", chemin)) as DeribitEnveloppe<T>;
+  const corps = (await fetchJsonExt("www.deribit.com", chemin, 10_000)) as DeribitEnveloppe<T>;
   if (corps.error) throw new Error(`Deribit ${methode}: ${corps.error.message ?? "erreur"}`);
   if (corps.result === undefined) throw new Error(`Deribit ${methode}: réponse vide`);
   return corps.result;
@@ -118,11 +118,13 @@ export interface StrikeOi {
  * « Max pain » : prix de règlement qui MINIMISE la valeur intrinsèque totale versée aux
  * détenteurs d'options (donc la perte des vendeurs). Pour chaque strike candidat S, la
  * « douleur » = Σ callOi·max(0, S−K) [calls ITM] + Σ putOi·max(0, K−S) [puts ITM]. Le max
- * pain est le strike de douleur minimale. Fonction PURE. Renvoie null si aucun strike valide.
+ * pain est le strike de douleur minimale. Fonction PURE. Renvoie null sans OI positif
+ * sur un strike valide ; les OI non finis ou négatifs sont absents du calcul.
  */
 export function computeMaxPain(niveaux: StrikeOi[]): number | null {
   const valides = niveaux.filter((n) => Number.isFinite(n.strike) && n.strike > 0);
-  if (valides.length === 0) return null;
+  const oiPositif = (oi: number): boolean => Number.isFinite(oi) && oi > 0;
+  if (!valides.some((n) => oiPositif(n.callOi) || oiPositif(n.putOi))) return null;
 
   let meilleurStrike: number | null = null;
   let minDouleur = Infinity;
@@ -130,8 +132,8 @@ export function computeMaxPain(niveaux: StrikeOi[]): number | null {
     const s = cand.strike;
     let douleur = 0;
     for (const n of valides) {
-      if (s > n.strike && Number.isFinite(n.callOi)) douleur += n.callOi * (s - n.strike);
-      if (s < n.strike && Number.isFinite(n.putOi)) douleur += n.putOi * (n.strike - s);
+      if (s > n.strike && oiPositif(n.callOi)) douleur += n.callOi * (s - n.strike);
+      if (s < n.strike && oiPositif(n.putOi)) douleur += n.putOi * (n.strike - s);
     }
     if (douleur < minDouleur) {
       minDouleur = douleur;
@@ -236,7 +238,13 @@ export interface OptionPoint {
   markIv: number;
   /** Open interest, en unités de base (BTC/ETH). */
   openInterest: number;
-  /** Prix du sous-jacent (index) au moment du résumé. */
+  /** Vrai index BTC/ETH-USD de get_index_price ; distinct du forward. */
+  indexPrice?: number;
+  /** Horodatage fournisseur du résumé (creation_timestamp), absent si inconnu. */
+  observedAt?: number;
+  /** Horodatage local de réception, commun au cycle de chargement. */
+  receivedAt?: number;
+  /** Forward propre à l’échéance (underlying_price Deribit), pas le spot. */
   underlying: number;
   /** Taux sans risque en fraction (Deribit `interest_rate`, souvent 0). Input Black-Scholes. */
   interestRate: number;
@@ -255,34 +263,44 @@ interface DeribitOptionSummary {
   interest_rate: number | null;
   volume: number | null;
   mark_price: number | null;
+  creation_timestamp?: number;
 }
 
 /**
- * Chaîne d'options complète (toutes échéances) d'une devise, en UN appel agrégé. Chaque
+ * Chaîne d’options actives : un résumé agrégé + un index spot par devise. Chaque
  * point porte échéance/strike/type (parsés du nom), IV au mark et open interest. Santé signalée.
  */
 export async function fetchDeribitOptionChain(currency: "BTC" | "ETH"): Promise<OptionPoint[]> {
   try {
-    const resume = await appelDeribit<DeribitOptionSummary[]>("get_book_summary_by_currency", {
-      currency,
-      kind: "option",
-    });
+    const [resume, index] = await Promise.all([
+      appelDeribit<DeribitOptionSummary[]>("get_book_summary_by_currency", { currency, kind: "option" }),
+      appelDeribit<{ index_price: number }>("get_index_price", { index_name: `${currency.toLowerCase()}_usd` }),
+    ]);
+    if (!Number.isFinite(index.index_price) || index.index_price <= 0) throw new Error(`Deribit ${currency} : index indisponible`);
+    if (!Array.isArray(resume)) throw new Error("Deribit : résumé d’options invalide");
+    const receivedAt = Date.now();
+    const nombre = (v: unknown, strict = false): number =>
+      typeof v === "number" && Number.isFinite(v) && (strict ? v > 0 : v >= 0) ? v : NaN;
     const out: OptionPoint[] = [];
     for (const r of resume) {
+      if (r === null || typeof r.instrument_name !== "string") continue;
       const parsed = parseOptionInstrument(r.instrument_name);
-      if (!parsed) continue;
+      if (!parsed || parsed.currency !== currency || parsed.expiryMs <= receivedAt) continue;
       out.push({
         instrument: r.instrument_name,
         expiryMs: parsed.expiryMs,
         strike: parsed.strike,
         type: parsed.type,
-        markIv: r.mark_iv ?? NaN,
-        openInterest: r.open_interest ?? 0,
-        underlying: r.underlying_price ?? NaN,
-        interestRate: r.interest_rate ?? 0,
-        volume24h: typeof r.volume === "number" && Number.isFinite(r.volume) ? r.volume : NaN,
-        markPrice:
-          typeof r.mark_price === "number" && Number.isFinite(r.mark_price) ? r.mark_price : NaN,
+        markIv: nombre(r.mark_iv, true),
+        openInterest: nombre(r.open_interest),
+        underlying: nombre(r.underlying_price, true),
+        indexPrice: index.index_price,
+        ...(typeof r.creation_timestamp === "number" && Number.isFinite(r.creation_timestamp)
+          && r.creation_timestamp > 0 && r.creation_timestamp <= receivedAt ? { observedAt: r.creation_timestamp } : {}),
+        receivedAt,
+        interestRate: typeof r.interest_rate === "number" && Number.isFinite(r.interest_rate) ? r.interest_rate : NaN,
+        volume24h: nombre(r.volume),
+        markPrice: nombre(r.mark_price),
       });
     }
     healthStore.getState().setEtat(HEALTH_SOURCE, "connected", { dernierMessageTs: Date.now() });

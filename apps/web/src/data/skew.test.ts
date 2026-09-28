@@ -78,3 +78,12 @@ describe("calculerSkew25d", () => {
     expect(calculerSkew25d([...CALLS, ...PUTS], 0, NOW)).toBeNull();
   });
 });
+
+
+it("RR25 : sélectionne sur le forward propre, oracle Python math.erf avec base +10 %", () => {
+  // F110/X100 : call140 delta .25660 ; put90 delta -.20131. L’ancien spot seul retient 128/84.
+  const chaine = [...CALLS, ...PUTS].map((p) => ({ ...p, underlying: 110, indexPrice: 100 }));
+  expect(calculerSkew25d(chaine, 100, NOW)).toEqual({
+    rr25: 2, strikeCall: 140, strikePut: 90, ivCall: 60, ivPut: 58,
+  });
+});

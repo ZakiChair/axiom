@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateGexDex,
   comparerHypothesesGamma,
+  comparerHypothesesGammaCrypto,
   computeCryptoGexDex,
   gammaFlip,
   gexParStrikeToutesEcheances,
@@ -135,11 +136,9 @@ describe("computeCryptoGexDex", () => {
     const points: CryptoOptionInput[] = [
       { strike: 100, type: "call", markIv: 50, openInterest: 10, interestRate: 0, expiryMs: NOW - UN_AN },
     ];
-    // Aucun strike contribue (gammaSigne/deltaSigne restent à 0 → point à 0, mais présent).
+    // Un contrat expiré doit disparaître de l’univers, sans faux zéro.
     const out = computeCryptoGexDex(points, 100, NOW);
-    expect(out).toHaveLength(1);
-    expect(out[0]?.gex).toBe(0);
-    expect(out[0]?.dex).toBe(0);
+    expect(out).toEqual([]);
   });
 
   it("multiplicateur crypto = 1 (pas de facteur 100)", () => {
@@ -169,6 +168,7 @@ describe("gexParStrikeToutesEcheances", () => {
       markIv: 50,
       openInterest: 1,
       underlying: 100,
+      indexPrice: 100,
       interestRate: 0,
       volume24h: NaN,
       markPrice: NaN,
@@ -296,7 +296,8 @@ describe("verdictGamma", () => {
     const v = verdictGamma(1000, 100, 90, 5000);
     expect(v.regime).toBe("long-gamma");
     expect(v.qualificatif).toBe("amorti");
-    expect(v.action).toContain("vendent le sous-jacent quand ça monte");
+    expect(v.action).toContain("Sous cette hypothèse");
+    expect(v.action).toContain("amortir");
     // distance = (100 − 90)/100 × 100 = 10 %.
     expect(v.distanceFlipPct).toBeCloseTo(10, 9);
   });
@@ -305,7 +306,8 @@ describe("verdictGamma", () => {
     const v = verdictGamma(-1000, 100, 110, 5000);
     expect(v.regime).toBe("short-gamma");
     expect(v.qualificatif).toBe("amplifié");
-    expect(v.action).toContain("achètent les hausses");
+    expect(v.action).toContain("Sous cette hypothèse");
+    expect(v.action).toContain("amplifier");
     // distance = (100 − 110)/100 × 100 = −10 %.
     expect(v.distanceFlipPct).toBeCloseTo(-10, 9);
   });
@@ -437,9 +439,9 @@ describe("profilGexSpot", () => {
     expect(points.map((p) => p.spot)).toEqual([90, 110]);
   });
 
-  it("chaîne vide → GEX net nul partout, flip réel null (pas de faux zéro)", () => {
+  it("chaîne vide → aucun point de profil, flip réel null", () => {
     const { points, flipReel } = profilGexSpot([], [90, 100, 110], NOW);
-    expect(points.map((p) => p.gexNet)).toEqual([0, 0, 0]);
+    expect(points).toEqual([]);
     expect(flipReel).toBeNull();
   });
 
@@ -485,5 +487,37 @@ describe("passage EXACTEMENT par zéro (revue v2.6, trouvaille no 9)", () => {
       { strike: 110, gex: -3 },
     ]);
     expect(flip).toBeNull();
+  });
+});
+
+
+describe("Deribit : index spot distinct du forward", () => {
+  const now = Date.UTC(2026, 0, 1);
+  const option: CryptoOptionInput = {
+    strike: 100, type: "call", markIv: 50, openInterest: 100, interestRate: 0,
+    expiryMs: now + 182.5 * 86_400_000, underlying: 110, indexPrice: 100,
+  };
+  it("reproduit l’oracle indépendant Python math.erf, taux API zéro et basis +10 %", () => {
+    const point = computeCryptoGexDex([option], 100, now)[0];
+    expect(point?.gex).toBeCloseTo(102.1391615366253, 9);
+    expect(point?.dex).toBeCloseTo(6723.294365833989, 3);
+    const scenario = comparerHypothesesGammaCrypto([option], 100, now)[0];
+    expect(scenario?.gexNet).toBeCloseTo(102.1391615366253, 9);
+    expect(gexParStrikeToutesEcheances([option], 100, now)[0]?.gex).toBeCloseTo(102.1391615366253, 9);
+  });
+  it("le scénario spot garde la base F/X constante : oracles S80/F88 et S120/F132", () => {
+    const profile = profilGexSpot([option], [80, 120], now);
+    expect(profile.points[0]?.gexNet).toBeCloseTo(88.74215894861925, 9);
+    expect(profile.points[1]?.gexNet).toBeCloseTo(85.24381715154043, 9);
+  });
+  it.each([
+    { markIv: NaN }, { markIv: 0 }, { openInterest: -1 }, { openInterest: NaN },
+    { strike: Infinity }, { expiryMs: now }, { underlying: NaN }, { indexPrice: NaN },
+  ])("une jambe invalide %j est exclue de toutes les vues", (partiel) => {
+    const invalid = { ...option, ...partiel };
+    expect(computeCryptoGexDex([invalid], 100, now)).toEqual([]);
+    expect(gexParStrikeToutesEcheances([invalid], 100, now)).toEqual([]);
+    expect(comparerHypothesesGammaCrypto([invalid], 100, now)).toEqual([]);
+    expect(profilGexSpot([invalid], [90, 100], now).points).toEqual([]);
   });
 });

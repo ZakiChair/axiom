@@ -16,6 +16,7 @@ function opt(
     interestRate: 0,
     expiryMs: ECHEANCE,
     underlying: 100_000,
+    indexPrice: 100_000,
     ...partiel,
   };
 }
@@ -75,7 +76,7 @@ describe("verdictGammaDepuisChaine", () => {
     expect(new Set(res?.scenarios.map((s) => s.dexNet)).size).toBe(1);
   });
 
-  it("cumul qui change de signe entre deux strikes → flip et distance au flip présents", () => {
+  it("le verdict principal mesure la distance au zéro du profil spot, pas au cumul strike", () => {
     // Put à 90 k puis call à 110 k (gamma du 110 k > gamma du 90 k à ce spot) :
     // cumul négatif puis positif → flip interpolé entre les deux strikes.
     const res = verdictGammaDepuisChaine(
@@ -85,6 +86,8 @@ describe("verdictGammaDepuisChaine", () => {
     expect(res?.verdict.regime).toBe("long-gamma");
     expect(res?.verdict.distanceFlipPct).not.toBeNull();
     expect(Number.isFinite(res?.verdict.distanceFlipPct ?? NaN)).toBe(true);
+    // Oracle indépendant Python : profil 41 spots ±15 %, racine interpolée 98 036,902 $.
+    expect(res?.verdict.distanceFlipPct).toBeCloseTo(1.963098271431023, 9);
   });
 
   it("chaîne vide ou sans underlying exploitable → null", () => {
@@ -142,6 +145,51 @@ describe("chargerVerdictGammaBtc — cache TTL 10 min, succès seulement", () =>
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(r4?.recupereLe).toBe(NOW + 700_500);
 
+    _viderCacheGammaRegime();
+  });
+});
+
+
+describe("verdict courant : univers et échéance", () => {
+  it("aucune option valide ne doit produire un verdict à zéro", () => {
+    expect(verdictGammaDepuisChaine([opt({ strike: 100_000, type: "call", expiryMs: NOW })], NOW)).toBeNull();
+    expect(verdictGammaDepuisChaine([opt({ strike: 100_000, type: "call", markIv: NaN })], NOW)).toBeNull();
+  });
+  it("la permutation de forwards différents garde le même indice et verdict", () => {
+    const chaine = [opt({ strike: 100_000, type: "call", underlying: 110_000 }), opt({ strike: 95_000, type: "put", underlying: 115_000 })];
+    const a = verdictGammaDepuisChaine(chaine, NOW);
+    const b = verdictGammaDepuisChaine([...chaine].reverse(), NOW);
+    expect(a?.spot).toBe(100_000);
+    expect(a).toEqual(b);
+  });
+  it("le cache expire au plus proche contrat ; relecture offline ne rend pas le verdict périmé", async () => {
+    const { fetchDeribitOptionChain } = await import("./deribit");
+    const { chargerVerdictGammaBtc, _viderCacheGammaRegime } = await import("./gammaRegime");
+    _viderCacheGammaRegime();
+    vi.useFakeTimers({ now: NOW });
+    const mock = vi.mocked(fetchDeribitOptionChain).mockReset();
+    mock.mockResolvedValueOnce([opt({ strike: 100_000, type: "call", expiryMs: NOW + 1_000 })] as never);
+    expect(await chargerVerdictGammaBtc(NOW)).not.toBeNull();
+    mock.mockRejectedValueOnce(new Error("offline"));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await chargerVerdictGammaBtc(Date.now())).toBeNull();
+    _viderCacheGammaRegime();
+  });
+  it("coalesce les lectures parallèles et écarte un contrat expiré pendant le réseau", async () => {
+    const { fetchDeribitOptionChain } = await import("./deribit");
+    const { chargerVerdictGammaBtc, _viderCacheGammaRegime } = await import("./gammaRegime");
+    _viderCacheGammaRegime();
+    vi.useFakeTimers({ now: NOW });
+    const mock = vi.mocked(fetchDeribitOptionChain).mockReset();
+    let resolve!: (chaine: never) => void;
+    mock.mockImplementation(() => new Promise((r) => { resolve = r; }));
+    const a = chargerVerdictGammaBtc(NOW);
+    const b = chargerVerdictGammaBtc(NOW);
+    expect(mock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    resolve([opt({ strike: 100_000, type: "call", expiryMs: NOW + 500 })] as never);
+    expect(await a).toBeNull();
+    expect(await b).toBeNull();
     _viderCacheGammaRegime();
   });
 });

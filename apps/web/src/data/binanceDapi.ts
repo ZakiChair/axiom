@@ -117,15 +117,33 @@ export function parseCoinMContrats(info: ExchangeInfoResp, pair: string): Contra
  * dapi.binance.com) ; en cas d'échec (CORS/réseau/HTTP non-OK), bascule sur le proxy
  * SAME-ORIGIN `/extapi/<hote>/<chemin>`. Dégradation gracieuse — jamais de boucle d'erreur.
  */
-export async function fetchJsonExt(hote: string, chemin: string): Promise<unknown> {
+export async function fetchJsonExt(hote: string, chemin: string, timeoutMs?: number): Promise<unknown> {
+  // Borne aussi la lecture du corps, et libère le consommateur si un fetch ignore abort.
+  async function lire(url: string): Promise<unknown> {
+    async function requete(signal?: AbortSignal): Promise<unknown> {
+      const res = await (signal === undefined ? fetch(url) : fetch(url, { signal }));
+      if (!res.ok) throw new Error(`${hote} HTTP ${res.status}`);
+      return await res.json();
+    }
+    if (timeoutMs === undefined) return requete();
+    const controleur = new AbortController();
+    let minuteur: ReturnType<typeof setTimeout> | undefined;
+    const delai = new Promise<never>((_, reject) => {
+      minuteur = setTimeout(() => {
+        reject(new Error(`${hote} : délai de réponse dépassé`));
+        controleur.abort();
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([delai, requete(controleur.signal)]);
+    } finally {
+      clearTimeout(minuteur);
+    }
+  }
   try {
-    const res = await fetch(`https://${hote}/${chemin}`);
-    if (res.ok) return await res.json();
-    throw new Error(`HTTP ${res.status}`);
+    return await lire(`https://${hote}/${chemin}`);
   } catch {
-    const res = await fetch(extUrl(hote, chemin));
-    if (!res.ok) throw new Error(`${hote} ${res.status} (proxy)`);
-    return await res.json();
+    return await lire(extUrl(hote, chemin));
   }
 }
 

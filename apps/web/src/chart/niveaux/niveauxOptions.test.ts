@@ -13,7 +13,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { computeMaxPain, parseOptionInstrument, type OptionPoint } from "../../data/deribit";
 import { gammaFlip, gexParStrikeToutesEcheances, mursGamma, profilGexSpot } from "../../data/gexDex";
 import { TTL_CHAINE_MS, type ChaineOptionsChargee } from "../../data/chaineOptionsCache";
-import { formatDateHeure } from "../../lib/format";
 import {
   calculerNiveauxOptions,
   creerSourceNiveauxOptions,
@@ -39,6 +38,7 @@ function opt(instrument: string, openInterest: number, partiel: Partial<OptionPo
     markIv: 50,
     openInterest,
     underlying: 79_000,
+    indexPrice: 79_000,
     interestRate: 0,
     volume24h: 1,
     markPrice: 0.01,
@@ -111,7 +111,7 @@ describe("calculerNiveauxOptions", () => {
 
   it("chaîne vide ou sans spot fini → null → aucune ligne", () => {
     expect(calculerNiveauxOptions([], NOW)).toBeNull();
-    const sansSpot = CHAINE.map((p) => ({ ...p, underlying: NaN }));
+    const sansSpot = CHAINE.map((p) => ({ ...p, underlying: NaN, indexPrice: NaN }));
     expect(calculerNiveauxOptions(sansSpot, NOW)).toBeNull();
     expect(lignesNiveauxOptions(null)).toEqual([]);
   });
@@ -186,7 +186,7 @@ describe("creerSourceNiveauxOptions", () => {
     expect(eth.appels.map((a) => a.devise)).toEqual(["ETH"]);
   });
 
-  it("rafraîchit à chaque TTL ; échec : toast unique datant les lignes conservées ; désabonnement coupe tout", async () => {
+  it("retire les lignes au TTL ; échec signalé une fois ; désabonnement coupe tout", async () => {
     vi.useFakeTimers({ now: NOW });
     const c = chargeurFactice([{ chaine: CHAINE, recupereLe: NOW }, null, null, { chaine: CHAINE, recupereLe: NOW + 3 * TTL_CHAINE_MS }]);
     const toasts: string[] = [];
@@ -199,9 +199,9 @@ describe("creerSourceNiveauxOptions", () => {
     await vi.advanceTimersByTimeAsync(TTL_CHAINE_MS + 1_000);
     await vi.advanceTimersByTimeAsync(TTL_CHAINE_MS + 1_000);
     expect(c.appels).toHaveLength(3);
-    expect(source.getLignes()).toEqual(lignes);
+    expect(source.getLignes()).toEqual([]);
     expect(toasts).toEqual([
-      `Niveaux d'options : chaîne Deribit BTC indisponible, lignes du ${formatDateHeure(NOW)} conservées, nouvel essai dans 10 min`,
+      "Niveaux d'options : chaîne Deribit BTC indisponible, nouvel essai dans 10 min",
     ]);
 
     unsub();
@@ -224,7 +224,7 @@ describe("creerSourceNiveauxOptions", () => {
   });
 
   it("premier échec sans lignes, puis chaîne sans spot : toasts explicites, aucune ligne", async () => {
-    const sansSpot = CHAINE.map((p) => ({ ...p, underlying: NaN }));
+    const sansSpot = CHAINE.map((p) => ({ ...p, underlying: NaN, indexPrice: NaN }));
     const c = chargeurFactice([null, { chaine: sansSpot, recupereLe: NOW }]);
     const toasts: string[] = [];
     vi.useFakeTimers({ now: NOW });
@@ -239,4 +239,49 @@ describe("creerSourceNiveauxOptions", () => {
       "Niveaux d'options : aucun niveau calculable sur la chaîne Deribit BTC",
     ]);
   });
+});
+
+
+describe("frontière d’expiration du dessin, même sans réseau", () => {
+  it("retire immédiatement les lignes à 08:00, même pendant un chargement bloqué", async () => {
+    vi.useFakeTimers({ now: NOW });
+    const chaine = [opt("BTC-25SEP26-80000-C", 100, { expiryMs: NOW + 1_000 })];
+    let appels = 0;
+    const source = creerSourceNiveauxOptions({ exchange: "binance", symbol: "BTCUSDT" }, {
+      charger: async () => { appels++; return appels === 1 ? { chaine, recupereLe: NOW } : new Promise(() => {}); },
+      toast: () => {},
+    });
+    let notifications = 0;
+    const stop = source.subscribe(() => { notifications++; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(source.getLignes().length).toBeGreaterThan(0);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(source.getLignes()).toEqual([]);
+    expect(notifications).toBeGreaterThanOrEqual(2);
+    await vi.advanceTimersByTimeAsync(3 * TTL_CHAINE_MS);
+    expect(appels).toBe(2);
+    stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+
+it.each([500, 1_500])("réactivation après %ims : expiration retire les lignes même si la requête bloque", async (delai) => {
+  vi.useFakeTimers({ now: NOW });
+  const chaine = [opt("BTC-25SEP26-80000-C", 100, { expiryMs: NOW + 1_000 })];
+  let appels = 0;
+  const source = creerSourceNiveauxOptions({ exchange: "binance", symbol: "BTCUSDT" }, {
+    charger: async () => ++appels === 1 ? { chaine, recupereLe: NOW } : new Promise(() => {}),
+    toast: () => {},
+  });
+  const stop = source.subscribe(() => {});
+  await vi.advanceTimersByTimeAsync(0);
+  expect(source.getLignes().length).toBeGreaterThan(0);
+  stop();
+  await vi.advanceTimersByTimeAsync(delai);
+  const restop = source.subscribe(() => {});
+  await vi.advanceTimersByTimeAsync(Math.max(0, 1_000 - delai));
+  expect(source.getLignes()).toEqual([]);
+  restop();
+  expect(vi.getTimerCount()).toBe(0);
 });

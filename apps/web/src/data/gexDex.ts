@@ -11,15 +11,13 @@
  * et gamma est identique et positif pour calls et puts (le signe call/put est appliqué ici).
  *
  * Deux sources alimentent la même agrégation :
- *   - crypto (Deribit) : greeks calculés côté client par Black-Scholes, multiplicateur = 1 ;
+ *   - crypto (Deribit) : greeks calculés avec index + forward d’échéance, multiplicateur = 1 ;
  *   - indices actions (CBOE) : greeks PRÉ-calculés dans la réponse, multiplicateur = 100.
  *
  * Toutes les fonctions ici sont pures et testées (gexDex.test.ts).
  */
-import { bsGreeks } from "./blackScholes";
-
-/** Millisecondes dans une année (base 365 j — convention du dépôt). */
-const MS_PAR_AN = 365 * 24 * 60 * 60 * 1000;
+import { greeksOptionCrypto, type OptionCryptoModele } from "./greeksDeribit";
+export { estOptionCryptoExploitable } from "./greeksDeribit";
 
 /** Une « jambe » d'option porteuse de greeks, prête à agréger (source-agnostique). */
 export interface OptionGreekLeg {
@@ -134,56 +132,39 @@ export function comparerHypothesesGammaCrypto(
   spot: number,
   nowMs: number,
 ): ScenarioGamma[] {
-  const legs: OptionGreekLeg[] = points.map((p) => {
-    const t = (p.expiryMs - nowMs) / MS_PAR_AN;
-    const g = bsGreeks(spot, p.strike, t, p.markIv / 100, p.interestRate);
-    return {
-      strike: p.strike,
-      type: p.type,
-      openInterest: p.openInterest,
-      delta: p.type === "call" ? g.deltaCall : g.deltaPut,
-      gamma: g.gamma,
-    };
-  });
-  return comparerHypothesesGamma(legs, spot, 1);
+  const legs = jambesCrypto(points, spot, nowMs);
+  return legs.length === 0 ? [] : comparerHypothesesGamma(legs, spot, 1);
 }
 
 /** Input minimal d'une option crypto pour le calcul GEX/DEX (compatible OptionPoint). */
-export interface CryptoOptionInput {
-  strike: number;
+export interface CryptoOptionInput extends OptionCryptoModele {
   type: "call" | "put";
-  /** Volatilité implicite mark en POURCENTAGE (Deribit renvoie déjà en %). */
-  markIv: number;
   openInterest: number;
-  /** Taux sans risque en fraction (Deribit `interest_rate`, ex. 0). */
-  interestRate: number;
-  /** Échéance (ms epoch). */
-  expiryMs: number;
+}
+
+/** Univers validé unique pour le tableau, les scénarios et le profil en spot. */
+function jambesCrypto(points: CryptoOptionInput[], spot: number, nowMs: number): OptionGreekLeg[] {
+  return points.flatMap((p) => {
+    if (!Number.isFinite(p.openInterest) || p.openInterest < 0) return [];
+    const g = greeksOptionCrypto(p, spot, nowMs);
+    if (g === null) return [];
+    return [{ strike: p.strike, type: p.type, openInterest: p.openInterest,
+      delta: p.type === "call" ? g.deltaCall : g.deltaPut, gamma: g.gamma }];
+  });
 }
 
 /**
- * GEX/DEX crypto (Deribit) : calcule delta/gamma par Black-Scholes puis agrège par strike.
+ * GEX/DEX crypto : calcule delta/gamma avec le modèle commun puis agrège par strike.
  * Multiplicateur de contrat = 1 (les options BTC/ETH Deribit valent 1 sous-jacent chacune).
  * `nowMs` est injecté par l'appelant (fonction PURE — convention du dépôt). Les options déjà
- * expirées (T ≤ 0) ou à IV invalide produisent des greeks NaN et sont ignorées à l'agrégation.
+ * expirées (T ≤ 0), à IV/OI/index/forward invalide sont exclues avant agrégation.
  */
 export function computeCryptoGexDex(
   points: CryptoOptionInput[],
   spot: number,
   nowMs: number,
 ): GexDexPoint[] {
-  const legs: OptionGreekLeg[] = points.map((p) => {
-    const t = (p.expiryMs - nowMs) / MS_PAR_AN;
-    const g = bsGreeks(spot, p.strike, t, p.markIv / 100, p.interestRate);
-    return {
-      strike: p.strike,
-      type: p.type,
-      openInterest: p.openInterest,
-      delta: p.type === "call" ? g.deltaCall : g.deltaPut,
-      gamma: g.gamma,
-    };
-  });
-  return aggregateGexDex(legs, spot, 1);
+  return aggregateGexDex(jambesCrypto(points, spot, nowMs), spot, 1);
 }
 
 /**
@@ -320,7 +301,7 @@ export function verdictGamma(
   if (!Number.isFinite(gexNet) || gexNet === 0 || sousSeuilRelatif) {
     return {
       regime: "indetermine",
-      action: "GEX net trop faible pour trancher — pas de pression dominante des dealers.",
+      action: "GEX net trop faible pour trancher sous cette hypothèse.",
       qualificatif: "neutre",
       distanceFlipPct,
     };
@@ -329,7 +310,7 @@ export function verdictGamma(
     return {
       regime: "long-gamma",
       action:
-        "Les dealers vendent le sous-jacent quand ça monte, l'achètent quand ça baisse — mouvements amortis, aimantation vers les murs.",
+        "Sous cette hypothèse, les couvertures gamma peuvent amortir les mouvements : vente des hausses, achat des baisses.",
       qualificatif: "amorti",
       distanceFlipPct,
     };
@@ -337,7 +318,7 @@ export function verdictGamma(
   return {
     regime: "short-gamma",
     action:
-      "Les dealers achètent les hausses, vendent les baisses — mouvements amplifiés (carburant de squeeze/cascade).",
+      "Sous cette hypothèse, les couvertures gamma peuvent amplifier les mouvements : achat des hausses, vente des baisses.",
     qualificatif: "amplifié",
     distanceFlipPct,
   };
@@ -402,7 +383,7 @@ export interface ProfilGexSpot {
  * Le « flip réel » est le zéro du profil : premier changement de signe STRICT entre deux
  * spots consécutifs, interpolé linéairement (même convention que gammaFlip, mais sur le
  * profil en spot — pas sur le cumul en strike). Null si le profil ne change jamais de signe
- * (chaîne vide → gexNet 0 partout → null aussi). Les spots non finis ou ≤ 0 sont ignorés,
+ * (chaîne vide → aucun point). Les spots non finis ou ≤ 0 sont ignorés,
  * l'entrée est triée par spot croissant. Fonction PURE (nowMs injecté, jamais Date.now()).
  */
 export function profilGexSpot(
@@ -411,10 +392,10 @@ export function profilGexSpot(
   nowMs: number,
 ): ProfilGexSpot {
   const tri = spots.filter((s) => Number.isFinite(s) && s > 0).sort((a, b) => a - b);
-  const points: PointProfilGex[] = tri.map((s) => ({
-    spot: s,
-    gexNet: computeCryptoGexDex(chaine, s, nowMs).reduce((somme, p) => somme + p.gex, 0),
-  }));
+  const points: PointProfilGex[] = tri.flatMap((s) => {
+    const calcul = computeCryptoGexDex(chaine, s, nowMs);
+    return calcul.length === 0 ? [] : [{ spot: s, gexNet: calcul.reduce((somme, p) => somme + p.gex, 0) }];
+  });
   let flipReel: number | null = null;
   // Même convention que gammaFlip : un profil qui touche EXACTEMENT 0 puis
   // repart du côté opposé bascule au spot du zéro (revue v2.6, trouvaille no 9).

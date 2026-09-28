@@ -46,7 +46,7 @@ test("économie des chaînes : horizons, parts à date commune et série absente
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Fonctions" }).click();
+  await page.getByRole("button", { name: "Rubriques" }).click();
   await page.getByRole("menuitem", { name: /On-chain/ }).click();
   const fenetre = page.getByRole("complementary", { name: "On-chain", exact: true });
   const table = fenetre.getByRole("table", { name: "Économie comparée des chaînes" });

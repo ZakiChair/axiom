@@ -18,7 +18,7 @@ test("DOM chauffe, distingue carnet insuffisant et réarme au changement de symb
   });
   try {
     await page.goto("/");
-    await page.getByRole("button", { name: "Fonctions" }).click();
+    await page.getByRole("button", { name: "Rubriques" }).click();
     await page.getByRole("menuitem", { name: /Carnet d'ordres/ }).click();
     const panneau = page.getByTestId("depth-stability");
     await expect(panneau).toBeVisible();

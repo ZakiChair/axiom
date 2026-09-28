@@ -26,6 +26,7 @@ import {
   DomPosition,
   LoadDataType,
   TooltipShowRule,
+  CandleType,
   YAxisType,
 } from "klinecharts";
 import type { Chart as KLineChartInstance, Crosshair, KLineData } from "klinecharts";
@@ -96,6 +97,9 @@ import { CandleReadout } from "./candleReadout";
 import { SymbolBanner } from "../components/SymbolBanner";
 import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 import { useMobileLayout } from "../hooks/useMobileLayout";
+import { CHART_MODES, chartDisplayStore, footprintDisponible, modeEffectif, type ChartDisplayMode } from "../store/chart-display";
+import "./chartPresentation.css";
+import "./canvasText";
 
 /** Type d'échelle de l'axe prix (miroir de YAxisType klinecharts). */
 export type PriceScaleType = "normal" | "log" | "percentage";
@@ -136,6 +140,8 @@ const Y_AXIS_TYPE: Record<PriceScaleType, YAxisType> = {
   log: YAxisType.Log,
   percentage: YAxisType.Percentage,
 };
+
+const MODE_LABEL: Record<ChartDisplayMode, string> = { candles: "Bougies", line: "Courbe", area: "Aire" };
 
 const MOBILE_AXIS_BREAKPOINT_PX = 640;
 const MOBILE_X_AXIS_SIZE_PX = 28;
@@ -394,28 +400,10 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void
   chartDom.style.backgroundImage = "";
 
   chart.setStyles({
-    grid: { horizontal: { color: grid }, vertical: { color: grid } },
-    // Légende native (nom + valeur) laissée aux défauts KLineChart (showName/showParams) :
-    // elle est désormais la SEULE source du NOM d'indicateur — panes séparés ET overlays.
-    // Indispensable pour les overlays (EMA/BOLL) : leur en-tête DOM (chart/overlayLegend.ts)
-    // porte la PASTILLE de couleur d'instance et les actions (⚙ ✕), le nom restant ici pour
-    // ne pas l'imprimer deux fois.
-    // NB : la portée est forcément globale — klinecharts@9.8.12 lit showName depuis les styles
-    // GLOBAUX (getStyles().indicator.tooltip), un override par indicateur est ignoré.
+    grid: { horizontal: { color: grid }, vertical: { show: false, color: grid } },
     candle: {
-      // La légende OHLCV native est COUPÉE (`showRule: "none"`) : le bandeau de symbole et le
-      // readout de bougie l'affichent déjà, elle faisait un troisième exemplaire — et surtout
-      // elle poussait la légende des INDICATEURS sous ce bandeau, où elle était illisible
-      // (seule sa queue dépassait, cf. revue du 2026-08-01 § 3.2).
-      //
-      // `offsetTop: 36` place alors la légende d'indicateur juste SOUS le bandeau : vérifié
-      // dans le bundle 9.8.12 — `_drawCandleStandardTooltip` (index.esm.js:9376) retourne
-      // `coordinate.y + prevRowHeight`, soit `offsetTop` quand `isDrawTooltip` est faux, et
-      // c'est CE retour qui sert d'ordonnée à `drawIndicatorTooltip` (:9356-9357). Poser
-      // `showRule: "none"` SEUL ferait retomber l'ordonnée à 6, donc sous le bandeau :
-      // les deux réglages vont ensemble. Les panes SÉPARÉS ne sont pas concernés — ils lisent
-      // `indicator.tooltip.offsetTop` par un autre chemin (:8152).
-      tooltip: { showRule: TooltipShowRule.None, offsetTop: 36 },
+      // Identité et légende vivent hors du tracé ; seule la lecture au curseur reste ici.
+      tooltip: { showRule: TooltipShowRule.None, offsetTop: 6 },
       bar: {
         upColor: candleUp,
         downColor: candleDown,
@@ -472,7 +460,7 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void
     // cliquable. NB : showName/showParams sont lus depuis les styles GLOBAUX en
     // 9.8.12 — un override par indicateur serait ignoré.
     indicator: {
-      tooltip: { showName: false, showParams: false, text: { color: textDim, family: font, size: 11 } },
+      tooltip: { showRule: TooltipShowRule.FollowCross, showName: false, showParams: false, text: { color: textDim, family: font, size: 12 } },
     },
     separator: { color: border },
   });
@@ -554,6 +542,7 @@ export function ChartInstance({
   const mobile = useMobileLayout();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<HTMLDivElement>(null);
+  const legendRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null); // footprint (orderflow)
   const vpCanvasRef = useRef<HTMLCanvasElement>(null); // volume profile (maître)
   const liqCanvasRef = useRef<HTMLCanvasElement>(null); // heatmap liquidations (maître)
@@ -598,6 +587,10 @@ export function ChartInstance({
   const orderflowEnabled = useStore(orderflowStore, (s) => s.enabled);
   const isMaster = role === "master";
   const isFocus = focus === slot;
+  const preferredMode = useStore(chartDisplayStore, (s) => s.modes[slot] ?? "candles");
+  const footprintEnabled = orderflowEnabled && footprintDisponible(exchange);
+  const displayMode = modeEffectif(preferredMode, footprintEnabled && isFocus);
+  const priceScale = useStore(priceScaleStore, (s) => s.type);
   // Replay (roadmap 4.4) : ce slot est-il en rejeu ? `gen` (primitif) force le remontage
   // de l'effet à chaque start/seek/stop — c'est le mécanisme de suspension/reprise des WS
   // live (dispose au démontage → resubscribe + backfill au remontage). `replayLabel`
@@ -637,8 +630,24 @@ export function ChartInstance({
     const unsubscribeViewportOptions = chartLayoutStore.subscribe(chargerViewportSync);
 
     // Thème (bougies/grille/axes/crosshair + fond) — appliqué puis réabonné.
-    applyChartTheme(chart, chartDom);
-    const unsubscribeTheme = themeStore.subscribe(() => applyChartTheme(chart, chartDom));
+    const applyDisplay = (): void => {
+      const footprint = orderflowStore.getState().enabled && footprintDisponible(store.getState().exchange) && chartLayoutStore.getState().focus === slot;
+      const mode = modeEffectif(chartDisplayStore.getState().modes[slot] ?? "candles", footprint);
+      chart.setStyles({ candle: {
+        type: mode === "candles" ? CandleType.CandleSolid : CandleType.Area,
+        area: { value: "close", smooth: false, lineSize: 2, lineColor: lireTokenCanvas("--serie-1", "#9de8ff"),
+          backgroundColor: mode === "area" ? [{ offset: 0, color: "transparent" }, { offset: 1, color: rgbaTokenCanvas("--serie-1", 0.22, "#9de8ff") }] : "transparent",
+          point: { show: false, animation: false } },
+        priceMark: { high: { show: mode === "candles" }, low: { show: mode === "candles" } },
+      } });
+    };
+    const applyTheme = (): void => { applyChartTheme(chart, chartDom); applyDisplay(); };
+    applyTheme();
+    const unsubscribeTheme = themeStore.subscribe(applyTheme);
+    const unsubscribeDisplay = chartDisplayStore.subscribe(applyDisplay);
+    const unsubscribeDisplayFootprint = orderflowStore.subscribe((state, prev) => { if (state.enabled !== prev.enabled) applyDisplay(); });
+    const unsubscribeDisplayFocus = chartLayoutStore.subscribe((state, prev) => { if (state.focus !== prev.focus) applyDisplay(); });
+    const unsubscribeDisplaySource = store.subscribe((state, prev) => { if (state.exchange !== prev.exchange) applyDisplay(); });
 
     // Contrôleur d'indicateurs @axiom (partagé : même sélection sur tous les slots ;
     // chaque slot calcule sur SON buffer). L'abonnement `indicatorsStore` qui CAPTURE
@@ -650,7 +659,7 @@ export function ChartInstance({
     const paneHeaders = new PaneHeaders(chart, container);
     // Légende des indicateurs overlay (EMA/BOLL/VWAP ancré…) sur le pane prix : croix ✕
     // de suppression directe, même cycle de vie que paneHeaders (cf. chart/overlayLegend.ts).
-    const overlayLegend = new OverlayLegend(chart, container);
+    const overlayLegend = new OverlayLegend(chart, container, legendRef.current ?? container);
     const unsubscribePaneHeaders = indicatorsStore.subscribe(() => {
       paneHeaders.sync();
       overlayLegend.sync();
@@ -854,6 +863,10 @@ export function ChartInstance({
       unbindViewportSync();
       unbindPriceAlert();
       unsubscribeTheme();
+      unsubscribeDisplay();
+      unsubscribeDisplayFootprint();
+      unsubscribeDisplayFocus();
+      unsubscribeDisplaySource();
       unsubscribePaneHeaders();
       chart.unsubscribeAction(ActionType.OnDataReady, majHauteurs);
       paneHeaders.dispose();
@@ -1467,16 +1480,39 @@ export function ChartInstance({
   }, [exchange, symbol, timeframe, replayGen, isMaster, retryRevision, ccdataDataRevision]);
 
   return (
-    // Conteneur relatif : le graphe le remplit ; les canvases se superposent
-    // (pointer-events:none → pan/zoom passent au graphe). Clic = focus de ce slot.
-    <div
-      ref={containerRef}
-      data-mobile={mobile}
-      className={`relative h-full w-full ${isFocus ? "ring-1 ring-accent/70 ring-inset" : ""}`}
+    <section className={`axiom-chart-panel ${isFocus ? "axiom-chart-focused" : ""}`}
+      aria-label={`Graphique vue ${slot + 1}`} data-chart-mode={displayMode}
       onPointerDownCapture={() => {
         if (chartLayoutStore.getState().focus !== slot) chartLayoutStore.getState().setFocus(slot);
         setFocusChart(slot);
-      }}
+      }}>
+      <div className="axiom-chart-header">
+      <SymbolBanner store={store} slot={slot} onChangeSymbol={onChangeSymbol} replay={replayLabel !== ""} />
+      <div className="axiom-chart-commands" role="group" aria-label={`Commandes du graphique ${slot + 1}`}>
+        <select aria-label={isMaster ? "Unité de temps" : "Timeframe du slot"} value={timeframe}
+          onChange={(event) => {
+            const tf = event.target.value as Timeframe;
+            if (onChangeTimeframe) onChangeTimeframe(tf); else store.getState().setTimeframe(tf);
+          }}>
+          {supportedTimeframesFor(exchange, symbol).map((tf) => <option key={tf} value={tf}>{tf}</option>)}
+        </select>
+        <div className="axiom-chart-render-modes" role="group" aria-label="Affichage de la série">
+          {CHART_MODES.map((mode) => <button key={mode} type="button" aria-pressed={preferredMode === mode}
+            onClick={() => chartDisplayStore.getState().setMode(slot, mode)}>
+            {MODE_LABEL[mode]}
+          </button>)}
+        </div>
+        <select aria-label="Échelle commune" title="Échelle commune à toutes les vues" value={priceScale}
+          onChange={(event) => priceScaleStore.getState().setType(event.target.value as PriceScaleType)}>
+          <option value="normal">Linéaire</option><option value="log">Log</option><option value="percentage">%</option>
+        </select>
+      </div>
+      </div>
+      {footprintEnabled && isFocus && preferredMode !== "candles" && <p className="axiom-chart-notice" role="status">Footprint : bougies · préférence {MODE_LABEL[preferredMode].toLowerCase()} conservée</p>}
+      {replayLabel !== "" && <p className="axiom-chart-notice" role="status">REPLAY · {replayLabel}</p>}
+      {footprintEnabled && !isFocus && layout !== "1" && <p className="axiom-chart-notice">Footprint sur la vue active</p>}
+      <div ref={legendRef} className="axiom-chart-overlays" />
+      <div ref={containerRef} data-mobile={mobile} className="axiom-chart-viewport"
       // Double-clic sur un pane d'indicateur → ses réglages, geste de référence des
       // terminaux de charting. Auparavant il fallait passer par le menu latéral, section
       // « Actifs », puis retrouver la bonne instance dans la liste (revue § 5.1).
@@ -1498,32 +1534,6 @@ export function ChartInstance({
       }}
     >
       <div ref={chartRef} className="absolute inset-0 touch-none" />
-      {/* Bannière REPLAY (roadmap 4.4) : visible tant que ce slot rejoue un jour passé. */}
-      {replayLabel !== "" && (
-        <div className="pointer-events-none absolute left-1/2 top-1 z-20 -translate-x-1/2 rounded border border-accent/60 bg-surface/90 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-accent backdrop-blur">
-          ⏵ REPLAY · {replayLabel}
-        </div>
-      )}
-      {/* Orderflow réservé au slot focus (perf) : badge explicite sur les AUTRES slots pour
-          rappeler pourquoi leur footprint/CVD est inactif. Masqué en mono-chart (un seul
-          slot = toujours le focus, le badge serait toujours absent de toute façon). */}
-      {orderflowEnabled && !isFocus && layout !== "1" && (
-        <div className="pointer-events-none absolute right-1 top-1 z-20 rounded border border-border bg-surface/80 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-text-dim">
-          Orderflow · slot focus
-        </div>
-      )}
-      {isMaster ? (
-        <SymbolBanner />
-      ) : (
-        <SecondaryHeader
-          exchange={exchange}
-          symbol={symbol}
-          timeframe={timeframe}
-          onChangeSymbol={onChangeSymbol}
-          onChangeTimeframe={onChangeTimeframe}
-          mobile={mobile}
-        />
-      )}
       <canvas ref={vpCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={liqCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={depthHeatCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
@@ -1546,7 +1556,8 @@ export function ChartInstance({
         requested={{ exchange, symbol, timeframe }}
         onRetry={() => setRetryRevision((revision) => revision + 1)}
       />
-    </div>
+      </div>
+    </section>
   );
 }
 
@@ -1615,54 +1626,6 @@ function ChartDataStatusOverlay({
           </button>
         )}
       </div>
-    </div>
-  );
-}
-
-/** En-tête compact d'un slot secondaire : symbole (éditable) + TF + source. */
-function SecondaryHeader({
-  exchange,
-  symbol,
-  timeframe,
-  onChangeSymbol,
-  onChangeTimeframe,
-  mobile,
-}: {
-  exchange: ExchangeId;
-  symbol: string;
-  timeframe: Timeframe;
-  onChangeSymbol?: (symbol: string) => void;
-  onChangeTimeframe?: (tf: Timeframe) => void;
-  mobile: boolean;
-}) {
-  const timeframes = supportedTimeframesFor(exchange, symbol);
-  return (
-    <div className={`pointer-events-auto absolute left-1 top-1 z-20 flex max-w-[calc(100%-0.5rem)] items-center gap-1 rounded bg-surface/80 px-1 py-0.5 text-[10px] backdrop-blur ${mobile ? "right-1" : ""}`}>
-      <input
-        aria-label="Symbole du slot"
-        defaultValue={symbol}
-        key={symbol}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") onChangeSymbol?.((e.target as HTMLInputElement).value.trim());
-        }}
-        onBlur={(e) => onChangeSymbol?.(e.target.value.trim())}
-        className={`${mobile ? "min-h-11 min-w-0 flex-1 text-base" : "w-20"} rounded bg-bg px-1 py-0.5 font-mono text-text outline-none focus:ring-1 focus:ring-accent/60 ${exchange === "synthetic" ? "" : "uppercase"}`}
-      />
-      <select
-        aria-label="Timeframe du slot"
-        value={timeframe}
-        onChange={(e) => onChangeTimeframe?.(e.target.value as Timeframe)}
-        className={`${mobile ? "min-h-11 text-base" : ""} rounded bg-bg px-0.5 py-0.5 text-text outline-none`}
-      >
-        {timeframes.map((tf) => (
-          <option key={tf} value={tf}>
-            {tf}
-          </option>
-        ))}
-      </select>
-      <span title="Source sélectionnée automatiquement" className="min-w-0 truncate px-1 text-text-dim">
-        Auto · {exchange}
-      </span>
     </div>
   );
 }

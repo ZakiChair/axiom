@@ -5,7 +5,7 @@ async function ouvrirData(page: Page) {
   await bouchonnerReseau(page);
   await page.addInitScript(() => localStorage.setItem("axiom:onboarding:v1", JSON.stringify({ completed: true, step: 0 })));
   await page.goto("/");
-  await page.getByRole("button", { name: "Fonctions" }).click();
+  await page.getByRole("button", { name: "Rubriques" }).click();
   await page.getByRole("menuitem", { name: /Sources de données/ }).click();
   return page.locator('[data-window-id="data"]');
 }

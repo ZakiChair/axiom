@@ -282,3 +282,41 @@ describe("index.css — cohérence entre chaque --x-rgb et son jumeau hex --x", 
     }
   );
 });
+
+/** Contraste WCAG des aplats réels ; aucune tolérance d'arrondi au seuil. */
+function contraste(a: string, b: string): number {
+  const luminance = (hex: string): number => {
+    const canaux = (hexVersTriplet(hex) ?? "").split(" ").map(Number).map((c) => {
+      const s = c / 255;
+      return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+    });
+    return canaux[0]! * 0.2126 + canaux[1]! * 0.7152 + canaux[2]! * 0.0722;
+  };
+  const [sombre, clair] = [luminance(a), luminance(b)].sort((x, y) => x - y);
+  return (clair! + 0.05) / (sombre! + 0.05);
+}
+
+describe("lisibilité des thèmes et des séries analytics", () => {
+  it.each(SELECTEURS_THEMES)("%s : texte principal et secondaire lisibles sur les deux fonds", (selecteur) => {
+    for (const texte of ["--text", "--text-dim"]) {
+      for (const fond of ["--bg", "--surface"]) {
+        expect(contraste(extraireValeur(cssIndex, selecteur, texte)!, extraireValeur(cssIndex, selecteur, fond)!), `${selecteur} ${texte}/${fond}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it("dark : actions, valeurs signées et six séries restent lisibles dans les cartes", () => {
+    for (const texte of ["--accent", "--up", "--down", ...Array.from({ length: 6 }, (_, i) => `--serie-${i + 1}`)]) {
+      for (const fond of ["--bg", "--surface"]) {
+        expect(contraste(extraireValeur(cssIndex, ":root", texte)!, extraireValeur(cssIndex, ":root", fond)!), `${texte}/${fond}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+    expect(contraste(extraireValeur(cssIndex, ":root", "--accent-ink")!, extraireValeur(cssIndex, ":root", "--accent")!)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("dark : fond uniforme sans halo derrière les données", () => {
+    for (const token of ["--atmos", "--accent-glow", "--wordmark-shadow"]) {
+      expect(extraireValeur(cssIndex, ":root", token)).toBe("none");
+    }
+  });
+});

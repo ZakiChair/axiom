@@ -31,10 +31,11 @@ describe("grille téléphone", () => {
     expect(chartLayoutStore.getState().focus).toBe(2);
   });
 
-  it("rend toutes les vues accessibles sur bureau, sans navigation mobile", () => {
+  it("rend toutes les vues accessibles sur bureau et nomme leurs onglets par instrument", () => {
     mode.mobile = false;
     const html = renderToStaticMarkup(<ChartGrid />);
     expect(html.match(/data-chart-slot="\d"[^>]*aria-hidden="false"/g)).toHaveLength(4);
-    expect(html).not.toContain('aria-label="Vues du graphique"');
+    expect(html).toContain('aria-label="Vues du graphique"');
+    expect(html).toContain("SOLUSDT");
   });
 });

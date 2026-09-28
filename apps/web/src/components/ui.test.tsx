@@ -87,7 +87,8 @@ describe("Chip / BarreProgression / TitreSection", () => {
   it("TitreSection : h3 gabarit unique", () => {
     const el = racine(TitreSection({ children: "Positions" }));
     expect(el.type).toBe("h3");
-    expect(el.props.className).toContain("text-[10px] uppercase tracking-wide text-text-dim");
+    expect(el.type).toBe("h3");
+    expect(el.props.className).toContain("font-semibold");
   });
 });
 
@@ -100,8 +101,8 @@ describe("TuileStat", () => {
     expect(html).toContain("PnL net");
     expect(html).toContain("text-down");
     expect(html).toContain("tabular-nums");
-    // Marqueurs uniques à empilée : uppercase tracking-wider sur le libellé (text-[10px])
-    expect(html).toContain("uppercase tracking-wider");
+    // La disposition verticale est distincte du rendu inline, indépendamment de la casse du titre.
+    expect(el.props.className).toContain("flex-col");
   });
   it("couleur brute prioritaire sur ton (style appliqué, classeTon conservé)", () => {
     // Teste que couleur (style inline) est prioritaire sur ton (classe), en inspectant le span valeur

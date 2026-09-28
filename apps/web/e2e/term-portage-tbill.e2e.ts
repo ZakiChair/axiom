@@ -6,7 +6,7 @@ const INSTANT_FIXE = Date.parse("2026-09-25T08:00:00Z");
 const SPOT = 100_000;
 
 async function commande(page: Page, texte: string): Promise<void> {
-  await expect(page.getByRole("banner").getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
+  await expect(page.getByRole("banner").getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
   await page.getByPlaceholder(/^Commande/).fill(texte);
   await page.keyboard.press("Enter");

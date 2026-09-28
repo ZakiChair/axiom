@@ -42,7 +42,7 @@ export function lireTokenCanvas(nom: string, repli: string): string {
 }
 
 /** Replis RVB des tokens de série (valeurs du thème dark) — contexte sans DOM ou token absent. */
-const REPLIS_SERIE = ["#38bdf8", "#a78bfa", "#f59e0b", "#f472b6", "#22d3ee", "#60a5fa"] as const;
+const REPLIS_SERIE = ["#9de8ff", "#f6c85f", "#ac96ff", "#f29fc2", "#65a0ff", "#ffb8a1"] as const;
 
 /** Index 0-based → index de token 0..5 (modulo positif) — pur, testé. */
 export function indexSerie(i: number): number {
@@ -52,7 +52,7 @@ export function indexSerie(i: number): number {
 /** Couleur de la série i (0-based, cycle sur --serie-1…6), lue au moment du dessin. */
 export function serieCanvas(i: number, repli?: string): string {
   const n = indexSerie(i);
-  return lireTokenCanvas(`--serie-${n + 1}`, repli ?? REPLIS_SERIE[n] ?? "#38bdf8");
+  return lireTokenCanvas(`--serie-${n + 1}`, repli ?? REPLIS_SERIE[n] ?? "#9de8ff");
 }
 
 /** #rgb / #rrggbb → triplet RVB, sinon null — pur, testé. */

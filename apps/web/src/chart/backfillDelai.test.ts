@@ -59,6 +59,8 @@ vi.mock("klinecharts", () => ({
   dispose: () => {},
   registerIndicator: () => {},
   registerOverlay: () => {},
+  registerFigure: () => {},
+  utils: { checkCoordinateOnText: () => false, drawText: () => {} },
   ActionType: {
     OnCrosshairChange: "onCrosshairChange",
     OnDataReady: "onDataReady",

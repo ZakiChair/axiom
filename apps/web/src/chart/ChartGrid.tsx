@@ -188,16 +188,15 @@ export function ChartGrid() {
     }
   };
 
-  const slotClass = (slot: number): string => `min-h-0 min-w-0 overflow-hidden bg-bg ${
+  const slotClass = (slot: number): string => `axiom-chart-slot min-h-0 min-w-0 overflow-hidden bg-bg ${
     mobile ? `absolute inset-0 ${focus === slot ? "visible" : "invisible pointer-events-none"}` : "relative"
   }`;
   const commandSize = mobile ? "min-h-11 min-w-11 px-2 text-xs" : "px-1.5 py-0.5 text-[10px]";
 
   return (
-    <div className="relative flex h-full w-full min-w-0 flex-col">
-      {mobile && (
-        <div className="flex shrink-0 items-center gap-1 border-b border-border bg-surface px-1">
-          <nav aria-label="Vues du graphique" className="flex min-w-0 flex-1 gap-1">
+    <div className="axiom-chart-grid relative flex h-full w-full min-w-0 flex-col">
+        <div className="axiom-chart-grid-heading">
+          <nav aria-label="Vues du graphique" className="axiom-chart-tabs">
             {Array.from({ length: count }, (_, slot) => (
               <button key={slot} type="button"
                 aria-label={`Vue ${slot + 1} : ${slot === 0 ? masterSymbol : slots[slot - 1]?.symbol}`}
@@ -208,27 +207,19 @@ export function ChartGrid() {
                   setFocusChart(slot);
                   setControlsOpen(false);
                 }}
-                className={`min-h-11 min-w-11 flex-1 truncate rounded px-2 text-xs ${focus === slot ? "bg-accent/20 text-accent" : "text-text-dim"}`}
-              >{count === 1 ? "Graphique" : `Vue ${slot + 1}`}</button>
+                className={`axiom-chart-tab ${focus === slot ? "axiom-chart-tab-active" : ""}`}
+              >{count === 1 ? "Graphique" : <><span>{slot + 1}</span> {slot === 0 ? masterSymbol : slots[slot - 1]?.symbol}</>}</button>
             ))}
           </nav>
-          <div ref={controlsRef} className="relative shrink-0">
+          <div ref={controlsRef} hidden={!mobile} className="relative shrink-0">
             <button ref={controlsButtonRef} type="button" aria-expanded={controlsOpen}
               aria-controls="chart-grid-controls" onClick={() => setControlsOpen((open) => !open)}
-              className="min-h-11 rounded px-3 text-xs text-text"
+              className="axiom-chart-views-button"
             >Vues ▾</button>
           </div>
-        </div>
-      )}
-      {/* Barre flottante : disposition + liaison. Ancrée en BAS à droite — en haut, elle
-          occupait le pixel de départ de la légende d'indicateurs overlay
-          (chart/overlayLegend.ts, z-10) et la recouvrait, avec un z supérieur. */}
-      <div id="chart-grid-controls"
-        onPointerDown={(event) => event.stopPropagation()}
-        className={mobile
-          ? `${controlsOpen ? "flex" : "hidden"} pointer-events-auto absolute right-1 top-12 z-30 max-h-[65dvh] w-[min(23rem,calc(100%-0.5rem))] flex-wrap items-center gap-1 overflow-y-auto rounded border border-border bg-surface p-2 shadow-xl`
-          : "pointer-events-auto absolute bottom-2 right-2 z-20 flex items-center gap-1 rounded border border-border bg-surface/85 px-1 py-0.5 backdrop-blur"}
-      >
+      {/* Commandes en flux : aucune commande ne masque les prix ni les axes. */}
+      <div id="chart-grid-controls" hidden={mobile && !controlsOpen} className="axiom-chart-grid-controls"
+        onPointerDown={(event) => event.stopPropagation()}>
         {LAYOUT_BUTTONS.map((b) => (
           <button
             key={b.mode}
@@ -263,8 +254,9 @@ export function ChartGrid() {
           </Suspense>
         )}
       </div>
+      </div>
 
-      <div className={mobile ? "relative min-h-0 w-full flex-1" : `grid min-h-0 w-full flex-1 gap-px bg-border ${GRID_CLASS[layout]}`}>
+      <div className={mobile ? "relative min-h-0 w-full flex-1" : `grid min-h-0 w-full flex-1 gap-2 ${GRID_CLASS[layout]}`}>
         {/* Slot 0 : maître (store global, jeu complet de contrôleurs). */}
         <div id="chart-slot-0" data-chart-slot="0" aria-hidden={mobile && focus !== 0} className={slotClass(0)}>
           <Chart />

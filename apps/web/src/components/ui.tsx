@@ -354,7 +354,7 @@ export function MenuDeroulant({
       </button>
 
       {ouvert && (
-        <PortailMobile fermer={fermer}>
+        <PortailMobile fermer={fermer} retourFocus={declencheurRef}>
         <div
           role="menu"
           tabIndex={-1}
@@ -371,9 +371,8 @@ export function MenuDeroulant({
 }
 
 /**
- * En-tête interne standard d'une fenêtre flottante : titre en capitales
- * espacées + sous-titre discret, actions éventuelles à droite (7/7 fenêtres
- * du groupe marché suivaient déjà exactement ce markup).
+ * En-tête commun aux pages et fenêtres : titre lisible, provenance secondaire
+ * et actions repliables quand la largeur se réduit.
  */
 export function EnTeteFenetre({
   titre,
@@ -388,9 +387,9 @@ export function EnTeteFenetre({
   mnemo?: string;
 }) {
   return (
-    <header className="axiom-entete-fenetre flex shrink-0 items-start justify-between gap-3 border-b border-border px-4 py-3">
+    <header className="axiom-entete-fenetre flex shrink-0 flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
       <div className="min-w-0">
-        <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">
+        <h2 className="text-base font-semibold text-text">
           {mnemo !== undefined && (
             <>
               <span className="text-accent">{mnemo}</span>
@@ -399,9 +398,9 @@ export function EnTeteFenetre({
           )}
           {titre}
         </h2>
-        {sousTitre !== undefined && <p className="mt-0.5 text-[11px] text-text-dim">{sousTitre}</p>}
+        {sousTitre !== undefined && <p className="mt-1 text-xs leading-relaxed text-text-dim">{sousTitre}</p>}
       </div>
-      {actions !== undefined && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      {actions !== undefined && <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div>}
     </header>
   );
 }
@@ -490,17 +489,17 @@ export function TuileStat({
     return (
       <div
         title={title}
-        className="axiom-tuile-stat flex items-baseline justify-between gap-3 rounded-md border border-border bg-bg px-3 py-2"
+        className="axiom-tuile-stat flex min-w-0 items-baseline justify-between gap-3 rounded-md border border-border bg-bg px-3 py-2"
       >
         {/* min-w-0 + flex-wrap : un libellé long accompagné d'un badge se replie au
             lieu de pousser la valeur hors de la tuile (backlog lot A). */}
-        <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-text-dim">
+        <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-text-dim">
           {label}
           {badge}
         </span>
         <span className="flex shrink-0 items-center gap-2">
           {extra}
-          <span className={`tabular-nums text-sm font-medium ${classeTon}`} style={styleCouleur}>
+          <span className={`tabular-nums text-sm font-semibold ${classeTon}`} style={styleCouleur}>
             {valeur}
           </span>
         </span>
@@ -508,19 +507,19 @@ export function TuileStat({
     );
   }
   return (
-    <div title={title} className="axiom-tuile-stat flex flex-col gap-1 rounded-md border border-border bg-bg px-3 py-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="min-w-0 truncate text-[10px] uppercase tracking-wider text-text-dim">{label}</span>
+    <div title={title} className="axiom-tuile-stat flex min-w-0 flex-col gap-2 rounded-md border border-border bg-bg px-3 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="min-w-0 text-xs text-text-dim">{label}</span>
         {badge !== undefined && <span className="flex shrink-0 items-center gap-1">{badge}</span>}
       </div>
-      <div className="flex items-end justify-between gap-2">
-        <span className={`tabular-nums text-sm font-medium ${classeTon}`} style={styleCouleur}>
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <span className={`min-w-0 break-words tabular-nums text-lg font-semibold ${classeTon}`} style={styleCouleur}>
           {valeur}
         </span>
         {extra}
       </div>
       {pied !== undefined && (
-        <div className="flex items-center justify-between gap-2 text-[10px] text-text-dim">{pied}</div>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-text-dim">{pied}</div>
       )}
     </div>
   );
@@ -622,7 +621,7 @@ export function Onglets<T extends string>({
           key={o.id}
           type="button"
           onClick={() => onChange(o.id)}
-          className={`rounded px-2.5 py-1 text-[11px] transition ${
+          className={`rounded px-2.5 py-1.5 text-xs font-medium transition ${
             actif === o.id ? "bg-bg text-text" : "text-text-dim hover:text-text"
           }`}
         >
@@ -764,7 +763,7 @@ export function BarreProgression({ fraction, ariaLabel }: { fraction: number; ar
 /** Titre de section interne standard — un seul gabarit (l'audit relevait 4 variantes h3/span/div). */
 export function TitreSection({ children, extra }: { children: ReactNode; extra?: ReactNode }) {
   return (
-    <h3 className="mb-1 flex items-baseline justify-between gap-2 text-[10px] uppercase tracking-wide text-text-dim">
+    <h3 className="mb-2 flex flex-wrap items-baseline justify-between gap-2 text-xs font-semibold text-text">
       <span>{children}</span>
       {extra !== undefined && <span className="normal-case tracking-normal">{extra}</span>}
     </h3>

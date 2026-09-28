@@ -77,9 +77,10 @@ export class OverlayLegend {
   private readonly onDataReady = (): void => this.repositionnerTout();
   private readonly desabonnerStatuts: () => void;
 
-  constructor(chart: Chart, container: HTMLElement) {
+  constructor(chart: Chart, container: HTMLElement, private readonly host: HTMLElement = container) {
     this.chart = chart;
     this.container = container;
+    this.expanded = container.dataset["mobile"] !== "true";
     this.panel = document.createElement("div");
     this.panel.setAttribute("data-overlay-legend", "");
     this.toggle = document.createElement("button");
@@ -96,7 +97,7 @@ export class OverlayLegend {
       this.repositionnerTout();
       this.toggle.focus();
     });
-    this.container.append(this.panel, this.toggle);
+    this.host.append(this.toggle, this.panel);
     this.chart.subscribeAction(ActionType.OnPaneDrag, this.onPaneDrag);
     this.chart.subscribeAction(ActionType.OnDataReady, this.onDataReady);
     this.desabonnerStatuts = abonnerStatutsIndicateurs(chart, (instanceId) => {
@@ -156,6 +157,19 @@ export class OverlayLegend {
     const main = this.chart.getSize(CANDLE_PANE_ID, DomPosition.Main);
     const mobile = this.container.dataset.mobile === "true";
     const entries = overlayIndicators(indicatorsStore.getState().indicators);
+    if (this.host !== this.container) {
+      this.host.hidden = entries.length === 0;
+      this.toggle.className = "axiom-chart-legend-toggle";
+      this.toggle.textContent = `Indicateurs (${entries.length}) ${this.expanded ? "▴" : "▾"}`;
+      this.toggle.setAttribute("aria-expanded", String(this.expanded));
+      this.panel.className = "axiom-chart-legend-list";
+      this.panel.hidden = !this.expanded;
+      for (const el of this.els.values()) {
+        el.className = "axiom-chart-legend-item";
+        adapterCiblesTactiles(el, mobile);
+      }
+      return;
+    }
     this.toggle.style.display = mobile && main && entries.length > 0 ? "" : "none";
     this.toggle.textContent = `Indicateurs (${entries.length}) ${this.expanded ? "▾" : "▴"}`;
     this.toggle.setAttribute("aria-expanded", String(this.expanded));

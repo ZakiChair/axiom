@@ -42,16 +42,16 @@
  */
 
 /* ──────────────────────────────────────────────────────────────────────────
- * DARK — sombre neutre « pro », accent bleu/cyan discret. RÉFÉRENCE sérieuse.
- * Rampe neutre = hex littéraux de Tailwind v3 (rendu chrome inchangé).
+ * DARK — graphite analytique, actions bleues et courbe principale cyan.
+ * Rampe neutre alignée sur les surfaces, sans halo derrière les données.
  * ────────────────────────────────────────────────────────────────────────── */
 :root,
 :root[data-theme="dark"] {
-  --bg: #0a0a0a;
-  --surface: #171717;
-  --border: #262626;
-  --text: #e5e5e5;
-  --text-dim: #9ca3af;
+  --bg: #0b1018;
+  --surface: #131b27;
+  --border: #263347;
+  --text: #e3eaf4;
+  --text-dim: #9eaec3;
   --up: #2dc08e;
   --down: #f92855;
   /* Teinte des BOUGIES du chart, découplée de --up/--down. Sur les thèmes sombres
@@ -59,77 +59,76 @@
      lisibilité du TEXTE (audit #15/#19) tandis que les bougies restent pastel. */
   --candle-up: #2dc08e;
   --candle-down: #f92855;
-  --accent: #38bdf8; /* bleu/cyan discret (identité Dark) */
-  --grid: #1f2937;
-  --crosshair: #888888;
+  --accent: #6b91ff; /* navigation et actions */
+  --grid: #253247;
+  --crosshair: #869ab5;
 
-  /* Rampe neutre (= palette Tailwind par défaut : chrome strictement identique). */
-  --n-100: #f5f5f5;
-  --n-200: #e5e5e5;
-  --n-300: #d4d4d4;
-  --n-400: #a3a3a3;
-  --n-500: #737373;
-  --n-600: #525252;
-  --n-700: #404040;
-  --n-800: #262626;
-  --n-900: #171717;
-  --n-950: #0a0a0a;
+  /* Rampe graphite : les classes neutral suivent les surfaces et le texte. */
+  --n-100: #f2f6fc;
+  --n-200: #e3eaf4;
+  --n-300: #cbd5e3;
+  --n-400: #9eaec3;
+  --n-500: #788ba6;
+  --n-600: #53647b;
+  --n-700: #35465e;
+  --n-800: #263347;
+  --n-900: #131b27;
+  --n-950: #0b1018;
 
   /* Bascules de la toolbar + encre sombre sur fond vif + anneau de focus. */
-  --ui-emerald: #10b981;
-  --ui-emerald-hover: #34d399;
-  --ui-cyan: #06b6d4;
+  --ui-emerald: #6b91ff;
+  --ui-emerald-hover: #8facff;
+  --ui-cyan: #4dc8ed;
   --ui-amber: #f59e0b;
-  --accent-ink: #0a0a0a;
-  --ring: #38bdf8;
+  --accent-ink: #081425;
+  --ring: #6b91ff;
 
   /* Couleurs de série (courbes multi-séries non sémantiques). */
-  --serie-1: #0274c7;
-  --serie-2: #895709;
-  --serie-3: #571ffd;
-  --serie-4: #9172fe;
-  --serie-5: #0b764d;
-  --serie-6: #a3069e;
+  --serie-1: #9de8ff;
+  --serie-2: #f6c85f;
+  --serie-3: #ac96ff;
+  --serie-4: #f29fc2;
+  --serie-5: #65a0ff;
+  --serie-6: #ffb8a1;
 
-  /* Atmosphère : typo propre + voile discret + lueurs. */
+  /* Fond uniforme : la couleur est réservée aux données et aux actions. */
   --font-display: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --atmos:
-    radial-gradient(1100px 520px at 82% -12%, rgba(56, 189, 248, 0.05), transparent 60%),
-    radial-gradient(900px 600px at 10% 110%, rgba(56, 189, 248, 0.03), transparent 70%);
-  --accent-glow: 0 0 8px rgba(56, 189, 248, 0.35);
-  --wordmark-shadow: 0 0 6px rgba(56, 189, 248, 0.4);
+    none;
+  --accent-glow: none;
+  --wordmark-shadow: none;
 
   /* Triplets RVB (jumeaux Tailwind <alpha-value>) — cf. tailwind.config.js. */
-  --bg-rgb: 10 10 10;
-  --surface-rgb: 23 23 23;
-  --border-rgb: 38 38 38;
-  --text-rgb: 229 229 229;
-  --text-dim-rgb: 156 163 175;
+  --bg-rgb: 11 16 24;
+  --surface-rgb: 19 27 39;
+  --border-rgb: 38 51 71;
+  --text-rgb: 227 234 244;
+  --text-dim-rgb: 158 174 195;
   --up-rgb: 45 192 142;
   --down-rgb: 249 40 85;
-  --accent-rgb: 56 189 248;
-  --accent-ink-rgb: 10 10 10;
-  --grid-rgb: 31 41 55;
-  --crosshair-rgb: 136 136 136;
-  --serie-1-rgb: 2 116 199;
-  --serie-2-rgb: 137 87 9;
-  --serie-3-rgb: 87 31 253;
-  --serie-4-rgb: 145 114 254;
-  --serie-5-rgb: 11 118 77;
-  --serie-6-rgb: 163 6 158;
-  --n-100-rgb: 245 245 245;
-  --n-200-rgb: 229 229 229;
-  --n-300-rgb: 212 212 212;
-  --n-400-rgb: 163 163 163;
-  --n-500-rgb: 115 115 115;
-  --n-600-rgb: 82 82 82;
-  --n-700-rgb: 64 64 64;
-  --n-800-rgb: 38 38 38;
-  --n-900-rgb: 23 23 23;
-  --n-950-rgb: 10 10 10;
-  --ui-emerald-rgb: 16 185 129;
-  --ui-emerald-hover-rgb: 52 211 153;
-  --ui-cyan-rgb: 6 182 212;
+  --accent-rgb: 107 145 255;
+  --accent-ink-rgb: 8 20 37;
+  --grid-rgb: 37 50 71;
+  --crosshair-rgb: 134 154 181;
+  --serie-1-rgb: 157 232 255;
+  --serie-2-rgb: 246 200 95;
+  --serie-3-rgb: 172 150 255;
+  --serie-4-rgb: 242 159 194;
+  --serie-5-rgb: 101 160 255;
+  --serie-6-rgb: 255 184 161;
+  --n-100-rgb: 242 246 252;
+  --n-200-rgb: 227 234 244;
+  --n-300-rgb: 203 213 227;
+  --n-400-rgb: 158 174 195;
+  --n-500-rgb: 120 139 166;
+  --n-600-rgb: 83 100 123;
+  --n-700-rgb: 53 70 94;
+  --n-800-rgb: 38 51 71;
+  --n-900-rgb: 19 27 39;
+  --n-950-rgb: 11 16 24;
+  --ui-emerald-rgb: 107 145 255;
+  --ui-emerald-hover-rgb: 143 172 255;
+  --ui-cyan-rgb: 77 200 237;
   --ui-amber-rgb: 245 158 11;
   color-scheme: dark;
 }
@@ -513,6 +512,7 @@ body {
   color: var(--text);
   /* Police propre au thème (mono terminal, arrondie « cute », etc.). */
   font-family: var(--font-display, ui-sans-serif, system-ui, sans-serif);
+  font-variant-numeric: tabular-nums;
   /* Transition douce du fond/texte au changement de thème (le canvas, lui, est
      repeint impérativement par Chart.tsx). */
   transition:

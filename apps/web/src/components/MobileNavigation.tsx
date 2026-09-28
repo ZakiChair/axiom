@@ -1,19 +1,15 @@
-import { paletteStore } from "../commands/registry";
-import { settingsUiStore } from "../store/settings-ui";
-import { FonctionsMenu } from "./Toolbar";
+import { useStore } from "zustand";
+import { navigationStore, navigateTool } from "../store/navigation";
 
-export function MobileNavigation({ panneauxOuverts, dessinsOuverts, onPanneaux, onDessins, onNavigate }: {
-  panneauxOuverts: boolean;
-  dessinsOuverts: boolean;
-  onPanneaux: () => void;
-  onDessins: () => void;
-  onNavigate: () => void;
+export function MobileNavigation({ panneauxOuverts, dessinsOuverts, onPanneaux, onDessins, onOptions, onNavigate }: {
+  panneauxOuverts: boolean; dessinsOuverts: boolean;
+  onPanneaux: () => void; onDessins: () => void; onOptions: () => void; onNavigate: () => void;
 }) {
+  const active = useStore(navigationStore, (s) => s.active);
   return <nav aria-label="Navigation du terminal" className="axiom-mobile-navigation">
-    <div onClickCapture={onNavigate}><FonctionsMenu /></div>
-    <button type="button" onClick={() => { onNavigate(); paletteStore.getState().ouvrir(); }}>Recherche</button>
+    <button type="button" aria-current={active === "chart" ? "page" : undefined} onClick={() => { onNavigate(); navigateTool("chart"); }}>Graphique</button>
     <button type="button" aria-expanded={panneauxOuverts} aria-controls="panneaux-terminal" onClick={onPanneaux}>Panneaux</button>
     <button type="button" aria-expanded={dessinsOuverts} aria-controls="outils-dessin" onClick={onDessins}>Dessins</button>
-    <button type="button" onClick={() => { onNavigate(); settingsUiStore.getState().openSettings(); }}>Réglages</button>
+    <button type="button" onClick={onOptions}>Options</button>
   </nav>;
 }

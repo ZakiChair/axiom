@@ -45,7 +45,11 @@ test.beforeEach(async ({ page }) => {
 
 test("EVTS réhydrate l'import et ignore une réaction lente d'une sélection remplacée", async ({ page }) => {
   let navigations = 0;
-  page.on("framenavigated", (frame) => { if (frame === page.mainFrame()) navigations += 1; });
+  // Les routes internes changent le hash ; seule une navigation de document
+  // constituerait un rechargement et perdrait l’état à protéger ici.
+  page.on("request", (request) => {
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame()) navigations += 1;
+  });
   await page.goto("/");
   const apresBoot = navigations;
 

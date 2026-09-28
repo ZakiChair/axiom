@@ -42,7 +42,7 @@ function pointsCoinMetrics(): unknown[] {
 
 async function ouvrirChain(page: Page): Promise<ReturnType<Page["getByRole"]>> {
   await page.goto("/");
-  await page.getByRole("button", { name: "Fonctions" }).click();
+  await page.getByRole("button", { name: "Rubriques" }).click();
   await page.getByRole("menuitem", { name: /On-chain/ }).click();
   return page.getByRole("complementary", { name: "On-chain", exact: true });
 }
@@ -112,7 +112,7 @@ test("CHAIN publie les sources rapides puis invalide une réponse BGeometrics ap
   await expect(chain.getByText("424.27K", { exact: true })).toBeVisible();
   expect(cheminsNouveaux.size).toBe(0);
 
-  await page.getByRole("button", { name: "Ouvrir les réglages" }).click();
+  await page.getByRole("banner").getByRole("button", { name: "Réglages", exact: true }).click();
   const reglages = page.getByRole("dialog", { name: "Réglages", exact: true });
   const blocBgeometrics = reglages.locator("div.rounded-md").filter({ hasText: "BGeometrics (on-chain)" }).first();
   await blocBgeometrics.getByRole("button", { name: "Modifier" }).click();

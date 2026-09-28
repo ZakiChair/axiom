@@ -20,9 +20,8 @@ import {
   debutJourLocalMs,
   type Position,
 } from "../store/portfolio";
-import { alertsStore } from "../store/alerts";
-import { alerteActiveAuTemps } from "@axiom/alerts";
-import { useExpirationClock } from "../alerts/useExpirationClock";
+import { AlertesCompteur } from "./AlertesCompteur";
+export { compterAlertesActives } from "./AlertesCompteur";
 import { healthStore, type SanteSource } from "../store/health";
 import { degradedLevel } from "./HealthPanel";
 import { regimeStore } from "../store/regime";
@@ -50,18 +49,8 @@ function healthLevelSignature(sources: Record<string, SanteSource>): string {
   return degradedLevel(sources) ?? "ok";
 }
 
-/** Compte les alertes actives. PURE. */
-export function compterAlertesActives(defs: readonly { actif: boolean; expireTs?: number }[], maintenant = Date.now()): number {
-  let n = 0;
-  for (const d of defs) if (alerteActiveAuTemps(d, maintenant)) n += 1;
-  return n;
-}
-
 export function SessionStrip() {
   const positions = useStore(portfolioStore, (s) => s.positions);
-  const defs = useStore(alertsStore, (s) => s.defs);
-  const maintenant = useExpirationClock(defs);
-  const nbAlertes = compterAlertesActives(defs, maintenant);
   // Abonnement bas-fréquence : ne change que si le niveau de dégradation bascule.
   const healthSig = useStore(healthStore, (s) => healthLevelSignature(s.sources));
   const healthLevel = healthSig === "ok" ? null : (healthSig as "error" | "warn");
@@ -154,10 +143,7 @@ export function SessionStrip() {
         |
       </span>
 
-      <div className="flex items-center gap-1 tabular-nums" title="Nombre d'alertes actives">
-        <span className="uppercase tracking-[0.08em]">Alertes</span>
-        <span className="font-medium text-text">{nbAlertes}</span>
-      </div>
+      <AlertesCompteur />
 
       <span aria-hidden className="text-border">
         |

@@ -4,7 +4,7 @@ import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 type FenetreTest = Window & { axiomFailSave?: boolean };
 
 async function ouvrirCommande(page: Page, commande: string, id: string) {
-  await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
+  await expect(page.getByRole("banner").getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
   const fenetre = page.locator(`[data-window-id="${id}"]`);
   if (await fenetre.isVisible()) return fenetre;
   await page.keyboard.press("ControlOrMeta+k");
@@ -31,7 +31,7 @@ test.beforeEach(async ({ page }) => {
 
 test("NOTE : saisie corrigée après quota, réessai et rechargement sans doublon", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
+  await expect(page.getByRole("banner").getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
   await page.evaluate(async () => {
     const mod = await (new Function("return import('/src/store/market.ts')") as () => Promise<typeof import("../src/store/market")>)();
     mod.marketStore.getState().setCandles([]);

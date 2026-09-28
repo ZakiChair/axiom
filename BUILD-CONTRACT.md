@@ -1263,3 +1263,47 @@ calcul financier, fenêtre métier ni dépendance.
 
 Constats, vérifications et limites :
 [`docs/revue-2026-09-28-mobile.md`](docs/revue-2026-09-28-mobile.md).
+
+## Navigation et courbes inspirées de Coinglass (28 septembre 2026)
+
+Après l'adaptation mobile, le propriétaire demande de changer complètement la
+navigation et l'affichage des courbes en s'inspirant de Coinglass. Cette demande
+autorise la refonte de présentation sur téléphone et ordinateur. Les 39 outils,
+les fournisseurs, les données et les calculs existants sont conservés ; aucune
+dépendance supplémentaire n'est introduite.
+
+- Le mode **Pages** est la présentation par défaut. Les rubriques métier et leur
+  catalogue organisent les outils existants ; le **Mode fenêtres** reste une
+  commande explicite sur ordinateur. La destination de navigation est distincte
+  de l'identité du marché et de la disposition des graphiques.
+- Les outils ouverts conservent un hôte React stable lorsqu'on change de page.
+  Les contenus inactifs sont masqués et inertes ; seule une fermeture explicite
+  détruit leur contenu. Revenir au Graphique ne réduit pas toutes les fenêtres.
+- La présentation en pages n'écrase pas les géométries enregistrées lors d'une
+  ouverture, d'un redimensionnement du navigateur ou d'un changement de vue.
+  Une restauration explicite de workspace ou de sauvegarde conserve, elle, les
+  géométries demandées par cette restauration.
+- Le bandeau de marché, les commandes et les légendes sont séparés du viewport
+  de tracé. KLineChart, les dessins et les couches canvas gardent le même
+  conteneur relatif. Les mises à jour de cours restent impératives.
+- Chaque slot possède une préférence **Bougies / Courbe / Aire**. Courbe et Aire
+  utilisent le mode natif Area de KLineChart, sur les clôtures sans lissage ; le
+  footprint impose temporairement les bougies pour une source compatible et
+  conserve la préférence choisie.
+  Le changement de rendu ne recharge pas les données. L'échelle partagée est
+  nommée **Échelle commune**, les commandes de timeframe ciblent leur slot.
+- La figure publique de texte KLineChart arrondit les largeurs automatiques
+  vers le haut pour conserver les chiffres sur WebKit à forte densité. Les
+  largeurs explicites et les styles restent gérés par le moteur natif.
+- Les statistiques du bandeau décrivent les bougies effectivement chargées
+  dont l'ouverture appartient aux dernières 24 h, avec couverture potentiellement
+  partielle. La variation conserve la provenance du ticker, le volume ses unités
+  de base, et les séries synthétiques ne présentent pas leur volume structurel
+  nul comme une mesure de marché.
+- Le thème sombre utilise des surfaces graphite, un accent bleu et des séries
+  contrastées ; les quatre autres thèmes restent disponibles. Le budget de
+  chargement initial demeure 1 220 000 octets bruts / 360 000 gzip, mesuré avec
+  Node 24. Les commandes avancées sont différées pour financer cette refonte.
+
+Direction, lots et preuves :
+[`docs/refonte-navigation-courbes-2026-09-28.md`](docs/refonte-navigation-courbes-2026-09-28.md).

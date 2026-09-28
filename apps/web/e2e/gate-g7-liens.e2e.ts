@@ -47,7 +47,7 @@ test("EQS : cliquer un résultat ouvre le symbole dans le chart", async ({ page 
   await page.goto("/");
   await poserSymboleTemoin(page);
 
-  await page.getByRole("button", { name: "Fonctions" }).click();
+  await page.getByRole("button", { name: "Rubriques" }).click();
   await page.getByRole("menuitem", { name: /Screener/ }).click();
   const fenetre = page.getByRole("complementary", { name: "Screener d'actifs" });
   await expect(fenetre).toBeVisible({ timeout: 15_000 });
@@ -129,7 +129,7 @@ test("MAP : cliquer une tuile de la treemap ouvre le symbole dans le chart", asy
   await page.goto("/");
   await poserSymboleTemoin(page);
 
-  await page.getByRole("button", { name: "Fonctions" }).click();
+  await page.getByRole("button", { name: "Rubriques" }).click();
   await page.getByRole("menuitem", { name: /Vue marché/ }).click();
   const fenetre = page.getByRole("complementary", { name: "Vue marché (treemap)" });
   await expect(fenetre).toBeVisible({ timeout: 15_000 });

@@ -1,53 +1,24 @@
-/**
- * Vue GEX/DEX de la fenêtre « Options » (OMON) — extraite d'OptionsWindow.tsx (composant présentationnel).
- *
- * Contrairement aux vues smile/heatmap/termiv, ce bloc reste monté CONDITIONNELLEMENT par
- * l'orchestrateur (`{vue === "gexdex" && <VueGexDex … />}`) — pas de canvas useDomaineZoom ici.
- * TOUTE la logique (state cboe/metrique, mémos, effets, handlers) reste dans l'orchestrateur ;
- * ce fichier ne reçoit que des props.
- *
- * Lot E (v2.6) : tuile VERDICT market maker en tête (régime gamma + phrase d'action), murs
- * call/put nommés, distance spot↔flip, portée AFFICHÉE sur chaque tuile (toutes échéances vs
- * échéance sélectionnée), infobulle au survol de l'histogramme et courbe compacte du profil
- * GEX(S) sous l'histogramme (crypto uniquement — les greeks CBOE sont figés, non re-simulables).
- */
+/** Vue analytique GEX/DEX : carte des expositions nettes et sensibilité au prix. */
+import { useState } from "react";
 import type { MursGamma, ScenarioGamma, VerdictGamma } from "../../data/gexDex";
+import type { CarteExpositions as Carte, ProfilExpositionsCrypto } from "../../data/carteExpositions";
 import { niveauCrypto } from "../../data/cboe";
 import { formatDec, formatEntier, formatPct, formatPourcentage, formatUsd } from "../../lib/format";
-import { Badge, TuileStat, ErreurBloc, NoteSource, Fraicheur, InfobulleGraphe } from "../ui";
-import { formatStrike } from "./dessins";
+import { Badge, ErreurBloc, NoteSource, Fraicheur, Segmente } from "../ui";
+import { CarteExpositions } from "./CarteExpositions";
+import { ProfilExpositions } from "./ProfilExpositions";
 import { formatUsdExact } from "./format";
 
-/** Barre survolée de l'histogramme GEX/DEX — pilote l'InfobulleGraphe (même patron que SurvolSmile). */
-export interface SurvolBarres {
-  xPix: number;
-  largeur: number;
-  strike: number;
-  gex: number;
-  dex: number;
-  oiCall: number | null;
-  oiPut: number | null;
-  /** Strike converti en niveau crypto (ETF seulement), null sinon ou si la référence manque. */
-  niveauCrypto: number | null;
-}
-
-/** Lecture d'un ETF spot crypto (IBIT → BTC, ETHA → ETH) en classe Actions. */
 export interface LectureEtf {
   sousJacent: "BTC" | "ETH";
   prixEtf: number;
-  /** Clôture Binance 1m au dernier échange de l'ETF ; null = conversion masquée. */
   prixCrypto: number | null;
-  /** Heure du dernier échange (New York, sans offset), null si absente. */
   dernierEchangeNy: string | null;
-  /** IV30 CBOE (%). */
   iv30: number;
-  /** Ratios put/call de la chaîne complète (NaN si aucun call). */
   pcOi: number;
   pcVol: number;
-  /** Σ OI × 100 × prix de l'ETF, chaîne complète (USD). */
   notionnelUsd: number;
 }
-
 interface Props {
   metrique: "gex" | "dex";
   classe: "crypto" | "actions";
@@ -57,324 +28,72 @@ interface Props {
   majTs: number | null;
   erreur: string | null;
   cboeErreur: string | null;
-  barCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
+  carte: Carte;
+  profil: ProfilExpositionsCrypto;
   gexNet: number;
   dexNet: number;
-  /**
-   * Spot du PÉRIMÈTRE du verdict (spot de la chaîne complète en crypto, spot
-   * CBOE en actions) — le même que celui de Spot↔flip, pour que recalculer
-   * (spot − flip)/spot depuis les tuiles redonne le % affiché (revue v2.6 no 8).
-   */
   spotVerdict: number;
   flip: number | null;
   strikePicGex: number | null;
-  /** Verdict sous la convention principale — régime, action, distance au flip. */
   verdict: VerdictGamma;
-  /** Murs de gamma nommés (mursGamma) — même périmètre que le net/flip. */
   murs: MursGamma;
   scenariosGamma: ScenarioGamma[];
-  /** Zéro du profil GEX(S) (crypto), null si aucun ou en classe actions. */
   flipReel: number | null;
-  /** Canvas du profil GEX(S) — rendu seulement en crypto (dessiné par l'orchestrateur). */
-  profilCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
-  /** Lecture ETF (IBIT/ETHA) : conversions en niveaux crypto et tuiles dédiées ; null sinon. */
   etf: LectureEtf | null;
-  survolBarres: SurvolBarres | null;
-  onSurvolBarres: (e: React.MouseEvent<HTMLCanvasElement>) => void;
-  onSortieBarres: () => void;
 }
-
-export function VueGexDex({
-  metrique,
-  classe,
-  portee,
-  loading,
-  cboeLoading,
-  majTs,
-  erreur,
-  cboeErreur,
-  barCanvasRef,
-  gexNet,
-  dexNet,
-  spotVerdict,
-  flip,
-  strikePicGex,
-  verdict,
-  murs,
-  scenariosGamma,
-  flipReel,
-  profilCanvasRef,
-  etf,
-  survolBarres,
-  onSurvolBarres,
-  onSortieBarres,
-}: Props) {
-  // Histogramme, net, murs, verdict et profil partagent la portée choisie.
+export function VueGexDex({ metrique, classe, portee, loading, cboeLoading, majTs, erreur, cboeErreur,
+  carte, profil, gexNet, dexNet, spotVerdict, flip, strikePicGex, verdict, murs, scenariosGamma, flipReel, etf }: Props) {
+  const [mode, setMode] = useState<"carte" | "profil">("carte");
   const porteeNet = classe === "crypto" && portee === "toutes" ? "toutes échéances actives" : "échéance sélectionnée";
-
-  // Libellé + ton de la tuile verdict : long gamma = marché amorti (up), short gamma =
-  // amplifié (down), indéterminé = neutre (pas de ton).
-  const libelleVerdict =
-    verdict.regime === "long-gamma"
-      ? `Long gamma — ${verdict.qualificatif}`
-      : verdict.regime === "short-gamma"
-        ? `Short gamma — ${verdict.qualificatif}`
-        : "Indéterminé";
-  const tonVerdict =
-    verdict.regime === "long-gamma" ? "up" : verdict.regime === "short-gamma" ? "down" : undefined;
-
-  // Décimales des OI de l'infobulle : unités de base (fractionnaires) en crypto, contrats
-  // entiers en actions.
-  const decOi = classe === "crypto" ? 2 : 0;
-
-  // ETF : niveau crypto équivalent affiché à côté du strike (« ≈ — BTC » si la référence manque).
-  const converti = (strike: number | null) =>
-    etf ? (
-      <span className="text-[10px] text-text-dim">
-        ≈ {formatUsdExact(niveauCrypto(strike, etf.prixEtf, etf.prixCrypto))} {etf.sousJacent}
-      </span>
-    ) : undefined;
-
-  return (
-    <>
-      <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
-        <span>
-          {metrique === "gex" ? "Gamma exposure ($/1 %)" : "Delta exposure ($)"} par strike · {porteeNet}
-        </span>
-        <Fraicheur loading={classe === "crypto" ? loading : cboeLoading} majTs={majTs} />
+  const converti = (strike: number | null) => etf ? `≈ ${formatUsdExact(niveauCrypto(strike, etf.prixEtf, etf.prixCrypto))} ${etf.sousJacent}` : "";
+  const niveaux: [string, number | null][] = [["Call wall", murs.callWall], ["Put wall", murs.putWall], ["Strike |GEX| max", strikePicGex]];
+  return <section aria-label="Analyse des expositions" className="min-w-0">
+    {classe === "actions" && <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-[10px] text-text-dim">
+      <span>{porteeNet} · convention calls + / puts −</span>
+      <Fraicheur loading={cboeLoading} majTs={majTs} cadenceMs={etf ? 300_000 : 60_000} />
+    </div>}
+    {(classe === "crypto" ? erreur : cboeErreur) && <ErreurBloc>{classe === "crypto" ? erreur : cboeErreur}</ErreurBloc>}
+    <div className="mb-2 grid grid-cols-3 gap-3 border-y border-border py-1.5 tabular-nums">
+      <div role="group" aria-label="GEX net" className="flex flex-wrap items-baseline gap-x-2"><span className="text-[10px] text-text-dim">GEX $/1 %</span><span className="text-[13px] font-medium">{formatUsd(gexNet)}</span></div>
+      <div role="group" aria-label="DEX net" className="flex flex-wrap items-baseline gap-x-2"><span className="text-[10px] text-text-dim">DEX $</span><span className="text-[13px] font-medium">{formatUsd(dexNet)}</span></div>
+      <div role="group" aria-label="Spot" className="flex flex-wrap items-baseline gap-x-2"><span className="text-[10px] text-text-dim">Spot</span><span className="text-[13px] font-medium">{formatUsdExact(spotVerdict)}</span>{etf && <small className="block w-full text-text-dim">{converti(spotVerdict)}</small>}</div>
+    </div>
+    {classe === "crypto" && <div className="mb-2 flex flex-wrap items-center justify-between gap-1"><Segmente options={[
+      { id: "carte", label: "Carte des expositions" }, { id: "profil", label: "Sensibilité au prix" },
+    ] as const} actif={mode} onChange={setMode} /><span className="text-[10px] text-text-dim">{porteeNet} · calls + / puts −{loading ? " · maj…" : ""}</span></div>}
+    {classe === "actions" || mode === "carte"
+      ? <CarteExpositions carte={carte} metrique={metrique} spot={spotVerdict} convertirStrike={etf ? converti : undefined} />
+      : <ProfilExpositions points={profil.points} spot={spotVerdict} metrique={metrique} portee={porteeNet} />}
+    <div className="mt-3 grid grid-cols-3 gap-3 border-y border-border py-2 text-[11px] tabular-nums">
+      {niveaux.map(([label, valeur]) => <div key={label} role="group" aria-label={label}><div className="text-[10px] text-text-dim">{label}</div><div className="mt-0.5 font-medium">{formatUsdExact(valeur)}</div>{etf && <small className="block text-text-dim">{converti(valeur)}</small>}</div>)}
+    </div>
+    {etf && <>
+      <p className="mt-2 text-[10px] leading-relaxed text-text-dim">CBOE — différé ~15 min — marché US fermé nuits et week-ends · dernier échange {etf.dernierEchangeNy?.replace("T", " ") ?? "—"} (heure de New York){etf.prixCrypto === null && " · conversion en " + etf.sousJacent + " indisponible (bougie Binance absente)"}.</p>
+      <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] tabular-nums">
+        <div role="group" aria-label="P/C (OI)"><span className="text-text-dim">P/C (OI) </span>{formatDec(etf.pcOi, 2)}</div>
+        <div role="group" aria-label="P/C (Vol)"><span className="text-text-dim">P/C (Vol) </span>{formatDec(etf.pcVol, 2)}</div>
+        <div role="group" aria-label="IV30 (CBOE)"><span className="text-text-dim">IV30 (CBOE) </span>{formatPourcentage(etf.iv30, 1)}</div>
+        <div role="group" aria-label="Notionnel OI"><span className="text-text-dim">Notionnel OI </span>{formatUsd(etf.notionnelUsd)}<small className="block text-text-dim">≈ {etf.prixCrypto === null ? "—" : formatEntier(etf.notionnelUsd / etf.prixCrypto)} {etf.sousJacent}</small></div>
       </div>
-
-      {classe === "actions" && (
-        <div className="mb-3 rounded-md border border-border bg-bg px-3 py-1.5 text-[10px] text-text-dim">
-          {etf
-            ? `CBOE — différé ~15 min — marché US fermé nuits et week-ends · dernier échange ${
-                etf.dernierEchangeNy?.replace("T", " ") ?? "—"
-              } (heure de New York) · niveaux ≈ ${etf.sousJacent} : prix crypto au dernier échange ÷ prix courant de l'ETF (pas la NAV)${
-                etf.prixCrypto === null ? ` · conversion en ${etf.sousJacent} indisponible (bougie Binance absente)` : ""
-              } · endpoint non contractuel.`
-            : "CBOE — données différées (~15 min), endpoint non contractuel."}
-        </div>
-      )}
-
-      {(classe === "crypto" ? erreur : cboeErreur) && (
-        <div className="mb-3">
-          <ErreurBloc>{classe === "crypto" ? erreur : cboeErreur}</ErreurBloc>
-        </div>
-      )}
-
-      <div className="rounded-md border border-border bg-bg p-2">
-        <div className="relative">
-          <canvas
-            ref={barCanvasRef}
-            className="h-[200px] w-full"
-            onMouseMove={onSurvolBarres}
-            onMouseLeave={onSortieBarres}
-          />
-          {survolBarres && (
-            <InfobulleGraphe
-              xPix={survolBarres.xPix}
-              largeurGraphe={survolBarres.largeur}
-              titre={`Strike ${formatStrike(survolBarres.strike)}`}
-              lignes={[
-                {
-                  label: "GEX",
-                  valeur: formatUsd(survolBarres.gex),
-                  couleur: survolBarres.gex >= 0 ? "var(--up)" : "var(--down)",
-                },
-                {
-                  label: "DEX",
-                  valeur: formatUsd(survolBarres.dex),
-                  couleur: survolBarres.dex >= 0 ? "var(--up)" : "var(--down)",
-                },
-                { label: "OI calls", valeur: formatDec(survolBarres.oiCall, decOi) },
-                { label: "OI puts", valeur: formatDec(survolBarres.oiPut, decOi) },
-                ...(etf ? [{ label: `≈ ${etf.sousJacent}`, valeur: formatUsdExact(survolBarres.niveauCrypto) }] : []),
-              ]}
-            />
-          )}
-        </div>
+    </>}
+    <details className="mt-3 text-[10px]">
+      <summary className="cursor-pointer text-text-dim">Niveaux dérivés et conventions</summary>
+      <div className="mt-2 grid grid-cols-2 gap-2 tabular-nums">
+        <div role="group" aria-label="Flip cumulé par strike"><span className="text-text-dim">Flip cumulé par strike </span>{formatUsdExact(flip)} {etf && <Badge ton="warn">indicatif</Badge>}{etf && <small className="block text-text-dim">{converti(flip)}</small>}</div>
+        <div><span className="text-text-dim">Distance spot / cumul </span>{formatPct(verdict.distanceFlipPct, 1)}</div>
+        {classe === "crypto" && <div className="col-span-2"><span className="text-text-dim">Zéro du profil GEX modélisé </span>{formatUsdExact(flipReel)}</div>}
       </div>
-      <div className="mt-1 flex items-center gap-4 text-[10px] text-text-dim">
-        <span className="flex items-center gap-1">
-          <span className="inline-block h-1.5 w-3 rounded bg-up" />
-          exposition positive
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block h-1.5 w-3 rounded bg-down" />
-          exposition négative
-        </span>
-      </div>
-
-      {/* Profil GEX(S) — crypto uniquement : GEX net recalculé à spot simulé (±15 %),
-          zéro du profil modélisé. Pas d'équivalent actions (greeks CBOE figés). */}
-      {classe === "crypto" && (
-        <div className="mt-2 rounded-md border border-border bg-bg p-2">
-          <div className="mb-1 flex items-center justify-between text-[10px] text-text-dim">
-            <span>Profil GEX net (spot simulé ±15 %) · {porteeNet}</span>
-            <span>Zéro du profil modélisé : {formatUsdExact(flipReel)}</span>
-          </div>
-          <canvas ref={profilCanvasRef} className="h-[90px] w-full" />
-        </div>
-      )}
-
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        {/* Tuile VERDICT en tête : le MM doit-il acheter ou vendre le sous-jacent ? */}
-        <div className="col-span-2">
-          <TuileStat
-            label="Verdict sous hypothèse gamma"
-            valeur={Number.isFinite(gexNet) ? libelleVerdict : "Indisponible"}
-            ton={tonVerdict}
-            badge={<Badge>{porteeNet}</Badge>}
-            pied={<span>{!Number.isFinite(gexNet)
-              ? "Aucune exposition calculable sur cette portée."
-              : verdict.regime === "long-gamma"
-                ? "Sous cette convention, une couverture delta-neutre pourrait amortir les variations. Les positions des dealers ne sont pas observées."
-                : verdict.regime === "short-gamma"
-                  ? "Sous cette convention, une couverture delta-neutre pourrait amplifier les variations. Les positions des dealers ne sont pas observées."
-                  : "Le GEX net ne permet pas de trancher sous cette convention."}</span>}
-          />
-        </div>
-        <TuileStat
-          disposition="inline"
-          label="GEX net"
-          title="USD de variation du delta notionnel pour un mouvement de +1 % du sous-jacent"
-          badge={<Badge>{porteeNet}</Badge>}
-          valeur={formatUsd(gexNet)}
-          couleur={gexNet !== 0 ? (gexNet > 0 ? "var(--up)" : "var(--down)") : undefined}
-        />
-        <TuileStat
-          disposition="inline"
-          label="DEX net"
-          title="Delta agrégé signé, en USD notionnels ; aucune position dealer observée"
-          badge={<Badge>{porteeNet}</Badge>}
-          valeur={formatUsd(dexNet)}
-          couleur={dexNet !== 0 ? (dexNet > 0 ? "var(--up)" : "var(--down)") : undefined}
-        />
-        <TuileStat
-          disposition="inline"
-          label="Spot"
-          badge={<Badge>{porteeNet}</Badge>}
-          valeur={formatUsdExact(spotVerdict)}
-          extra={converti(spotVerdict)}
-        />
-        <TuileStat
-          disposition="inline"
-          label="Flip cumulé par strike"
-          badge={
-            <>
-              <Badge>{porteeNet}</Badge>
-              {etf && (
-                <Badge
-                  ton="warn"
-                  title="Sur une chaîne d'ETF, le cumul du GEX par strike change souvent de signe plusieurs fois (cinq fois sur l'échéance IBIT du 18/09 sondée) : premier passage instable, les murs sont plus robustes."
-                >
-                  indicatif
-                </Badge>
-              )}
-            </>
-          }
-          valeur={formatUsdExact(flip)}
-          extra={converti(flip)}
-        />
-        <TuileStat
-          disposition="inline"
-          label="Spot↔flip cumulé"
-          title="Distance au passage à zéro du cumul par strike, pas un seuil de bascule du prix"
-          badge={<Badge>{porteeNet}</Badge>}
-          valeur={formatPct(verdict.distanceFlipPct, 1)}
-          couleur={
-            verdict.distanceFlipPct !== null && verdict.distanceFlipPct !== 0
-              ? verdict.distanceFlipPct > 0
-                ? "var(--up)"
-                : "var(--down)"
-              : undefined
-          }
-        />
-        <TuileStat
-          disposition="inline"
-          label="Call wall"
-          badge={<Badge>{porteeNet}</Badge>}
-          valeur={formatUsdExact(murs.callWall)}
-          extra={converti(murs.callWall)}
-        />
-        <TuileStat
-          disposition="inline"
-          label="Put wall"
-          badge={<Badge>{porteeNet}</Badge>}
-          valeur={formatUsdExact(murs.putWall)}
-          extra={converti(murs.putWall)}
-        />
-        <TuileStat
-          disposition="inline"
-          label="Strike |GEX| max"
-          badge={<Badge>{porteeNet}</Badge>}
-          valeur={formatUsdExact(strikePicGex)}
-          extra={converti(strikePicGex)}
-        />
-        {etf && (
-          <>
-            <TuileStat
-              disposition="inline"
-              label="P/C (OI)"
-              badge={<Badge>chaîne complète</Badge>}
-              valeur={formatDec(etf.pcOi, 2)}
-            />
-            <TuileStat
-              disposition="inline"
-              label="P/C (Vol)"
-              badge={<Badge>chaîne complète</Badge>}
-              valeur={formatDec(etf.pcVol, 2)}
-              title="Volume du fichier CBOE : consolidé toutes places ou propre au CBOE, non vérifié"
-            />
-            <TuileStat disposition="inline" label="IV30 (CBOE)" valeur={formatPourcentage(etf.iv30, 1)} />
-            <TuileStat
-              disposition="inline"
-              label="Notionnel OI"
-              badge={<Badge>chaîne complète</Badge>}
-              valeur={formatUsd(etf.notionnelUsd)}
-              extra={
-                <span className="text-[10px] text-text-dim">
-                  ≈ {etf.prixCrypto === null ? "—" : formatEntier(etf.notionnelUsd / etf.prixCrypto)} {etf.sousJacent}
-                </span>
-              }
-            />
-          </>
-        )}
-      </div>
-
-      {scenariosGamma.length > 0 && (
-        <div className="mt-3 rounded-md border border-border bg-bg px-2 py-2">
-          <div className="mb-1 flex flex-wrap items-center gap-2 text-[10px] text-text-dim">
-            <span className="font-medium text-text">Sensibilité au signe gamma</span>
-            <Badge>mêmes contrats · spot · horloge</Badge>
-          </div>
-          <div className="grid gap-1 text-[10px] md:grid-cols-3">
-            {scenariosGamma.map((scenario) => (
-              <div key={scenario.hypothese} className="rounded border border-border/60 bg-surface px-2 py-1.5">
-                <div className="font-medium text-text">{scenario.libelle}</div>
-                <div className="mt-0.5 tabular-nums text-text-dim">GEX {formatUsd(scenario.gexNet)}</div>
-                <div className="tabular-nums text-text-dim">
-                  flip cumul/strike {formatUsdExact(scenario.flipCumulStrike)}
-                </div>
-                <div className="text-text-dim">verdict {scenario.verdict.regime}</div>
-              </div>
-            ))}
-          </div>
-          <p className="mt-1.5 text-[10px] text-text-dim">
-            Scénarios de convention, pas des positions dealer observées. Le DEX conserve son delta signé.
-          </p>
-        </div>
-      )}
-
-      <div className="mt-3">
-        <NoteSource>
-          {classe === "crypto"
-            ? `GEX/DEX modélisés à partir des IV mark et forwards de chaque maturité, avec l’index Deribit pour la valorisation USD. OI en unités de base, multiplicateur 1. La convention calls+/puts− et les variantes tous-long/tous-short sont des hypothèses, pas une observation des portefeuilles dealers. Histogramme, net, murs, pic, verdict et profil : ${porteeNet}. GEX en USD par +1 % ; DEX en USD notionnels. Le flip cumulé par strike est distinct du zéro du profil modélisé ; aucun des deux n’est une prévision de prix.`
-            : "Greeks pré-calculés CBOE (multiplicateur 100) — toutes les métriques portent sur l'échéance sélectionnée. Convention : dealers long les calls, short les puts — le signe du GEX en dépend. GEX = Σ(Γc·OIc − Γp·OIp)·S²·0,01·mult ; DEX = Σ(Δ·OI)·S·mult. Histogramme : strikes < 0,5 % du max masqués. Pas de profil GEX(S) : greeks figés, non re-simulables."}
-          {etf &&
-            ` ETF ${etf.sousJacent} : strikes conservés à ±25 % du prix de l'ETF (P/C et notionnel sur la chaîne complète) ; OI OCC mis à jour une fois par jour ; volume consolidé ou propre au CBOE : non vérifié. Niveau ≈ ${etf.sousJacent} = strike × clôture Binance 1 min au dernier échange ÷ prix courant de l'ETF (hors séance, il peut s'écarter de la clôture de séance) : approximation, pas la NAV (frais, prime ou décote) ; « — » si la bougie manque, jamais le cours crypto courant.`}
-        </NoteSource>
-      </div>
-    </>
-  );
+      <p className="mt-2 text-text-dim">Le cumul par strike n’est pas un seuil de bascule du prix. Le zéro du profil simulé désigne un autre calcul, sous hypothèses constantes.</p>
+      {scenariosGamma.length > 0 && <div className="mt-3">
+        <div className="mb-2 flex flex-wrap items-center gap-2"><span>Sensibilité au signe gamma</span><Badge>mêmes contrats · spot · horloge</Badge></div>
+        <div className="grid gap-2 sm:grid-cols-3">{scenariosGamma.map((s) => <div key={s.hypothese} className="rounded border border-border p-2"><div>{s.libelle}</div><div className="mt-1">GEX {formatUsd(s.gexNet)}</div><div className="text-text-dim">flip cumul/strike {formatUsdExact(s.flipCumulStrike)}</div><div className="text-text-dim">verdict {s.verdict.regime}</div></div>)}</div>
+        <p className="mt-2 text-text-dim">Scénarios de convention, pas des positions dealer observées. Le DEX conserve son delta signé.</p>
+      </div>}
+    </details>
+    <div className="mt-3"><NoteSource>{classe === "crypto"
+      ? "Options inverses Deribit. Les variantes tous-long/tous-short sont des hypothèses. IV mark et forward par maturité ; valorisation USD à l’index. GEX net : delta notionnel par +1 % ; DEX : USD notionnels. Les petites contributions restent incluses."
+      : "Greeks pré-calculés CBOE, multiplicateur 100, échéance sélectionnée. Greeks figés : pas de simulation de prix. Convention calls + / puts −, positions dealers inconnues. Endpoint différé non contractuel."}
+      {etf && ` ETF ${etf.sousJacent} : strikes à ±25 % du prix ETF ; P/C et notionnel sur la chaîne complète. OI OCC quotidien. Niveau ≈ ${etf.sousJacent} = strike × prix crypto au dernier échange ÷ prix ETF ; approximation, pas la NAV. Volume consolidé ou propre au CBOE : non vérifié.`}
+    </NoteSource></div>
+  </section>;
 }

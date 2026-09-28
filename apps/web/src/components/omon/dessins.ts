@@ -2,15 +2,14 @@
  * Fonctions de dessin canvas de la fenêtre « Options » (OMON) — extraites d'OptionsWindow.tsx.
  *
  * POURQUOI ce fichier : OptionsWindow atteignait sa dernière marge de lisibilité (revue finale
- * v1.2) ; les quatre routines de tracé (smile IV, histogramme GEX/DEX, heatmap OI, term structure)
+ * v1.2) ; les trois routines de tracé (smile IV, heatmap OI, term structure)
  * et leurs helpers/constantes propres vivent désormais ici. ZÉRO changement de comportement :
  * couper-coller à l'identique, signatures inchangées. Les constantes de padding et quelques helpers
- * (formatStrike, joursAvant, filtrerAuSeuil, SurvolHeatmap) sont partagés avec les survols/JSX du
+ * (formatStrike, joursAvant, SurvolHeatmap) sont partagés avec les survols/JSX du
  * composant hôte : ils sont exportés puis réimportés par OptionsWindow (imports uni-directionnels —
  * ce module NE dépend PAS d'OptionsWindow, pour éviter tout cycle).
  */
 import type { OptionPoint } from "../../data/deribit";
-import type { GexDexPoint } from "../../data/gexDex";
 import type { PointTermIv } from "../../data/termIv";
 import type { SegmentVolForward } from "../../data/volForward";
 import { intensiteCellule, type GrilleOi } from "../../data/oiHeatmap";
@@ -164,15 +163,6 @@ export function dessinerSmile(
   tracer(finies.filter((p) => p.type === "put"), couleurDown);
 }
 
-// ─────────────────────────── Dessin des barres GEX/DEX ───────────────────────────
-
-// Marges latérales du plot de l'histogramme GEX/DEX — partagées avec l'inversion pixel→strike
-// du survol (onSurvolBarres, composant hôte), même modèle que SMILE_PAD_L/R : dessin et survol
-// doivent utiliser EXACTEMENT les mêmes constantes, sinon l'infobulle dérive des barres
-// (leçon HEATMAP_PAD documentée).
-export const BARRES_PAD_L = 46;
-export const BARRES_PAD_R = 10;
-
 /**
  * Graduations Y dont l'étiquette reste lisible : prises dans l'ordre (priorité décroissante),
  * écartée toute valeur à moins de `ecartMinPx` d'une étiquette déjà retenue (police canvas 10 px).
@@ -189,243 +179,6 @@ export function graduationsLisibles(
     if (retenues.every((g) => Math.abs(g.y - y) >= ecartMinPx)) retenues.push({ valeur, y });
   }
   return retenues;
-}
-
-/** Sous-ensemble des points dont l'exposition |gex ou dex| dépasse 0,5 % du max — même
- * base pour le tracé (dessinerBarres) et le domaine de l'axe (domaineActionsGexDex). */
-export function filtrerAuSeuil(points: GexDexPoint[], metrique: "gex" | "dex"): GexDexPoint[] {
-  const val = (p: GexDexPoint) => (metrique === "gex" ? p.gex : p.dex);
-  const maxAbs = points.reduce((m, p) => Math.max(m, Math.abs(val(p))), 0);
-  return maxAbs > 0 ? points.filter((p) => Math.abs(val(p)) >= maxAbs * 0.005) : [];
-}
-
-/**
- * Dessine un histogramme d'exposition par strike (axe X = strike, barres pos./nég. depuis
- * la ligne zéro, couleurs --up/--down du thème). Repère vertical sur le spot. Ne montre que
- * les strikes dont l'exposition dépasse 0,5 % du maximum (focalise sur la zone active).
- */
-export function dessinerBarres(
-  canvas: HTMLCanvasElement,
-  points: GexDexPoint[],
-  spot: number,
-  metrique: "gex" | "dex",
-  domaine: Domaine,
-  flip: number | null,
-): void {
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
-  const cssW = canvas.clientWidth || 380;
-  const cssH = canvas.clientHeight || 200;
-  canvas.width = Math.round(cssW * dpr);
-  canvas.height = Math.round(cssH * dpr);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, cssW, cssH);
-
-  const padL = BARRES_PAD_L;
-  const padR = BARRES_PAD_R;
-  const padT = 12;
-  const padB = 22;
-  const plotW = Math.max(1, cssW - padL - padR);
-  const plotH = Math.max(1, cssH - padT - padB);
-
-  const couleurDim = lireTokenCanvas("--text-dim", "#9ca3af");
-  const couleurBordure = lireTokenCanvas("--border", "#262626");
-  const couleurUp = lireTokenCanvas("--up", "#2dc08e");
-  const couleurDown = lireTokenCanvas("--down", "#f92855");
-  const couleurAccent = lireTokenCanvas("--accent", "#38bdf8");
-
-  // Accesseur de la métrique active — réutilisé plus bas pour l'échelle Y et le tracé des barres.
-  const val = (p: GexDexPoint) => (metrique === "gex" ? p.gex : p.dex);
-
-  // Ne garde que les strikes dont l'exposition dépasse 0,5 % du max (déjà triés par strike
-  // croissant — aggregateGexDex/computeCryptoGexDex le garantissent, filter préserve l'ordre).
-  const seuil = filtrerAuSeuil(points, metrique);
-
-  if (seuil.length === 0) {
-    ctx.fillStyle = couleurDim;
-    ctx.font = POLICE_CANVAS;
-    ctx.fillText("Pas d'exposition pour cette échéance…", padL, padT + plotH / 2);
-    return;
-  }
-
-  // Fenêtre de zoom (même domaine que le smile) : rescale Y sur le sous-ensemble visible.
-  const { debut, fin } = indicesVisibles(seuil, (p) => p.strike, domaine);
-  const visibles = seuil.slice(debut, fin + 1);
-  const vals = visibles.map(val);
-  const yHi = Math.max(0, ...vals);
-  const yLo = Math.min(0, ...vals);
-  const yRange = yHi - yLo || 1;
-
-  const px = (s: number) => padL + valeurVersPixel(domaine, s, plotW);
-  const py = (v: number) => padT + (1 - (v - yLo) / yRange) * plotH;
-
-  // Grille + étiquettes Y (exposition compacte). Bornes prioritaires : l'étiquette du zéro trop
-  // proche d'une borne (petite exposition d'un côté) ou confondue avec elle n'est pas écrite.
-  ctx.font = POLICE_CANVAS;
-  ctx.lineWidth = 1;
-  for (const v of [yHi, 0, yLo]) {
-    const y = py(v);
-    ctx.strokeStyle = v === 0 ? couleurDim : couleurBordure;
-    ctx.beginPath();
-    ctx.moveTo(padL, y);
-    ctx.lineTo(cssW - padR, y);
-    ctx.stroke();
-  }
-  ctx.fillStyle = couleurDim;
-  for (const { valeur, y } of graduationsLisibles([yHi, yLo, 0], py)) ctx.fillText(formatUsd(valeur), 2, y + 3);
-  // Étiquettes X (bornes du domaine visible).
-  ctx.fillStyle = couleurDim;
-  ctx.fillText(formatStrike(domaine.min), padL, cssH - 6);
-  const txtMax = formatStrike(domaine.max);
-  ctx.fillText(txtMax, cssW - padR - ctx.measureText(txtMax).width, cssH - 6);
-
-  // Barres (largeur fixe centrée sur le strike).
-  const largeur = Math.max(1.5, Math.min(14, (plotW / visibles.length) * 0.7));
-  const yZero = py(0);
-  for (const p of visibles) {
-    const v = val(p);
-    const x = px(p.strike);
-    const yv = py(v);
-    ctx.fillStyle = v >= 0 ? couleurUp : couleurDown;
-    ctx.fillRect(x - largeur / 2, Math.min(yv, yZero), largeur, Math.abs(yv - yZero));
-  }
-
-  // Repère vertical du spot.
-  if (Number.isFinite(spot) && spot >= domaine.min && spot <= domaine.max) {
-    const x = px(spot);
-    ctx.strokeStyle = couleurDim;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 3]);
-    ctx.beginPath();
-    ctx.moveTo(x, padT);
-    ctx.lineTo(x, padT + plotH);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = couleurDim;
-    ctx.fillText("spot", Math.min(x + 3, cssW - padR - 24), padT + 9);
-  }
-
-  // Repère vertical du gamma flip (accent) — même projection que les barres (px). Tracé
-  // seulement quand le niveau tombe dans la plage de strikes affichée.
-  if (flip !== null && Number.isFinite(flip) && flip >= domaine.min && flip <= domaine.max) {
-    const x = px(flip);
-    ctx.strokeStyle = couleurAccent;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 3]);
-    ctx.beginPath();
-    ctx.moveTo(x, padT);
-    ctx.lineTo(x, padT + plotH);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = couleurAccent;
-    ctx.fillText("γ flip", Math.min(x + 3, cssW - padR - 30), padT + 20);
-  }
-}
-
-// ─────────────────────────── Dessin du profil GEX(S) ───────────────────────────
-
-/**
- * Dessine la courbe compacte du profil GEX(S) (crypto uniquement, Lot E) : axe X = spot
- * simulé, axe Y = GEX net total recalculé à ce spot (profilGexSpot). Ligne zéro appuyée,
- * courbe en accent, repères verticaux pointillés au spot courant (dim) et au « flip réel »
- * (accent — zéro du profil). Canvas simple SANS zoom ni survol : aucun handler n'inverse
- * cette géométrie, les marges restent donc locales (pas de constantes PAD partagées).
- * Tokens thème lus AU MOMENT du dessin, POLICE_CANVAS (conventions canvas du dépôt).
- */
-export function dessinerProfilGex(
-  canvas: HTMLCanvasElement,
-  points: { spot: number; gexNet: number }[],
-  spotCourant: number,
-  flipReel: number | null,
-): void {
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
-  const cssW = canvas.clientWidth || 380;
-  const cssH = canvas.clientHeight || 90;
-  canvas.width = Math.round(cssW * dpr);
-  canvas.height = Math.round(cssH * dpr);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, cssW, cssH);
-
-  const padL = 46;
-  const padR = 10;
-  const padT = 8;
-  const padB = 14;
-  const plotW = Math.max(1, cssW - padL - padR);
-  const plotH = Math.max(1, cssH - padT - padB);
-
-  const couleurDim = lireTokenCanvas("--text-dim", "#9ca3af");
-  const couleurBordure = lireTokenCanvas("--border", "#262626");
-  const couleurAccent = lireTokenCanvas("--accent", "#38bdf8");
-
-  ctx.font = POLICE_CANVAS;
-
-  // Points exploitables (profilGexSpot les renvoie déjà triés par spot croissant).
-  const finis = points.filter((p) => Number.isFinite(p.spot) && Number.isFinite(p.gexNet));
-  if (finis.length < 2) {
-    ctx.fillStyle = couleurDim;
-    ctx.fillText("Pas de profil GEX(S)…", padL, padT + plotH / 2);
-    return;
-  }
-
-  const xMin = finis[0]!.spot;
-  const xMax = finis[finis.length - 1]!.spot;
-  const ys = finis.map((p) => p.gexNet);
-  let yHi = Math.max(0, ...ys);
-  let yLo = Math.min(0, ...ys);
-  if (yHi === yLo) yHi = yLo + 1;
-
-  const px = (s: number) => padL + ((s - xMin) / (xMax - xMin || 1)) * plotW;
-  const py = (v: number) => padT + (1 - (v - yLo) / (yHi - yLo)) * plotH;
-
-  // Grille : bornes Y (compactes) + ligne zéro appuyée (dim) — même patron que dessinerBarres.
-  ctx.lineWidth = 1;
-  for (const v of [yHi, 0, yLo]) {
-    const y = py(v);
-    ctx.strokeStyle = v === 0 ? couleurDim : couleurBordure;
-    ctx.beginPath();
-    ctx.moveTo(padL, y);
-    ctx.lineTo(cssW - padR, y);
-    ctx.stroke();
-    ctx.fillStyle = couleurDim;
-    ctx.fillText(formatUsd(v), 2, y + 3);
-  }
-  // Étiquettes X (bornes de la plage de spots simulés).
-  ctx.fillStyle = couleurDim;
-  ctx.fillText(formatStrike(xMin), padL, cssH - 3);
-  const txtMax = formatStrike(xMax);
-  ctx.fillText(txtMax, cssW - padR - ctx.measureText(txtMax).width, cssH - 3);
-
-  // Courbe GEX net(S) en accent.
-  ctx.strokeStyle = couleurAccent;
-  ctx.lineWidth = 1.4;
-  ctx.beginPath();
-  finis.forEach((p, i) => (i === 0 ? ctx.moveTo(px(p.spot), py(p.gexNet)) : ctx.lineTo(px(p.spot), py(p.gexNet))));
-  ctx.stroke();
-
-  /** Repère vertical pointillé borné à la plage simulée (spot courant / flip réel). */
-  const repere = (val: number, couleur: string, etiquette: string, yLibelle: number) => {
-    if (!Number.isFinite(val) || val < xMin || val > xMax) return;
-    const x = px(val);
-    ctx.strokeStyle = couleur;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 3]);
-    ctx.beginPath();
-    ctx.moveTo(x, padT);
-    ctx.lineTo(x, padT + plotH);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = couleur;
-    ctx.fillText(etiquette, Math.min(x + 3, cssW - padR - ctx.measureText(etiquette).width), yLibelle);
-  };
-  // Libellés étagés quand spot et flip réel sont proches en x (même recette que dessinerSmile).
-  const xSpot = Number.isFinite(spotCourant) ? px(spotCourant) : NaN;
-  const xFlip = flipReel !== null && Number.isFinite(flipReel) ? px(flipReel) : NaN;
-  const proches = Number.isFinite(xSpot) && Number.isFinite(xFlip) && Math.abs(xSpot - xFlip) < 48;
-  repere(spotCourant, couleurDim, "spot", padT + 8);
-  if (flipReel !== null) repere(flipReel, couleurAccent, "flip réel", proches ? padT + 18 : padT + 8);
 }
 
 // ─────────────────────────── Dessin de la heatmap OI strike × échéance ───────────────────────────
@@ -449,7 +202,7 @@ export const HEATMAP_PAD_B = 22;
  * bande utile (ordonnés DÉCROISSANT, strike haut en haut, spot au milieu). Chaque cellule est un
  * `fillRect` teinté par `intensiteCellule` — métriques OI et Volume : rampe neutre → `--accent` ;
  * métrique GEX : signe porté par la teinte `--up`/`--down`, intensité = |gex|. Marqueur ◆ du max pain
- * par colonne, ligne horizontale pointillée du spot. Calqué sur `dessinerBarres` (DPR, tokens au dessin).
+ * par colonne, ligne horizontale pointillée du spot. DPR et tokens du thème lus au dessin.
  */
 export function dessinerHeatmapOi(
   canvas: HTMLCanvasElement,

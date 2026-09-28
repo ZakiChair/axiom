@@ -285,9 +285,12 @@ test("GEX/DEX Actions : IBIT différé converti en niveaux BTC au dernier échan
 
   // Tuiles visibles de la vue GEX/DEX (Smile, toujours montée mais masquée, a ses propres P/C et notionnel).
   const tuile = (label: string) =>
-    fenetre.locator("div.rounded-md").filter({ hasText: new RegExp(`^${label}`), visible: true });
+    fenetre.getByRole("group", { name: new RegExp(`^${label}`) });
   await expect(fenetre).toContainText("différé ~15 min — marché US fermé nuits et week-ends");
   await expect(fenetre).toContainText("dernier échange 2026-09-11 16:00:00 (heure de New York)");
+
+  await fenetre.getByText("Niveaux dérivés et conventions", { exact: true }).click();
+  await expect(fenetre.getByRole("button", { name: "Sensibilité au prix", exact: true })).toHaveCount(0);
 
   // Niveaux convertis au ratio 80 000 / 45 ; petits strikes fractionnaires non arrondis.
   await expect(tuile("Spot(?!↔)")).toContainText("≈ $80,000 BTC");
@@ -306,13 +309,12 @@ test("GEX/DEX Actions : IBIT différé converti en niveaux BTC au dernier échan
   await expect(tuile("Notionnel OI")).toContainText("$66.60M");
   await expect(tuile("Notionnel OI")).toContainText("≈ 833 BTC");
 
-  // Infobulle de l'histogramme au bord droit du tracé (strike 50).
-  const canvas = fenetre.locator("canvas").filter({ visible: true }).first();
-  const boite = await canvas.boundingBox();
-  if (boite === null) throw new Error("histogramme GEX absent");
-  await page.mouse.move(boite.x + boite.width - 12, boite.y + boite.height / 2);
-  await expect(fenetre.getByText("Strike 50", { exact: true })).toBeVisible();
-  await expect(fenetre.getByText("≈ BTC : $88,889")).toBeVisible();
+  // La cellule +5 à +15 % contient le strike 50 ; détail persistant accessible au clic.
+  await fenetre.getByRole("region", { name: "Carte des expositions nettes" })
+    .getByRole("button", { name: /\+5 à \+15/ }).click();
+  const detail = fenetre.getByRole("region", { name: "Détail de la cellule" });
+  await expect(detail).toContainText("$50");
+  await expect(detail).toContainText("≈ $88,889 BTC");
 
   // ETHA : bougie ETHUSDT indisponible → conversion masquée, jamais le spot courant.
   await fenetre.getByRole("button", { name: "ETHA", exact: true }).click();
@@ -388,7 +390,7 @@ test("GEX/DEX Actions : après 16:00 à New York, l'échéance CBOE par défaut 
   await fenetre.getByRole("button", { name: "IBIT", exact: true }).click();
 
   const tuile = (label: string) =>
-    fenetre.locator("div.rounded-md").filter({ hasText: new RegExp(`^${label}`), visible: true });
+    fenetre.getByRole("group", { name: new RegExp(`^${label}`) });
   const selecteur = fenetre.getByLabel("Échéance CBOE");
   const mention = fenetre.getByText("Échéance expirée (16:00 NY passée) : greeks CBOE résiduels, murs et flip non significatifs.");
 

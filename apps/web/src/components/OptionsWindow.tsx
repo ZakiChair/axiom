@@ -31,9 +31,9 @@ import {
   verdictGamma,
   EQUITY_CONTRACT_MULTIPLIER,
   type GexDexPoint,
-  type ProfilGexSpot,
   type ScenarioGamma,
 } from "../data/gexDex";
+import { construireSourcesCrypto, construireCarteExpositions, profilExpositionsCrypto } from "../data/carteExpositions";
 import { calculerSkew25d } from "../data/skew";
 import { termStructureIv, type PointTermIv } from "../data/termIv";
 import { mouvementsAttendus, type PointMouvementAttendu } from "../data/mouvementAttendu";
@@ -52,7 +52,6 @@ import {
   echeanceCboeRetenue,
   estEtfCrypto,
   fetchCboeChain,
-  niveauCrypto,
   prixCryptoAuDernierEchange,
   type CboeChain,
   type CboeTicker,
@@ -64,14 +63,9 @@ import { useDomaineZoom } from "../hooks/useDomaineZoom";
 import { EnTeteFenetre, Segmente, Select } from "./ui";
 import {
   dessinerSmile,
-  dessinerBarres,
   dessinerHeatmapOi,
-  dessinerProfilGex,
   dessinerTermIv,
-  filtrerAuSeuil,
   joursAvant,
-  BARRES_PAD_L,
-  BARRES_PAD_R,
   SMILE_PAD_L,
   SMILE_PAD_R,
   HEATMAP_PAD_L,
@@ -84,7 +78,7 @@ import {
 } from "./omon/dessins";
 // Sous-vues présentationnelles (JSX extrait, découpe v1.9) — toute la logique reste ici.
 import { VueSmile, type SurvolSmile } from "./omon/VueSmile";
-import { VueGexDex, type LectureEtf, type SurvolBarres } from "./omon/VueGexDex";
+import { VueGexDex, type LectureEtf } from "./omon/VueGexDex";
 import { VueHeatmap } from "./omon/VueHeatmap";
 import { VueTermIv } from "./omon/VueTermIv";
 import { ResumeMarcheOptions } from "./omon/ResumeMarcheOptions";
@@ -197,10 +191,6 @@ function strikePlusProche(points: OptionPoint[], cible: number): number | null {
 export function OptionsWindow() {
   const open = useStore(optionsUiStore, (s) => s.open);
 
-  const barCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  // Canvas du profil GEX(S) — monté conditionnellement avec VueGexDex (crypto uniquement) :
-  // l'effet de dessin court APRÈS le render, la ref est donc posée quand il s'exécute.
-  const profilCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const heatmapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const termIvCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [devise, setDevise] = useState<Devise>("BTC");
@@ -216,8 +206,6 @@ export function OptionsWindow() {
   // Métrique de la heatmap : open interest, |GEX| (murs de gamma) OU volume 24h. État dédié à la vue heatmap.
   const [heatmapMetrique, setHeatmapMetrique] = useState<"oi" | "gex" | "volume">("oi");
   const [survolHeatmap, setSurvolHeatmap] = useState<SurvolHeatmap | null>(null);
-  // Barre de l'histogramme GEX/DEX survolée (null = aucune) — pilote l'InfobulleGraphe (Lot E).
-  const [survolBarres, setSurvolBarres] = useState<SurvolBarres | null>(null);
   // Index du point de term structure survolé (null = aucun) — pilote l'infobulle et l'anneau.
   const [survolTermIv, setSurvolTermIv] = useState<number | null>(null);
   // Chaîne CBOE (indices actions) — chargée seulement en GEX/DEX « Actions ».
@@ -412,59 +400,19 @@ export function OptionsWindow() {
     );
   }, [vue, classe, pointsPortee, spotVerdict, nowMs, cboeChaine, cboeExpiry]);
 
-  // Profil GEX(S) — crypto uniquement : GEX net recalculé par Black-Scholes sur 41 spots
-  // simulés ±15 % autour du spot de la chaîne (IV/échéances inchangées ; nowMs au bord
-  // comme gexDexPoints, nowMs injecté dans la logique pure). Les actions n'en ont pas : les
-  // greeks CBOE sont pré-calculés, non re-simulables à spot déplacé.
-  const profilGex = useMemo<ProfilGexSpot | null>(() => {
-    if (vue !== "gexdex" || classe !== "crypto") return null;
-    if (!Number.isFinite(spotChaine) || pointsPortee.length === 0) return null;
-    const spots: number[] = [];
-    for (let i = 0; i <= 40; i++) spots.push(spotChaine * (0.85 + (0.3 * i) / 40));
-    return profilGexSpot(pointsPortee, spots, nowMs);
-  }, [vue, classe, pointsPortee, spotChaine, nowMs]);
-
-  // Barres effectivement tracées (même base filtrerAuSeuil que dessinerBarres) — candidates du survol.
-  const barresSeuil = useMemo(() => filtrerAuSeuil(gexDexPoints, metrique), [gexDexPoints, metrique]);
-
-  // OI calls/puts par strike du même périmètre que l’histogramme — lignes OI
-  // de l'infobulle. Crypto : unités de base Deribit ; actions : contrats CBOE.
-  const oiParStrikeHisto = useMemo(() => {
-    const parStrike = new Map<number, { call: number; put: number }>();
-    const ajouter = (strike: number, type: "call" | "put", oi: number) => {
-      if (!Number.isFinite(oi)) return;
-      const cur = parStrike.get(strike) ?? { call: 0, put: 0 };
-      cur[type] += oi;
-      parStrike.set(strike, cur);
-    };
-    if (classe === "crypto") {
-      for (const p of pointsPortee) ajouter(p.strike, p.type, p.openInterest);
-    } else if (cboeChaine && cboeExpiry !== null) {
-      for (const l of cboeOptionsToLegs(cboeChaine.options, cboeExpiry)) {
-        ajouter(l.strike, l.type, l.openInterest);
-      }
-    }
-    return parStrike;
-  }, [classe, pointsPortee, cboeChaine, cboeExpiry]);
-
-  // L'histogramme possède son domaine : la portée globale ne doit pas être
-  // tronquée par le domaine de l'échéance du smile.
-  const domaineGexDex = useMemo<Domaine | null>(() => {
-    if (gexDexPoints.length === 0) return null;
-
-    // Domaine basé sur le sous-ensemble filtré au seuil (même base que le tracé, via
-    // filtrerAuSeuil, partagée avec dessinerBarres).
-    const seuil = filtrerAuSeuil(gexDexPoints, metrique);
-
-    // Fallback à tous les points si le sous-ensemble filtré est vide.
-    const pointsUtiles = seuil.length > 0 ? seuil : gexDexPoints;
-    const strikes = pointsUtiles.map((p) => p.strike);
-    let min = Math.min(...strikes, Number.isFinite(gexDexSpot) ? gexDexSpot : Infinity);
-    let max = Math.max(...strikes, Number.isFinite(gexDexSpot) ? gexDexSpot : -Infinity);
-    if (max === min) max = min + 1;
-    return { min, max };
-  }, [classe, gexDexPoints, gexDexSpot, metrique]);
-  const domaineBarres = domaineGexDex;
+  const sourcesCarte = useMemo(() => {
+    if (vue !== "gexdex") return [];
+    if (classe === "crypto") return construireSourcesCrypto(pointsPortee, spotChaine, nowMs);
+    return cboeExpiry === null ? [] : [{ expiryMs: cboeExpiry, points: gexDexPoints }];
+  }, [vue, classe, pointsPortee, spotChaine, nowMs, cboeExpiry, gexDexPoints]);
+  const carte = useMemo(() => construireCarteExpositions(sourcesCarte, gexDexSpot), [sourcesCarte, gexDexSpot]);
+  const profil = useMemo(() => vue === "gexdex" && classe === "crypto"
+    ? profilExpositionsCrypto(pointsPortee, spotChaine, nowMs) : { points: [] },
+  [vue, classe, pointsPortee, spotChaine, nowMs]);
+  // La détection du zéro reste celle du moteur validé, y compris les plateaux nuls.
+  const flipProfil = useMemo(() => profil.points.length === 0 ? null
+    : profilGexSpot(pointsPortee, profil.points.map((p) => p.spot), nowMs).flipReel,
+  [pointsPortee, profil, nowMs]);
 
   // Redessine le smile à chaque changement de données (fenêtre ouverte, vue smile).
   useEffect(() => {
@@ -474,78 +422,11 @@ export function OptionsWindow() {
     else if (canvas) canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
   }, [open, vue, pointsEcheance, underlying, maxPain, domaine]);
 
-  // Le repère cumulé emploie exactement les mêmes contrats que les tuiles.
-  const flipBarres = useMemo(() => gammaFlip(gexDexPoints), [gexDexPoints]);
-
-  // Redessine l'histogramme GEX/DEX (fenêtre ouverte, vue gexdex).
   useEffect(() => {
-    if (!open || vue !== "gexdex") return;
-    const canvas = barCanvasRef.current;
-    if (canvas && domaineBarres)
-      dessinerBarres(canvas, gexDexPoints, gexDexSpot, metrique, domaineBarres, flipBarres);
-    else if (canvas) canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
-  }, [open, vue, gexDexPoints, gexDexSpot, metrique, domaineBarres, flipBarres]);
-
-  // Redessine le profil GEX(S) (fenêtre ouverte, vue gexdex crypto) — canvas monté
-  // conditionnellement avec VueGexDex, cf. profilCanvasRef.
-  useEffect(() => {
-    if (!open || vue !== "gexdex" || classe !== "crypto") return;
-    const canvas = profilCanvasRef.current;
-    if (!canvas) return;
-    if (profilGex) {
-      dessinerProfilGex(canvas, profilGex.points, spotChaine, profilGex.flipReel);
-    } else {
-      // Profil indisponible (chaîne vide, spot invalide) : effacer, sinon la
-      // dernière courbe reste affichée périmée (revue v2.6, trouvaille no 11).
-      canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
-    }
-  }, [open, vue, classe, profilGex, spotChaine]);
-
-  // Barre survolée : inverse la géométrie avec les MÊMES constantes de marge que le dessin
-  // (BARRES_PAD_L/R, cf. dessinerBarres — leçon HEATMAP_PAD : dessin et survol doivent
-  // partager leur géométrie, sinon l'infobulle dérive des barres). Candidates = barres
-  // réellement tracées (filtrées au seuil 0,5 % ET dans le domaine visible).
-  useEffect(() => {
-    setSurvolBarres(null);
     setSurvolSmile(null);
     setSurvolHeatmap(null);
     setSurvolTermIv(null);
   }, [devise, expiry, portee, cboeTicker]);
-
-  const onSurvolBarres = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (domaineBarres === null || barresSeuil.length === 0) {
-      setSurvolBarres(null);
-      return;
-    }
-    const rect = e.currentTarget.getBoundingClientRect();
-    const plotW = Math.max(1, rect.width - BARRES_PAD_L - BARRES_PAD_R);
-    const cible = pixelVersValeur(domaineBarres, e.clientX - rect.left - BARRES_PAD_L, plotW);
-    let best: GexDexPoint | null = null;
-    let bestDist = Infinity;
-    for (const p of barresSeuil) {
-      if (p.strike < domaineBarres.min || p.strike > domaineBarres.max) continue;
-      const d = Math.abs(p.strike - cible);
-      if (d < bestDist) {
-        bestDist = d;
-        best = p;
-      }
-    }
-    if (!best) {
-      setSurvolBarres(null);
-      return;
-    }
-    const oi = oiParStrikeHisto.get(best.strike);
-    setSurvolBarres({
-      xPix: BARRES_PAD_L + valeurVersPixel(domaineBarres, best.strike, plotW),
-      largeur: rect.width,
-      strike: best.strike,
-      gex: best.gex,
-      dex: best.dex,
-      oiCall: oi?.call ?? null,
-      oiPut: oi?.put ?? null,
-      niveauCrypto: lectureEtf ? niveauCrypto(best.strike, lectureEtf.prixEtf, lectureEtf.prixCrypto) : null,
-    });
-  };
 
   // ─────────────────────────── Heatmap OI strike × échéance ───────────────────────────
 
@@ -734,9 +615,9 @@ export function OptionsWindow() {
 
   return (
     <>
-      <EnTeteFenetre mnemo="OMON" titre="Options" sousTitre="Smile IV · max pain · GEX/DEX · heatmap OI · term IV" />
+      {vue !== "gexdex" && <EnTeteFenetre mnemo="OMON" titre="Options" sousTitre="Smile IV · max pain · GEX/DEX · heatmap OI · term IV" />}
 
-      <div className="px-4 py-3">
+      <div className="min-w-0 px-4 py-3">
         {/* Bascule de vue : Smile ↔ GEX/DEX ↔ Heatmap OI */}
         <div className="mb-3">
           <Segmente
@@ -753,7 +634,7 @@ export function OptionsWindow() {
 
         {/* En GEX/DEX : bascules classe (crypto/actions) + métrique (GEX/DEX) */}
         {vue === "gexdex" && (
-          <div className="mb-3 flex items-center gap-2">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
             <Segmente
               options={[
                 { id: "crypto", label: "Crypto" },
@@ -770,6 +651,7 @@ export function OptionsWindow() {
               actif={metrique}
               onChange={setMetrique}
             />
+            {classe === "crypto" && <Segmente options={DEVISES.map((d) => ({ id: d, label: d }))} actif={devise} onChange={setDevise} />}
           </div>
         )}
 
@@ -807,17 +689,15 @@ export function OptionsWindow() {
 
         {/* Sélecteurs devise + échéance Deribit (smile ET gex/dex crypto) */}
         {(vue === "smile" || (vue === "gexdex" && classe === "crypto")) && (
-          <div className="mb-3 flex items-center gap-2">
-            <Segmente
-              options={DEVISES.map((d) => ({ id: d, label: d }))}
-              actif={devise}
-              onChange={setDevise}
-            />
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            {vue === "smile" ? <Segmente options={DEVISES.map((d) => ({ id: d, label: d }))} actif={devise} onChange={setDevise} />
+              : <Segmente options={[{ id: "toutes", label: "Toutes échéances" }, { id: "selection", label: "Échéance sélectionnée" }] as const} actif={portee} onChange={setPortee} />}
             <Select
               value={expiry ?? ""}
               onChange={(e) => { setExpiry(Number(e.target.value)); if (vue === "gexdex") setPortee("selection"); }}
               aria-label="Échéance"
-              className="flex-1"
+              disabled={vue === "gexdex" && portee === "toutes"}
+              className="min-w-0 flex-1"
             >
               {echeances.length === 0 && <option value="">—</option>}
               {echeances.map((e) => (
@@ -835,16 +715,8 @@ export function OptionsWindow() {
           </div>
         )}
 
-        {vue === "gexdex" && classe === "crypto" && (
-          <div className="mb-3">
-            <Segmente options={[
-              { id: "toutes", label: "Toutes échéances" },
-              { id: "selection", label: "Échéance sélectionnée" },
-            ] as const} actif={portee} onChange={setPortee} />
-          </div>
-        )}
         {(vue !== "gexdex" || classe === "crypto") && (
-          <ResumeMarcheOptions devise={devise} resume={resumeMarche} loading={loading} erreur={erreur}
+          <ResumeMarcheOptions compacte={vue === "gexdex"} devise={devise} resume={resumeMarche} loading={loading} erreur={erreur}
             majTs={majTs} observedAt={observedAt} nowMs={nowMs} onRefresh={actualiser} />
         )}
 
@@ -921,7 +793,9 @@ export function OptionsWindow() {
             majTs={classe === "crypto" ? majTs : cboeMajTs}
             erreur={erreur}
             cboeErreur={cboeErreur}
-            barCanvasRef={barCanvasRef}
+            key={`${classe}:${classe === "crypto" ? devise : cboeTicker}`}
+            carte={carte}
+            profil={profil}
             gexNet={gexNet}
             dexNet={dexNet}
             spotVerdict={spotVerdict}
@@ -930,12 +804,8 @@ export function OptionsWindow() {
             verdict={verdict}
             murs={murs}
             scenariosGamma={scenariosGamma}
-            flipReel={profilGex?.flipReel ?? null}
+            flipReel={flipProfil}
             etf={lectureEtf}
-            profilCanvasRef={profilCanvasRef}
-            survolBarres={survolBarres}
-            onSurvolBarres={onSurvolBarres}
-            onSortieBarres={() => setSurvolBarres(null)}
           />
         )}
 

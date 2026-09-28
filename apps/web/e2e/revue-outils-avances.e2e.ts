@@ -153,6 +153,7 @@ test("OMON rend les trois hypothèses gamma sur la même chaîne Deribit", async
   const fenetre = page.getByRole("complementary", { name: "Options (smile IV, max pain)" });
   await fenetre.getByRole("button", { name: "GEX/DEX", exact: true }).click();
 
+  await fenetre.getByText("Niveaux dérivés et conventions", { exact: true }).click();
   await expect(fenetre.getByText("Sensibilité au signe gamma", { exact: true })).toBeVisible();
   const sensibilite = fenetre.locator("div").filter({ hasText: /^Sensibilité au signe gamma/ }).last();
   for (const libelle of ["Calls + / puts −", "Tous long gamma", "Tous short gamma"]) {
@@ -163,7 +164,7 @@ test("OMON rend les trois hypothèses gamma sur la même chaîne Deribit", async
   }
   await expect(sensibilite).toContainText("mêmes contrats · spot · horloge");
   await expect(fenetre).toContainText("Scénarios de convention, pas des positions dealer observées");
-  await expect(fenetre).toContainText("les variantes tous-long/tous-short sont des hypothèses");
+  await expect(fenetre).toContainText(/les variantes tous-long\/tous-short sont des hypothèses/i);
 });
 
 test("WHALES expose provenance datée, couverture inconnue et direction interne", async ({ page }) => {

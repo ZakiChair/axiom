@@ -37,4 +37,60 @@ describe("résumé options", () => {
     expect(html).not.toContain("$0");
     expect(html).not.toContain('role="table"');
   });
+
+  it("le mode compact replie le contexte, tout en gardant fraîcheur et couverture visibles", () => {
+    const html = renderToStaticMarkup(<ResumeMarcheOptions {...props} compacte />);
+    const visible = html.slice(0, html.indexOf("<details"));
+    const contexte = html.slice(html.indexOf("<details"));
+    expect(visible).toContain("Deribit ETH");
+    expect(visible).toContain("Actualiser les options");
+    expect(visible).toContain("Observé :");
+    expect(visible).toContain("Reçu :");
+    expect(visible).toContain("Calculé :");
+    expect(visible).toContain("Greeks / OI connu");
+    expect(visible).toContain("100.0 %");
+    expect(visible).not.toContain("OI notionnel");
+    expect(contexte).toContain("Contexte de chaîne");
+    expect(contexte).toContain("OI notionnel");
+    expect(contexte).toContain("P/C OI");
+    expect(contexte).toContain("Concentration :");
+    expect(contexte).toContain("Sous 7 jours :");
+    expect(contexte).toContain("Prochaine échéance :");
+    expect(contexte).toContain("Expositions par échéance");
+    expect(contexte).toContain("Options inverses Deribit uniquement");
+    expect(contexte).not.toMatch(/<details[^>]*\sopen(?:[\s=>])/);
+  });
+
+  it("les avertissements partiel, périmé et erreur restent hors contexte replié", () => {
+    const html = renderToStaticMarkup(<ResumeMarcheOptions {...props} compacte
+      resume={{ ...resume, nbOiInconnus: 2, couvertureOiPct: 75 }}
+      nowMs={now + 600_000} erreur="Actualisation indisponible" />);
+    const visible = html.slice(0, html.indexOf("<details"));
+    expect(visible).toContain("Couverture partielle");
+    expect(visible).toContain("OI inconnu pour 2 options");
+    expect(visible).toContain("75.0 %");
+    expect(visible).toContain("Instantané périmé");
+    expect(visible).toContain("Actualisation indisponible");
+    expect(visible).toContain("Dernier instantané conservé");
+  });
+
+  it("compact sans données : état absent visible et aucun volet de chiffres vide", () => {
+    const html = renderToStaticMarkup(<ResumeMarcheOptions {...props} compacte majTs={null} observedAt={null}
+      resume={resumerMarcheOptions([], NaN, now)} erreur="Actualisation indisponible" />);
+    expect(html).toContain("Données indisponibles");
+    expect(html).toContain("heure non fournie");
+    expect(html).not.toContain("Contexte de chaîne");
+    expect(html).not.toContain("$0");
+  });
+
+  it("sans compact, conserve le résumé développé et le seul volet existant des échéances", () => {
+    const html = renderToStaticMarkup(<ResumeMarcheOptions {...props} />);
+    expect(html).toBe(renderToStaticMarkup(<ResumeMarcheOptions {...props} compacte={false} />));
+    const visible = html.slice(0, html.indexOf("<details"));
+    expect(visible).toContain("OI notionnel");
+    expect(visible).toContain("Greeks / OI connu");
+    expect(visible).toContain("Prochaine échéance :");
+    expect(html).not.toContain("Contexte de chaîne");
+    expect(html.match(/<details/g)).toHaveLength(1);
+  });
 });

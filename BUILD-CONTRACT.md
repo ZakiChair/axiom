@@ -1187,3 +1187,27 @@ Revue indépendante favorable ; `pnpm check` réussi (8 139 tests et typage mono
 18 parcours Chromium réussis. Entrée : **1 188 014 / 354 233** octets bruts/gzip
 (Node 24, zlib 1.3.1), plafonds inchangés. Les six nouveaux parcours de fraîcheur
 sont inclus dans `pnpm check:e2e`. Le max pain sans OI positif exploitable est absent.
+
+### Nouvelle représentation GEX / DEX (seconde demande du 28 septembre 2026)
+
+Le propriétaire demande ensuite de changer radicalement les graphiques. La refonte porte
+sur les vues OMON existantes et conserve les sources, modèles et garde-fous ci-dessus.
+La [conception](docs/superpowers/specs/2026-09-28-carte-gex-dex-design.md) décrit la carte
+distance au spot × échéance et le profil de sensibilité de la métrique sélectionnée.
+
+- Les bandes de distance couvrent tous les strikes ; elles sont catégorielles, comme les
+  échéances. Les sommes signées sont conservées, sans filtre des faibles contributions.
+- Les couleurs représentent l'exposition **nette**, avec une échelle commune linéaire et
+  symétrique par métrique et portée. Une compensation peut donner un net nul ; une donnée
+  absente reste distincte d'un zéro calculé. Les détails sont accessibles au clavier.
+- Le profil simule GEX ou DEX sur ±15 % de spot en réutilisant le calcul commun, avec
+  IV, OI, temps et ratio forward/index constants. Son point central rejoint le total
+  affiché. Il reste absent en CBOE, dont les greeks fournis sont figés.
+- Fraîcheur, couverture, périmètre et limites du modèle restent lisibles. La refonte
+  n'ajoute ni dépendance, ni service, ni exécution de trading.
+
+Revue indépendante favorable, `pnpm check` réussi (**8 164 tests**) et **20 parcours
+Chromium** réussis. Budget initial : **1 188 014 / 354 239** octets bruts/gzip
+(Node 24.13.0, zlib 1.3.1), plafonds inchangés. Les deux nouveaux parcours carte/profil
+sont inclus dans `pnpm check:e2e`. Preuves et limites :
+[`docs/revue-2026-09-28-carte-gex-dex.md`](docs/revue-2026-09-28-carte-gex-dex.md).

@@ -18,7 +18,10 @@ async function ouvrir(page: Page, tableau = true) {
   await page.keyboard.press("Enter");
   const fenetre = page.getByRole("complementary", { name: "Options (smile IV, max pain)" });
   await fenetre.getByRole("button", { name: "GEX/DEX", exact: true }).click();
-  if (tableau) await fenetre.getByText(/^Expositions par échéance \(/).click();
+  if (tableau) {
+    await fenetre.getByText("Contexte de chaîne", { exact: true }).click();
+    await fenetre.getByText(/^Expositions par échéance \(/).click();
+  }
   return fenetre;
 }
 test.beforeEach(async ({ page }) => {
@@ -47,9 +50,10 @@ test("BTC → ETH lent : aucun chiffre BTC sous ETH, la chaîne n'attend pas DVO
   await f.getByRole("button", { name: "ETH", exact: true }).click();
   await expect(f.getByRole("region", { name: "Marché options ETH" })).not.toContainText("$1.50M");
   await expect(f.getByRole("region", { name: "Marché options ETH" })).toContainText("Chargement");
-  await expect(f.locator("div.rounded-md").filter({ hasText: /^GEX net/ }).first()).toContainText("—");
+  await expect(f.getByRole("group", { name: "GEX net", exact: true })).toContainText("—");
   libererEth?.();
   await page.clock.runFor(500);
+  await f.getByText("Contexte de chaîne", { exact: true }).click();
   await f.getByText(/^Expositions par échéance \(/).click();
   await expect(f.getByRole("table", { name: "Expositions par échéance" })).toContainText("$60.00K");
 });
@@ -105,7 +109,7 @@ test("08:00 UTC : retire la grosse échéance même quand le réseau ne répond 
   liberer?.();
 });
 
-test("portée unique : net et histogramme passent de toutes échéances à la sélection", async ({ page }) => {
+test("portée unique : net et carte passent de toutes échéances à la sélection", async ({ page }) => {
   await page.route("https://www.deribit.com/api/v2/public/**", async (route) => {
     const u = new URL(route.request().url());
     if (u.pathname.endsWith("get_index_price")) return route.fulfill({ json: { result: { index_price: 100_000 } } });
@@ -117,15 +121,16 @@ test("portée unique : net et histogramme passent de toutes échéances à la s�
     return route.fulfill({ json: { result: { data: [[NOW, 50, 50, 50, 50]] } } });
   });
   const f = await ouvrir(page);
-  const net = f.locator("div.rounded-md").filter({ hasText: /^GEX net/ }).first();
-  await expect(net).toContainText("toutes échéances actives");
+  const net = f.getByRole("group", { name: "GEX net", exact: true });
+  await expect(f.getByRole("region", { name: "Analyse des expositions" })).toContainText("toutes échéances actives");
   await expect(net).toContainText(/\$/);
   await expect(net).not.toContainText("−$");
   await f.getByRole("button", { name: "Échéance sélectionnée", exact: true }).click();
   await expect(net).toContainText("−$");
-  await expect(net).toContainText("échéance sélectionnée");
-  await expect(f.getByText("Gamma exposure ($/1 %) par strike · échéance sélectionnée", { exact: true })).toBeVisible();
-  await expect(f.getByText("Profil GEX net (spot simulé ±15 %) · échéance sélectionnée", { exact: true })).toBeVisible();
+  await expect(f.getByRole("region", { name: "Analyse des expositions" })).toContainText("échéance sélectionnée");
+  await expect(f.getByRole("region", { name: "Carte des expositions nettes" })).toBeVisible();
+  await f.getByRole("button", { name: "Sensibilité au prix", exact: true }).click();
+  await expect(f.getByText("GEX net · échéance sélectionnée", { exact: true })).toBeVisible();
 });
 
 test("premier chargement en échec : expositions indisponibles, aucun faux zéro", async ({ page }) => {
@@ -133,8 +138,8 @@ test("premier chargement en échec : expositions indisponibles, aucun faux zéro
   const resume = f.getByRole("region", { name: "Marché options BTC" });
   await expect(resume).toContainText("Actualisation indisponible");
   await expect(resume.getByRole("table")).toHaveCount(0);
-  const net = f.locator("div.rounded-md").filter({ hasText: /^GEX net/ }).first();
-  const dex = f.locator("div.rounded-md").filter({ hasText: /^DEX net/ }).first();
+  const net = f.getByRole("group", { name: "GEX net", exact: true });
+  const dex = f.getByRole("group", { name: "DEX net", exact: true });
   await expect(net).toContainText("—");
   await expect(dex).toContainText("—");
   await expect(net).not.toContainText("$0");

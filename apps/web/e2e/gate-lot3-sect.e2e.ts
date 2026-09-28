@@ -4,7 +4,7 @@ import { test, expect, type Page } from "@playwright/test";
  * Gate e2e du Lot 3 — fenêtre SECT (Secteurs crypto).
  *
  * POURQUOI ICI : `apps/web` tourne en env vitest NODE (pas de jsdom — BUILD-CONTRACT).
- * Le parcours catalogue Rubriques → table des groupes → drill-down → clic membre → chart
+ * Le parcours menu Fonctions → table des groupes → drill-down → clic membre → chart
  * n'est vérifiable que dans un vrai navigateur.
  *
  * BOUCHON CoinGecko (page.route) : les 3 endpoints du pipeline overview sont servis
@@ -71,9 +71,9 @@ async function poserSymboleTemoin(page: Page) {
   });
 }
 
-/** Ouvre SECT par le canal de découverte no 1 : le catalogue Rubriques de la Toolbar. */
+/** Ouvre SECT par le canal de découverte no 1 : le menu Fonctions de la Toolbar. */
 async function ouvrirSectParLeMenu(page: Page) {
-  await page.getByRole("button", { name: "Rubriques" }).click();
+  await page.getByRole("button", { name: "Fonctions" }).click();
   await page.getByRole("menuitem", { name: /Secteurs crypto/ }).click();
   const fenetre = page.getByRole("complementary", { name: "Secteurs crypto" });
   await expect(fenetre).toBeVisible({ timeout: 15_000 });
@@ -87,13 +87,13 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("le catalogue Rubriques ouvre SECT sur la table des groupes (perfs, cap, couverture)", async ({
+test("le menu Fonctions ouvre SECT sur la table des groupes (perfs, cap, couverture)", async ({
   page,
 }) => {
   await page.goto("/");
   // Attendre le montage AVANT toute interaction : l'écouteur global est posé par un
   // effet React (leçon du gate v2.4).
-  await expect(page.getByRole("banner").getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
 
   const fenetre = await ouvrirSectParLeMenu(page);
 
@@ -110,7 +110,7 @@ test("drill-down puis clic sur un membre coté Binance → le symbole du chart c
   page,
 }) => {
   await page.goto("/");
-  await expect(page.getByRole("banner").getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
   await poserSymboleTemoin(page);
 
   const fenetre = await ouvrirSectParLeMenu(page);

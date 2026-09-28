@@ -32,7 +32,7 @@ test.beforeEach(async ({ page }) => {
 
 test("preset Crowded long : run complet (funding + ΔOI + L/S) en ≤15 s", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Rubriques" }).click();
+  await page.getByRole("button", { name: "Fonctions" }).click();
   await page.getByRole("menuitem", { name: /Screener/ }).click();
   const fenetre = page.getByRole("complementary", { name: "Screener d'actifs" });
   await expect(fenetre).toBeVisible({ timeout: 15_000 });

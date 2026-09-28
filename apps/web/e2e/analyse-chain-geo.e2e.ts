@@ -17,7 +17,7 @@ test("CHAIN garde les quatre chaînes et montre une variation de part distincte 
   await page.route("**/api.llama.fi/overview/**", (route) => route.fulfill({ json: { totalDataChart: [] } }));
   await page.route("**/stablecoins.llama.fi/stablecoincharts/**", (route) => route.fulfill({ json: [] }));
   await page.goto("/");
-  await page.getByRole("banner").getByRole("button", { name: "Recherche", exact: true }).click();
+  await page.keyboard.press("ControlOrMeta+k");
   await page.getByPlaceholder(/^Commande/).fill("CHAIN");
   await page.keyboard.press("Enter");
   const chain = page.getByRole("complementary", { name: "On-chain", exact: true });
@@ -50,7 +50,7 @@ test("CHAIN ne renormalise jamais une cohorte 3/4", async ({ page }) => {
     return route.fulfill({ json: [] });
   });
   await page.goto("/");
-  await page.getByRole("banner").getByRole("button", { name: "Recherche", exact: true }).click();
+  await page.keyboard.press("ControlOrMeta+k");
   await page.getByPlaceholder(/^Commande/).fill("CHAIN");
   await page.keyboard.press("Enter");
   const chain = page.getByRole("complementary", { name: "On-chain", exact: true });

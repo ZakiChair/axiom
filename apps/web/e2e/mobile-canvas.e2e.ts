@@ -20,8 +20,8 @@ test("OMON tactile : lecture du contact conservée après le relâchement", asyn
     return route.fulfill({ json: { result } });
   });
   await page.goto("/");
-  await page.getByRole("banner").getByRole("button", { name: "Rubriques", exact: true }).tap();
-  await page.getByRole("dialog", { name: "Rubriques et outils" }).getByText("OMON", { exact: true }).tap();
+  await page.getByRole("navigation", { name: "Navigation du terminal" }).getByRole("button", { name: "Fonctions", exact: true }).tap();
+  await page.getByRole("menuitem", { name: /^OMON/ }).tap();
   const fenetre = page.getByRole("complementary", { name: "Options (smile IV, max pain)" });
   await fenetre.getByRole("button", { name: "Term IV", exact: true }).tap();
   await expect(fenetre.getByRole("table", { name: "Mouvement attendu par échéance" })).toContainText("50.0 %");

@@ -121,7 +121,7 @@ test("preset Crowded long : lignes, colonnes Δ OI / L-S et enrichissement (fixt
   page,
 }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Rubriques" }).click();
+  await page.getByRole("button", { name: "Fonctions" }).click();
   await page.getByRole("menuitem", { name: /Screener/ }).click();
   const fenetre = page.getByRole("complementary", { name: "Screener d'actifs" });
   await expect(fenetre).toBeVisible({ timeout: 15_000 });

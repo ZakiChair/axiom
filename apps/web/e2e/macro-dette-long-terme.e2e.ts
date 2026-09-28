@@ -9,7 +9,7 @@ const TRIMESTRES = Array.from({ length: 264 }, (_, i) => ({
 const IDS = ["QUSCAM770A", "QXMCAM770A", "QGBCAM770A", "QJPCAM770A", "QCNCAM770A", "QINCAM770A", "QCACAM770A", "QCHCAM770A"];
 
 async function commande(page: Page, texte: string): Promise<void> {
-  await expect(page.getByRole("banner").getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
+  await expect(page.getByRole("banner").getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
   await page.getByPlaceholder(/^Commande/).fill(texte);
   await page.keyboard.press("Enter");

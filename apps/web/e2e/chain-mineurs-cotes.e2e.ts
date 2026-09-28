@@ -125,7 +125,7 @@ async function ouvrirChain(page: Page) {
     localStorage.setItem("axiom:onboarding:v1", JSON.stringify({ completed: true, step: 0 })),
   );
   await page.goto("/");
-  await page.getByRole("button", { name: "Rubriques" }).click();
+  await page.getByRole("button", { name: "Fonctions" }).click();
   await page.getByRole("menuitem", { name: /On-chain/ }).click();
   return page.getByRole("complementary", { name: "On-chain", exact: true });
 }
@@ -205,7 +205,7 @@ test("CHAIN : mineurs cotés — neuf appels au montage, lecture et tri au dépl
   expect(await page.evaluate(() => Date.now())).toBe(Date.UTC(2026, 8, 16, 12, 45));
   await chain.getByTitle("Fermer").click();
   await expect(chain).toHaveCount(0);
-  await page.getByRole("button", { name: "Rubriques" }).click();
+  await page.getByRole("button", { name: "Fonctions" }).click();
   await page.getByRole("menuitem", { name: /On-chain/ }).click();
   await expect(bouton).toHaveAttribute("aria-expanded", "false");
   await expect(chain).toContainText("archive 30 j · J-1 2026-09-15");

@@ -60,7 +60,7 @@ test("CHAIN : flux commun coalescé, ETF partiel, groupes différés et files ET
     return route.fulfill({ json: [{ date: jour, entry_queue: 100, exit_queue: 0, entry_wait: 2, exit_wait: 0, staked_amount: 4000, staked_percent: 30 }] });
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "Rubriques" }).click();
+  await page.getByRole("button", { name: "Fonctions" }).click();
   await page.getByRole("menuitem", { name: /On-chain/ }).click();
   const chain = page.getByRole("complementary", { name: "On-chain", exact: true });
   await expect(chain).toContainText("Charger un groupe à la demande");
@@ -139,7 +139,7 @@ test("CHAIN : le groupe Exchanges réutilise le flux net Coin Metrics de la vue 
   } } }));
   await page.route("**/stablecoincharts/all", route => route.fulfill({ json: [{ date: Date.now() / 1000, totalCirculatingUSD: { USDT: 1000 } }] }));
   await page.goto("/");
-  await page.getByRole("button", { name: "Rubriques" }).click();
+  await page.getByRole("button", { name: "Fonctions" }).click();
   await page.getByRole("menuitem", { name: /On-chain/ }).click();
   const chain = page.getByRole("complementary", { name: "On-chain", exact: true });
   await expect.poll(() => bg.length).toBe(3);
@@ -176,7 +176,7 @@ function lignesEthCm(): unknown[] {
 async function ouvrirChainSansCle(page: Page) {
   await page.addInitScript(() => localStorage.setItem("axiom:onboarding:v1", JSON.stringify({ completed: true, step: 0 })));
   await page.goto("/");
-  await page.getByRole("button", { name: "Rubriques" }).click();
+  await page.getByRole("button", { name: "Fonctions" }).click();
   await page.getByRole("menuitem", { name: /On-chain/ }).click();
   const chain = page.getByRole("complementary", { name: "On-chain", exact: true });
   const section = chain.locator("section", { has: page.locator("h3", { hasText: "Réseau ETH" }) });
@@ -258,11 +258,11 @@ for (const [joursEtf, badgeEtf] of [[4, null], [6, "source en retard"]] as const
       cache("etfFlow", 0, jours * JOUR); // repli ETF BTC (SoSoValue indisponible)
     }, joursEtf);
     await page.goto("/");
-    await page.getByRole("button", { name: "Rubriques" }).click();
+    await page.getByRole("button", { name: "Fonctions" }).click();
     await page.getByRole("menuitem", { name: /On-chain/ }).click();
     const chain = page.getByRole("complementary", { name: "On-chain", exact: true });
     const tuile = (libelle: string) =>
-      chain.locator(".axiom-tuile-stat", { has: page.getByText(libelle, { exact: true }) });
+      chain.locator("div.flex-col", { has: page.locator("span.uppercase", { hasText: new RegExp(`^${libelle}$`) }) }).last();
 
     await expect(tuile("MVRV Z-Score")).toContainText("embargo 7 j");
     await expect(tuile("MVRV Z-Score")).not.toContainText("source en retard");

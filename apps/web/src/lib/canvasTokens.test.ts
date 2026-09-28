@@ -1,6 +1,5 @@
-import { readFileSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
-import { couleurDeclaree, indexSerie, parseHexRgb, POLICE_CANVAS, POLICE_CANVAS_MONO, serieCanvas } from "./canvasTokens";
+import { describe, expect, it } from "vitest";
+import { couleurDeclaree, indexSerie, parseHexRgb, POLICE_CANVAS, POLICE_CANVAS_MONO } from "./canvasTokens";
 
 // serieCanvas/lireTokenCanvas exigent le DOM (vitest node) : on teste leurs
 // briques pures — le cycle modulo des séries et le parseur hex.
@@ -51,19 +50,4 @@ it("POLICE_CANVAS : police unique des axes canvas", () => {
 
 it("POLICE_CANVAS_MONO : variante monospace pour l'alignement de colonnes de chiffres", () => {
   expect(POLICE_CANVAS_MONO).toBe("11px ui-monospace, SFMono-Regular, Menlo, monospace");
-});
-
-it("un token absent conserve la palette dark du CSS, y compris après rebouclage", () => {
-  const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
-  vi.stubGlobal("document", { documentElement: {} });
-  vi.stubGlobal("getComputedStyle", () => ({ getPropertyValue: () => "" }));
-  try {
-    for (let i = 0; i < 12; i++) {
-      const couleur = css.match(new RegExp(`--serie-${i % 6 + 1}:\\s*(#[0-9a-f]{6})`))?.[1];
-      expect(serieCanvas(i)).toBe(couleur);
-    }
-    expect(serieCanvas(0, "#123456")).toBe("#123456");
-  } finally {
-    vi.unstubAllGlobals();
-  }
 });

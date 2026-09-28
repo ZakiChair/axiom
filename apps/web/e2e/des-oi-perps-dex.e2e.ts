@@ -1,4 +1,3 @@
-import { ouvrirOutil } from "./helpers/navigation";
 import { expect, test } from "@playwright/test";
 import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
@@ -62,7 +61,7 @@ test("DES : OI perps DEX chargé au premier dépliage, indépendant de la branch
   );
 
   await page.goto("/");
-  await ouvrirOutil(page, "derivatives");
+  await page.getByRole("button", { name: "Produits dérivés" }).click();
   const des = page.getByRole("complementary", { name: "Produits dérivés" });
   // En dev local, la clé Coinalyze est réputée disponible (repli `.env` du proxy) : branche
   // « avec clé », en échec réseau. La branche hors Binance est couverte plus bas.
@@ -117,7 +116,7 @@ test("DES : OI perps DEX chargé au premier dépliage, indépendant de la branch
   // Fermeture puis réouverture de DES : la section repart repliée, le cache 1 h la sert.
   await des.getByTitle("Fermer").click();
   await expect(des).toHaveCount(0);
-  await ouvrirOutil(page, "derivatives");
+  await page.getByRole("button", { name: "Produits dérivés" }).click();
   await des.getByRole("button", { name: /OI perps DEX/i }).click();
   await expect(des).toContainText("59.4 %");
   await page.waitForTimeout(300);
@@ -137,7 +136,7 @@ test("DES : OI perps DEX dont l'observation a plus de 2 jours, marqué périmé 
   );
 
   await page.goto("/");
-  await ouvrirOutil(page, "derivatives");
+  await page.getByRole("button", { name: "Produits dérivés" }).click();
   const des = page.getByRole("complementary", { name: "Produits dérivés" });
   await des.getByRole("button", { name: /OI perps DEX/i }).click();
   const section = des.locator("section").filter({ has: page.getByRole("button", { name: /OI perps DEX/i }) });

@@ -33,7 +33,7 @@ const formatMilliers = (valeur: number): string =>
   `${new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(valeur)} milliers`;
 
 async function commande(page: Page, texte: string): Promise<void> {
-  await expect(page.getByRole("banner").getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
+  await expect(page.getByRole("banner").getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
   await page.getByPlaceholder(/^Commande/).fill(texte);
   await page.keyboard.press("Enter");

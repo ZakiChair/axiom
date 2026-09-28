@@ -8,7 +8,7 @@ test("DATA vieillit un relevé sans collecte et accepte une observation entre de
   await page.clock.install({ time: t0 });
   await page.clock.pauseAt(t0 + 60_000);
   await page.goto("/");
-  await page.getByRole("button", { name: "Rubriques" }).click();
+  await page.getByRole("button", { name: "Fonctions" }).click();
   await page.getByRole("menuitem", { name: /Sources de données/ }).click();
   const publier = () => page.evaluate(async () => {
     const chemin = "/src/store/qualiteMetriques.ts";

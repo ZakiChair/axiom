@@ -83,14 +83,14 @@ async function attendreMemesDates(page: Page, nombre: number, tolerance = MINUTE
 }
 
 /** Gestes réels sur le canvas : la molette zoome, le glisser déplace l'historique. */
-async function naviguer(page: Page, slot: number, nombre: number, crans = 1): Promise<void> {
+async function naviguer(page: Page, slot: number, nombre: number): Promise<void> {
   const avant = (await lireCharts(page, nombre))[slot]!;
   const box = avant.box;
   expect(box).toBeTruthy();
   const x = box!.x + box!.width * 0.55;
   const y = box!.y + box!.height * 0.55;
   await page.mouse.move(x, y);
-  for (let cran = 0; cran < crans; cran++) await page.mouse.wheel(0, -350);
+  await page.mouse.wheel(0, -350);
   await expect.poll(async () => (await lireCharts(page, nombre))[slot]!.barSpace).toBeGreaterThan(avant.barSpace);
   const apresZoom = (await lireCharts(page, nombre))[slot]!;
   await page.mouse.down();
@@ -143,7 +143,7 @@ test("les unités se synchronisent dans les deux sens sans remplacer les actifs 
   await expect(synchroniserReticule).toHaveAttribute("aria-pressed", "true");
   const timeframes = page.getByRole("combobox", { name: "Timeframe du slot", exact: true });
   await timeframes.first().selectOption("1h");
-  await page.getByRole("combobox", { name: "Unité de temps", exact: true }).selectOption("1m");
+  await page.getByRole("button", { name: "1m", exact: true }).click();
   await page.getByRole("textbox", { name: "Symbole du slot", exact: true }).first().click();
   await synchroniserTf.click();
   await expect(synchroniserTf).toHaveAttribute("aria-pressed", "true");
@@ -154,7 +154,7 @@ test("les unités se synchronisent dans les deux sens sans remplacer les actifs 
     await page.getByRole("button", { name: disposition, exact: true }).last().click();
     await expect(timeframes).toHaveCount(nombre - 1);
     for (let i = 0; i < nombre - 1; i++) await expect(timeframes.nth(i)).toHaveValue("1h");
-    await page.getByRole("combobox", { name: "Unité de temps", exact: true }).selectOption("3M");
+    await page.getByRole("button", { name: "3M", exact: true }).click();
     for (let i = 0; i < nombre - 1; i++) await expect(timeframes.nth(i)).toHaveValue("3M");
     await attendreCharts(page, nombre);
     for (const chart of await lireCharts(page, nombre)) {
@@ -169,7 +169,7 @@ test("les unités se synchronisent dans les deux sens sans remplacer les actifs 
     }
     for (const chart of await lireCharts(page, nombre)) expect(chart?.months.every((mois) => mois === 0)).toBe(true);
     expect(await lireMarcheMaitre(page)).toEqual({ symbol: "BTCUSDT", timeframe: "12M", exchange: "binance" });
-    await page.getByRole("combobox", { name: "Unité de temps", exact: true }).selectOption("1h");
+    await page.getByRole("button", { name: "1h", exact: true }).click();
   }
 
   await synchroniserVue.click();
@@ -236,14 +236,13 @@ test("la navigation trimestrielle conserve les mêmes dates calendaires entre ac
   await page.goto("/");
   await page.getByRole("button", { name: "Deux côte à côte", exact: true }).last().click();
   await page.getByRole("button", { name: "Synchroniser les unités de temps", exact: true }).click();
-  await page.getByRole("combobox", { name: "Unité de temps", exact: true }).selectOption("3M");
+  await page.getByRole("button", { name: "3M", exact: true }).click();
   await attendreCharts(page, 2);
   const initiaux = await lireCharts(page, 2);
   expect(initiaux.map((chart) => chart?.count)).toEqual([72, 60]);
   await page.getByRole("button", { name: "Synchroniser le zoom et le défilement", exact: true }).click();
   const trimestreMax = 92 * 24 * 60 * MINUTE;
-  // Le panneau élargi exige de zoomer avant le glisser pour rester dans les 60 trimestres communs.
-  await naviguer(page, 0, 2, 6);
+  await naviguer(page, 0, 2);
   await attendreMemesDates(page, 2, trimestreMax);
   const apresMaitre = await lireCharts(page, 2);
   expect(apresMaitre[0]!.barSpace).toBeGreaterThan(initiaux[0]!.barSpace);

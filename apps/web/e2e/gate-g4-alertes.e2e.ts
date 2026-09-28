@@ -1,4 +1,3 @@
-import { ouvrirFavoris } from "./helpers/navigation";
 import { test, expect } from "@playwright/test";
 
 /**
@@ -25,7 +24,6 @@ test.beforeEach(async ({ page }) => {
 
 test("créer une alerte prix puis une alerte funding via le panneau Alertes", async ({ page }) => {
   await page.goto("/");
-  await ouvrirFavoris(page);
   const aside = page.locator("aside");
 
   // La section Alertes est repliée par défaut (accordéon SidebarSection).

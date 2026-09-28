@@ -1,4 +1,3 @@
-import { ouvrirFavoris, ouvrirOutil } from "./helpers/navigation";
 import { expect, test } from "@playwright/test";
 import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
@@ -13,7 +12,6 @@ test.beforeEach(async ({ page }) => {
 
 test("alerte déclenchée → dossier daté → brouillon PAPER → validation → clôture EXPY", async ({ page }) => {
   await page.goto("/");
-  await ouvrirFavoris(page);
   const aside = page.locator("aside");
   await aside.getByRole("button", { name: /^Alertes/ }).click();
   await aside.getByPlaceholder("Niveau").fill("100");
@@ -76,7 +74,6 @@ test("alerte déclenchée → dossier daté → brouillon PAPER → validation �
   const trade = await page.evaluate(() => JSON.parse(localStorage.getItem("axiom:expy:v1")!)[0]);
   expect(trade.source).toBe(alerte.source);
   expect(trade.decisionIds).toEqual([dossier.id]);
-  await ouvrirOutil(page, "expy");
   await expect(expy.getByRole("region", { name: "Dossiers de décision" })).toContainText("1 trade(s) EXPY");
   await page.reload();
   const recharge = await page.evaluate(async () => {

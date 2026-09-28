@@ -87,7 +87,7 @@ async function bouchonnerReseau(page: Page): Promise<void> {
 async function ouvrirCorr(page: Page) {
   // Attendre le montage AVANT la frappe : l'écouteur ⌘K est posé par un effet React,
   // une pression trop précoce se perd (leçon du gate v2.4).
-  await expect(page.getByRole("banner").getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
   await page.getByPlaceholder(/^Commande/).fill("CORR");
   await page.keyboard.press("Enter");

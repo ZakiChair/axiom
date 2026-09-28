@@ -26,7 +26,6 @@ import {
   COMMON_EXTENSIONS,
 } from "../chart/fibonacci";
 import { marketStore } from "../store/market";
-import { navigationStore } from "../store/navigation";
 import { useMobileLayout } from "../hooks/useMobileLayout";
 
 /** Props communes aux icônes (trait fin, hérite la couleur du bouton). */
@@ -397,9 +396,7 @@ function FibSettingsPanel({ onClose }: { onClose: () => void }) {
 }
 
 export function DrawingToolbar({ mobileOpen = false, onClose }: { mobileOpen?: boolean; onClose?: () => void }) {
-  const phone = useMobileLayout();
-  const mode = useStore(navigationStore, (s) => s.mode);
-  const mobile = phone || mode === "pages";
+  const mobile = useMobileLayout();
   const tool = useStore(drawingStore, (s) => s.tool);
   // Le VPFR n'a pas de sens sur une série synthétique (volume composé = 0).
   const exchange = useStore(marketStore, (s) => s.exchange);

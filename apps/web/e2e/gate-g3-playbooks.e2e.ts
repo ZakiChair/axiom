@@ -48,7 +48,6 @@ test.beforeEach(async ({ page }) => {
 
 test("le menu Playbooks liste exactement les playbooks attendus", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Options du graphique", exact: true }).click();
   await page.getByRole("button", { name: "Playbooks" }).click();
   // Un menuitem par playbook du catalogue — si ce compte casse, mettre à jour
   // PLAYBOOKS_ATTENDUS ci-dessus (source : data/playbooks.ts).
@@ -61,9 +60,6 @@ test("le menu Playbooks liste exactement les playbooks attendus", async ({ page 
 for (const p of PLAYBOOKS_ATTENDUS) {
   test(`playbook ${p.mnemonique} : 1 clic ouvre ${p.fenetres.join(" + ")}`, async ({ page }) => {
     await page.goto("/");
-    // Ces scénarios vérifient plusieurs outils simultanés : présentation fenêtres explicite.
-    await page.getByRole("button", { name: "Mode fenêtres", exact: true }).click();
-    await page.getByRole("button", { name: "Options du graphique", exact: true }).click();
     await page.getByRole("button", { name: "Playbooks" }).click();
     await page.getByRole("menuitem", { name: p.mnemonique }).click();
     for (const titre of p.fenetres) {

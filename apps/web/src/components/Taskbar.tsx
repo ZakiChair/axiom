@@ -23,7 +23,6 @@ import {
 } from "../store/windowManager";
 import { couleurAffichable } from "../store/compare";
 import { BTN_SECONDAIRE } from "./ui";
-import { navigationStore, navigateTool } from "../store/navigation";
 import { useMobileLayout } from "../hooks/useMobileLayout";
 
 /** Classes d'une pastille selon son état visuel. `opacity-60` en utilitaire d'élément
@@ -45,10 +44,7 @@ function titrePastille(etat: "focus" | "minimisee" | "normale", titre: string): 
 }
 
 export function Taskbar({ onNavigate, feuilleOuverte = false }: { onNavigate?: () => void; feuilleOuverte?: boolean }) {
-  const phone = useMobileLayout();
-  const mode = useStore(navigationStore, (s) => s.mode);
-  const active = useStore(navigationStore, (s) => s.active);
-  const mobile = phone || mode === "pages";
+  const mobile = useMobileLayout();
   const windows = useStore(windowManagerStore, (s) => s.windows);
   // Ordre stable = ordre du registre, filtré aux fenêtres ouvertes.
   const ouvertes = WINDOW_REGISTRY.filter((r) => windows[r.id]?.open);
@@ -64,15 +60,15 @@ export function Taskbar({ onNavigate, feuilleOuverte = false }: { onNavigate?: (
   return (
     <div role="toolbar" aria-label="Fenêtres ouvertes" className="axiom-taskbar flex shrink-0 flex-wrap gap-1 border-t border-border bg-surface px-2 py-1">
       {mobile && <button type="button" className={BTN_SECONDAIRE}
-        onClick={() => naviguer(() => navigateTool("chart"))}>Graphique</button>}
-      {!mobile && <button
+        onClick={() => naviguer(() => windowManagerStore.getState().minimizeAll())}>Graphique</button>}
+      <button
         type="button"
         title="Restaurer toutes les fenêtres réduites"
         onClick={() => naviguer(() => windowManagerStore.getState().restoreAll())}
         className={BTN_SECONDAIRE}
       >
         Tout restaurer
-      </button>}
+      </button>
       {!mobile && <button
         type="button"
         title="Disposer les fenêtres ouvertes en mosaïque"
@@ -84,18 +80,17 @@ export function Taskbar({ onNavigate, feuilleOuverte = false }: { onNavigate?: (
       {ouvertes.map((entry) => {
         const w = windows[entry.id];
         if (!w) return null;
-        const etat = mobile ? (active === entry.id ? "focus" : "normale") : etatPastille(w, zFocus);
+        const etat = etatPastille(w, zFocus);
         return (
           <div key={entry.id} className="axiom-taskbar-item group relative">
             <button
               type="button"
-              aria-current={mobile && active === entry.id ? "page" : undefined}
-              title={mobile || feuilleOuverte ? `Afficher ${entry.title}` : titrePastille(etat, entry.title)}
+              title={feuilleOuverte ? `Afficher ${entry.title}` : titrePastille(etat, entry.title)}
               onClick={() => naviguer(() => {
                 // Une fenêtre focalisée derrière un tiroir doit être révélée,
                 // pas réduite par le toggle habituel de la barre des fenêtres.
                 const store = windowManagerStore.getState();
-                if (mobile) navigateTool(entry.id);
+                if (mobile && feuilleOuverte) store.restoreWindow(entry.id);
                 else store.toggleFocusMinimize(entry.id);
               })}
               className={classesPastille(etat)}

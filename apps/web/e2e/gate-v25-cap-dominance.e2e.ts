@@ -122,7 +122,7 @@ test.describe("avec historique reconstruit", () => {
     await page.goto("/");
     // Attendre le montage AVANT la frappe : l'écouteur ⌘K est posé par un effet React,
     // une pression trop précoce se perd (leçon du gate v2.4).
-    await expect(page.getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
 
     await page.keyboard.press("ControlOrMeta+k");
     await page.getByPlaceholder(/^Commande/).fill("CAP");
@@ -179,7 +179,7 @@ test.describe("avec historique reconstruit", () => {
       return route.fulfill({ json: { data: { points }, status: { error_code: "0" } } });
     });
     await page.goto("/");
-    await expect(page.getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
 
     await page.getByRole("combobox", { name: "Rechercher une paire" }).fill("TOTAL3");
     await page.getByRole("option", { name: /^TOTAL3\b/ }).click();
@@ -190,21 +190,20 @@ test.describe("avec historique reconstruit", () => {
     expect(authorizationPresente).toBe(false);
 
     for (const tf of ["1h", "4h", "1d", "1w", "1M", "3M", "6M", "12M"]) {
-      await expect(page.getByRole("combobox", { name: "Unité de temps", exact: true }).getByRole("option", { name: tf, exact: true })).toBeEnabled();
+      await expect(page.getByRole("button", { name: tf, exact: true })).toBeEnabled();
     }
-    await page.getByRole("combobox", { name: "Unité de temps", exact: true }).selectOption("1h");
+    await page.getByRole("button", { name: "1h", exact: true }).click();
     await expect(page.getByText("CoinMarketCap · 1h", { exact: true })).toBeVisible();
     await expect.poll(() => intervallesGlobaux.has("1h")).toBe(true);
-    await page.getByRole("combobox", { name: "Unité de temps", exact: true }).selectOption("4h");
+    await page.getByRole("button", { name: "4h", exact: true }).click();
     await expect(page.getByText("CoinMarketCap · 4h", { exact: true })).toBeVisible();
     await expect.poll(() => intervallesGlobaux.has("4h")).toBe(true);
     for (const tf of ["1w", "1M", "3M", "6M", "12M", "1d"]) {
-      const unite = page.getByRole("combobox", { name: "Unité de temps", exact: true });
-      await unite.selectOption(tf);
-      await expect(unite).toHaveValue(tf);
+      const bouton = page.getByRole("button", { name: tf, exact: true });
+      await bouton.click();
+      await expect(bouton).toHaveClass(/bg-emerald-500/);
     }
 
-    await page.getByRole("button", { name: "Détails du marché et ratios" }).click();
     await expect(page.getByRole("button", { name: "÷BTC" })).toBeVisible();
     await page.getByRole("button", { name: "÷BTC" }).click();
     await expect(page.getByText("TOTAL3 / BTCUSDT", { exact: true })).toBeVisible();
@@ -222,7 +221,7 @@ test.describe("avec historique reconstruit", () => {
     page,
   }) => {
     await page.goto("/");
-    await expect(page.getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
     await page.keyboard.press("ControlOrMeta+k");
     await page.getByPlaceholder(/^Commande/).fill("CAP");
     await page.keyboard.press("Enter");
@@ -247,7 +246,7 @@ test.describe("avec historique reconstruit", () => {
 test.describe("sans historique local", () => {
   test("propose de reconstruire les 365 jours en annonçant la durée", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
     await page.keyboard.press("ControlOrMeta+k");
     await page.getByPlaceholder(/^Commande/).fill("CAP");
     await page.keyboard.press("Enter");

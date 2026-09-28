@@ -42,7 +42,7 @@ test("SCEN garde le mode simple et refuse un modèle multifacteur incomplet", as
     return [t, "100", "102", "99", String(100 + (i % 6)), "10", t + 86_399_999, "1000", 5, "5", "500"];
   }) }));
   await page.goto("/");
-  await page.getByRole("button", { name: "Rubriques" }).click();
+  await page.getByRole("button", { name: "Fonctions" }).click();
   await page.getByRole("menuitem", { name: /Stress-test/ }).click();
   const fenetre = page.locator('[data-window-id="scen"]');
   await expect(fenetre.getByRole("button", { name: "1 facteur" })).toBeVisible();
@@ -71,7 +71,7 @@ test("FUNDX calcule le carry avec les deux carnets, puis bloque des cotations p�
   await page.goto("/");
   await page.clock.pauseAt(INSTANT_CARRY);
   expect(await page.evaluate(() => Date.now())).toBe(INSTANT_CARRY);
-  await page.getByRole("button", { name: "Rubriques" }).click();
+  await page.getByRole("button", { name: "Fonctions" }).click();
   await page.getByRole("menuitem", { name: /Funding cross-exchange/ }).click();
   const fenetre = page.locator('[data-window-id="fundingMatrix"]');
   await fenetre.getByRole("button", { name: "Historique 7/30/90 j" }).click();
@@ -103,7 +103,7 @@ test("FUNDX expire une source perp âgée avant la réception spot", async ({ pa
   await page.goto("/");
   await page.clock.pauseAt(INSTANT_CARRY);
   expect(await page.evaluate(() => Date.now())).toBe(INSTANT_CARRY);
-  await page.getByRole("button", { name: "Rubriques" }).click();
+  await page.getByRole("button", { name: "Fonctions" }).click();
   await page.getByRole("menuitem", { name: /Funding cross-exchange/ }).click();
   const fenetre = page.locator('[data-window-id="fundingMatrix"]');
   await fenetre.getByRole("button", { name: "Carry spot/perp" }).click();

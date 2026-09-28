@@ -1,4 +1,3 @@
-import { ouvrirOptionsGraphique } from "./helpers/navigation";
 import { expect, test, type Page } from "@playwright/test";
 import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
@@ -13,7 +12,6 @@ test("les deux catalogues chargent au premier clic et Échap rend le focus au d�
     if (/\/(IndicatorMenu|StrategyMenu)\.tsx/.test(request.url())) modules.push(request.url());
   });
   await page.goto("/");
-  await ouvrirOptionsGraphique(page);
   const indicateurs = page.getByRole("button", { name: /^Indicateurs/ });
   const strategies = page.getByRole("button", { name: /^Stratégies/ });
   await expect(indicateurs).toBeVisible();
@@ -40,7 +38,6 @@ test("les réglages Footprint restent chargés seulement à l'ouverture au clavi
     if (request.url().includes("FootprintSettingsPanel.tsx")) modules.push(request.url());
   });
   await page.goto("/");
-  await ouvrirOptionsGraphique(page);
   const orderflow = page.getByRole("button", { name: "Orderflow" });
   await expect(orderflow).toBeVisible();
   expect(modules).toEqual([]);
@@ -52,14 +49,13 @@ test("les réglages Footprint restent chargés seulement à l'ouverture au clavi
 
 test("favoris, récents et recherche se cumulent ; un récent suit un ajout effectif", async ({ page }, testInfo) => {
   await page.goto("/");
-  await ouvrirOptionsGraphique(page);
   await page.getByRole("button", { name: /^Indicateurs/ }).click();
   const recherche = page.getByPlaceholder(/Rechercher… \(CVD/);
   await recherche.fill("EMA");
   await page.getByRole("button", { name: "Ajouter EMA aux favoris" }).focus();
   await page.keyboard.press("Enter");
   await recherche.fill("");
-  await page.getByRole("dialog", { name: "Options du graphique", exact: true }).getByRole("button", { name: "Favoris", exact: true }).focus();
+  await page.getByRole("button", { name: "Favoris", exact: true }).focus();
   await page.keyboard.press("Space");
   await expect(page.getByRole("button", { name: "Ajouter EMA", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Ajouter RSI", exact: true })).toHaveCount(0);
@@ -88,7 +84,6 @@ test("quota des préférences : favori gardé en mémoire puis réessayé sans n
     };
   });
   await page.goto("/");
-  await ouvrirOptionsGraphique(page);
   await page.getByRole("button", { name: /^Indicateurs/ }).click();
   await page.getByPlaceholder(/Rechercher… \(CVD/).fill("EMA");
   await page.getByRole("button", { name: "Ajouter EMA aux favoris" }).click();
@@ -100,7 +95,6 @@ test("quota des préférences : favori gardé en mémoire puis réessayé sans n
   await expect(erreur).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("axiom:indicatorPreferences:v1") ?? "{}").favoris)).toEqual(["ema"]);
   await page.reload();
-  await ouvrirOptionsGraphique(page);
   await page.getByRole("button", { name: /^Indicateurs/ }).click();
   await page.getByPlaceholder(/Rechercher… \(CVD/).fill("EMA");
   await expect(page.getByRole("button", { name: "Retirer EMA des favoris" })).toBeVisible();
@@ -108,7 +102,6 @@ test("quota des préférences : favori gardé en mémoire puis réessayé sans n
 
 test("utilisables ici cache l'indicateur indisponible sans effacer sa raison ni son favori", async ({ page }) => {
   await page.goto("/");
-  await ouvrirOptionsGraphique(page);
   await page.evaluate(async () => {
     const { marketStore } = await import("/src/store/market.ts");
     marketStore.getState().setMarket({ exchange: "synthetic", symbol: "BTCUSDT", timeframe: "1h" });
@@ -119,7 +112,7 @@ test("utilisables ici cache l'indicateur indisponible sans effacer sa raison ni 
   await expect(volume).toBeDisabled();
   await expect(volume).toHaveAttribute("title", "Volume non défini sur une série synthétique");
   await page.getByRole("button", { name: "Ajouter Volume aux favoris" }).click();
-  await page.getByRole("dialog", { name: "Options du graphique", exact: true }).getByRole("button", { name: "Favoris", exact: true }).click();
+  await page.getByRole("button", { name: "Favoris", exact: true }).click();
   await page.getByRole("button", { name: "Utilisables ici" }).click();
   await expect(volume).toHaveCount(0);
   await page.getByRole("button", { name: "Utilisables ici" }).click();
@@ -128,7 +121,6 @@ test("utilisables ici cache l'indicateur indisponible sans effacer sa raison ni 
 });
 
 async function ouvrirModule(page: Page, module: "IndicatorMenu" | "StrategyMenu" | "FootprintSettingsPanel") {
-  await ouvrirOptionsGraphique(page);
   if (module === "IndicatorMenu") await page.getByRole("button", { name: /^Indicateurs/ }).click();
   else if (module === "StrategyMenu") await page.getByRole("button", { name: /^Stratégies/ }).click();
   else {
@@ -145,7 +137,6 @@ for (const module of ["IndicatorMenu", "StrategyMenu", "FootprintSettingsPanel"]
       return appels === 1 ? route.fulfill({ status: 503, body: "indisponible" }) : route.continue();
     });
     await page.goto("/");
-  await ouvrirOptionsGraphique(page);
     await ouvrirModule(page, module);
     const erreur = page.getByRole("alert").filter({ hasText: module === "FootprintSettingsPanel" ? "Réglages Footprint indisponibles" : "Chargement impossible" });
     await expect(erreur).toBeVisible();

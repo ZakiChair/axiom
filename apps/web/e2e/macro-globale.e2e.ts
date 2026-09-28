@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
 async function commande(page: Page, texte: string) {
-  await expect(page.getByRole("banner").getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
+  await expect(page.getByRole("banner").getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
   await page.getByPlaceholder(/^Commande/).fill(texte);
   await page.keyboard.press("Enter");

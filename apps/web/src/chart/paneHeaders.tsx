@@ -198,7 +198,7 @@ export class PaneHeaders {
     // ne pas la chevaucher. La PASTILLE de couleur y est reprise pour relier l'en-tête à
     // sa courbe, et le ⚙ ouvre les réglages sans passer par le menu latéral.
     el.className =
-      "axiom-chart-pane-header pointer-events-auto absolute z-10 flex items-center gap-1.5 bg-bg px-1.5 py-0.5 text-xs text-text-dim";
+      "pointer-events-auto absolute z-10 flex items-center gap-1.5 rounded bg-surface/90 px-1.5 py-0.5 text-[10px] text-text-dim shadow-sm";
 
     const poignee = document.createElement("span");
     poignee.textContent = "⠿";

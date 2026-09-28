@@ -104,7 +104,7 @@ export function TableTriable<L>({
             aria-disabled={surClicLigne !== undefined && !active ? true : undefined}
             onClick={active ? () => surClicLigne(l) : undefined}
             onKeyDown={active ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); surClicLigne(l); } } : undefined}
-            className={`grid items-center gap-2 border-b border-border/50 px-3 py-2 text-xs last:border-b-0 ${
+            className={`grid items-center gap-2 border-b border-border/50 px-3 py-1.5 text-[11px] last:border-b-0 ${
               active ? "cursor-pointer outline-none hover:bg-surface focus-visible:bg-surface focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent" : surClicLigne !== undefined ? "opacity-60" : ""
             }`}
             style={{ gridTemplateColumns: grille }}
@@ -125,7 +125,7 @@ export function TableTriable<L>({
       style={{ "--axiom-table-width": `${colonnes.reduce((total, c) => total + (c.largeur?.endsWith("px") ? Number.parseFloat(c.largeur) : 104), 24 + Math.max(0, colonnes.length - 1) * 8)}px`, "--axiom-table-height": maxHauteur ?? "none" } as CSSProperties}>
       <div
         role={ariaLabel ? "row" : undefined}
-        className="axiom-table-entete axiom-table-contenu grid items-center gap-2 border-b border-border bg-surface px-3 py-2"
+        className="axiom-table-entete axiom-table-contenu grid items-center gap-2 border-b border-border px-3 py-1.5"
         style={{ gridTemplateColumns: grille }}
       >
         {colonnes.map((c) =>
@@ -138,7 +138,7 @@ export function TableTriable<L>({
               <button
                 type="button"
                 onClick={() => onTri(basculerTri(tri, c.id))}
-                className={`flex w-full items-center gap-0.5 text-xs font-medium text-text-dim transition hover:text-text ${alignementBouton(c)}`}
+                className={`flex w-full items-center gap-0.5 text-[10px] uppercase tracking-wide text-text-dim transition hover:text-text ${alignementBouton(c)}`}
               >
                 {c.label}
                 {tri !== null && tri.colonne === c.id && <span aria-hidden="true">{tri.dir === -1 ? "▾" : "▴"}</span>}
@@ -148,7 +148,7 @@ export function TableTriable<L>({
             <span
               key={c.id}
               role={ariaLabel ? "columnheader" : undefined}
-              className={`text-xs font-medium text-text-dim ${alignementSpan(c)}`}
+              className={`text-[10px] uppercase tracking-wide text-text-dim ${alignementSpan(c)}`}
             >
               {c.label}
             </span>

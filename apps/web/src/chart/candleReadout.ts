@@ -39,8 +39,8 @@ export class CandleReadout {
     this.box.setAttribute("data-candle-readout", "");
     this.box.style.cssText =
       "position:absolute;pointer-events:none;z-index:29;display:none;white-space:nowrap;" +
-      "font-family:ui-sans-serif,system-ui,sans-serif;font-size:12px;line-height:1.45;padding:6px 8px;" +
-      "border-radius:6px;background:var(--surface);" +
+      "font-family:ui-monospace,monospace;font-size:10px;line-height:1.35;padding:4px 6px;" +
+      "border-radius:4px;background:color-mix(in srgb, var(--surface) 92%, transparent);" +
       "border:1px solid var(--border);color:var(--text);box-shadow:0 2px 8px rgba(0,0,0,0.25);";
     container.appendChild(this.box);
   }

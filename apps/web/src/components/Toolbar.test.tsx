@@ -47,8 +47,7 @@ const windowStub = {
 (globalThis as unknown as { window: unknown }).window = windowStub;
 
 const { exporterSauvegarde } = await import("../store/persist");
-await import("./Toolbar");
-const { SECTIONS_FONCTIONS, entreeNeuve } = await import("./ToolbarOptions"); // enregistre aussi les commandes ⌘K
+const { SECTIONS_FONCTIONS, entreeNeuve } = await import("./Toolbar"); // enregistre aussi les commandes ⌘K
 const { construireRegistre } = await import("../commands/registry");
 const { cryptoquantUiStore, ENTREES_CQ } = await import("../store/cryptoquantUi");
 const { windowManagerStore } = await import("../store/windowManager");
@@ -67,8 +66,8 @@ describe("export de sauvegarde sans credential", () => {
     confirmSpy.mockReturnValue(true);
   });
 
-  it("exporte directement, sans confirmation devenue inutile", async () => {
-    await commandeExport().action();
+  it("exporte directement, sans confirmation devenue inutile", () => {
+    commandeExport().action();
     expect(exporterSauvegarde).toHaveBeenCalledTimes(1);
     expect(confirmSpy).not.toHaveBeenCalled();
   });

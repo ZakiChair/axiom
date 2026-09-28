@@ -2,7 +2,7 @@
  * SidebarSection — en-tête uniforme des panneaux de la colonne droite, repliable.
  *
  * Harmonise le look des sections (Watchlist, Comparer, Dérivés, Masse monétaire) :
- * même titre, même padding, même séparateur, et un
+ * même eyebrow (libellé MAJUSCULE espacé), même padding, même séparateur, et un
  * emplacement d'action optionnel à droite (badge, bouton refresh, …).
  *
  * REPLIABLE (accordéon) : avec `collapsible`, l'en-tête devient cliquable (chevron
@@ -23,7 +23,7 @@ import { useStore } from "zustand";
 import { uiSectionsStore } from "../store/ui-sections";
 
 interface SidebarSectionProps {
-  /** Titre de section. */
+  /** Titre affiché en eyebrow (MAJUSCULES). */
   title: string;
   /** Contenu optionnel aligné à droite de l'en-tête (badge, bouton…). Caché si replié. */
   action?: ReactNode;
@@ -70,7 +70,7 @@ export function SidebarSection({
           {isOpen ? "▼" : "▶"}
         </span>
       )}
-      <span className="text-xs font-semibold text-text">
+      <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
         {title}
       </span>
       {badge != null && (

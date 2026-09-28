@@ -12,7 +12,7 @@ function chaine(devise: string, oi = 10, date = "02OCT26") {
 }
 async function ouvrir(page: Page, tableau = true) {
   await page.goto("/");
-  await expect(page.getByRole("banner").getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
+  await expect(page.getByRole("banner").getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
   await page.getByPlaceholder(/^Commande/).fill("OMON");
   await page.keyboard.press("Enter");

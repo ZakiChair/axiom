@@ -1,7 +1,7 @@
 /**
- * SymbolBanner — identité et statistiques en flux au-dessus du viewport graphique.
- * Prix = dernière clôture chargée ; variation fournie par la source ; haut/bas/volume
- * limités aux bougies chargées ouvertes dans les dernières 24 h.
+ * SymbolBanner — bandeau d'en-tête du graphe (monté DANS le conteneur du chart,
+ * en surimpression haut-gauche). Affiche : dernier prix, variation 24 h, haut/bas
+ * 24 h, volume 24 h et le COMPTE À REBOURS de clôture de la bougie courante.
  *
  * Contrat de perf (comme Watchlist) : AUCUN re-render React sur tick. Le symbole et
  * le timeframe (basse fréquence) viennent d'un sélecteur Zustand (re-render admis à
@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { Candle, ExchangeId, Timeframe, Unsubscribe } from "@axiom/types";
-import { marketStore, type MarketStore } from "../store/market";
+import { marketStore } from "../store/market";
 import { syntheticsStore } from "../store/synthetics";
 import { denominateurStore } from "../store/denominateur";
 import {
@@ -326,12 +326,13 @@ function BoutonsRatio({
   );
 }
 
-export function SymbolBanner({ store = marketStore, slot = 0, onChangeSymbol, replay = false }: { store?: MarketStore; slot?: number; onChangeSymbol?: (symbol: string) => void; replay?: boolean }) {
+export function SymbolBanner() {
+  const mobile = useMobileLayout();
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const exchange = useStore(store, (s) => s.exchange);
-  const symbol = useStore(store, (s) => s.symbol);
-  const timeframe = useStore(store, (s) => s.timeframe);
-  const statut = useStore(store, (s) => s.dataLoad.status);
+  const exchange = useStore(marketStore, (s) => s.exchange);
+  const symbol = useStore(marketStore, (s) => s.symbol);
+  const timeframe = useStore(marketStore, (s) => s.timeframe);
+  useStore(marketStore, (s) => s.dataLoad.status);
   const syntheticSpec = exchange === "synthetic" ? parseSyntheticSymbol(symbol) : null;
   // Ratio ÷ marché ou devise : « BTCUSDT ÷Or », « BTCUSDT en CHF » ; sinon le libellé SYN.
   const ratioTradfi = syntheticSpec?.exB === "twelvedata" ? estRatio(symbol, exchange) : null;
@@ -382,7 +383,7 @@ export function SymbolBanner({ store = marketStore, slot = 0, onChangeSymbol, re
 
     /** Recalcule prix + H/L/volume 24 h depuis le buffer de bougies (écritures DOM directes). */
     const updateFromCandles = (): void => {
-      const candles = store.getState().candles;
+      const candles = marketStore.getState().candles;
       const last = candles.at(-1);
       if (last === undefined) {
         if (priceRef.current) priceRef.current.textContent = "—";
@@ -395,13 +396,13 @@ export function SymbolBanner({ store = marketStore, slot = 0, onChangeSymbol, re
       const stats = rolling24h(candles, Date.now());
       if (highRef.current) highRef.current.textContent = stats ? formatPrice(stats.high) : "—";
       if (lowRef.current) lowRef.current.textContent = stats ? formatPrice(stats.low) : "—";
-      if (volRef.current) volRef.current.textContent = exchange === "synthetic" ? "Non applicable" : stats ? formatCompact(stats.volume) : "—";
+      if (volRef.current) volRef.current.textContent = stats ? formatCompact(stats.volume) : "—";
       applyColor();
     };
 
     /** Recalcule le compte à rebours de clôture de la bougie courante. */
     const updateCountdown = (): void => {
-      const last = store.getState().candles.at(-1);
+      const last = marketStore.getState().candles.at(-1);
       if (countdownRef.current) {
         countdownRef.current.textContent = last
           ? formatCountdown(nextCloseTs(last.time, timeframe) - Date.now())
@@ -420,14 +421,14 @@ export function SymbolBanner({ store = marketStore, slot = 0, onChangeSymbol, re
     // Variation 24 h : ticker existant (routé par source dans data/ticker.ts).
     // Une série synthétique n'a pas de ticker natif ; sa variation viendra d'une
     // dérivation dédiée plus tard, pas du flux d'une jambe arbitraire.
-    const unsubTicker = replay ? () => {} : subscribeSymbolBannerTicker(exchange, symbol, (u) => {
+    const unsubTicker = subscribeSymbolBannerTicker(exchange, symbol, (u) => {
       changePct = u.changePercent;
       if (changeRef.current) changeRef.current.textContent = formatPct(u.changePercent);
       applyColor();
     });
 
     // Prix / H-L / volume : chaque tick du buffer marché (haute fréquence, DOM impératif).
-    const unsubMarket = store.subscribe(updateFromCandles);
+    const unsubMarket = marketStore.subscribe(updateFromCandles);
 
     // Compte à rebours : 1 Hz.
     const timer = window.setInterval(updateCountdown, 1000);
@@ -439,41 +440,44 @@ export function SymbolBanner({ store = marketStore, slot = 0, onChangeSymbol, re
     };
   // `exchange` est une partie de l'identité : un changement de source à symbole égal doit
   // aussi remplacer l'abonnement ticker, sinon la variation 24 h resterait celle de l'ancienne.
-  }, [store, exchange, symbol, timeframe, replay]);
+  }, [exchange, symbol, timeframe]);
 
   return (
-    <header data-chart-banner className="axiom-chart-banner" aria-label={`Marché vue ${slot + 1}`}>
-      <div className="axiom-chart-market">
-        <div className="axiom-chart-identity">
-          {onChangeSymbol ? <input aria-label="Symbole du slot" defaultValue={symbol} key={symbol}
-            onKeyDown={(e) => { if (e.key === "Enter") onChangeSymbol(e.currentTarget.value.trim()); }}
-            onBlur={(e) => { if (e.currentTarget.value.trim() !== symbol) onChangeSymbol(e.currentTarget.value.trim()); }} />
-            : <strong title={bannerSymbol}>{bannerSymbol}</strong>}
-          <span className="axiom-chart-source" aria-label="Source automatique">{statut === "ready" ? sourceCapitalisation ?? `Auto · ${exchange === "twelvedata" ? "Twelve Data" : exchange === "okx" || exchange === "mexc" ? exchange.toUpperCase() : exchange[0]!.toUpperCase() + exchange.slice(1)}` : statut === "error" ? "Source indisponible" : "Chargement…"}</span>
-        </div>
-        <div className="axiom-chart-quote">
-          <span ref={priceRef} className="axiom-chart-price" title="Dernière clôture chargée">—</span>
-          {!replay && exchange !== "synthetic" && <span className="axiom-chart-change">
-            <span>{exchange === "twelvedata" ? "Variation source" : "Variation 24 h source"}</span> <span ref={changeRef}>—</span>
-          </span>}
-        </div>
-        <button type="button" aria-expanded={detailsOpen} aria-controls={`chart-banner-details-${slot}`}
-          aria-label="Détails du marché et ratios" onClick={() => setDetailsOpen((open) => !open)}>
-          Détails {detailsOpen ? "▴" : "▾"}
-        </button>
+    <div data-chart-banner className={`pointer-events-none absolute top-2 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-border bg-surface/80 text-xs tabular-nums text-text-dim backdrop-blur-sm ${mobile ? "left-1 right-1 px-2" : "left-2 px-2.5 py-1"}`}>
+      <span title={bannerSymbol} className={`font-semibold text-text ${mobile ? "min-w-0 max-w-[28%] truncate" : ""}`}>{bannerSymbol}</span>
+      <span className="text-text-dim">{timeframe}</span>
+      <span ref={priceRef} className="min-w-0 font-semibold text-text">
+        —
+      </span>
+      <span ref={changeRef} className={mobile && !detailsOpen ? "hidden min-[390px]:inline" : ""}>—</span>
+      {mobile && <button type="button" aria-expanded={detailsOpen} aria-controls="chart-banner-details"
+        aria-label="Détails du marché et ratios"
+        onClick={() => setDetailsOpen((open) => !open)}
+        className="pointer-events-auto ml-auto min-h-11 shrink-0 rounded px-2 text-text"
+      >Détails {detailsOpen ? "▴" : "▾"}</button>}
+      <div id="chart-banner-details" className={mobile
+        ? `${detailsOpen ? "flex" : "hidden"} pointer-events-auto max-h-[35dvh] w-full flex-wrap items-center gap-x-3 gap-y-2 overflow-y-auto overscroll-contain border-t border-border py-2`
+        : "contents"}>
+      {sourceCapitalisation !== null && (
+        <span className="text-text-dim">{sourceCapitalisation}</span>
+      )}
+      {hasClosedTradfiLeg && (
+        <span className="text-text-dim">jambe tradfi : dernier close (marché fermé)</span>
+      )}
+      <BoutonsRatio exchange={exchange} symbol={symbol} timeframe={timeframe} />
+      <span>
+        H <span ref={highRef} className="text-text">—</span>
+      </span>
+      <span>
+        L <span ref={lowRef} className="text-text">—</span>
+      </span>
+      <span>
+        Vol <span ref={volRef} className="text-text">—</span>
+      </span>
+      <span>
+        ⏱ <span ref={countdownRef} className="text-text">—</span>
+      </span>
       </div>
-      <div id={`chart-banner-details-${slot}`} hidden={!detailsOpen} className="axiom-chart-statistics">
-        <p>Bougies chargées · ouvertures des dernières 24 h <span>· couverture partielle possible</span></p>
-        <dl>
-          <div><dt>Plus haut</dt><dd ref={highRef}>—</dd></div>
-          <div><dt>Plus bas</dt><dd ref={lowRef}>—</dd></div>
-          <div><dt>{exchange === "synthetic" ? "Volume" : "Volume · unités de base"}</dt><dd ref={volRef}>—</dd></div>
-          {!replay && <div><dt>Clôture dans</dt><dd ref={countdownRef}>—</dd></div>}
-        </dl>
-        <p>Prix : dernière clôture chargée. Une unité longue peut ne contenir aucune ouverture dans cette période.</p>
-        {hasClosedTradfiLeg && <p>Jambe tradfi : dernier close (marché fermé).</p>}
-        {slot === 0 && <div className="axiom-chart-ratios"><BoutonsRatio exchange={exchange} symbol={symbol} timeframe={timeframe} /></div>}
-      </div>
-    </header>
+    </div>
   );
 }

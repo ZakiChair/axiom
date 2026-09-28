@@ -148,7 +148,7 @@ describe("section DES « Flux takers toutes places »", () => {
   it("tuiles nominales : ratio, part acheteurs, Δ taker, volumes, VWAP, courbe, archive et limites", () => {
     const html = rendre();
     expect(html).toContain("Ratio taker achat/vente");
-    expect(html).toContain('text-down">0.98<');
+    expect(html).toContain('text-sm font-medium text-down">0.98<');
     expect(html).toContain("J-1 · CryptoQuant");
     expect(html).toContain("acheteurs 49.5 % · 28 j archivés : min 0.98 · méd. 1.00 · max 1.00 · 1ᵉʳ plus bas");
     expect(html).toContain("−$118.80M");
@@ -184,8 +184,8 @@ describe("section DES « Flux takers toutes places »", () => {
     const html = rendre({
       chargements: { "taker:spot:btc": chargement("taker:spot:btc", { archive: haussier, diagnostic: DIAG_SPOT_BTC }) },
     });
-    expect(html).toContain('text-up">1.05<');
-    expect(html).not.toContain('text-down">1.05<');
+    expect(html).toContain('text-sm font-medium text-up">1.05<');
+    expect(html).not.toContain('text-sm font-medium text-down">1.05<');
   });
 
   it("J-1 non publié : en attente, jamais compté en trou ; perdus définitifs", () => {

@@ -1,4 +1,3 @@
-import { ouvrirFavoris } from "./helpers/navigation";
 import { test, expect, type Page } from "@playwright/test";
 import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
@@ -64,17 +63,17 @@ test("recherche unique : crypto, tradfi, tokenisé et perp gardent leur identit�
     await choisir(page, symbol);
     await expect.poll(() => marche(page)).toMatchObject({ symbol, exchange, prix, status: "ready" });
   }
-  await page.getByRole("main").getByRole("button", { name: "Deux empilés", exact: true }).click();
+  await page.getByRole("button", { name: "Deux empilés", exact: true }).last().click();
   await expect(page.getByRole("combobox", { name: "Source du slot", exact: true })).toHaveCount(0);
   await page.getByRole("textbox", { name: "Symbole du slot" }).fill("SPY");
   await page.getByRole("textbox", { name: "Symbole du slot" }).press("Enter");
-  await expect(page.getByRole("region", { name: "Graphique vue 2", exact: true }).getByLabel("Source automatique", { exact: true })).toContainText(/twelvedata|Twelve Data/i);
+  await expect(page.getByTitle("Source sélectionnée automatiquement", { exact: true })).toContainText(/twelvedata|Twelve Data/i);
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("axiom:chartLayout:v1") ?? "{}").slots?.[0])).toMatchObject({ symbol: "SPY", exchange: "twelvedata" });
-  await page.getByRole("main").getByRole("button", { name: "Deux côte à côte", exact: true }).click();
+  await page.getByRole("button", { name: "Deux côte à côte", exact: true }).last().click();
   await expect(page.getByRole("textbox", { name: "Symbole du slot" })).toHaveValue("SPY");
   await page.reload();
   await expect(page.getByRole("textbox", { name: "Symbole du slot" })).toHaveValue("SPY");
-  await expect(page.getByRole("region", { name: "Graphique vue 2", exact: true }).getByLabel("Source automatique", { exact: true })).toContainText(/twelvedata|Twelve Data/i);
+  await expect(page.getByTitle("Source sélectionnée automatiquement", { exact: true })).toContainText("twelvedata");
   await page.screenshot({ path: "/tmp/axiom-sources-auto.png", fullPage: true });
 
 });
@@ -91,7 +90,6 @@ test("échec historique Binance : repli sur Bybit sans changer actif ni afficher
     const importer = new Function("return import('/src/store/watchlist.ts')") as () => Promise<{ watchlistStore: { getState: () => { addGroup: (name: string) => void } } }>;
     (await importer()).watchlistStore.getState().addGroup("Autres");
   });
-  await ouvrirFavoris(page);
   await page.getByRole("button", { name: "Principal", exact: true }).click();
   await expect(page.getByRole("button", { name: "BTCUSDT", exact: true }).last().locator("..")).toContainText("61,444.00");
   const sourceWatchlist = () => page.evaluate(async () => {
@@ -133,12 +131,7 @@ test("construction SYN lente : une navigation plus récente reste prioritaire", 
     await attente;
     await route.fulfill({ json: { symbols: [{ symbol: "ETHUSDT", status: "TRADING" }] } });
   });
-  await page.addInitScript(() => localStorage.setItem("axiom:watchlist:v1", JSON.stringify({
-    groups: [{ id: "principal", name: "Principal", symbols: ["BTCUSDT", "SPY"] }],
-    activeGroupId: "principal", sources: {},
-  })));
   await page.goto("/");
-  await ouvrirFavoris(page);
   await page.getByRole("button", { name: "SYN", exact: true }).click();
   await page.getByRole("button", { name: "Charger", exact: true }).click();
   await page.getByRole("button", { name: "SPY", exact: true }).click();
@@ -152,7 +145,6 @@ test("comparaison : refuse un actif hors du marché affiché et garde les ajouts
   await fixtures(page); await page.goto("/");
   await expect.poll(() => marche(page)).toMatchObject({ exchange: "binance", status: "ready" });
   expect(await profondeurs(page, "BTCUSDT")).toEqual({ binance: PROFONDEUR_EGALE, bybit: PROFONDEUR_EGALE });
-  await ouvrirFavoris(page);
   await page.getByRole("button", { name: /Comparer \(base 100\)/i }).click();
   const input = page.getByRole("combobox", { name: "Ajouter à comparer", exact: true });
   await input.fill("SPY"); await input.press("Enter");
@@ -245,7 +237,6 @@ test("CARDS : ajout en minuscules, prix confirmé OKX et provenance conservée a
   await fixturesCards(page);
   await page.goto("/");
   await expect.poll(() => marche(page)).toMatchObject({ symbol: "BTCUSDT", status: "ready" });
-  await ouvrirFavoris(page);
   const add = page.getByPlaceholder("Ajouter (ex. BNBUSDT)");
   await add.fill("cardsusdt"); await add.press("Enter");
   const button = page.getByRole("button", { name: "CARDSUSDT", exact: true });
@@ -282,7 +273,6 @@ for (const reprise of ["réessai", "réseau", "focus"] as const) {
     });
     else {
       await search.press("Escape");
-      await ouvrirFavoris(page);
       await page.getByPlaceholder("Ajouter (ex. BNBUSDT)").focus();
       await page.clock.setFixedTime(Date.now() + 31_000);
       await search.focus();
@@ -311,7 +301,6 @@ test("CARDS : la watchlist réessaie un prix absent quand le catalogue revient",
   api.prixDisponible(false);
   await page.goto("/");
   await expect.poll(() => marche(page)).toMatchObject({ symbol: "BTCUSDT", status: "ready" });
-  await ouvrirFavoris(page);
   const add = page.getByPlaceholder("Ajouter (ex. BNBUSDT)");
   await add.fill("CARDSUSDT"); await add.press("Enter");
   const row = page.getByRole("button", { name: "CARDSUSDT", exact: true }).locator("..");
@@ -342,7 +331,6 @@ test("CARDS : prix seul rétabli, les favoris non résolus réessaient sans inte
   await page.clock.install();
   await page.goto("/");
   await expect.poll(() => marche(page)).toMatchObject({ symbol: "BTCUSDT", status: "ready" });
-  await ouvrirFavoris(page);
   const add = page.getByPlaceholder("Ajouter (ex. BNBUSDT)");
   await add.fill("cardsusdt"); await add.press("Enter");
   const row = page.getByRole("button", { name: "CARDSUSDT", exact: true }).locator("..");
@@ -363,7 +351,6 @@ test("CARDS : une ancienne provenance Binance erronée est réparée après reto
     const importer = new Function("return import('/src/store/watchlist.ts')") as () => Promise<{ watchlistStore: { getState: () => { setAll: (symbols: string[], sources: Record<string, string>) => void } } }>;
     (await importer()).watchlistStore.getState().setAll(["CARDSUSDT"], { CARDSUSDT: "binance" });
   });
-  await ouvrirFavoris(page);
   const row = page.getByRole("button", { name: "CARDSUSDT", exact: true }).locator("..");
   await expect.poll(api.appelsPrix).toBeGreaterThan(0);
   await expect(row).not.toContainText("0.1200");
@@ -535,7 +522,6 @@ test("HYPEUSDT : la recherche et le favori retiennent la place la plus profonde"
   await search.press("Escape");
 
   // (d) Favori ajouté pendant que le graphe reste sur BTCUSDT : aucune confirmation par le graphe.
-  await ouvrirFavoris(page);
   const add = page.getByPlaceholder("Ajouter (ex. BNBUSDT)");
   await add.fill("HYPEUSDT"); await add.press("Enter");
   await expect.poll(() => sourcesFavoris(page)).toMatchObject({ HYPEUSDT: "bybit", BTCUSDT: "binance" });
@@ -564,7 +550,6 @@ test("HYPEUSDT : un ancien favori Binance migre vers la place la plus profonde a
     sources: { BTCUSDT: "binance", HYPEUSDT: "binance" },
   })));
   await page.goto("/");
-  await ouvrirFavoris(page);
   // Point de départ prouvé : la source Binance restaurée est bien lue avant la mesure de Bybit.
   await expect.poll(() => api.klinesBybit).toContain("W:1000");
   expect(await page.evaluate(async () => {

@@ -41,7 +41,7 @@
 .axiom-mobile .axiom-table-scroll { max-width: 100%; max-height: var(--axiom-table-height, none); overflow: auto; overscroll-behavior: contain; }
 .axiom-mobile .axiom-table-contenu { min-width: var(--axiom-table-width); }
 .axiom-mobile .axiom-table-corps { max-height: none !important; overflow: visible; }
-.axiom-mobile .axiom-table-entete { position: sticky; top: 0; z-index: 1; background: var(--surface); }
+.axiom-mobile .axiom-table-entete { position: sticky; top: 0; z-index: 1; background: var(--bg); }
 .axiom-mobile .axiom-liquidations-table { overflow-x: auto; }
 .axiom-mobile .axiom-liquidations-table > * { min-width: 430px; }
 .axiom-mobile .axiom-palette { padding-top: max(8px, env(safe-area-inset-top)); padding-bottom: max(8px, env(safe-area-inset-bottom)); }

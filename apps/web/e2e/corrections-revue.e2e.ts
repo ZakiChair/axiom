@@ -1,6 +1,4 @@
-import { ouvrirOptionsGraphique, ouvrirFavoris } from "./helpers/navigation";
 import { test, expect, type Page } from "@playwright/test";
-import type { Chart } from "klinecharts";
 import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
 /**
@@ -148,7 +146,6 @@ test("VWAP à chaud : 500 bougies dès 05:41 UTC → 841 dès minuit, sans recha
   await attendrePremiere(page, PREMIER_INITIAL);
   const navApresBoot = navigations;
 
-  await ouvrirOptionsGraphique(page);
   await page.getByRole("button", { name: /^Indicateurs/ }).click();
   await page.getByPlaceholder(/CVD, RVOL/).fill("VWAP");
   await boutonVwapCatalogue(page).click();
@@ -169,7 +166,6 @@ test("ré-ajout VWAP : aucune nouvelle requête d'historique (idempotence)", asy
   await page.goto("/");
   await attendreCompte(page, LIMIT_INITIAL);
 
-  await ouvrirOptionsGraphique(page);
   await page.getByRole("button", { name: /^Indicateurs/ }).click();
   await page.getByPlaceholder(/CVD, RVOL/).fill("VWAP");
   await boutonVwapCatalogue(page).click();
@@ -192,7 +188,6 @@ test("VWAP puis pivots : veille entière, store réel, sans rechargement", async
   await attendreCompte(page, LIMIT_INITIAL);
   const navApresBoot = navigations;
 
-  await ouvrirOptionsGraphique(page);
   await page.getByRole("button", { name: /^Indicateurs/ }).click();
   await page.getByPlaceholder(/CVD, RVOL/).fill("VWAP");
   await boutonVwapCatalogue(page).click();
@@ -241,43 +236,21 @@ test("extension de session : chaque barre garde sa valeur d'indicateur pendant l
     return i >= 0 ? textes[i + 1] : undefined;
   });
 
-  // La légende suit désormais le curseur : relire exactement la même barre après
-  // chaque extension, avec une nouvelle peinture pour ne pas accepter un texte périmé.
-  const derniereOuverture = PREMIER_INITIAL + (LIMIT_INITIAL - 1) * MINUTE;
-  const survolerBarre = async () => {
-    await page.mouse.move(1, 1);
-    const point = await page.evaluate(async (timestamp) => {
-      const importer = new Function("return import('/src/chart/drawing.ts')") as () => Promise<{ getActiveChart: () => Chart | null }>;
-      const chart = (await importer()).getActiveChart();
-      if (!chart) throw new Error("Graphe absent");
-      const rect = chart.getDom()!.getBoundingClientRect();
-      const pane = chart.getSize("candle_pane")!;
-      const pixel = chart.convertToPixel({ timestamp }, { paneId: "candle_pane", absolute: true }) as { x: number };
-      (window as unknown as { __textes: string[] }).__textes.length = 0;
-      return { x: rect.x + pixel.x, y: rect.y + pane.top + pane.height / 2 };
-    }, derniereOuverture);
-    await page.mouse.move(point.x, point.y);
-    await expect.poll(volumeAffiche, { timeout: 10_000 }).toBeDefined();
-  };
-
   await page.goto("/");
   await attendreCompte(page, LIMIT_INITIAL);
-  await survolerBarre();
+  await expect.poll(volumeAffiche, { timeout: 10_000 }).toBeDefined();
   const avant = await volumeAffiche();
 
-  await ouvrirOptionsGraphique(page);
   await page.getByRole("button", { name: /^Indicateurs/ }).click();
   await page.getByPlaceholder(/CVD, RVOL/).fill("Pivot Points Standard");
   await boutonPivotStandardCatalogue(page).click();
   // Page 1 reçue, page 2 retenue : le buffer a grandi, le graphe attend la réapplication finale.
   await expect.poll(async () => (await lireBougiesStore(page)).count, { timeout: 20_000 }).toBeGreaterThan(LIMIT_INITIAL);
-  await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Fermer les options", exact: true }).click();
-  await survolerBarre();
+  await new Promise((r) => setTimeout(r, 500));
   expect(await volumeAffiche()).toBe(avant);
 
   await attendreCompte(page, TOTAL_PIVOTS);
-  await survolerBarre();
+  await new Promise((r) => setTimeout(r, 500));
   expect(await volumeAffiche()).toBe(avant);
 });
 
@@ -295,16 +268,15 @@ test("limite Kraken visible (PARTIAL) après chargement", async ({ page }) => {
   await expect(badge).toContainText(/~500 bougies/);
 });
 
-test("watchlist : BTCUSDT / ETHUSDT / SOLUSDT lisibles en entier à 1440 px (panneau Favoris)", async ({
+test("watchlist : BTCUSDT / ETHUSDT / SOLUSDT lisibles en entier à 1440 px (sidebar 240)", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   await attendreCompte(page, LIMIT_INITIAL);
 
-  await ouvrirFavoris(page);
   const aside = page.locator("aside");
-  await expect(aside).toHaveCSS("width", "380px");
+  await expect(aside).toHaveCSS("width", "240px");
   for (const symbole of ["BTCUSDT", "ETHUSDT", "SOLUSDT"] as const) {
     const el = aside.getByText(symbole, { exact: true });
     await expect(el).toBeVisible();

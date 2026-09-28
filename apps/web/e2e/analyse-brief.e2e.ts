@@ -26,7 +26,7 @@ test("BRIEF actualise, conserve une référence, compare et réhydrate sans inve
     return route.fulfill({ json: [tuple(FIN - 30 * JOUR, 100), tuple(FIN, fin)] });
   });
   await page.goto("/");
-  await page.getByRole("banner").getByRole("button", { name: "Recherche", exact: true }).click();
+  await page.keyboard.press("ControlOrMeta+k");
   await page.getByPlaceholder(/^Commande/).fill("BRIEF");
   await page.keyboard.press("Enter");
   const section = page.getByRole("region", { name: "Analyse multidomaine" });
@@ -55,7 +55,7 @@ test("BRIEF actualise, conserve une référence, compare et réhydrate sans inve
   expect(await readFile((await mdDownload.path())!, "utf8")).toContain("ethereum : concordance descriptive");
 
   await page.reload();
-  await expect(page.getByRole("banner").getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
   const fenetre = page.locator('[data-window-id="brief"]');
   if (!(await fenetre.isVisible())) {
     await page.keyboard.press("ControlOrMeta+k");
@@ -77,7 +77,7 @@ test("une archive brute vide reste récupérable avant remplacement explicite", 
     localStorage.setItem("axiom:analyseBrief:v1", "");
   });
   await page.goto("/");
-  await expect(page.getByRole("banner").getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
   await page.getByPlaceholder(/^Commande/).fill("BRIEF");
   await page.keyboard.press("Enter");

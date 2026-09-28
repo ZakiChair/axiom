@@ -14,10 +14,9 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useSta
 import { useStore } from "zustand";
 import { Toolbar } from "./components/Toolbar";
 import { MobileNavigation } from "./components/MobileNavigation";
-import { mobileLayoutSnapshot, useMobileLayout } from "./hooks/useMobileLayout";
-const SessionStrip = lazy(() => import("./components/SessionStrip").then((m) => ({ default: m.SessionStrip })));
-const AlertesCompteur = lazy(() => import("./components/AlertesCompteur").then((m) => ({ default: m.AlertesCompteur })));
-const TickerBand = lazy(() => import("./components/TickerBand").then((m) => ({ default: m.TickerBand })));
+import { useMobileLayout } from "./hooks/useMobileLayout";
+import { SessionStrip } from "./components/SessionStrip";
+import { TickerBand } from "./components/TickerBand";
 import { DrawingToolbar } from "./components/DrawingToolbar";
 import { ChartGrid } from "./chart/ChartGrid";
 import { Watchlist } from "./components/Watchlist";
@@ -26,7 +25,7 @@ import { HealthPanel } from "./components/HealthPanel";
 import { settingsUiStore } from "./store/settings-ui";
 import { ecoCommands } from "./store/eco";
 import { commandes as newsCommands } from "./store/news";
-import { commandes as tickerCommands, tickerBandStore } from "./store/tickerBand";
+import { commandes as tickerCommands } from "./store/tickerBand";
 import { commandes as onchainCommands } from "./store/onchain";
 import { commandes as portfolioCommands } from "./store/portfolio";
 import { commandes as notesCommands } from "./store/notes";
@@ -64,13 +63,11 @@ import { useRaccourcisGlobaux, fullscreenStore } from "./commands/hotkeys";
 import { demarrerAlertes } from "./alerts/runtime";
 import { demarrerMoteurPaper } from "./store/paper";
 import { FloatingWindow } from "./components/FloatingWindow";
-const Taskbar = lazy(() => import("./components/Taskbar").then((m) => ({ default: m.Taskbar })));
+import { Taskbar } from "./components/Taskbar";
 import { SnapOverlay } from "./components/SnapOverlay";
 import { Toasts } from "./components/Toasts";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { WINDOW_REGISTRY, windowManagerStore, subscribeWindowNavigation, type WindowId } from "./store/windowManager";
-import { navigationStore, navigateTool, startNavigation } from "./store/navigation";
-import "./components/navigation.css";
+import { WINDOW_REGISTRY, windowManagerStore, type WindowId } from "./store/windowManager";
 
 // ─────────────────────────── Commandes de disposition multi-chart (Phase 4) ───────────────────────────
 
@@ -253,15 +250,8 @@ function AlertsPanelFallback() {
 
 export function App() {
   const mobile = useMobileLayout();
-  const tickerVisible = useStore(tickerBandStore, (s) => s.visible);
-  const mode = useStore(navigationStore, (s) => s.mode);
-  const active = useStore(navigationStore, (s) => s.active);
-  const pageMode = mobile || mode === "pages";
-  const fenetresOuvertes = useStore(windowManagerStore, (s) => Object.values(s.windows).some((w) => w.open));
-  useLayoutEffect(() => startNavigation(), []);
-  useLayoutEffect(() => { windowManagerStore.getState().preserverGeometrie(pageMode); }, [pageMode]);
   const [panneauxOuverts, setPanneauxOuverts] = useState(false);
-  const [panneauxCharges, setPanneauxCharges] = useState(false);
+  const [panneauxCharges, setPanneauxCharges] = useState(!mobile);
   const [dessinsOuverts, setDessinsOuverts] = useState(false);
   const [optionsOuvertes, setOptionsOuvertes] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -277,29 +267,33 @@ export function App() {
   useEffect(() => { if (paletteOuverte) setPaletteChargee(true); }, [paletteOuverte]);
   const plein = useStore(fullscreenStore, (s) => s.plein);
   const chartAreaRef = useRef<HTMLDivElement>(null);
-  const panneauxMasques = plein || !panneauxOuverts;
+  const panneauxMasques = plein || (mobile && !panneauxOuverts);
   const fermerFeuilles = useCallback(() => {
     setPanneauxOuverts(false);
     setDessinsOuverts(false);
     setOptionsOuvertes(false);
   }, []);
-  useLayoutEffect(() => { if (chartAreaRef.current) chartAreaRef.current.inert = pageMode && active !== "chart"; }, [pageMode, active]);
 
   // Même durée de vie que la sidebar desktop après sa première utilisation :
   // fermer le tiroir ne doit pas jeter le formulaire d'alerte en cours.
   useEffect(() => {
-    if (panneauxOuverts) setPanneauxCharges(true);
-  }, [panneauxOuverts]);
+    if (!mobile || panneauxOuverts) setPanneauxCharges(true);
+  }, [mobile, panneauxOuverts]);
   useLayoutEffect(() => {
     if (panneauxRef.current) panneauxRef.current.inert = panneauxMasques;
   }, [panneauxMasques, panneauxCharges]);
 
   // Toutes les entrées vers une fenêtre (menu, ticker, raccourci, restauration)
   // révèlent le contenu demandé plutôt que de le laisser sous un tiroir.
-  useEffect(() => subscribeWindowNavigation(() => fermerFeuilles()), [fermerFeuilles]);
+  useEffect(() => windowManagerStore.subscribe((next, prev) => {
+    if (next.windows !== prev.windows && Object.entries(next.windows).some(([id, w]) => {
+      const avant = prev.windows[id];
+      return w.open && !w.minimized && (!avant?.open || avant.minimized || avant.z !== w.z);
+    })) fermerFeuilles();
+  }), [fermerFeuilles]);
 
   useEffect(() => {
-    if (reglagesOuverts || paletteOuverte || plein) {
+    if (!mobile || reglagesOuverts || paletteOuverte || plein) {
       setPanneauxOuverts(false);
       setDessinsOuverts(false);
       setOptionsOuvertes(false);
@@ -309,9 +303,7 @@ export function App() {
   useEffect(() => {
     if (!panneauxOuverts && !dessinsOuverts) return;
     const echap = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented && !document.querySelector('[role="menu"]')) {
-        setPanneauxOuverts(false); setDessinsOuverts(false);
-      }
+      if (event.key === "Escape") { setPanneauxOuverts(false); setDessinsOuverts(false); }
     };
     document.addEventListener("keydown", echap);
     return () => document.removeEventListener("keydown", echap);
@@ -344,10 +336,7 @@ export function App() {
       const rect = el.getBoundingClientRect();
       // Le cadrage téléphone est uniquement visuel : setWorkspace reclampe et
       // persiste les fenêtres desktop, donc ne doit pas recevoir ce petit rectangle.
-      // Une notification ResizeObserver peut précéder le rendu React du nouveau
-      // breakpoint (notamment WebKit). Lire le viewport courant évite de persister
-      // ce rectangle mobile pendant cette courte transition.
-      if (pageMode || mobileLayoutSnapshot()) {
+      if (mobile) {
         const style = rootRef.current?.style;
         style?.setProperty("--mobile-workspace-x", `${rect.x}px`);
         style?.setProperty("--mobile-workspace-y", `${rect.y}px`);
@@ -367,26 +356,26 @@ export function App() {
       if (minuteur !== undefined) clearTimeout(minuteur);
       observer.disconnect();
     };
-  }, [pageMode, plein]);
+  }, [mobile, plein]);
 
   return (
-    <div ref={rootRef} className={`axiom-app axiom-analytics flex h-screen w-full flex-col overflow-hidden bg-bg text-text${mobile ? " axiom-mobile" : ""}${pageMode ? " axiom-page-mode" : " axiom-window-mode"}`}>
+    <div ref={rootRef} className={`axiom-app flex h-screen w-full flex-col overflow-hidden bg-bg text-text${mobile ? " axiom-mobile" : ""}`}>
       {/* Plein écran : toolbars et sidebar masquées, le graphe occupe tout l'écran. */}
-      {!plein && <Toolbar onNavigate={fermerFeuilles} panneauxOuverts={panneauxOuverts} onPanneaux={() => { setPanneauxOuverts((o) => !o); setDessinsOuverts(false); setOptionsOuvertes(false); }} onDessins={() => { navigateTool("chart"); setDessinsOuverts((o) => !o); setPanneauxOuverts(false); }} optionsOuvertes={optionsOuvertes} onOptionsChange={(open) => {
+      {!plein && <Toolbar optionsOuvertes={optionsOuvertes} onOptionsChange={(open) => {
         setOptionsOuvertes(open);
         if (open) { setPanneauxOuverts(false); setDessinsOuverts(false); }
       }} />}
       {/* Strip session (P&L jour · alertes · santé) — hors plein écran, dense 11px. */}
-      {!plein && !pageMode && <div className="axiom-session-slot"><Suspense fallback={null}><SessionStrip /></Suspense></div>}
+      {!plein && <SessionStrip />}
       {/* Bandeau news défilant (enfant flex : le workspace mesuré par chartAreaRef se
           rétrécit automatiquement). Se masque lui-même selon tickerBandStore (⌘K TICKER). */}
-      {!plein && tickerVisible && <Suspense fallback={null}><TickerBand /></Suspense>}
+      {!plein && <TickerBand />}
       {/* min-h-0 indispensable pour que le graphe (flex-1) prenne une hauteur réelle. */}
-      <main id="espace-analyse" aria-label="Espace d’analyse" className="relative flex min-h-0 flex-1">
+      <main className="relative flex min-h-0 flex-1">
         {/* Barre d'outils de dessin verticale, à gauche du graphe. */}
         {!plein && <DrawingToolbar mobileOpen={dessinsOuverts} onClose={() => setDessinsOuverts(false)} />}
         {/* min-w-0 : la grille de graphes peut rétrécir face aux panneaux latéraux. */}
-        <div ref={chartAreaRef} aria-hidden={pageMode && active !== "chart" || undefined} style={{ visibility: pageMode && active !== "chart" ? "hidden" : undefined }} className="relative isolate z-0 min-w-0 flex-1">
+        <div ref={chartAreaRef} className="relative isolate z-0 min-w-0 flex-1">
           <ErrorBoundary scope="Graphiques">
             <ChartGrid />
           </ErrorBoundary>
@@ -394,12 +383,12 @@ export function App() {
         {/* Colonne droite : en-tête (accès Réglages) + panneaux empilés, tous harmonisés
             via SidebarSection. Ordre : Watchlist, Alertes, Comparer, Santé. Les mesures
             macro ont quitté la sidebar pour l'onglet « Macro » du menu Indicateurs. */}
-        {(panneauxOuverts || panneauxCharges) && (
+        {(!mobile || panneauxOuverts || panneauxCharges) && (
           <aside ref={panneauxRef} id="panneaux-terminal" aria-label="Panneaux du terminal"
-            role="dialog"
+            role={mobile ? "dialog" : undefined}
             aria-hidden={panneauxMasques || undefined}
             style={{ display: panneauxMasques ? "none" : undefined }}
-            className="axiom-mobile-sidebar axiom-follow-sheet flex flex-col min-h-0 overflow-y-auto border border-border bg-surface">
+            className={`${mobile ? "axiom-mobile-sidebar" : "flex w-60 shrink-0"} flex-col min-h-0 overflow-y-auto border-l border-border bg-surface`}>
             <div className="flex shrink-0 items-center justify-between px-3 py-2">
               <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
                 Panneaux
@@ -415,10 +404,9 @@ export function App() {
                   ⚙
                 </span>
               </button>
-              {<button type="button" aria-label="Fermer les panneaux" onClick={() => setPanneauxOuverts(false)}
+              {mobile && <button type="button" aria-label="Fermer les panneaux" onClick={() => setPanneauxOuverts(false)}
                 className="rounded px-3 text-text-dim">✕</button>}
             </div>
-            {pageMode && <div className="px-3 pb-2 text-xs text-text-dim"><Suspense fallback={null}><AlertesCompteur /></Suspense></div>}
             <Watchlist />
             <Suspense fallback={<AlertsPanelFallback />}>
               <AlertsPanel />
@@ -432,13 +420,12 @@ export function App() {
       {/* Taskbar des fenêtres ouvertes — DANS LE FLUX (dernier enfant du flex-col) : elle
           réserve sa hauteur, donc le workspace mesuré par chartAreaRef se rétrécit et l'axe
           temporel du chart n'est plus masqué. Rien quand aucune fenêtre n'est ouverte. */}
-      {fenetresOuvertes && (!mobile || active !== "chart") && <Suspense fallback={null}><Taskbar onNavigate={fermerFeuilles} feuilleOuverte={panneauxOuverts || dessinsOuverts || optionsOuvertes} /></Suspense>}
+      <Taskbar onNavigate={fermerFeuilles} feuilleOuverte={mobile && (panneauxOuverts || dessinsOuverts || optionsOuvertes)} />
       {mobile && !plein && <MobileNavigation panneauxOuverts={panneauxOuverts} dessinsOuverts={dessinsOuverts}
         onNavigate={fermerFeuilles}
-        onOptions={() => { setOptionsOuvertes((o) => !o); setPanneauxOuverts(false); setDessinsOuverts(false); }}
         onPanneaux={() => { setPanneauxOuverts((o) => !o); setDessinsOuverts(false); setOptionsOuvertes(false); }}
         onDessins={() => {
-          if (!dessinsOuverts) navigateTool("chart");
+          if (!dessinsOuverts) windowManagerStore.getState().minimizeAll();
           setDessinsOuverts((o) => !o); setPanneauxOuverts(false); setOptionsOuvertes(false);
         }} />}
 

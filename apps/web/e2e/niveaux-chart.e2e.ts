@@ -46,7 +46,7 @@ async function bouchonnerBougies(page: Page): Promise<void> {
 }
 
 async function commande(page: Page, texte: string): Promise<void> {
-  await expect(page.getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
+  await expect(page.getByRole("banner").getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
   // Souris hors de la liste : laissée au milieu du chart par un clic droit, elle survolerait
   // un résultat de la palette et en changerait la sélection avant Entrée.
   await page.mouse.move(0, 0);
@@ -55,12 +55,6 @@ async function commande(page: Page, texte: string): Promise<void> {
   // La liste filtrée doit présenter la commande avant validation (sinon Enter part à vide).
   await expect(page.getByText(texte, { exact: true }).first()).toBeVisible();
   await page.keyboard.press("Enter");
-}
-
-async function changerSymbole(page: Page, symbole: string): Promise<void> {
-  const recherche = page.getByRole("banner").getByRole("combobox", { name: "Rechercher une paire" });
-  await recherche.fill(symbole);
-  await recherche.press("Enter");
 }
 
 async function attendreChart(page: Page): Promise<void> {
@@ -160,13 +154,13 @@ test("niveaux clés : activation palette, lignes accrochables, alerte au niveau 
 
   // Overlay scellé au symbole : sur ETHUSDT (sans historique 1d), aucune ligne BTC ne subsiste
   // et l'absence est expliquée par un toast.
-  await changerSymbole(page, "ETHUSDT");
+  await page.getByRole("banner").getByRole("button", { name: "ETHUSDT", exact: true }).click();
   await expect(page.getByText("Niveaux clés : bougies 1d de ETHUSDT (binance) indisponibles, nouvel essai dans 5 min")).toBeVisible();
   await attendreChart(page);
   expect(await enteteAuPrix(page, 77_450)).not.toContain("PDH");
 
   // Retour sur BTCUSDT puis désactivation : plus aucune ligne accrochable.
-  await changerSymbole(page, "BTCUSDT");
+  await page.getByRole("banner").getByRole("button", { name: "BTCUSDT", exact: true }).click();
   await attendreChart(page);
   await expect.poll(() => enteteAuPrix(page, 77_450)).toContain("PDH");
   await commande(page, "NIVCLE");
@@ -233,13 +227,13 @@ test("niveaux d'options : activation palette, murs, flips et max pain accrochabl
   expect(session).toMatchObject({ niveauxOptions: true, niveauxCles: false });
 
   // ETHUSDT : chaîne ETH indisponible → toast, et aucune ligne BTC ne subsiste.
-  await changerSymbole(page, "ETHUSDT");
+  await page.getByRole("banner").getByRole("button", { name: "ETHUSDT", exact: true }).click();
   await expect(page.getByText("Niveaux d'options : chaîne Deribit ETH indisponible, nouvel essai dans 10 min")).toBeVisible();
   await attendreChart(page);
   expect(await enteteAuPrix(page, 80_000)).not.toContain("Call wall");
 
   // Retour BTC puis désactivation par la palette.
-  await changerSymbole(page, "BTCUSDT");
+  await page.getByRole("banner").getByRole("button", { name: "BTCUSDT", exact: true }).click();
   await attendreChart(page);
   await expect.poll(() => enteteAuPrix(page, 80_000)).toContain("Call wall γ");
   await commande(page, "OPTNIV");
@@ -289,13 +283,13 @@ test("bandes implicites : bouton de DIST, lignes jour et semaine accrochables, s
   expect(session).toMatchObject({ bandesImplicites: true, niveauxCles: false, niveauxOptions: false });
 
   // ETHUSDT (sans historique 1d dans la fixture) : absence expliquée, aucune bande BTC ne subsiste.
-  await changerSymbole(page, "ETHUSDT");
+  await page.getByRole("banner").getByRole("button", { name: "ETHUSDT", exact: true }).click();
   await expect(page.getByText("Bandes implicites : bougies 1d de ETHUSDT (binance) indisponibles, nouvel essai dans 5 min")).toBeVisible();
   await attendreChart(page);
   expect(await enteteAuPrix(page, 78_406.2)).not.toContain("σ");
 
   // Retour BTC puis désactivation par la palette.
-  await changerSymbole(page, "BTCUSDT");
+  await page.getByRole("banner").getByRole("button", { name: "BTCUSDT", exact: true }).click();
   await attendreChart(page);
   await expect.poll(() => enteteAuPrix(page, 78_406.2)).toContain("+1σ J (DVOL)");
   await commande(page, "EMOVE");
@@ -354,18 +348,18 @@ test("coût Strategy : activation palette, ligne accrochable, scellée à BTC, b
   expect(session).toMatchObject({ prixRevientTresoreries: true, niveauxCles: false, niveauxOptions: false, bandesImplicites: false });
 
   // ETHUSDT : coût en dollar par BTC, non éligible → toast, et aucune ligne BTC ne subsiste.
-  await changerSymbole(page, "ETHUSDT");
+  await page.getByRole("banner").getByRole("button", { name: "ETHUSDT", exact: true }).click();
   await expect(page.getByText("Coût Strategy : BTC coté en dollar seulement (trésoreries CoinGecko), pas ETHUSDT")).toBeVisible();
   await attendreChart(page);
   expect(await enteteAuPrix(page, 76_052.1)).not.toContain("Coût Strategy");
 
-  await changerSymbole(page, "BTCUSDT");
+  await page.getByRole("banner").getByRole("button", { name: "BTCUSDT", exact: true }).click();
   await attendreChart(page);
   await expect.poll(() => enteteAuPrix(page, 76_052.1)).toBe("Coût Strategy · Prix 76,052.10");
 
   // Désactivation depuis la tuile Strategy de CHAIN, qui reflète la bascule de la palette.
   await page.keyboard.press("Escape"); // menu d'alerte laissé ouvert par le dernier clic droit
-  await page.getByRole("button", { name: "Rubriques", exact: true }).click();
+  await page.getByRole("button", { name: "Fonctions" }).click();
   await page.getByRole("menuitem", { name: /On-chain/ }).click();
   const chain = page.getByRole("complementary", { name: "On-chain", exact: true });
   const bouton = chain

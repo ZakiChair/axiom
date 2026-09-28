@@ -41,7 +41,7 @@ test("DOM peint les calculs L2 puis les invalide au trou de séquence", async ({
   const painted = () => page.evaluate(() => (window as unknown as { domPaint?: string[] }).domPaint?.join("\n") ?? "");
   try {
     await page.goto("/");
-    await page.getByRole("button", { name: "Rubriques" }).click();
+    await page.getByRole("button", { name: "Fonctions" }).click();
     await page.getByRole("menuitem", { name: /Carnet d'ordres/ }).click();
     const dom = page.getByRole("complementary", { name: "Carnet d'ordres (DOM / depth)" });
     await expect(dom).toBeVisible();

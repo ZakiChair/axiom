@@ -39,7 +39,7 @@ test("profil vierge : les 3 étapes se déroulent jusqu'à la Toolbar accessible
 
   // Fin : overlay démonté, Toolbar accessible, alerte démo comptée dans le strip.
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Rubriques" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Fonctions" })).toBeVisible();
   await expect(page.getByTitle("Nombre d'alertes actives")).toContainText("1");
 
   // Persistance : le parcours est marqué terminé (ne se réaffichera plus).

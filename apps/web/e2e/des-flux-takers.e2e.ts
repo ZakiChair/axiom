@@ -1,4 +1,3 @@
-import { ouvrirOutil } from "./helpers/navigation";
 import { expect, test, type Page } from "@playwright/test";
 import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
@@ -146,7 +145,7 @@ async function preparer(
 
 async function ouvrirDes(page: Page) {
   await page.goto("/");
-  await ouvrirOutil(page, "derivatives");
+  await page.getByRole("button", { name: "Produits dérivés" }).click();
   const des = page.getByRole("complementary", { name: "Produits dérivés" });
   const bouton = des.getByRole("button", { name: /Flux takers toutes places/i });
   const section = des
@@ -261,7 +260,7 @@ test("DES : flux takers chargés au montage (4 appels), repliés par défaut, sa
   expect(await page.evaluate(() => Date.now())).toBe(Date.UTC(2026, 8, 16, 12, 45));
   await des.getByTitle("Fermer").click();
   await expect(des).toHaveCount(0);
-  await ouvrirOutil(page, "derivatives");
+  await page.getByRole("button", { name: "Produits dérivés" }).click();
   await expect(bouton).toHaveAttribute("aria-expanded", "false");
   await expect(bouton).toContainText("J-1 2026-09-15");
   await page.waitForTimeout(300);
@@ -375,13 +374,13 @@ test("DES : 401 CryptoQuant — clé refusée affichée avec l'accès aux Régla
   expect(await lireArchive(page)).toBeNull();
 });
 
-test("DES : l'entrée CQTAKR du catalogue Rubriques ouvre DES, déplie les flux takers et n'appelle rien de plus", async ({ page }) => {
+test("DES : l'entrée CQTAKR du menu Fonctions ouvre DES, déplie les flux takers et n'appelle rien de plus", async ({ page }) => {
   // Décision du propriétaire du 2026-09-18 : entrée de NAVIGATION, aucune fenêtre nouvelle.
   const appels = await preparer(page);
   await page.goto("/");
 
   // Badge « nouveau » avant le premier clic (clé `axiom:seen:section:cq-takers` absente).
-  await page.getByRole("button", { name: "Rubriques" }).click();
+  await page.getByRole("button", { name: "Fonctions" }).click();
   const entree = page.getByRole("menuitem", { name: /CQTAKR/ });
   await expect(entree).toContainText("Flux takers toutes places (CryptoQuant)");
   await expect(entree).toContainText("nouveau");
@@ -410,7 +409,7 @@ test("DES : l'entrée CQTAKR du catalogue Rubriques ouvre DES, déplie les flux 
   expect(appels).toHaveLength(4);
 
   // Badge éteint après le premier clic (la section est « vue »).
-  await page.getByRole("button", { name: "Rubriques" }).click();
+  await page.getByRole("button", { name: "Fonctions" }).click();
   const revisitee = page.getByRole("menuitem", { name: /CQTAKR/ });
   await expect(revisitee).toBeVisible();
   await expect(revisitee).not.toContainText("nouveau");

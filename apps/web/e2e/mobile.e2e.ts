@@ -26,13 +26,12 @@ async function preparer(page: Page, onboarding = true): Promise<void> {
 }
 
 const navigation = (page: Page) => page.getByRole("navigation", { name: "Navigation du terminal" });
-const menuMobile = (page: Page) => page.locator(".axiom-mobile-menu-root:visible").last();
+const menuMobile = (page: Page) => page.locator(".axiom-mobile-menu-root").last();
 
 async function ouvrirFonction(page: Page, mnemonic: string): Promise<void> {
-  await page.getByRole("button", { name: "Rubriques", exact: true }).tap();
-  const catalogue = page.getByRole("dialog", { name: "Rubriques et outils" });
-  await catalogue.getByRole("searchbox", { name: "Filtrer les outils" }).fill(mnemonic);
-  await catalogue.getByRole("menuitem", { name: new RegExp(`^${mnemonic}\\b`) }).tap();
+  const nav = navigation(page);
+  await (await nav.isVisible() ? nav : page.getByRole("banner")).getByRole("button", { name: "Fonctions", exact: true }).tap();
+  await page.getByRole("menuitem", { name: new RegExp(`^${mnemonic}\\b`) }).tap();
 }
 
 /** Vérifie un contrôle réellement visible et entièrement atteignable sans scroll horizontal. */
@@ -64,16 +63,16 @@ async function etatChart(page: Page) {
   });
 }
 
-test("320 px : Rubriques ouvre un outil, revient au graphique, rouvre et ferme", async ({ page }) => {
+test("320 px : Fonctions ouvre, réduit, restaure et ferme une fenêtre", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 740 });
   await preparer(page);
   await page.goto("/");
   await ouvrirFonction(page, "DATA"); // dernière section : nécessite de parcourir le menu.
   const window = page.getByRole("complementary", { name: "Sources de données" });
   await dansEcran(page, window.getByTitle("Fermer", { exact: true }));
-  await window.getByTitle("Retour au graphique", { exact: true }).tap();
+  await window.getByTitle("Réduire", { exact: true }).tap();
   await expect(window).not.toBeVisible();
-  await ouvrirFonction(page, "DATA");
+  await page.getByRole("toolbar", { name: "Fenêtres ouvertes" }).getByRole("button", { name: /^DATA / }).tap();
   await expect(window).toBeVisible();
   await window.getByTitle("Fermer", { exact: true }).tap();
   await expect(window).toHaveCount(0);
@@ -114,7 +113,7 @@ test("Options : ajouter un indicateur puis parcourir et fermer les stratégies a
   await preparer(page);
   await page.goto("/");
   await page.getByRole("button", { name: "Options", exact: true }).tap();
-  await page.getByRole("dialog", { name: "Options du graphique" }).getByRole("button", { name: /^Indicateurs/ }).tap();
+  await page.getByRole("button", { name: /^Indicateurs/ }).tap();
   await menuMobile(page).getByPlaceholder(/^Rechercher/).fill("EMA");
   await menuMobile(page).getByRole("button", { name: "Ajouter EMA", exact: true }).tap();
   await menuMobile(page).getByRole("button", { name: "Fermer Indicateurs" }).tap();
@@ -177,7 +176,6 @@ test("quatre vues : focus dessin, instruments et disposition conservés entre po
   for (const viewport of [{ width: 844, height: 390 }, { width: 1280, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
     await expect.poll(async () => (await etatChart(page)).slotDessin).toBe("2");
-    await expect.poll(async () => (await etatChart(page)).box?.width ?? 0).toBeGreaterThan(viewport.width === 1280 ? 400 : viewport.width * 0.75);
     const apres = await etatChart(page);
     expect(apres).toMatchObject({ layout: "2x2", symbols: avant.symbols, overlays: 1 });
     if (viewport.width === 844) await page.screenshot({ path: testInfo.outputPath("graphe-paysage.png") });
@@ -210,7 +208,6 @@ test("les fenêtres retrouvent leur géométrie bureau après un aller-retour t�
   await page.setViewportSize({ width: 1280, height: 900 });
   await preparer(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Mode fenêtres", exact: true }).tap();
   await ouvrirFonction(page, "NOTE");
   const geometrie = () => page.evaluate(async () => {
     const importer = new Function("return import('/src/store/windowManager.ts')");
@@ -230,11 +227,11 @@ test("Réglages, recherche de commande et onboarding sont fermables au toucher",
   await preparer(page, false);
   await page.goto("/");
   await page.getByRole("button", { name: "Passer l'onboarding" }).tap();
-  await page.getByRole("banner").getByRole("button", { name: "Réglages", exact: true }).tap();
+  await navigation(page).getByRole("button", { name: "Réglages", exact: true }).tap();
   await page.getByPlaceholder("Clé API Twelve Data", { exact: true }).fill("clé-factice-test-local");
   await page.getByRole("button", { name: "Fermer les réglages" }).tap();
   await expect(page.getByRole("dialog", { name: "Réglages", exact: true })).not.toBeVisible();
-  await page.getByRole("banner").getByRole("button", { name: "Recherche", exact: true }).tap();
+  await navigation(page).getByRole("button", { name: "Recherche", exact: true }).tap();
   await page.getByRole("textbox", { name: "Saisie de commande" }).fill("NOTE");
   await dansEcran(page, page.getByRole("button", { name: "Fermer les commandes" }));
   await page.getByRole("button", { name: "Fermer les commandes" }).tap();

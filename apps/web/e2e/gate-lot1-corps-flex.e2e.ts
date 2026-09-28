@@ -25,7 +25,7 @@ test("le corps de FloatingWindow est un conteneur flex-col", async ({ page }) =>
   await page.goto("/");
   // Attendre le montage AVANT la frappe : l'écouteur ⌘K est posé par un effet React,
   // une pression trop précoce se perd (leçon du gate v2.4).
-  await expect(page.getByRole("banner").getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
   // NOTE : fenêtre locale sans réseau — Notes / journal.
   await page.keyboard.press("ControlOrMeta+k");
   await page.getByPlaceholder(/^Commande/).fill("NOTE");

@@ -451,8 +451,6 @@ export interface WindowManagerState {
    * (recalculée à chaque montage). Référentiel de TOUT le placement/redimensionnement/
    * snap des fenêtres flottantes, à la place de window.innerWidth/innerHeight. */
   workspace: WorkspaceRect;
-  geometriePreservee: boolean;
-  preserverGeometrie: (active: boolean) => void;
 
   openWindow: (id: string) => void;
   closeWindow: (id: string) => void;
@@ -573,27 +571,14 @@ function mettreAuSommet(state: EtatOrdreZ, id: string): EtatOrdreZ {
   };
 }
 
-type NavigationFenetre = { id: string; fermer?: boolean; restaurer?: boolean };
-const navigationListeners = new Set<(event: NavigationFenetre) => void>();
-export function subscribeWindowNavigation(listener: (event: NavigationFenetre) => void): () => void {
-  navigationListeners.add(listener);
-  return () => { navigationListeners.delete(listener); };
-}
-function signalerNavigation(id: string, fermer = false, restaurer = false): void {
-  for (const listener of navigationListeners) listener({ id, fermer, restaurer });
-}
-
 export const windowManagerStore = createStore<WindowManagerState>((set, get) => ({
   windows: {},
   nextZ: 1,
-  geometriePreservee: false,
-  preserverGeometrie: (geometriePreservee) => set({ geometriePreservee }),
   groupSymbols: {},
   dragPreview: null,
   workspace: { x: 0, y: 0, width: 1920, height: 1080 },
 
   openWindow: (id) => {
-    signalerNavigation(id);
     // Marque la fenêtre comme vue : son badge « nouveau » (menu Fonctions) disparaît.
     marquerVue(id);
     const state = get();
@@ -601,8 +586,8 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
       const ordre = mettreAuSommet(state, id);
       const existing = ordre.windows[id];
       if (!existing) return;
-      const size = state.geometriePreservee ? { width: existing.width, height: existing.height } : clampSize(existing.width, existing.height, MIN_WIDTH, MIN_HEIGHT, state.workspace);
-      const pos = state.geometriePreservee ? { x: existing.x, y: existing.y } : clampPosition(existing.x, existing.y, size.width, size.height, state.workspace);
+      const size = clampSize(existing.width, existing.height, MIN_WIDTH, MIN_HEIGHT, state.workspace);
+      const pos = clampPosition(existing.x, existing.y, size.width, size.height, state.workspace);
       const etatInchange =
         existing.open &&
         !existing.minimized &&
@@ -648,14 +633,12 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   },
 
   closeWindow: (id) => {
-    signalerNavigation(id, true);
     const existing = get().windows[id];
     if (!existing) return;
     set({ windows: { ...get().windows, [id]: { ...existing, open: false } } });
   },
 
   toggleWindow: (id) => {
-    if (get().geometriePreservee) { get().openWindow(id); return; }
     const state = get();
     const w = state.windows[id];
     // Une fenêtre minimisée se RESTAURE (⌘K la faisait disparaître — revue v2).
@@ -697,7 +680,6 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   },
 
   ancrerFocalisee: (zone) => {
-    if (get().geometriePreservee) return;
     const state = get();
     const id = get().fenetreFocalisee();
     if (id === null) return;
@@ -718,7 +700,6 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   },
 
   focusWindow: (id) => {
-    signalerNavigation(id);
     const state = get();
     if (!state.windows[id]) return;
     const ordre = mettreAuSommet(state, id);
@@ -727,14 +708,12 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   },
 
   moveWindow: (id, x, y) => {
-    if (get().geometriePreservee) return;
     const existing = get().windows[id];
     if (!existing) return;
     set({ windows: { ...get().windows, [id]: { ...existing, x, y } } });
   },
 
   resizeWindow: (id, width, height) => {
-    if (get().geometriePreservee) return;
     const existing = get().windows[id];
     if (!existing) return;
     set({ windows: { ...get().windows, [id]: { ...existing, width, height } } });
@@ -747,7 +726,6 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   },
 
   restoreWindow: (id) => {
-    signalerNavigation(id);
     const state = get();
     if (!state.windows[id]) return;
     const ordre = mettreAuSommet(state, id);
@@ -789,7 +767,6 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   },
 
   snapWindow: (id, geometrie) => {
-    if (get().geometriePreservee) return;
     const existing = get().windows[id];
     if (!existing) return;
     set({
@@ -805,7 +782,6 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   },
 
   setPreSnapGeometry: (id, preSnapGeometry) => {
-    if (get().geometriePreservee) return;
     const existing = get().windows[id];
     if (!existing) return;
     set({ windows: { ...get().windows, [id]: { ...existing, preSnapGeometry } } });
@@ -814,7 +790,6 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   setDragPreview: (preview) => set({ dragPreview: preview }),
 
   setWorkspace: (workspace) => {
-    if (get().geometriePreservee) return;
     set({ workspace });
     get().reclampAll(workspace);
   },
@@ -824,11 +799,9 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
     // peuvent être très supérieurs aux overlays actuels. On garde leur ordre relatif,
     // mais on les réinjecte immédiatement dans la bande sûre.
     set(normaliserOrdreZ(windows));
-    signalerNavigation(get().fenetreFocalisee() ?? "chart", false, true);
   },
 
   reclampAll: (workspace) => {
-    if (get().geometriePreservee) return;
     const state = get();
     const next: Record<string, EtatFenetre> = {};
     let changed = false;
@@ -880,7 +853,6 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   },
 
   closeAll: () => {
-    signalerNavigation("chart", false, true);
     const windows = get().windows;
     const next: Record<string, EtatFenetre> = {};
     let changed = false;
@@ -896,7 +868,6 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   },
 
   tileOpenWindows: () => {
-    if (get().geometriePreservee) return;
     const { windows, workspace } = get();
     const ouvertes = Object.values(windows)
       .filter((w) => w.open && !w.minimized)
@@ -914,7 +885,6 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   },
 
   cascadeAll: () => {
-    if (get().geometriePreservee) return;
     const { windows, workspace } = get();
     const ouvertes = Object.values(windows)
       .filter((w) => w.open && !w.minimized)

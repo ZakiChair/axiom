@@ -1,4 +1,3 @@
-import { ouvrirFavoris } from "./helpers/navigation";
 import { expect, test } from "@playwright/test";
 import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
@@ -13,7 +12,6 @@ test.beforeEach(async ({ page }) => {
 
 test("création datée, expiration sans tick, recharge et prolongation explicite", async ({ page }) => {
   await page.goto("/");
-  await ouvrirFavoris(page);
   const aside = page.locator("aside");
   await aside.getByRole("button", { name: /^Alertes/ }).click();
   await aside.getByLabel("Durée de l'alerte").selectOption(String(HEURE));
@@ -31,7 +29,6 @@ test("création datée, expiration sans tick, recharge et prolongation explicite
   await expect(page.locator('[title="Nombre d\'alertes actives"]')).toContainText("0");
 
   await page.reload();
-  await ouvrirFavoris(page);
   const recharge = page.locator("aside");
   const boutonAlertes = recharge.getByRole("button", { name: /^Alertes/ });
   await expect(boutonAlertes).toBeVisible();
@@ -48,7 +45,6 @@ test("création datée, expiration sans tick, recharge et prolongation explicite
 
 test("une alerte en pause devient visuellement expirée sans tick", async ({ page }) => {
   await page.goto("/");
-  await ouvrirFavoris(page);
   const aside = page.locator("aside");
   await aside.getByRole("button", { name: /^Alertes/ }).click();
   await aside.getByLabel("Durée de l'alerte").selectOption(String(HEURE));

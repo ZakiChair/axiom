@@ -1,4 +1,3 @@
-import { ouvrirOutil } from "./helpers/navigation";
 import { test, expect } from "@playwright/test";
 
 /**
@@ -25,8 +24,8 @@ test.beforeEach(async ({ page }) => {
 
 test("DES : les métriques OI / funding portent un badge de fiabilité Coinalyze", async ({ page }) => {
   await page.goto("/");
-  // Le catalogue expose DES dans la rubrique Dérivés.
-  await ouvrirOutil(page, "derivatives");
+  // Bouton dédié de la Toolbar (DES est `menuHidden` dans le registre).
+  await page.getByRole("button", { name: "Produits dérivés" }).click();
   const fenetre = page.getByRole("complementary", { name: "Produits dérivés" });
   await expect(fenetre).toBeVisible({ timeout: 15_000 });
   // Badges catalogue coinalyze:* (label « ≤1 min · Coinalyze ») : au moins OI + funding.
@@ -37,7 +36,7 @@ test("DES : les métriques OI / funding portent un badge de fiabilité Coinalyze
 
 test("CHAIN : les widgets on-chain portent un badge de fiabilité (Coin Metrics / BGeometrics)", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Rubriques" }).click();
+  await page.getByRole("button", { name: "Fonctions" }).click();
   await page.getByRole("menuitem", { name: /On-chain/ }).click();
   const fenetre = page.getByRole("complementary", { name: "On-chain" });
   await expect(fenetre).toBeVisible({ timeout: 15_000 });

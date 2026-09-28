@@ -1,4 +1,3 @@
-import { ouvrirOptionsGraphique, ouvrirDetailsMarche } from "./helpers/navigation";
 import { test, expect } from "@playwright/test";
 import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
@@ -42,19 +41,17 @@ test("les mesures macro ont quitté la sidebar pour l'onglet Macro du menu Indic
   page,
 }) => {
   await page.goto("/");
-  await ouvrirDetailsMarche(page);
 
   // La sidebar n'expose plus la section « Masse monétaire ». Assertion SCOPÉE à <aside> :
   // le libellé subsiste ailleurs (aide de la clé FRED dans les Réglages, commande MACRO).
   await expect(page.locator("aside").getByText("Masse monétaire")).toHaveCount(0);
 
-  await ouvrirOptionsGraphique(page);
   await page.getByRole("button", { name: /^Indicateurs/ }).click();
   // Onglet « Techniques » actif par défaut : le catalogue est là, pas les mesures macro.
   await expect(page.getByPlaceholder(/CVD, RVOL/)).toBeVisible();
   await expect(page.getByText("Cap. totale crypto")).toHaveCount(0);
 
-  await page.getByRole("dialog", { name: "Options du graphique", exact: true }).getByRole("button", { name: /^Macro/ }).click();
+  await page.getByRole("button", { name: /^Macro/ }).click();
   await expect(page.getByText("Cap. totale crypto")).toBeVisible();
   await expect(page.getByText("Stablecoins (supply)")).toBeVisible();
   await expect(page.getByText("M2 (US · FRED)")).toBeVisible();
@@ -64,10 +61,8 @@ test("les mesures macro ont quitté la sidebar pour l'onglet Macro du menu Indic
 
 test("cocher une mesure macro met à jour le compteur de l'onglet", async ({ page }) => {
   await page.goto("/");
-  await ouvrirDetailsMarche(page);
-  await ouvrirOptionsGraphique(page);
   await page.getByRole("button", { name: /^Indicateurs/ }).click();
-  await page.getByRole("dialog", { name: "Options du graphique", exact: true }).getByRole("button", { name: /^Macro/ }).click();
+  await page.getByRole("button", { name: /^Macro/ }).click();
 
   // Le <label> enveloppe sa case : cliquer le libellé bascule la case.
   await page.getByText("Cap. totale crypto").click();
@@ -76,10 +71,9 @@ test("cocher une mesure macro met à jour le compteur de l'onglet", async ({ pag
 
 test("la commande MONEY du Launchpad ouvre l'onglet Macro (palette refermée)", async ({ page }) => {
   await page.goto("/");
-  await ouvrirDetailsMarche(page);
   // Attendre le montage AVANT la frappe : l'écouteur ⌘K est posé par un effet React,
   // une pression trop précoce se perd (constaté — le test échouait à ce point).
-  await expect(page.getByRole("banner").getByRole("button", { name: "Rubriques", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
   // ⌘K : le registre prouve en unitaire que l'action mute le store ; SEUL le navigateur
   // prouve que la palette se referme et ne recouvre pas le panneau ouvert.
   await page.keyboard.press("ControlOrMeta+k");
@@ -94,7 +88,6 @@ test("bandeau : ÷BTC absent sur BTCUSDT, ÷ETH pose le ratio et le menu bascule
   page,
 }) => {
   await page.goto("/");
-  await ouvrirDetailsMarche(page);
 
   // Marché par défaut BTCUSDT : ÷BTC n'a pas de sens (base déjà BTC) → bouton absent.
   await expect(page.getByRole("button", { name: "÷BTC" })).toHaveCount(0);
@@ -139,13 +132,9 @@ test("bandeau tradfi : ÷BTC apparaît sur GLD, pose le SYN cross-source, détog
 }) => {
   await bouchonnerTwelveData(page);
   await page.goto("/");
-  await ouvrirDetailsMarche(page);
 
   // L’actif GLD suffit : le fournisseur est choisi automatiquement.
-  const recherche = page.getByRole("combobox", { name: "Rechercher une paire", exact: true });
-  await recherche.fill("GLD");
-  await expect(page.getByRole("option", { name: /^GLD\b/ }).first()).toBeVisible();
-  await recherche.press("Enter");
+  await page.getByRole("button", { name: "GLD", exact: true }).click();
 
   // Lot D : le bouton ÷BTC apparaît sur un symbole tradfi (composition cross-source).
   const boutonBtc = page.getByRole("button", { name: "÷BTC" });
@@ -176,7 +165,6 @@ test("bandeau : BTCUSDT ÷Or puis en CHF, jambe Twelve Data demandée, détoggle
   });
   await page.route("**/tdapi/quote*", (route) => route.fulfill({ json: QUOTE_TD }));
   await page.goto("/");
-  await ouvrirDetailsMarche(page);
 
   // Menu groupé : les marchés et les devises s'ajoutent à ETH et SOL.
   await page.getByRole("button", { name: "Choisir l'actif de comparaison" }).click();
@@ -214,7 +202,6 @@ test("bandeau : un actif non coté en dollar (BTCEUR) n'offre ni ÷Or ni devise"
     window.localStorage.setItem("axiom:chartState:v1", JSON.stringify({ exchange: "kraken", symbol: "BTCEUR", timeframe: "1d" }));
   });
   await page.goto("/");
-  await ouvrirDetailsMarche(page);
   const menu = page.getByRole("button", { name: "Choisir l'actif de comparaison" });
   await expect(menu).toBeVisible({ timeout: 15_000 });
   await menu.click();
@@ -224,7 +211,6 @@ test("bandeau : un actif non coté en dollar (BTCEUR) n'offre ni ÷Or ni devise"
 
 test("menu des dénominateurs au clavier : ↓ parcourt le menu sans changer de paire, Échap le ferme", async ({ page }) => {
   await page.goto("/");
-  await ouvrirDetailsMarche(page);
   const menu = page.getByRole("button", { name: "Choisir l'actif de comparaison" });
   await expect(menu).toHaveAttribute("aria-haspopup", "menu");
   await menu.focus();
@@ -248,7 +234,6 @@ test("menu des dénominateurs au clavier : ↓ parcourt le menu sans changer de 
 
 test("menu ouvert à la souris, focus perdu (Safari/Firefox) : ↓ revient au menu sans changer de paire", async ({ page }) => {
   await page.goto("/");
-  await ouvrirDetailsMarche(page);
   const symbole = () => page.evaluate(async () => {
     const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{ marketStore: { getState: () => { symbol: string } } }>;
     return (await importer()).marketStore.getState().symbol;
@@ -266,7 +251,6 @@ test("menu ouvert à la souris, focus perdu (Safari/Firefox) : ↓ revient au me
 
 test("menu ouvert puis « / » : le champ de recherche garde le focus sur ↓, la paire ne change pas", async ({ page }) => {
   await page.goto("/");
-  await ouvrirDetailsMarche(page);
   const symbole = () => page.evaluate(async () => {
     const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{ marketStore: { getState: () => { symbol: string } } }>;
     return (await importer()).marketStore.getState().symbol;
@@ -284,7 +268,6 @@ test("menu ouvert puis « / » : le champ de recherche garde le focus sur ↓, l
 
 test("focus sorti du menu par ⇧Tab : le menu se ferme et ↓ garde son sens global", async ({ page }) => {
   await page.goto("/");
-  await ouvrirDetailsMarche(page);
   const symbole = () => page.evaluate(async () => {
     const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{ marketStore: { getState: () => { symbol: string } } }>;
     return (await importer()).marketStore.getState().symbol;

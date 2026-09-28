@@ -4,7 +4,7 @@ import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 const navigation = (page: Page) => page.getByRole("navigation", { name: "Navigation du terminal" });
 
 async function ouvrirNotes(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Rubriques", exact: true }).tap();
+  await navigation(page).getByRole("button", { name: "Fonctions", exact: true }).tap();
   await page.getByRole("menuitem", { name: /^NOTE\b/ }).tap();
 }
 
@@ -25,7 +25,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 for (const feuille of ["Panneaux", "Dessins"] as const) {
-  test(`${feuille} → Rubriques : Notes est directement atteignable`, async ({ page }) => {
+  test(`${feuille} → Fonctions : Notes est directement atteignable`, async ({ page }) => {
     const declencheur = navigation(page).getByRole("button", { name: feuille, exact: true });
     await declencheur.tap();
     await expect(declencheur).toHaveAttribute("aria-expanded", "true");
@@ -34,7 +34,7 @@ for (const feuille of ["Panneaux", "Dessins"] as const) {
     await atteignable(page.getByRole("complementary", { name: "Notes / journal", exact: true }).getByTitle("Fermer", { exact: true }));
   });
 
-  if (feuille === "Panneaux") test(`${feuille} → barre des fenêtres : Notes revient sans être réduite`, async ({ page }) => {
+  test(`${feuille} → barre des fenêtres : Notes revient sans être réduite`, async ({ page }) => {
     await ouvrirNotes(page);
     const declencheur = navigation(page).getByRole("button", { name: feuille, exact: true });
     await declencheur.tap();
@@ -71,7 +71,7 @@ test("Notes → Graphique → Notes conserve le brouillon, mais Fermer termine l
   await page.getByRole("toolbar", { name: "Fenêtres ouvertes" }).getByRole("button", { name: "Graphique", exact: true }).tap();
   await expect(fenetre).toBeHidden();
   await expect(fenetre).toHaveAttribute("inert", "");
-  await ouvrirNotes(page);
+  await page.getByRole("toolbar", { name: "Fenêtres ouvertes" }).getByRole("button", { name: /^NOTE / }).tap();
   await expect(note).toHaveValue("Brouillon conservé pendant la lecture du graphique");
   await atteignable(fenetre.getByTitle("Fermer", { exact: true }));
   await fenetre.getByTitle("Fermer", { exact: true }).tap();
@@ -83,7 +83,7 @@ test("Notes → Graphique → Notes conserve le brouillon, mais Fermer termine l
 test("le paysage laisse la place au graphique et garde les actualités accessibles", async ({ page }) => {
   await page.setViewportSize({ width: 844, height: 390 });
   await expect.poll(async () => (await page.locator("main").boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(280);
-  await page.getByRole("button", { name: "Rubriques", exact: true }).tap();
+  await navigation(page).getByRole("button", { name: "Fonctions", exact: true }).tap();
   await page.getByRole("menuitem", { name: /^NEWS\b/ }).tap();
   await atteignable(page.locator('[data-window-id="news"]').getByTitle("Fermer", { exact: true }));
 });

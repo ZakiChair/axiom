@@ -54,7 +54,7 @@ async function preparer(page: Page, retenirBtcBybit = false) {
 
 async function ouvrirFundx(page: Page) {
   await page.goto("/");
-  await page.getByRole("button", { name: "Rubriques" }).click();
+  await page.getByRole("button", { name: "Fonctions" }).click();
   await page.getByRole("menuitem", { name: /Funding cross-exchange/ }).click();
   return page.locator('[data-window-id="fundingMatrix"]');
 }

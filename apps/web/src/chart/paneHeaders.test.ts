@@ -26,6 +26,7 @@ class FauxElement {
   parent: FauxElement | null = null;
   readonly attributs = new Map<string, string>();
   readonly style: Record<string, string> = {};
+  readonly dataset: Record<string, string> = {};
   className = "";
   title = "";
   type = "";
@@ -81,6 +82,12 @@ class FauxElement {
       if (trouve) return trouve;
     }
     return null;
+  }
+  querySelectorAll(selecteur: string): FauxElement[] {
+    return this.children.flatMap((child) => [
+      ...(child.tagName === selecteur ? [child] : []),
+      ...child.querySelectorAll(selecteur),
+    ]);
   }
 }
 

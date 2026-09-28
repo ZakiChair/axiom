@@ -47,6 +47,7 @@ import {
   majEtiquettes,
   majLibelle,
   majPastille,
+  adapterCiblesTactiles,
 } from "./legendeControles";
 import { computeDropOrder } from "./paneOrder";
 
@@ -229,6 +230,9 @@ export class PaneHeaders {
       return;
     }
     el.style.display = "";
+    const mobile = this.container.dataset.mobile === "true";
+    adapterCiblesTactiles(el, mobile);
+    el.style.maxWidth = mobile ? `${Math.max(0, main.width - 8)}px` : "";
     el.style.top = `${bounding.top + 2}px`;
     // Bord droit de l'aire de tracé = `left + width` (le champ `right` de Bounding n'est PAS
     // la coordonnée du bord droit en klinecharts@9.8.12 ; cf. ChartInstance crosshair sync).

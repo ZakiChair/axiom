@@ -11,6 +11,9 @@
  * border-down/40…) : tout suit le thème courant sans travail supplémentaire.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { useMobileLayout } from "../hooks/useMobileLayout";
+import "../mobile-surfaces.css";
 import {
   LABEL_NIVEAU,
   type MetaFiabilite,
@@ -22,6 +25,83 @@ import {
   texteRef,
   estExtreme,
 } from "../lib/referentiel";
+
+/** Les menus quittent les barres défilantes sur téléphone. Le viewport visuel
+ * garde les contrôles accessibles quand le clavier logiciel occupe l'écran. */
+export function PortailMobile({ children, fermer, actif = true, retourFocus, focusInitial, portailPermanent = false }: { children: ReactNode; fermer: () => void; actif?: boolean; retourFocus?: React.RefObject<HTMLElement>; focusInitial?: React.RefObject<HTMLElement>; portailPermanent?: boolean }) {
+  const modeMobile = useMobileLayout();
+  const mobile = modeMobile && actif;
+  const ref = useRef<HTMLDivElement>(null);
+  const actifRef = useRef(actif);
+  actifRef.current = actif;
+  const fermerRef = useRef(fermer);
+  fermerRef.current = fermer;
+  useEffect(() => {
+    if (!mobile) return;
+    const conteneur = ref.current;
+    const precedent = retourFocus?.current ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    const viewport = window.visualViewport;
+    const ajuster = () => {
+      if (!conteneur) return;
+      conteneur.style.top = `${viewport?.offsetTop ?? 0}px`;
+      conteneur.style.left = `${viewport?.offsetLeft ?? 0}px`;
+      conteneur.style.width = `${viewport?.width ?? window.innerWidth}px`;
+      conteneur.style.height = `${viewport?.height ?? window.innerHeight}px`;
+    };
+    ajuster();
+    viewport?.addEventListener("resize", ajuster);
+    viewport?.addEventListener("scroll", ajuster);
+    window.addEventListener("resize", ajuster);
+    const touches = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        fermerRef.current();
+      }
+      if (event.key !== "Tab") return;
+      const controles = Array.from(conteneur?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]') ?? [])
+        .filter((element) => element.getClientRects().length > 0);
+      const premier = controles[0], dernier = controles.at(-1);
+      if (!premier || !dernier) return;
+      if (event.shiftKey && (document.activeElement === premier || !conteneur?.contains(document.activeElement))) {
+        event.preventDefault(); dernier.focus();
+      } else if (!event.shiftKey && (document.activeElement === dernier || !conteneur?.contains(document.activeElement))) {
+        event.preventDefault(); premier.focus();
+      }
+    };
+    conteneur?.addEventListener("keydown", touches);
+    // Seule une recherche explicitement ouverte demande le clavier. Les menus
+    // ordinaires focalisent leur fermeture, y compris au remontage d'effet StrictMode.
+    if (focusInitial?.current) focusInitial.current.focus();
+    else if (!conteneur?.contains(document.activeElement)) conteneur?.querySelector<HTMLButtonElement>(".axiom-fermer-mobile button")?.focus();
+    return () => {
+      viewport?.removeEventListener("resize", ajuster);
+      viewport?.removeEventListener("scroll", ajuster);
+      window.removeEventListener("resize", ajuster);
+      conteneur?.removeEventListener("keydown", touches);
+      if (portailPermanent) {
+        for (const propriete of ["top", "left", "width", "height"]) conteneur?.style.removeProperty(propriete);
+      }
+      // Un changement de largeur ne ferme pas les Réglages : le champ en cours
+      // conserve son focus, en plus de son brouillon et de son parent React.
+      const toujoursOuvert = portailPermanent && actifRef.current && conteneur?.isConnected;
+      if (!toujoursOuvert && (document.activeElement === document.body || conteneur?.contains(document.activeElement))) precedent?.focus();
+    };
+  }, [mobile, retourFocus, focusInitial, portailPermanent]);
+  // Fermer un panneau permanent (Réglages) ne change pas son parent React : les
+  // brouillons restent en mémoire, y compris en passant du téléphone au bureau.
+  return (modeMobile || portailPermanent) && typeof document !== "undefined" ? createPortal(<div ref={ref} hidden={modeMobile && !actif} className={modeMobile ? "axiom-mobile axiom-mobile-menu-root" : undefined}>
+    {modeMobile && <div className="absolute inset-0 bg-black/60" onClick={fermer} aria-hidden="true" />}
+    {children}
+  </div>, document.body) : <>{children}</>;
+}
+
+export function EnteteMenuMobile({ titre, fermer }: { titre: string; fermer: () => void }) {
+  return <div className="axiom-fermer-mobile items-center justify-between gap-2 border-b border-border px-3 py-2">
+    <span className="text-sm font-semibold text-text">{titre}</span>
+    <button type="button" onClick={fermer} aria-label={`Fermer ${titre}`} className="rounded border border-border px-3 py-2 text-sm text-text">Fermer</button>
+  </div>;
+}
 
 /** Classes du bouton secondaire standard (recalculer, exporter, choisir…). */
 export const BTN_SECONDAIRE =
@@ -40,7 +120,7 @@ export const LARGEUR_MNEMONIQUE = "w-16";
  * (l'audit 2026-07-29 relevait 5 traitements de focus, 2 rayons, 3 tailles).
  */
 export const CLASSES_CHAMP =
-  "rounded-md border border-border bg-bg px-2 py-1 text-[11px] text-text placeholder:text-text-dim " +
+  "min-w-0 max-w-full rounded-md border border-border bg-bg px-2 py-1 text-[11px] text-text placeholder:text-text-dim " +
   "focus:border-accent/60 focus:outline-none focus:ring-1 focus:ring-accent " +
   "disabled:cursor-not-allowed disabled:opacity-50";
 
@@ -213,7 +293,7 @@ export function MenuDeroulant({
     const actifs = () => Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])') ?? []);
     (actifs()[0] ?? menuRef.current)?.focus();
     const surClicExterieur = (e: MouseEvent) => {
-      if (!wrapperRef.current?.contains(e.target as Node)) setOuvert(false);
+      if (!wrapperRef.current?.contains(e.target as Node) && !menuRef.current?.contains(e.target as Node)) setOuvert(false);
     };
     const surEchap = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -227,10 +307,10 @@ export function MenuDeroulant({
         (e.key === "ArrowDown" ? items[0] : items.at(-1))?.focus();
       }
     };
-    document.addEventListener("mousedown", surClicExterieur);
+    document.addEventListener("pointerdown", surClicExterieur);
     document.addEventListener("keydown", surEchap);
     return () => {
-      document.removeEventListener("mousedown", surClicExterieur);
+      document.removeEventListener("pointerdown", surClicExterieur);
       document.removeEventListener("keydown", surEchap);
     };
   }, [ouvert]);
@@ -256,7 +336,7 @@ export function MenuDeroulant({
       onBlur={(e) => {
         // Focus parti vers un autre élément (Tab, « / ») : le menu se ferme, et ↓ retrouve son
         // sens global sans menu fantôme. Focus perdu vers nulle part (clic Safari) : il reste.
-        if (ouvert && e.relatedTarget !== null && !wrapperRef.current?.contains(e.relatedTarget as Node)) setOuvert(false);
+        if (ouvert && e.relatedTarget !== null && !wrapperRef.current?.contains(e.relatedTarget as Node) && !menuRef.current?.contains(e.relatedTarget as Node)) setOuvert(false);
       }}
     >
       <button
@@ -274,14 +354,17 @@ export function MenuDeroulant({
       </button>
 
       {ouvert && (
+        <PortailMobile fermer={fermer}>
         <div
           role="menu"
           tabIndex={-1}
           ref={menuRef}
-          className={`${classesPanneauMenu(align, direction)} ${classePanneau}`}
+          className={`axiom-menu-mobile ${classesPanneauMenu(align, direction)} ${classePanneau}`}
         >
+          <EnteteMenuMobile titre={ariaLabel ?? titre ?? "Menu"} fermer={fermer} />
           {children(fermer)}
         </div>
+        </PortailMobile>
       )}
     </div>
   );
@@ -305,7 +388,7 @@ export function EnTeteFenetre({
   mnemo?: string;
 }) {
   return (
-    <header className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-4 py-3">
+    <header className="axiom-entete-fenetre flex shrink-0 items-start justify-between gap-3 border-b border-border px-4 py-3">
       <div className="min-w-0">
         <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">
           {mnemo !== undefined && (
@@ -407,7 +490,7 @@ export function TuileStat({
     return (
       <div
         title={title}
-        className="flex items-baseline justify-between gap-3 rounded-md border border-border bg-bg px-3 py-2"
+        className="axiom-tuile-stat flex items-baseline justify-between gap-3 rounded-md border border-border bg-bg px-3 py-2"
       >
         {/* min-w-0 + flex-wrap : un libellé long accompagné d'un badge se replie au
             lieu de pousser la valeur hors de la tuile (backlog lot A). */}
@@ -425,7 +508,7 @@ export function TuileStat({
     );
   }
   return (
-    <div title={title} className="flex flex-col gap-1 rounded-md border border-border bg-bg px-3 py-2">
+    <div title={title} className="axiom-tuile-stat flex flex-col gap-1 rounded-md border border-border bg-bg px-3 py-2">
       <div className="flex items-center justify-between gap-2">
         <span className="min-w-0 truncate text-[10px] uppercase tracking-wider text-text-dim">{label}</span>
         {badge !== undefined && <span className="flex shrink-0 items-center gap-1">{badge}</span>}
@@ -467,7 +550,7 @@ export function Badge({
   return (
     <span
       title={title}
-      className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${TONS_BADGE[ton]}`}
+      className={`axiom-badge shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${TONS_BADGE[ton]}`}
     >
       {children}
     </span>
@@ -533,7 +616,7 @@ export function Onglets<T extends string>({
   onChange: (id: T) => void;
 }) {
   return (
-    <div className="flex gap-1 border-b border-border px-3 py-2">
+    <div className="axiom-onglets flex gap-1 border-b border-border px-3 py-2">
       {options.map((o) => (
         <button
           key={o.id}
@@ -565,7 +648,7 @@ export function Segmente<T extends string | number>({
   onChange: (id: T) => void;
 }) {
   return (
-    <div className="flex overflow-hidden rounded-md border border-border text-[11px]">
+    <div className="axiom-segmente flex overflow-hidden rounded-md border border-border text-[11px]">
       {options.map((o) => (
         <button
           key={o.id}
@@ -585,7 +668,7 @@ export function Segmente<T extends string | number>({
 }
 
 /** Conteneur du segmenté COMPACT (variante en-tête/réglages, consacrée depuis LIQ). */
-export const CLASSES_SEGMENT_CONTENEUR = "flex items-center gap-0.5 rounded border border-border p-0.5";
+export const CLASSES_SEGMENT_CONTENEUR = "axiom-segmente flex items-center gap-0.5 rounded border border-border p-0.5";
 
 /** Classes d'un item de segmenté compact (pure — réutilisable pour les groupes multi). */
 export function classesSegmentItem(actif: boolean): string {
@@ -690,7 +773,7 @@ export function TitreSection({ children, extra }: { children: ReactNode; extra?:
 
 /** Note de bas de section : source + cadence (« Données Deribit, ~1 min. »). */
 export function NoteSource({ children }: { children: ReactNode }) {
-  return <p className="text-[10px] leading-snug text-text-dim">{children}</p>;
+  return <p className="axiom-note-source text-[10px] leading-snug text-text-dim">{children}</p>;
 }
 
 /**
@@ -728,7 +811,7 @@ export function BadgeFiabilite({
   return (
     <span
       title={tip}
-      className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${TONS_FIABILITE[n]}`}
+      className={`axiom-badge shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${TONS_FIABILITE[n]}`}
     >
       {texte}
     </span>

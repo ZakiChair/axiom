@@ -38,7 +38,7 @@ import { coinalyzeKeyStore } from "../store/coinalyze";
 import { chartCapaciteStore, plafondPanesAtteint } from "../store/chartCapacite";
 import { correspondAlias, normaliser } from "./indicateurAlias";
 import { settingsUiStore } from "../store/settings-ui";
-import { CLASSES_CHAMP, indexRoving, Onglets } from "./ui";
+import { CLASSES_CHAMP, EnteteMenuMobile, PortailMobile, indexRoving, Onglets } from "./ui";
 import { MacroIndicators } from "./MacroIndicators";
 import { JeuxIndicateurs } from "./JeuxIndicateurs";
 import { raisonUnusableIndicateur } from "../lib/indicatorUsability";
@@ -359,14 +359,15 @@ export function IndicatorMenu() {
       </button>
 
       {open && (
-        <>
+        <PortailMobile fermer={fermerMenu}>
         {/* Zone de fermeture au clic extérieur (même mécanisme que les menus de la Toolbar). */}
         <div className="fixed inset-0 z-40" onClick={() => fermerMenu()} />
         <div
           ref={panneauRef}
           onKeyDown={onKeyDownPanneau}
-          className="absolute left-0 top-full z-50 mt-1 flex max-h-[70vh] w-72 flex-col rounded border border-neutral-800 bg-neutral-900 shadow-xl"
+          className="axiom-menu-mobile absolute left-0 top-full z-50 mt-1 flex max-h-[70vh] w-72 flex-col rounded border border-neutral-800 bg-neutral-900 shadow-xl"
         >
+          <EnteteMenuMobile titre="Indicateurs" fermer={fermerMenu} />
           {/* Onglets : catalogue technique | mesures macro. Les contenus sont montés
               CONDITIONNELLEMENT (pas masqués en CSS) — les items de l'onglet inactif ne
               sont donc pas dans le DOM et le focus roving ↑/↓ ne les traverse jamais. */}
@@ -620,7 +621,7 @@ export function IndicatorMenu() {
           </>
           )}
         </div>
-        </>
+        </PortailMobile>
       )}
     </div>
   );

@@ -232,8 +232,9 @@ export function CourbeTaux({ series }: { series: SerieCourbe[] }): JSX.Element {
         ref={refCanvas}
         className="h-[180px] w-full"
         aria-hidden="true"
-        onMouseMove={onSurvol}
-        onMouseLeave={() => setSurvol(null)}
+        onPointerDown={onSurvol}
+              onPointerMove={onSurvol}
+        onPointerLeave={(event) => { if (event.pointerType !== "touch") setSurvol(null); }}
       />
       {survol && (
         <InfobulleGraphe

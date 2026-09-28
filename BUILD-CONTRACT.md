@@ -1234,3 +1234,32 @@ Revue indépendante favorable, `pnpm check` réussi (**8 181 tests**), **21 parc
 Chromium** réussis. Contraste vérifié sur cinq thèmes ; build final à **1 188 014 /
 354 245 octets bruts/gzip**, plafonds inchangés. Les contrôles de conservation des chiffres
 au cadrage et d'interaction sont intégrés à la suite `options-carte` existante.
+
+## Usage sur téléphone (demande du 28 septembre 2026)
+
+Le propriétaire demande la révision complète de l'usage depuis un navigateur de
+téléphone. L'adaptation porte sur les outils existants, sans nouveau fournisseur,
+calcul financier, fenêtre métier ni dépendance.
+
+- `hooks/useMobileLayout.ts` centralise la détection des petits écrans et du paysage
+  tactile. Le terminal utilise la hauteur dynamique du navigateur et les marges
+  de sécurité ; les menus portés dans le document suivent le viewport visuel.
+- La navigation mobile donne accès aux fonctions, à la recherche, aux panneaux,
+  aux dessins et aux réglages. Les options du graphique restent accessibles au
+  toucher. Aucun contrôle indispensable ne dépend du survol ou d'un clic droit.
+- Les fenêtres sont cadrées visuellement dans l'espace de travail. Le passage
+  mobile ne transmet pas ce petit rectangle à `setWorkspace`, qui recalculerait
+  et persisterait les géométries du bureau. Les fenêtres ouvertes inactives ou
+  réduites restent montées sur mobile, masquées et inertes ; le passage de l'une
+  à l'autre conserve les brouillons. Leur fermeture définitive démonte le contenu.
+- Les panneaux déjà ouverts conservent les formulaires à leur fermeture. Les
+  Réglages gardent un parent React stable, y compris au changement de mode
+  téléphone/bureau, pour préserver les saisies non enregistrées.
+- La grille conserve sa disposition et ses instruments. Sur téléphone, une vue
+  est visible à la fois ; ses onglets pilotent également le focus des dessins.
+- Les tableaux larges défilent dans un conteneur commun à l'en-tête et au corps.
+  Les champs et les actions sont adaptés au toucher. Les graphiques des fenêtres
+  exposent leur lecture au contact, sans modifier leurs données ou leurs formules.
+
+Constats, vérifications et limites :
+[`docs/revue-2026-09-28-mobile.md`](docs/revue-2026-09-28-mobile.md).

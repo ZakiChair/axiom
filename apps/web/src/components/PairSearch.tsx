@@ -9,7 +9,8 @@ import { TWELVEDATA_SYMBOLS } from "../data/pairs";
 import { encodeSyntheticSymbol, formatSyntheticLabel, parseSyntheticSymbol, type SyntheticLegSource } from "../data/synthetic";
 import { fetchMarketCatalog, subscribeMarketCatalog, searchMarkets, resolveMarketCandidates, type MarketCandidate, type MarketCatalog } from "../data/marketRouting";
 import { abonnerProfondeurs, mesurerProfondeurs } from "../data/profondeurHistorique";
-import { CLASSES_CHAMP } from "./ui";
+import { CLASSES_CHAMP, EnteteMenuMobile, PortailMobile } from "./ui";
+import { useMobileLayout } from "../hooks/useMobileLayout";
 
 export interface PairSearchProps {
   /** Comparaison : le moteur ne sait actuellement comparer que sur la source du graphe. */
@@ -67,6 +68,14 @@ export function clesMesures(resultats: readonly MarketCandidate[], indexActif: n
 export const JAMBE_B_TRADFI_DEFAUT = "GLD";
 
 export function PairSearch({ onPick, placeholder = "Rechercher une paire" }: PairSearchProps = {}) {
+  const mobile = useMobileLayout();
+  const champSourceRef = useRef<HTMLInputElement>(null);
+  const champPortailRef = useRef<HTMLInputElement>(null);
+  const ignorerRetourFocus = useRef(false);
+  const fermetureDifferee = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(fermetureDifferee.current), []);
+  // Le raccourci « / » cible ce nom stable ; le placeholder peut afficher l'actif courant.
+  const libelleRecherche = onPick ? placeholder : "Rechercher une paire";
   const exchange = useStore(marketStore, (s) => s.exchange);
   const timeframe = useStore(marketStore, (s) => s.timeframe);
   const recents = useStore(syntheticsStore, (s) => s.recents);
@@ -164,7 +173,7 @@ export function PairSearch({ onPick, placeholder = "Rechercher une paire" }: Pai
     listeRef.current?.querySelector<HTMLElement>(`[data-idx="${indexActif}"]`)?.scrollIntoView({ block: "nearest" });
   }, [indexActif, query]);
 
-  const close = () => { invalidateBuild(); setQuery(""); setOpen(false); };
+  const close = () => { if (mobile) ignorerRetourFocus.current = true; invalidateBuild(); setQuery(""); setOpen(false); };
   const choose = (candidate: MarketCandidate | string) => {
     const symbol = typeof candidate === "string" ? candidate.trim().toUpperCase() : candidate.symbol;
     if (!symbol) return;
@@ -213,27 +222,51 @@ export function PairSearch({ onPick, placeholder = "Rechercher une paire" }: Pai
     finally { if (generation === buildGeneration.current) setBuilding(false); }
   };
 
-  return <div className="relative">
+  const fermerTout = () => { close(); setSyntheticOpen(false); };
+  const fermerSansVider = () => {
+    if (mobile) ignorerRetourFocus.current = true;
+    invalidateBuild(); setOpen(false); setSyntheticOpen(false);
+  };
+  const surToucheRecherche = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown" && listeVisible) { e.preventDefault(); setIndexActif((i) => Math.min(matches.length - 1, i + 1)); }
+    else if (e.key === "ArrowUp" && listeVisible) { e.preventDefault(); setIndexActif((i) => Math.max(0, i - 1)); }
+    else if (e.key === "Enter") choose(matches[indexActif] ?? query);
+    else if (e.key === "Escape") { e.preventDefault(); fermerSansVider(); }
+  };
+  return <div className="axiom-pair-search relative">
     <div className="flex items-center gap-1">
-      <input value={query} onChange={(e) => { setQuery(e.target.value.toUpperCase()); setIndexActif(0); setOpen(true); setError(null); }}
-        onFocus={() => { setOpen(true); refreshCatalog(); }} onBlur={() => window.setTimeout(() => setOpen(false), 150)}
-        onKeyDown={(e) => {
-          if (e.key === "ArrowDown" && listeVisible) { e.preventDefault(); setIndexActif((i) => Math.min(matches.length - 1, i + 1)); }
-          else if (e.key === "ArrowUp" && listeVisible) { e.preventDefault(); setIndexActif((i) => Math.max(0, i - 1)); }
-          else if (e.key === "Enter") choose(matches[indexActif] ?? query);
-          else if (e.key === "Escape") { invalidateBuild(); setOpen(false); setSyntheticOpen(false); }
-        }} placeholder={placeholder} spellCheck={false} autoComplete="off" role="combobox" aria-expanded={listeVisible}
-        aria-autocomplete="list" aria-controls={listeVisible ? idListe : undefined}
-        aria-activedescendant={listeVisible ? `${idListe}-opt-${indexActif}` : undefined}
-        className="w-44 rounded border border-border bg-bg px-2 py-1 text-xs text-text outline-none placeholder:text-text-dim focus:border-accent" aria-label={placeholder} />
-      {!onPick && <button type="button" title="Construire une série synthétique" onMouseDown={(e) => { e.preventDefault(); invalidateBuild(); setSyntheticOpen((v) => !v); setOpen(true); refreshCatalog(); }}
+      <input ref={champSourceRef} value={query} onChange={(e) => { setQuery(e.target.value.toUpperCase()); setIndexActif(0); setOpen(true); setError(null); }}
+        onFocus={() => {
+          window.clearTimeout(fermetureDifferee.current);
+          fermetureDifferee.current = undefined;
+          if (mobile && ignorerRetourFocus.current) { ignorerRetourFocus.current = false; return; }
+          setOpen(true); refreshCatalog();
+        }}
+        onClick={() => { if (mobile) setOpen(true); }}
+        onBlur={() => {
+          window.clearTimeout(fermetureDifferee.current);
+          if (!mobile) fermetureDifferee.current = window.setTimeout(() => {
+            fermetureDifferee.current = undefined;
+            if (document.activeElement !== champSourceRef.current) setOpen(false);
+          }, 150);
+        }}
+        onKeyDown={surToucheRecherche} placeholder={placeholder} spellCheck={false} autoComplete="off" role="combobox" aria-expanded={!mobile && listeVisible}
+        aria-autocomplete="list" aria-controls={!mobile && listeVisible ? idListe : undefined}
+        aria-activedescendant={!mobile && listeVisible ? `${idListe}-opt-${indexActif}` : undefined}
+        className="w-44 rounded border border-border bg-bg px-2 py-1 text-xs text-text outline-none placeholder:text-text-dim focus:border-accent" aria-label={libelleRecherche} />
+      {!onPick && <button type="button" title="Construire une série synthétique" onClick={() => { invalidateBuild(); setSyntheticOpen((v) => !v); setOpen(true); refreshCatalog(); }}
         className={`rounded border px-2 py-1 text-xs ${syntheticOpen ? "border-emerald-500 bg-emerald-500 text-accent-ink" : "border-neutral-700 bg-neutral-900 text-neutral-300 hover:border-neutral-500"}`}>SYN</button>}
     </div>
 
-    {open && !syntheticOpen && (query.trim() || listeVisible || loading || error || catalog.unavailableSources.length > 0) && <div className="absolute left-0 top-full z-30 mt-1 w-72 rounded border border-neutral-700 bg-neutral-900 shadow-lg">
+    {open && !syntheticOpen && (mobile || query.trim() || listeVisible || loading || error || catalog.unavailableSources.length > 0) && <PortailMobile fermer={fermerSansVider} retourFocus={champSourceRef} focusInitial={champPortailRef}><div className="axiom-menu-mobile absolute left-0 top-full z-30 mt-1 w-72 rounded border border-neutral-700 bg-neutral-900 shadow-lg">
+      <EnteteMenuMobile titre="Recherche d’actif" fermer={fermerTout} />
+      {mobile && <input ref={champPortailRef} autoFocus value={query} onChange={(e) => { setQuery(e.target.value.toUpperCase()); setIndexActif(0); setError(null); }}
+        onKeyDown={surToucheRecherche} role="combobox" aria-expanded={listeVisible} aria-autocomplete="list"
+        aria-controls={listeVisible ? idListe : undefined} aria-activedescendant={listeVisible ? `${idListe}-opt-${indexActif}` : undefined}
+        placeholder={placeholder} aria-label={libelleRecherche} autoComplete="off" spellCheck={false} className={`${CLASSES_CHAMP} my-2 w-full`} />}
       {listeVisible && <ul ref={listeRef} id={idListe} role="listbox" aria-label="Résultats de paires" className="max-h-72 overflow-y-auto py-1">
         {matches.map((m, i) => <li key={`${m.kind}:${m.symbol}`} role="none"><button id={`${idListe}-opt-${i}`} data-idx={i} type="button" role="option" aria-selected={i === indexActif} title={titreSource(m)}
-          onMouseDown={(e) => { e.preventDefault(); choose(m); }} onMouseEnter={() => setIndexActif(i)}
+          onMouseDown={(e) => e.preventDefault()} onClick={() => choose(m)} onMouseEnter={() => setIndexActif(i)}
           className={`flex w-full items-center justify-between gap-2 px-2 py-1 text-left text-xs text-neutral-200 ${i === indexActif ? "bg-neutral-800" : "hover:bg-neutral-800"}`}>
           <span><span>{m.symbol}</span>{m.label && <span className="block text-[10px] text-text-dim">{m.label}</span>}</span><span className="shrink-0 text-[10px] text-text-dim">{libelleSource(m)}</span>
         </button></li>)}
@@ -243,9 +276,10 @@ export function PairSearch({ onPick, placeholder = "Rechercher une paire" }: Pai
       {catalog.unavailableSources.length > 0 && <p className="border-t border-neutral-800 px-2 py-1 text-[10px] text-text-dim">Catalogue partiel · {catalog.unavailableSources.map(sourceLabel).join(", ")} indisponible(s)</p>}
       {error && <p role="status" className="px-2 py-1 text-[11px] text-down">{error}</p>}
       <button type="button" disabled={loading} onMouseDown={(e) => e.preventDefault()} onClick={() => refreshCatalog(true)} className="w-full border-t border-neutral-800 px-2 py-1 text-left text-[11px] text-text-dim hover:text-text disabled:opacity-40">Actualiser les actifs</button>
-    </div>}
+    </div></PortailMobile>}
 
-    {syntheticOpen && <div className="absolute left-0 top-full z-30 mt-1 w-[30rem] rounded border border-neutral-700 bg-neutral-900 p-2 shadow-xl">
+    {syntheticOpen && <PortailMobile fermer={fermerSansVider} retourFocus={champSourceRef}><div className="axiom-menu-mobile absolute left-0 top-full z-30 mt-1 w-[30rem] rounded border border-neutral-700 bg-neutral-900 p-2 shadow-xl">
+      <EnteteMenuMobile titre="Série synthétique" fermer={fermerTout} />
       <div className="mb-2 flex justify-between text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim"><span>Synthétique</span><span>ratio / spread · sources automatiques</span></div>
       <div className="mb-2 flex flex-wrap gap-1">{SYNTHETIC_PRESETS.map((preset) => <button key={preset.symbol} type="button" onClick={() => {
         const spec = parseSyntheticSymbol(preset.symbol);
@@ -258,7 +292,7 @@ export function PairSearch({ onPick, placeholder = "Rechercher une paire" }: Pai
           else chooseSynthetic(recent);
         }} className="rounded bg-neutral-950 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800">{spec ? formatSyntheticLabel(spec) : recent}</button>;
       })}</div>}
-      <div className="grid grid-cols-[1fr_auto_1fr_auto] items-start gap-2 border-t border-neutral-800 pt-2">
+      <div className="axiom-synth-grid grid grid-cols-[1fr_auto_1fr_auto] items-start gap-2 border-t border-neutral-800 pt-2">
         <LegEditor label="Jambe A" symbol={legA} matches={searchMarkets(catalog, legA, 8)} onSymbol={(value) => { invalidateBuild(); setLegA(value); }} />
         <div className="flex flex-col gap-1 pt-6">{(["/", "-"] as const).map((candidate) => <button key={candidate} type="button" onClick={() => { invalidateBuild(); setOp(candidate); }} className={`h-7 w-7 rounded text-sm ${op === candidate ? "bg-emerald-500 text-accent-ink" : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"}`}>{candidate}</button>)}</div>
         <LegEditor label="Jambe B" symbol={legB} matches={searchMarkets(catalog, legB, 8)} onSymbol={(value) => { invalidateBuild(); setLegB(value); }} />
@@ -266,7 +300,7 @@ export function PairSearch({ onPick, placeholder = "Rechercher une paire" }: Pai
       </div>
       {error && <p role="status" className="mt-2 text-[11px] text-down">{error}</p>}
       {catalog.unavailableSources.length > 0 && <button type="button" disabled={loading} onClick={() => refreshCatalog(true)} className="mt-2 text-[11px] text-text-dim hover:text-text disabled:opacity-40">Actualiser les actifs</button>}
-    </div>}
+    </div></PortailMobile>}
   </div>;
 }
 

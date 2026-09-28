@@ -19,7 +19,7 @@ import {
   onboardingStore,
 } from "../store/onboarding";
 import { coinalyzeKeyStore } from "../store/coinalyze";
-import { BTN_SECONDAIRE } from "./ui";
+import { BTN_SECONDAIRE, PortailMobile } from "./ui";
 import { URL_SIGNALER_PROBLEME } from "../lib/lienRetours";
 
 /** Clé locale « présence clé perso » sans exposer la valeur (coinalyze hasKey est toujours true). */
@@ -102,14 +102,15 @@ export function OnboardingOverlay() {
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+    <PortailMobile fermer={skip}>
+    <div className="axiom-onboarding fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="onboarding-titre"
         tabIndex={-1}
-        className="flex w-full max-w-md flex-col rounded-lg border border-border bg-surface shadow-2xl outline-none"
+        className="axiom-onboarding-dialog flex w-full max-w-md flex-col rounded-lg border border-border bg-surface shadow-2xl outline-none"
       >
         <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
           <div className="min-w-0">
@@ -267,5 +268,6 @@ export function OnboardingOverlay() {
         </footer>
       </div>
     </div>
+    </PortailMobile>
   );
 }

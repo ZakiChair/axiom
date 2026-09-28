@@ -641,3 +641,153 @@ body::before {
     opacity: 1;
   }
 }
+
+/* Le shell mobile reprend les tokens et la typographie du terminal. Les fenêtres
+ * changent de cadre visuel uniquement ; leur géométrie desktop reste dans le store. */
+.axiom-app { height: 100dvh; }
+.axiom-mobile {
+  width: 100%;
+  max-width: 100%;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  overscroll-behavior: none;
+}
+.axiom-mobile .axiom-toolbar {
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-height: 56px;
+  padding: 6px 8px;
+}
+.axiom-mobile .axiom-toolbar > div:first-of-type { min-width: 0; flex: 1; }
+.axiom-mobile .axiom-toolbar > div:first-of-type > button { max-width: 100%; }
+.axiom-mobile .axiom-toolbar > select { width: 72px; flex-shrink: 0; }
+.axiom-mobile .axiom-toolbar > button { flex-shrink: 0; }
+.axiom-mobile .axiom-toolbar button,
+.axiom-mobile .axiom-toolbar select,
+.axiom-mobile .axiom-mobile-sidebar button,
+.axiom-mobile .axiom-taskbar button,
+.axiom-mobile .axiom-window-header button,
+.axiom-mobile .axiom-mobile-drawings button { min-height: 44px; }
+.axiom-mobile .axiom-toolbar-options.contents {
+  position: fixed;
+  z-index: 40;
+  top: var(--mobile-workspace-y, 100px);
+  left: var(--mobile-workspace-x, 0px);
+  width: var(--mobile-workspace-width, 100%);
+  height: var(--mobile-workspace-height, calc(100dvh - 156px));
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  overscroll-behavior: contain;
+}
+.axiom-mobile .axiom-toolbar-options > div { flex-wrap: wrap; max-width: 100%; }
+.axiom-mobile .axiom-toolbar-options > .w-px { display: none; }
+.axiom-mobile .axiom-toolbar-options > .ml-auto { margin-left: 0; }
+.axiom-options-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.axiom-options-heading > button { min-width: 44px; }
+.axiom-mobile .axiom-session-strip {
+  position: relative;
+  min-width: 0;
+  min-height: 36px;
+  gap: 10px;
+  overflow-x: auto;
+  white-space: nowrap;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.axiom-mobile .axiom-session-strip > * { flex-shrink: 0; }
+.axiom-mobile .axiom-session-strip button { min-height: 36px; }
+.axiom-mobile-navigation {
+  display: flex;
+  flex-shrink: 0;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 2px;
+  min-height: 48px;
+  padding: 2px 4px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.axiom-mobile-navigation > * { min-width: 0; flex: 1; }
+.axiom-mobile-navigation button {
+  width: 100%;
+  min-height: 44px;
+  padding: 4px 2px;
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.axiom-mobile-navigation button[aria-expanded="true"] { color: var(--accent); background: var(--bg); }
+.axiom-mobile-sidebar,
+.axiom-mobile-drawings {
+  position: absolute;
+  z-index: 41;
+  inset: 0 0 0 auto;
+  display: flex;
+  width: min(100%, 380px);
+  max-width: 100%;
+  overscroll-behavior: contain;
+  box-shadow: -12px 0 30px #0004;
+}
+.axiom-mobile-drawings.hidden { display: none; }
+.axiom-mobile-drawings > button { width: 100%; height: auto; justify-content: flex-start; gap: 12px; padding: 6px 12px; font-size: 12px; }
+.axiom-mobile-drawings svg { flex-shrink: 0; }
+.axiom-mobile .axiom-taskbar {
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.axiom-mobile .axiom-taskbar > * { flex-shrink: 0; white-space: nowrap; }
+.axiom-mobile .axiom-taskbar-item { display: flex; align-items: stretch; }
+.axiom-mobile .axiom-taskbar-item > button:last-child {
+  position: static;
+  width: 44px;
+  height: auto;
+  transform: none;
+  opacity: 1;
+  border: 1px solid var(--border);
+}
+.axiom-mobile .axiom-floating-window { border-radius: 0; }
+.axiom-mobile .axiom-window-header { cursor: default; padding: 2px 6px; gap: 4px; }
+.axiom-mobile .axiom-window-header button { min-width: 44px; }
+.axiom-mobile .axiom-window-header > div:first-child { gap: 4px; }
+.axiom-mobile .axiom-window-header > div:first-child > span:first-child { width: auto; }
+.axiom-mobile .axiom-window-groups { top: 46px; width: 250px; flex-wrap: wrap; }
+.axiom-mobile .axiom-fib-settings,
+.axiom-mobile .axiom-footprint-settings {
+  left: max(8px, env(safe-area-inset-left, 0px));
+  right: max(8px, env(safe-area-inset-right, 0px));
+  top: max(8px, env(safe-area-inset-top, 0px));
+  bottom: max(8px, env(safe-area-inset-bottom, 0px));
+  width: auto;
+  max-height: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.axiom-mobile .axiom-fib-settings button,
+.axiom-mobile .axiom-footprint-settings button,
+.axiom-mobile .axiom-fib-settings label,
+.axiom-mobile .axiom-footprint-settings label { min-height: 44px; }
+@media (max-height: 500px) {
+  .axiom-mobile .axiom-session-strip,
+  .axiom-mobile .axiom-ticker-mobile { display: none; }
+}

@@ -18,6 +18,20 @@ import { NB_COULEURS_SERIE } from "../store/indicators";
 /** Taille des cibles de clic (px) — au-dessus des ~14 px précédents (loi de Fitts). */
 const CIBLE = "min-h-[18px] min-w-[18px]";
 
+/** Les légendes sont impératives : leur taille suit celle du slot au redimensionnement. */
+export function adapterCiblesTactiles(parent: HTMLElement, mobile: boolean): void {
+  for (const button of parent.querySelectorAll<HTMLButtonElement>("button")) {
+    button.style.minHeight = mobile ? "44px" : "";
+    button.style.minWidth = mobile ? "44px" : "";
+    button.style.flexShrink = "0";
+  }
+  const label = parent.querySelector<HTMLElement>("[data-role=label]");
+  if (label) {
+    label.style.minWidth = "0";
+    label.style.maxWidth = mobile ? "100px" : "";
+  }
+}
+
 /**
  * Nom de la variable CSS de série pour un index 0-based, replié dans la bande.
  * PURE — le modulo positif évite `--serie-0` et `--serie-NaN` sur un état douteux.

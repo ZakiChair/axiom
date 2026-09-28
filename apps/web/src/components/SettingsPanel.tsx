@@ -41,7 +41,7 @@ import {
 } from "../data/daemon";
 import { formatCompact, formatDateHeure } from "../lib/format";
 import { ThemeSwitcher } from "./ThemeSwitcher";
-import { Badge, BTN_SECONDAIRE, Chargement, Unusable, Vide } from "./ui";
+import { Badge, BTN_SECONDAIRE, Chargement, PortailMobile, Unusable, Vide } from "./ui";
 
 interface ApiKeyFieldProps {
   /** Nom de la source (ex. « Coinalyze »). */
@@ -544,8 +544,9 @@ export function SettingsPanel() {
   }, [open, closeSettings]);
 
   return (
+    <PortailMobile fermer={closeSettings} actif={open} portailPermanent>
     <div
-      className={`fixed inset-0 z-50 ${open ? "" : "pointer-events-none"}`}
+      className={`axiom-settings-shell fixed inset-0 z-50 ${open ? "" : "pointer-events-none"}`}
       aria-hidden={!open}
     >
       {/* Overlay (clic = fermeture) — frère du panneau, pas de propagation à gérer. */}
@@ -770,5 +771,6 @@ export function SettingsPanel() {
         </div>
       </div>
     </div>
+    </PortailMobile>
   );
 }

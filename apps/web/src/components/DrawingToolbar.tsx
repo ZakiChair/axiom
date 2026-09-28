@@ -26,6 +26,7 @@ import {
   COMMON_EXTENSIONS,
 } from "../chart/fibonacci";
 import { marketStore } from "../store/market";
+import { useMobileLayout } from "../hooks/useMobileLayout";
 
 /** Props communes aux icônes (trait fin, hérite la couleur du bouton). */
 const ICON_PROPS = {
@@ -309,7 +310,7 @@ function FibSettingsPanel({ onClose }: { onClose: () => void }) {
       <div
         role="dialog"
         aria-label="Réglages Fibonacci"
-        className="fixed bottom-3 left-12 z-50 max-h-[80vh] w-60 overflow-y-auto rounded-md border border-border bg-surface p-3 shadow-2xl"
+        className="axiom-fib-settings fixed bottom-3 left-12 z-50 max-h-[80vh] w-60 overflow-y-auto rounded-md border border-border bg-surface p-3 shadow-2xl"
       >
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
@@ -394,7 +395,8 @@ function FibSettingsPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function DrawingToolbar() {
+export function DrawingToolbar({ mobileOpen = false, onClose }: { mobileOpen?: boolean; onClose?: () => void }) {
+  const mobile = useMobileLayout();
   const tool = useStore(drawingStore, (s) => s.tool);
   // Le VPFR n'a pas de sens sur une série synthétique (volume composé = 0).
   const exchange = useStore(marketStore, (s) => s.exchange);
@@ -425,9 +427,16 @@ export function DrawingToolbar() {
   return (
     <>
       <nav
-        className="hidden w-10 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-border bg-surface py-2 sm:flex"
+        id="outils-dessin"
+        className={mobile
+          ? `axiom-mobile-drawings ${mobileOpen ? "flex" : "hidden"} flex-col gap-1 overflow-y-auto border border-border bg-surface p-2`
+          : "flex w-10 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-border bg-surface py-2"}
         aria-label="Outils de dessin"
       >
+        {mobile && <div className="flex items-center justify-between px-2">
+          <strong className="text-sm">Dessins</strong>
+          <button type="button" aria-label="Fermer les dessins" onClick={onClose}>✕</button>
+        </div>}
         {TOOLS.map(({ id, label, Icon }) => {
           const active = tool === id;
           const disabled = id === "volumeRange" && exchange === "synthetic";
@@ -437,14 +446,14 @@ export function DrawingToolbar() {
               key={id}
               type="button"
               disabled={disabled}
-              onClick={() => selectTool(id)}
+              onClick={() => { selectTool(id); if (mobile) { hideTip(); onClose?.(); } }}
               onMouseEnter={showTip(tip)}
               onMouseLeave={hideTip}
               onFocus={showTip(tip)}
               onBlur={hideTip}
               aria-pressed={active}
               aria-label={tip}
-              className={`flex h-8 w-8 items-center justify-center rounded transition ${
+              className={`flex ${mobile ? "min-h-11 gap-3 px-3 text-left text-xs" : "h-8 w-8 justify-center"} items-center rounded transition ${
                 disabled
                   ? "cursor-not-allowed text-text-dim opacity-40"
                   : active
@@ -453,6 +462,7 @@ export function DrawingToolbar() {
               }`}
             >
               <Icon />
+              {mobile && <span>{label.split(" — ")[0]}</span>}
             </button>
           );
         })}
@@ -477,7 +487,13 @@ export function DrawingToolbar() {
           }`}
         >
           <SlidersIcon />
+          {mobile && <span>Réglages Fibonacci</span>}
         </button>
+
+        {mobile && <button type="button" onClick={() => { deleteSelectedDrawing(); onClose?.(); }}
+          className="flex min-h-11 items-center gap-3 rounded px-3 text-left text-xs text-text-dim">
+          <TrashIcon /><span>Supprimer le dessin sélectionné</span>
+        </button>}
 
         {/* Effacer tout. */}
         <button
@@ -491,11 +507,12 @@ export function DrawingToolbar() {
           className="flex h-8 w-8 items-center justify-center rounded text-text-dim transition hover:bg-bg hover:text-down"
         >
           <TrashIcon />
+          {mobile && <span>Effacer tous les dessins</span>}
         </button>
       </nav>
 
       {/* Infobulle thémée (fixed → jamais rognée par le scroll de la barre). */}
-      {hover && (
+      {hover && !mobile && (
         <div
           role="tooltip"
           style={{ top: hover.y }}

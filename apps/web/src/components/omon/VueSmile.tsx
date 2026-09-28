@@ -93,8 +93,9 @@ export function VueSmile({
           <canvas
             ref={refCanvas}
             className="h-[200px] w-full"
-            onMouseMove={onSurvolSmile}
-            onMouseLeave={onSortieSmile}
+            onPointerDown={onSurvolSmile}
+              onPointerMove={onSurvolSmile}
+            onPointerLeave={(event) => { if (event.pointerType !== "touch") onSortieSmile(); }}
           />
           {survolSmile && (
             <InfobulleGraphe

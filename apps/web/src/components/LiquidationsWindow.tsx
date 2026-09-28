@@ -701,7 +701,7 @@ function ContenuLive() {
             se charge automatiquement s'il existe)
           </Vide>
         ) : (
-          <div className="text-xs">
+          <div className="axiom-liquidations-table text-xs">
             <div
               className={`sticky top-0 z-10 border-b border-border bg-surface pb-1 text-[10px] uppercase tracking-wider text-text-dim ${GRILLE_FEED}`}
             >
@@ -998,7 +998,7 @@ function ContenuHistorique({
               <Histogramme buckets={derives.buckets} />
 
               {/* Top des plus grosses liquidations de la fenêtre. */}
-              <div className="mt-4 text-xs">
+              <div className="axiom-liquidations-table mt-4 text-xs">
                 <div
                   className={`border-b border-border pb-1 text-[10px] uppercase tracking-wider text-text-dim ${GRILLE_TOP}`}
                 >

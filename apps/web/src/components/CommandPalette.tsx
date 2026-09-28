@@ -25,6 +25,7 @@ import {
 } from "../commands/registry";
 import { RACCOURCIS_AIDE, lignesMnemoniques } from "../commands/hotkeys";
 import { URL_SIGNALER_PROBLEME } from "../lib/lienRetours";
+import { PortailMobile } from "./ui";
 
 /** Entrée d'historique persistée (id de commande + texte de saisie pour rejouer la navigation). */
 interface EntreeHistorique {
@@ -217,18 +218,20 @@ export function CommandPalette() {
   const selection = items[indexSel];
 
   return (
+    <PortailMobile fermer={fermer}>
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/60 backdrop-blur-sm pt-[12vh]"
+      className="axiom-palette fixed inset-0 z-[60] flex items-start justify-center bg-black/60 backdrop-blur-sm pt-[12vh]"
       onMouseDown={fermer}
     >
       {/* Panneau (mousedown stoppé pour ne pas fermer au clic interne). */}
       <div
         onMouseDown={(e) => e.stopPropagation()}
-        className="w-[min(680px,94vw)] overflow-hidden rounded-lg border border-border bg-surface font-mono shadow-2xl"
+        className="axiom-palette-dialog w-[min(680px,94vw)] overflow-hidden rounded-lg border border-border bg-surface font-mono shadow-2xl"
         role="dialog"
         aria-modal="true"
         aria-label={mode === "aide" ? "Aide des raccourcis" : "Palette de commandes"}
       >
+        <div className="axiom-fermer-mobile items-center justify-between border-b border-border px-4 py-2"><span className="text-sm text-text">{mode === "aide" ? "Aide" : "Commandes"}</span><button type="button" onClick={fermer} aria-label="Fermer les commandes" className="rounded border border-border px-3 py-2 text-sm text-text">Fermer</button></div>
         {mode === "aide" ? (
           <div>
             <div className="border-b border-border px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
@@ -314,7 +317,7 @@ export function CommandPalette() {
                       {it.cmd.id === "nav" ? "→" : (it.cmd.mnemonique ?? "")}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-sm text-text">{it.cmd.libelle}</span>
-                    <span className="shrink-0 text-[10px] uppercase tracking-wider text-text-dim">
+                    <span className="axiom-palette-categorie shrink-0 text-[10px] uppercase tracking-wider text-text-dim">
                       {CATEGORIE_LABEL[it.cmd.categorie]}
                     </span>
                   </button>
@@ -325,11 +328,12 @@ export function CommandPalette() {
             {/* Aperçu de la commande sélectionnée + rappel des touches. */}
             <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-2 text-[11px] text-text-dim">
               <span className="min-w-0 truncate">{selection?.cmd.apercu ?? ""}</span>
-              <span className="shrink-0">↑↓ naviguer · ⏎ exécuter · ? aide</span>
+              <span className="axiom-palette-raccourcis shrink-0">↑↓ naviguer · ⏎ exécuter · ? aide</span>
             </div>
           </div>
         )}
       </div>
     </div>
+    </PortailMobile>
   );
 }

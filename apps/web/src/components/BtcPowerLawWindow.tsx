@@ -531,8 +531,9 @@ export function BtcPowerLawWindow() {
               </div>
               <canvas
                 ref={refCanvas}
-                onMouseMove={onMove}
-                onMouseLeave={() => setSurvol(null)}
+                onPointerDown={onMove}
+              onPointerMove={onMove}
+                onPointerLeave={(event) => { if (event.pointerType !== "touch") setSurvol(null); }}
                 className="h-full w-full cursor-grab active:cursor-grabbing"
               />
               {survol !== null && modele !== null && (

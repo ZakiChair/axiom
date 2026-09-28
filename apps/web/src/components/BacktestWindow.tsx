@@ -139,7 +139,7 @@ function OperandeSelect({
   const tf = useStore(backtestStore, s => s.tf);
   const spec = specParId(specId);
   return (
-    <span className="flex items-center gap-1">
+    <span className="axiom-operande flex items-center gap-1">
       <Select
         value={specId}
         onChange={(e) => {
@@ -538,8 +538,9 @@ function EquityCanvas({ resultat, frontiere }: { resultat: ResultatBacktest; fro
           className="h-40 w-full rounded-md border border-border bg-bg"
           role="img"
           aria-label="Courbe d'équité et drawdown"
-          onMouseMove={onSurvol}
-          onMouseLeave={() => setSurvol(null)}
+          onPointerDown={onSurvol}
+              onPointerMove={onSurvol}
+          onPointerLeave={(event) => { if (event.pointerType !== "touch") setSurvol(null); }}
         />
         {survol && (
           <InfobulleGraphe
@@ -1182,7 +1183,7 @@ export function BacktestWindow() {
         sousTitre={intrabar ? "Bougies clôturées · exécution open+1 · stop/objectif intrabar" : "Bougies clôturées · exécution open+1 · pas d'intrabar"}
       />
 
-      <div className="space-y-3 px-4 py-3">
+      <div className="axiom-backtest space-y-3 px-4 py-3">
         {/* Presets */}
         <section className="space-y-2">
           <TitreSection>Stratégies</TitreSection>

@@ -66,8 +66,9 @@ export function VueHeatmap({
           <canvas
             ref={heatmapCanvasRef}
             className="h-[300px] w-full"
-            onMouseMove={onSurvolHeatmap}
-            onMouseLeave={onSortieHeatmap}
+            onPointerDown={onSurvolHeatmap}
+              onPointerMove={onSurvolHeatmap}
+            onPointerLeave={(event) => { if (event.pointerType !== "touch") onSortieHeatmap(); }}
           />
           {survolHeatmap && celluleSurvol && grilleOi && (
             <InfobulleGraphe

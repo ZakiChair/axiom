@@ -380,8 +380,9 @@ function CourbeHashrate({ points }: { points: PointMetrique[] }) {
         <canvas
           ref={refCanvas}
           style={{ width: "100%", height: COURBE_H }}
-          onMouseMove={surSurvol}
-          onMouseLeave={() => setSurvol(null)}
+          onPointerDown={surSurvol}
+              onPointerMove={surSurvol}
+          onPointerLeave={(event) => { if (event.pointerType !== "touch") setSurvol(null); }}
         />
         {survol && (
           <InfobulleGraphe
@@ -409,7 +410,7 @@ function CarteHashrate({ hr }: { hr: ResultatFrais<SerieMetrique> | null }) {
   const max = values.length > 0 ? Math.max(...values) : undefined;
   return (
     <div className="col-span-2 flex flex-col gap-1 rounded-md border border-border bg-bg px-3 py-2">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="truncate text-[11px] text-text-dim">Évolution du hashrate (1 an)</span>
         <BadgeFiabilite meta={META_DAILY} />
       </div>
@@ -932,7 +933,7 @@ export function OnchainWindow() {
               const cumul30 = cumulDe(serie, 30);
               return (
                 <div className="space-y-1.5 rounded-md border border-accent/40 bg-accent/5 px-3 py-2">
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-[11px] text-text-dim">Flux ETF BTC (jour)</span>
                     <span
                       className={`tabular-nums text-base font-semibold ${jour >= 0 ? "text-up" : "text-down"}`}
@@ -949,7 +950,7 @@ export function OnchainWindow() {
                       {fmtFluxBtc(cumul30)}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <NoteSource>bitcoin-data.com (repli)</NoteSource>
                     <span className="flex shrink-0 items-center gap-1 text-[10px] text-text-dim">
                       {/* Séances boursières seulement : retard au-delà de la règle ETF de 5 jours (week-end, férié). */}

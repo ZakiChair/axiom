@@ -10,7 +10,7 @@ const BUTTONS: { option: ChartSyncOption; label: string; title: string }[] = [
   { option: "syncCrosshair", label: "Rét.", title: "Synchroniser le réticule" },
 ];
 
-export default function ChartSyncControls() {
+export default function ChartSyncControls({ mobile = false }: { mobile?: boolean }) {
   const layout = useStore(chartLayoutStore, (s) => s.layout);
   const syncTimeframe = useStore(chartLayoutStore, (s) => s.syncTimeframe);
   const syncViewport = useStore(chartLayoutStore, (s) => s.syncViewport);
@@ -26,7 +26,7 @@ export default function ChartSyncControls() {
 
   return <>
     {differents && (
-      <div role="status" className="pointer-events-none absolute bottom-8 right-0 w-72 max-w-[90vw] rounded border border-border bg-surface/95 px-2 py-1 text-[10px] text-warn">
+      <div role="status" className={`${mobile ? "order-last w-full" : "pointer-events-none absolute bottom-8 right-0 w-72 max-w-[90vw]"} rounded border border-border bg-surface/95 px-2 py-1 text-[10px] text-warn`}>
         Unités différentes : {timeframes.map((s) => `vue ${s.slot + 1} ${s.timeframe}`).join(" · ")}.
         {" "}Certaines sources peuvent ne pas accepter l’unité choisie.
       </div>
@@ -36,7 +36,7 @@ export default function ChartSyncControls() {
       <button key={b.option} type="button" title={b.title} aria-label={b.title}
         aria-pressed={options[b.option]}
         onClick={() => chartLayoutStore.getState().setSyncOption(b.option, !options[b.option])}
-        className={`rounded px-1.5 py-0.5 font-mono text-[10px] transition ${
+        className={`rounded ${mobile ? "min-h-11 min-w-11 px-2 text-xs" : "px-1.5 py-0.5 text-[10px]"} font-mono transition ${
           options[b.option] ? "bg-accent/25 text-text" : "text-text-dim hover:bg-bg hover:text-text"
         }`}
       >{b.label}</button>

@@ -10,7 +10,7 @@
  *  - variation 24 h : abonnement `subscribeTickers` existant (data/ticker.ts) ;
  *  - prix / H-L / volume : dérivés du buffer de bougies (marketStore), fenêtre 24 h.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { Candle, ExchangeId, Timeframe, Unsubscribe } from "@axiom/types";
 import { marketStore } from "../store/market";
@@ -40,6 +40,7 @@ import {
 import { supportedTimeframesFor, timeframeProche } from "../data/adapters";
 import { MenuDeroulant } from "./ui";
 import { formatCompact, formatCountdown, formatPct, formatPrice } from "../lib/format";
+import { useMobileLayout } from "../hooks/useMobileLayout";
 
 /** Durée (ms) d'une bougie pour les timeframes à pas FIXE. */
 export const TF_DURATION_MS: Partial<Record<Timeframe, number>> = {
@@ -146,8 +147,8 @@ export function subscribeSymbolBannerTicker(
 }
 
 /** Classes d'un bouton de ratio (état actif = teinte pleine, comme le ÷BTC d'origine). */
-function classeBouton(actif: boolean): string {
-  return `pointer-events-auto rounded border px-2 py-1 text-xs ${
+function classeBouton(actif: boolean, mobile = false): string {
+  return `pointer-events-auto rounded border px-2 py-1 text-xs ${mobile ? "min-h-11 min-w-11" : ""} ${
     actif
       ? "border-emerald-500 bg-emerald-500 text-accent-ink"
       : "border-neutral-700 bg-neutral-900 text-neutral-300 hover:border-neutral-500"
@@ -180,6 +181,7 @@ function BoutonsRatio({
   symbol: string;
   timeframe: Timeframe;
 }) {
+  const mobile = useMobileLayout();
   const choisi = useStore(denominateurStore, (s) => s.denominateur);
   const setChoisi = useStore(denominateurStore, (s) => s.setDenominateur);
 
@@ -257,7 +259,8 @@ function BoutonsRatio({
           type="button"
           title={actif?.denom === "BTC" ? `Revenir à ${actif.spec.legA}` : "Ratio vs BTC"}
           onClick={() => basculer("BTC")}
-          className={classeBouton(actif?.denom === "BTC")}
+          aria-pressed={actif?.denom === "BTC"}
+          className={classeBouton(actif?.denom === "BTC", mobile)}
         >
           ÷BTC
         </button>
@@ -273,7 +276,8 @@ function BoutonsRatio({
                 : detail(denomScinde)
             }
             onClick={() => basculer(denomScinde)}
-            className={`${classeBouton(actif?.denom === denomScinde)} rounded-r-none border-r-0`}
+            aria-pressed={actif?.denom === denomScinde}
+            className={`${classeBouton(actif?.denom === denomScinde, mobile)} rounded-r-none border-r-0`}
           >
             {libelleDenominateur(denomScinde)}
           </button>
@@ -284,7 +288,7 @@ function BoutonsRatio({
             titre="Choisir l'actif de comparaison"
             align="right"
             classePanneau="w-56"
-            declencheurClasse={`${classeBouton(false)} rounded-l-none px-1`}
+            declencheurClasse={`${classeBouton(false, mobile)} rounded-l-none px-1`}
           >
             {(fermer) => groupes.map(([titre, liste]) => (
               <div key={titre} role="group" aria-labelledby={`ratio-groupe-${titre}`} className="flex flex-col">
@@ -303,7 +307,7 @@ function BoutonsRatio({
                       poser(denom);
                       fermer();
                     }}
-                    className={`flex items-center gap-1.5 px-2 py-1 text-left text-xs ${
+                    className={`flex ${mobile ? "min-h-11" : ""} items-center gap-1.5 px-2 py-1 text-left text-xs ${
                       disponible(denom)
                         ? "text-text hover:bg-neutral-800 focus:bg-neutral-800 focus:outline-none"
                         : "cursor-not-allowed text-text-dim"
@@ -323,6 +327,8 @@ function BoutonsRatio({
 }
 
 export function SymbolBanner() {
+  const mobile = useMobileLayout();
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const exchange = useStore(marketStore, (s) => s.exchange);
   const symbol = useStore(marketStore, (s) => s.symbol);
   const timeframe = useStore(marketStore, (s) => s.timeframe);
@@ -437,20 +443,28 @@ export function SymbolBanner() {
   }, [exchange, symbol, timeframe]);
 
   return (
-    <div className="pointer-events-none absolute left-2 top-2 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-border bg-surface/80 px-2.5 py-1 text-xs tabular-nums text-text-dim backdrop-blur-sm">
-      <span className="font-semibold text-text">{bannerSymbol}</span>
+    <div data-chart-banner className={`pointer-events-none absolute top-2 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-border bg-surface/80 text-xs tabular-nums text-text-dim backdrop-blur-sm ${mobile ? "left-1 right-1 px-2" : "left-2 px-2.5 py-1"}`}>
+      <span title={bannerSymbol} className={`font-semibold text-text ${mobile ? "min-w-0 max-w-[28%] truncate" : ""}`}>{bannerSymbol}</span>
+      <span className="text-text-dim">{timeframe}</span>
+      <span ref={priceRef} className="min-w-0 font-semibold text-text">
+        —
+      </span>
+      <span ref={changeRef} className={mobile && !detailsOpen ? "hidden min-[390px]:inline" : ""}>—</span>
+      {mobile && <button type="button" aria-expanded={detailsOpen} aria-controls="chart-banner-details"
+        aria-label="Détails du marché et ratios"
+        onClick={() => setDetailsOpen((open) => !open)}
+        className="pointer-events-auto ml-auto min-h-11 shrink-0 rounded px-2 text-text"
+      >Détails {detailsOpen ? "▴" : "▾"}</button>}
+      <div id="chart-banner-details" className={mobile
+        ? `${detailsOpen ? "flex" : "hidden"} pointer-events-auto max-h-[35dvh] w-full flex-wrap items-center gap-x-3 gap-y-2 overflow-y-auto overscroll-contain border-t border-border py-2`
+        : "contents"}>
       {sourceCapitalisation !== null && (
         <span className="text-text-dim">{sourceCapitalisation}</span>
       )}
       {hasClosedTradfiLeg && (
         <span className="text-text-dim">jambe tradfi : dernier close (marché fermé)</span>
       )}
-      <span className="text-text-dim">{timeframe}</span>
       <BoutonsRatio exchange={exchange} symbol={symbol} timeframe={timeframe} />
-      <span ref={priceRef} className="font-semibold text-text">
-        —
-      </span>
-      <span ref={changeRef}>—</span>
       <span>
         H <span ref={highRef} className="text-text">—</span>
       </span>
@@ -463,6 +477,7 @@ export function SymbolBanner() {
       <span>
         ⏱ <span ref={countdownRef} className="text-text">—</span>
       </span>
+      </div>
     </div>
   );
 }

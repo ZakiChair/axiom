@@ -47,14 +47,20 @@ test("analyse figée au signal → dossier → PAPER → EXPY après rechargemen
   await aside.getByRole("button", { name: "Dossier" }).click();
   const expy = page.locator('[data-window-id="expy"]');
   await expect(expy.getByRole("region", { name: "Dossiers de décision" })).toContainText("preuve capturée");
-  await expect(expy.getByRole("region", { name: "Dossiers de décision" })).toContainText("dernière bougie");
-  await expect(expy.getByRole("region", { name: "Dossiers de décision" })).not.toContainText("150");
+  // Le prix futur doit rester absent du contexte, sans tester les chiffres
+  // aléatoires de l'UUID d'alerte affiché dans le paragraphe voisin.
+  const contexte = expy.getByRole("region", { name: "Dossiers de décision" })
+    .getByText(/^Contexte connu au signal :/);
+  await expect(contexte).toContainText("dernière bougie");
+  await expect(contexte).toContainText("plus haut 99");
+  await expect(contexte).not.toContainText("150");
   const dossier = await page.evaluate(() => JSON.parse(localStorage.getItem("axiom:decisionDossiers:v1")!).dossiers[0]);
   expect(dossier.origine.alertId).toBe(alerte.id);
   expect(dossier.origine.ts).toBe(INSTANT);
   expect(dossier.origine.symbol).toBe(alerte.symbol);
   expect(dossier.origine.source).toBe(alerte.source);
   expect(dossier.contexte.derniereBougie.close).toBe(98);
+  expect(dossier.contexte.derniereBougie.high).toBe(99);
   expect(dossier.analyse.captureLe).toBe(INSTANT);
   expect(dossier.analyse.lectures[0].tags[0].valeur).toBe("expansion");
   await expect(expy.getByRole("region", { name: "Résultats par contexte archivé" })).toContainText("quadrant:US");

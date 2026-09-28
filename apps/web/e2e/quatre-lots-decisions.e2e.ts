@@ -40,14 +40,20 @@ test("alerte déclenchée → dossier daté → brouillon PAPER → validation �
   await aside.getByRole("button", { name: "Dossier" }).click();
   const expy = page.locator('[data-window-id="expy"]');
   await expect(expy.getByRole("region", { name: "Dossiers de décision" })).toContainText("preuve capturée");
-  await expect(expy.getByRole("region", { name: "Dossiers de décision" })).toContainText("dernière bougie");
-  await expect(expy.getByRole("region", { name: "Dossiers de décision" })).not.toContainText("150");
+  // Le prix futur doit rester absent du contexte, sans tester les chiffres
+  // aléatoires de l'UUID d'alerte affiché dans le paragraphe voisin.
+  const contexte = expy.getByRole("region", { name: "Dossiers de décision" })
+    .getByText(/^Contexte connu au signal :/);
+  await expect(contexte).toContainText("dernière bougie");
+  await expect(contexte).toContainText("plus haut 99");
+  await expect(contexte).not.toContainText("150");
   const dossier = await page.evaluate(() => JSON.parse(localStorage.getItem("axiom:decisionDossiers:v1")!).dossiers[0]);
   expect(dossier.origine.alertId).toBe(alerte.id);
   expect(dossier.origine.ts).toBe(INSTANT);
   expect(dossier.origine.symbol).toBe(alerte.symbol);
   expect(dossier.origine.source).toBe(alerte.source);
   expect(dossier.contexte.derniereBougie.close).toBe(98);
+  expect(dossier.contexte.derniereBougie.high).toBe(99);
   await expy.getByRole("button", { name: "Préparer dans PAPER" }).click();
 
   const paper = page.locator('[data-window-id="paper"]');

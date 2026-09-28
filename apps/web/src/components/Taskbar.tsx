@@ -23,6 +23,7 @@ import {
 } from "../store/windowManager";
 import { couleurAffichable } from "../store/compare";
 import { BTN_SECONDAIRE } from "./ui";
+import { useMobileLayout } from "../hooks/useMobileLayout";
 
 /** Classes d'une pastille selon son état visuel. `opacity-60` en utilitaire d'élément
  *  (PAS de slash `/60` sur un token de thème — non fiable avec ces couleurs pilotées par
@@ -42,7 +43,8 @@ function titrePastille(etat: "focus" | "minimisee" | "normale", titre: string): 
   return `Passer ${titre} au premier plan`;
 }
 
-export function Taskbar() {
+export function Taskbar({ onNavigate, feuilleOuverte = false }: { onNavigate?: () => void; feuilleOuverte?: boolean }) {
+  const mobile = useMobileLayout();
   const windows = useStore(windowManagerStore, (s) => s.windows);
   // Ordre stable = ordre du registre, filtré aux fenêtres ouvertes.
   const ouvertes = WINDOW_REGISTRY.filter((r) => windows[r.id]?.open);
@@ -50,35 +52,47 @@ export function Taskbar() {
   if (ouvertes.length === 0) return null;
 
   const zFocus = zFenetreFocalisee(windows);
+  const naviguer = (action: () => void) => {
+    if (mobile) onNavigate?.();
+    action();
+  };
 
   return (
-    <div className="flex shrink-0 flex-wrap gap-1 border-t border-border bg-surface px-2 py-1">
+    <div role="toolbar" aria-label="Fenêtres ouvertes" className="axiom-taskbar flex shrink-0 flex-wrap gap-1 border-t border-border bg-surface px-2 py-1">
+      {mobile && <button type="button" className={BTN_SECONDAIRE}
+        onClick={() => naviguer(() => windowManagerStore.getState().minimizeAll())}>Graphique</button>}
       <button
         type="button"
         title="Restaurer toutes les fenêtres réduites"
-        onClick={() => windowManagerStore.getState().restoreAll()}
+        onClick={() => naviguer(() => windowManagerStore.getState().restoreAll())}
         className={BTN_SECONDAIRE}
       >
         Tout restaurer
       </button>
-      <button
+      {!mobile && <button
         type="button"
         title="Disposer les fenêtres ouvertes en mosaïque"
         onClick={() => windowManagerStore.getState().tileOpenWindows()}
         className={BTN_SECONDAIRE}
       >
         Mosaïque
-      </button>
+      </button>}
       {ouvertes.map((entry) => {
         const w = windows[entry.id];
         if (!w) return null;
         const etat = etatPastille(w, zFocus);
         return (
-          <div key={entry.id} className="group relative">
+          <div key={entry.id} className="axiom-taskbar-item group relative">
             <button
               type="button"
-              title={titrePastille(etat, entry.title)}
-              onClick={() => windowManagerStore.getState().toggleFocusMinimize(entry.id)}
+              title={feuilleOuverte ? `Afficher ${entry.title}` : titrePastille(etat, entry.title)}
+              onClick={() => naviguer(() => {
+                // Une fenêtre focalisée derrière un tiroir doit être révélée,
+                // pas réduite par le toggle habituel de la barre des fenêtres.
+                const store = windowManagerStore.getState();
+                if (mobile && feuilleOuverte) store.restoreWindow(entry.id);
+                else store.toggleFocusMinimize(entry.id);
+              })}
               className={classesPastille(etat)}
             >
               {w.groupColor !== null && (
@@ -95,6 +109,7 @@ export function Taskbar() {
             <button
               type="button"
               title="Fermer"
+              aria-label={`Fermer ${entry.title}`}
               onClick={() => windowManagerStore.getState().closeWindow(entry.id)}
               className="absolute right-0.5 top-1/2 z-10 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-sm bg-surface text-[10px] leading-none text-text-dim opacity-0 transition hover:text-down focus-visible:opacity-100 group-hover:opacity-100"
             >

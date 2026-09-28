@@ -39,6 +39,7 @@ import { indicatorsStore } from "../store/indicators";
 import { macroOverlayStore } from "../store/macro-overlays";
 import { INDICATORS, getIndicator } from "@axiom/indicators";
 import { PairSearch } from "./PairSearch";
+import { useMobileLayout } from "../hooks/useMobileLayout";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { Badge, CLASSES_CHAMP, LARGEUR_MNEMONIQUE, MenuDeroulant } from "./ui";
 
@@ -326,7 +327,7 @@ export const SECTIONS_FONCTIONS: { groupe: string; entrees: EntreeFonction[] }[]
  * mnémonique) plutôt que dix boutons dans la barre. Basse fréquence (aucun re-render sur
  * tick) — les actions lisent les stores via getState(), sans abonnement.
  */
-function FonctionsMenu() {
+export function FonctionsMenu() {
   return (
     <MenuDeroulant
       declencheur={<span>Fonctions</span>}
@@ -562,7 +563,26 @@ function WorkspaceMenu() {
   );
 }
 
-export function Toolbar() {
+export function Toolbar({ optionsOuvertes = false, onOptionsChange = () => {} }: {
+  optionsOuvertes?: boolean;
+  onOptionsChange?: (open: boolean) => void;
+}) {
+  const mobile = useMobileLayout();
+  const optionsRef = useRef<HTMLButtonElement>(null);
+  const fermerOptions = () => { onOptionsChange(false); optionsRef.current?.focus(); };
+  useEffect(() => {
+    if (!optionsOuvertes) return;
+    const echap = (e: KeyboardEvent) => { if (e.key === "Escape") fermerOptions(); };
+    document.addEventListener("keydown", echap);
+    return () => document.removeEventListener("keydown", echap);
+  }, [optionsOuvertes]);
+  // Une action de navigation ferme la feuille pour révéler immédiatement la fenêtre.
+  useEffect(() => windowManagerStore.subscribe((next, prev) => {
+    if (next.windows !== prev.windows && Object.entries(next.windows).some(([id, w]) =>
+      w.open && !w.minimized && (!prev.windows[id]?.open || prev.windows[id]?.z !== w.z))) {
+      onOptionsChange(false);
+    }
+  }), [onOptionsChange]);
   const exchange = useStore(marketStore, (s) => s.exchange);
   const symbol = useStore(marketStore, (s) => s.symbol);
   const timeframe = useStore(marketStore, (s) => s.timeframe);
@@ -620,15 +640,36 @@ export function Toolbar() {
 
   return (
     <>
-    <header className="flex flex-wrap items-center gap-3 border-b border-neutral-800 bg-neutral-950 px-4 py-2">
-      <span className="axiom-wordmark font-semibold tracking-wide text-text">AXIOM</span>
+    <header className="axiom-toolbar flex shrink-0 flex-wrap items-center gap-3 border-b border-neutral-800 bg-neutral-950 px-4 py-2">
+      {!mobile && <span className="axiom-wordmark font-semibold tracking-wide text-text">AXIOM</span>}
 
-      <span aria-label="Source automatique" className="text-[11px] text-text-dim" title="La source est choisie automatiquement selon l’actif et les données disponibles">
+      {!mobile && <span aria-label="Source automatique" className="text-[11px] text-text-dim" title="La source est choisie automatiquement selon l’actif et les données disponibles">
         {dataStatus === "ready" ? `Auto · ${exchangeLabel(exchange)}` : dataStatus === "error" ? "Auto · indisponible" : "Auto · recherche…"}
-      </span>
+      </span>}
 
       {/* Recherche unifiée des actifs disponibles. */}
-      <PairSearch />
+      <PairSearch placeholder={mobile ? `${symbol} · rechercher` : undefined} />
+
+      {mobile && <>
+        <select aria-label="Unité de temps" value={timeframe}
+          onChange={(e) => setTimeframe(e.target.value as Timeframe)} className={CLASSES_CHAMP}>
+          {Array.from(new Set([...TIMEFRAMES, timeframe])).map((tf) =>
+            <option key={tf} value={tf} disabled={!supportedTf.includes(tf)}>{tf}</option>)}
+        </select>
+        <button ref={optionsRef} type="button" aria-expanded={optionsOuvertes} aria-controls="options-graphe"
+          onClick={() => onOptionsChange(!optionsOuvertes)} className="rounded border border-border px-3 text-xs text-text">
+          Options
+        </button>
+      </>}
+
+      <div id="options-graphe" className={`axiom-toolbar-options ${mobile && !optionsOuvertes ? "hidden" : "contents"}`}
+        role={mobile && optionsOuvertes ? "dialog" : undefined} aria-label={mobile ? "Options du graphique" : undefined}>
+      {mobile && <div className="axiom-options-heading">
+        <div><strong className="text-sm text-text">Options du graphique</strong>
+          <p className="text-xs text-text-dim">{dataStatus === "ready" ? `Source automatique · ${exchangeLabel(exchange)}` : "Source automatique"}</p>
+        </div>
+        <button type="button" aria-label="Fermer les options" onClick={fermerOptions}>✕</button>
+      </div>}
 
       {/* Accès directs crypto / tradfi ; routage automatique au chargement. */}
       <div className="flex gap-1">
@@ -746,6 +787,8 @@ export function Toolbar() {
         Orderflow
       </button>
       {erreurFootprint && <ErreurChargement message="Réglages Footprint indisponibles." />}
+      {mobile && <button type="button" onClick={basculerFootprint} disabled={noTradeStream}
+        className="rounded border border-border px-2 text-xs text-text-dim">Réglages Footprint</button>}
 
       {/* Profil de volume par zone de prix (VPVR) — toutes sources sauf synthétiques. */}
       <button
@@ -856,6 +899,7 @@ export function Toolbar() {
           Thème
         </span>
         <ThemeSwitcher />
+      </div>
       </div>
     </header>
 

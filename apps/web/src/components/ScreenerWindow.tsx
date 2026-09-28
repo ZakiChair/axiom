@@ -103,11 +103,11 @@ function BaseConditionRow({ index, cond }: { index: number; cond: BaseCondition 
   const update = useStore(screenerStore, (s) => s.updateBaseCondition);
   const remove = useStore(screenerStore, (s) => s.removeBaseCondition);
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="axiom-screener-ligne flex items-center gap-1.5">
       <Select
         value={cond.field}
         onChange={(e) => update(index, { field: e.target.value as BaseField })}
-        className="flex-1"
+        className="min-w-0 flex-1"
         aria-label="Champ"
       >
         {BASE_FIELDS.map((f) => (
@@ -153,11 +153,11 @@ function IndicatorConditionRow({ index, cond }: { index: number; cond: Indicator
   const remove = useStore(screenerStore, (s) => s.removeIndicatorCondition);
   const spec = getIndicatorField(cond.fieldId);
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="axiom-screener-ligne flex items-center gap-1.5">
       <Select
         value={cond.fieldId}
         onChange={(e) => update(index, { fieldId: e.target.value })}
-        className="flex-1"
+        className="min-w-0 flex-1"
         aria-label="Indicateur"
       >
         {INDICATOR_FIELDS.map((f) => (
@@ -237,7 +237,7 @@ function LigneSetup({ ligne }: { ligne: LigneSignaux }) {
   const fleche = ligne.direction === "haussier" ? "▲" : ligne.direction === "baissier" ? "▼" : "◆";
   return (
     <div className="space-y-1.5 border-b border-border/50 px-3 py-2 last:border-b-0 hover:bg-surface">
-      <div className="flex items-center gap-2">
+      <div className="axiom-screener-ligne flex items-center gap-2">
         <button
           type="button"
           onClick={() => ouvrirSetupDansChart(ligne.symbol)}
@@ -251,7 +251,7 @@ function LigneSetup({ ligne }: { ligne: LigneSignaux }) {
         >
           {formatPct(ligne.priceChangePct24h)}
         </span>
-        <span className="flex-1" />
+        <span className="min-w-0 flex-1" />
         <Badge ton={tonDirection(ligne.direction)} title="Direction agrégée des signaux (somme pondérée)">
           {fleche} {ligne.direction}
         </Badge>
@@ -367,9 +367,9 @@ function VueSignaux() {
   const busy = runState === "loading" || runState === "running";
 
   return (
-    <div className="space-y-3 px-4 py-3">
+    <div className="axiom-screener space-y-3 px-4 py-3">
       <section className="space-y-2">
-        <div className="flex items-center gap-2">
+        <div className="axiom-screener-ligne flex items-center gap-2">
           {busy ? (
             <Bouton variante="danger" onClick={cancel}>
               Annuler
@@ -673,7 +673,7 @@ export function ScreenerWindow() {
       {vue === "signaux" ? (
         <VueSignaux />
       ) : (
-      <div className="space-y-3 px-4 py-3">
+      <div className="axiom-screener space-y-3 px-4 py-3">
         {/* Presets — groupés : Scénarios (glyphe teinté) / Filtres / Mes presets */}
         <section className="space-y-2">
           <TitreSection>Presets</TitreSection>
@@ -736,13 +736,13 @@ export function ScreenerWindow() {
               </div>
             </>
           )}
-          <div className="flex items-center gap-1.5">
+          <div className="axiom-screener-ligne flex items-center gap-1.5">
             <Input
               type="text"
               value={presetName}
               onChange={(e) => setPresetName(e.target.value)}
               placeholder="Nom du preset…"
-              className="flex-1"
+              className="min-w-0 flex-1"
             />
             <Bouton
               onClick={() => {
@@ -758,7 +758,7 @@ export function ScreenerWindow() {
 
           {/* Alerte de scan : rescanne périodiquement le preset chargé, notifie les symboles
               ENTRANTS. Actif seulement sur un preset chargé et intact (édition manuelle → null). */}
-          <div className="flex items-center gap-2">
+          <div className="axiom-screener-ligne flex items-center gap-2">
             <label className="text-[10px] text-text-dim">Durée du scan
               <select value={dureeAlerteMs} onChange={(e) => setDureeAlerteMs(Number(e.target.value))}
                 aria-label="Durée de l'alerte de scan" className="ml-1 rounded border border-border bg-bg px-1 py-0.5 text-xs text-text">
@@ -805,7 +805,7 @@ export function ScreenerWindow() {
         <section className="space-y-2 rounded-md border border-border bg-bg px-3 py-2.5">
           <TitreSection
             extra={
-              <div className="flex items-center gap-2">
+              <div className="axiom-screener-ligne flex items-center gap-2">
                 <label className="flex items-center gap-1 text-[10px] text-text-dim">
                   TF
                   <Select
@@ -840,7 +840,7 @@ export function ScreenerWindow() {
 
         {/* Contrôle du run */}
         <section className="space-y-2">
-          <div className="flex items-center gap-2">
+          <div className="axiom-screener-ligne flex items-center gap-2">
             {busy ? (
               <Bouton variante="danger" onClick={cancel}>
                 Annuler

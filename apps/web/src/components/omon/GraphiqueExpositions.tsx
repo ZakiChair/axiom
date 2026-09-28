@@ -79,7 +79,7 @@ export function GraphiqueExpositions({ carte, spot, metrique, convertirStrike }:
     <div className="flex flex-wrap justify-between gap-1 text-[10px] text-text-dim"><span>{unite}</span><span>{donnees.nbStrikesAffiches} strikes affichés sur {donnees.nbStrikesTotal}</span></div>
     {points.length && domainePrix ? <>
       <svg role="img" aria-label={`${metrique.toUpperCase()} net par strike`} viewBox={`0 0 ${largeur} 280`} className="h-[280px] w-full cursor-crosshair"
-        onMouseMove={(e) => setSurvolStrike(pointeStrike(e))} onMouseLeave={() => setSurvolStrike(null)} onClick={(e) => setStrike(pointeStrike(e))}>
+        onPointerDown={(e) => setSurvolStrike(pointeStrike(e))} onPointerMove={(e) => setSurvolStrike(pointeStrike(e))} onPointerLeave={(e) => { if (e.pointerType !== "touch") setSurvolStrike(null); }} onClick={(e) => setStrike(pointeStrike(e))}>
         <rect x={gauche} y={haut} width={droite - gauche} height={y(0) - haut} fill={`rgba(${BLEU_EXPOSITION}, .045)`} />
         <rect x={gauche} y={y(0)} width={droite - gauche} height={bas - y(0)} fill={`rgba(${ORANGE_EXPOSITION}, .045)`} />
         <AxesMontants ticks={ticks} y={y} gauche={gauche} droite={droite} />
@@ -109,7 +109,7 @@ export function GraphiqueExpositions({ carte, spot, metrique, convertirStrike }:
       <div className="flex flex-wrap justify-between gap-1 text-[10px]"><span className="font-medium text-text">Exposition par échéance</span><span className="text-text-dim">{unite} · dates catégorielles UTC</span></div>
       {echeances.some((e) => e[metrique] !== null) ? <>
         <svg role="img" aria-label={`${metrique.toUpperCase()} net par échéance`} viewBox={`0 0 ${largeur} 152`} className="h-[152px] w-full cursor-crosshair"
-          onMouseMove={(e) => setSurvolEcheance(pointeEcheance(e))} onMouseLeave={() => setSurvolEcheance(null)} onClick={(e) => setEcheance(pointeEcheance(e))}>
+          onPointerDown={(e) => setSurvolEcheance(pointeEcheance(e))} onPointerMove={(e) => setSurvolEcheance(pointeEcheance(e))} onPointerLeave={(e) => { if (e.pointerType !== "touch") setSurvolEcheance(null); }} onClick={(e) => setEcheance(pointeEcheance(e))}>
           <AxesMontants ticks={ticksEcheance} y={yEcheance} gauche={gauche} droite={droite} />
           {echeances.map((e, i) => <g key={e.expiryMs}>
             {e[metrique] === null ? <text x={xEcheance(i)} y={yEcheance(0) - 5} fill="var(--text-dim)" fontSize="12" textAnchor="middle">—</text>

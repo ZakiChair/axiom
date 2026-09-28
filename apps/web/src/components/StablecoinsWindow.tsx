@@ -526,8 +526,9 @@ function VueImpression({
         <canvas
           ref={refCanvas}
           className="h-56 w-full rounded-md border border-border"
-          onMouseMove={onSurvol}
-          onMouseLeave={() => setSurvol(null)}
+          onPointerDown={onSurvol}
+              onPointerMove={onSurvol}
+          onPointerLeave={(event) => { if (event.pointerType !== "touch") setSurvol(null); }}
         />
         {survol && (
           <InfobulleGraphe

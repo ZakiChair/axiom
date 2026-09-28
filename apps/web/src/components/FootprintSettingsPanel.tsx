@@ -83,7 +83,7 @@ export function FootprintSettingsPanel({ onClose }: { onClose: () => void }) {
       <div
         role="dialog"
         aria-label="Paramètres Footprint"
-        className="fixed bottom-3 left-12 z-50 w-64 rounded-md border border-border bg-surface p-3 shadow-2xl"
+        className="axiom-footprint-settings fixed bottom-3 left-12 z-50 max-h-[calc(100dvh-1.5rem)] w-64 overflow-y-auto rounded-md border border-border bg-surface p-3 shadow-2xl"
       >
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">

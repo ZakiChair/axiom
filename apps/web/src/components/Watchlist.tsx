@@ -814,12 +814,12 @@ export function Watchlist() {
           return (
             <div
               key={sym}
-              className={`group relative flex items-center gap-1.5 border-l-2 pr-1.5 text-sm ${
+              className={`axiom-watchlist-row group relative flex items-center gap-1.5 border-l-2 pr-1.5 text-sm ${
                 selected ? "border-accent bg-surface" : "border-transparent hover:bg-surface"
               }`}
             >
               {manual && (
-                <span className="absolute right-5 top-1/2 z-10 hidden -translate-y-1/2 flex-col group-hover:flex group-focus-within:flex">
+                <span className="axiom-action-tactile axiom-watchlist-actions absolute right-5 top-1/2 z-10 hidden -translate-y-1/2 flex-col group-hover:flex group-focus-within:flex">
                   <button
                     type="button"
                     onClick={() => move(sym, -1)}
@@ -877,7 +877,7 @@ export function Watchlist() {
                 type="button"
                 onClick={() => remove(sym)}
                 aria-label={`Retirer ${sym}`}
-                className="absolute right-1 top-1/2 z-10 hidden -translate-y-1/2 text-text-dim hover:text-text group-hover:block group-focus-within:block"
+                className="axiom-action-tactile axiom-watchlist-remove absolute right-1 top-1/2 z-10 hidden -translate-y-1/2 text-text-dim hover:text-text group-hover:block group-focus-within:block"
               >
                 ×
               </button>

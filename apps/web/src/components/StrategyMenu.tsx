@@ -20,7 +20,7 @@ import type { IndicatorDef } from "@axiom/types";
 import { indicatorsStore, formatInstanceLabel } from "../store/indicators";
 import { marketStore } from "../store/market";
 import { tfAtLeast } from "../chart/tfOrder";
-import { CLASSES_CHAMP, indexRoving } from "./ui";
+import { CLASSES_CHAMP, EnteteMenuMobile, PortailMobile, indexRoving } from "./ui";
 import { InstanceParamsEditor } from "./InstanceParamsEditor";
 import { raisonUnusableIndicateur } from "../lib/indicatorUsability";
 
@@ -151,14 +151,15 @@ export function StrategyMenu({ initialOpen = false }: { initialOpen?: boolean })
       </button>
 
       {open && (
-        <>
+        <PortailMobile fermer={() => setOpen(false)}>
         {/* Zone de fermeture au clic extérieur (même mécanisme que les menus de la Toolbar). */}
         <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
         <div
           ref={panneauRef}
           onKeyDown={onKeyDownPanneau}
-          className="absolute left-0 top-full z-50 mt-1 flex max-h-[70vh] w-72 flex-col rounded border border-neutral-800 bg-neutral-900 shadow-xl"
+          className="axiom-menu-mobile absolute left-0 top-full z-50 mt-1 flex max-h-[70vh] w-72 flex-col rounded border border-neutral-800 bg-neutral-900 shadow-xl"
         >
+          <EnteteMenuMobile titre="Stratégies" fermer={() => setOpen(false)} />
           {/* Section « Actives » : les instances de stratégies, éditables par instance. */}
           {activesStrategie.length > 0 && (
             <div className="border-b border-neutral-800 p-1">
@@ -314,7 +315,7 @@ export function StrategyMenu({ initialOpen = false }: { initialOpen?: boolean })
             ))}
           </div>
         </div>
-        </>
+        </PortailMobile>
       )}
     </div>
   );

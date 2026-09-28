@@ -465,7 +465,7 @@ export function AlertsPanel() {
                     ? `Confirmer la suppression de l'alerte ${d.symbol}`
                     : `Supprimer l'alerte ${d.symbol}`
                 }
-                className={`shrink-0 transition ${
+                className={`axiom-action-tactile shrink-0 transition ${
                   confirmSuppr === d.id
                     ? "text-[10px] font-semibold uppercase text-down opacity-100"
                     : "text-text-dim opacity-0 hover:text-text group-hover:opacity-100 focus-visible:opacity-100"
@@ -1032,7 +1032,7 @@ export function AlertsPanel() {
                 type="button"
                 onClick={() => presetAlertsStore.getState().retirer(a.id)}
                 aria-label={`Supprimer l'alerte de scan ${a.nom}`}
-                className="shrink-0 text-text-dim opacity-0 transition hover:text-down group-hover:opacity-100 focus-visible:opacity-100"
+                className="axiom-action-tactile shrink-0 text-text-dim opacity-0 transition hover:text-down group-hover:opacity-100 focus-visible:opacity-100"
               >
                 ×
               </button>

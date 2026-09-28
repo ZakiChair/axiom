@@ -180,8 +180,9 @@ export function VueTermIv({
           <canvas
             ref={termIvCanvasRef}
             className="h-[220px] w-full"
-            onMouseMove={onSurvolTermIv}
-            onMouseLeave={onSortieTermIv}
+            onPointerDown={onSurvolTermIv}
+              onPointerMove={onSurvolTermIv}
+            onPointerLeave={(event) => { if (event.pointerType !== "touch") onSortieTermIv(); }}
           />
           {survolTermIv !== null && termIvPoints[survolTermIv] && (
             <InfobulleGraphe

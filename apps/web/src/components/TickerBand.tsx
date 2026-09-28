@@ -33,6 +33,8 @@ import {
   type NewsSourceId,
 } from "../data/news";
 import { META_SOURCE, bordureSource } from "../data/newsMeta";
+import { useMobileLayout } from "../hooks/useMobileLayout";
+import { windowManagerStore } from "../store/windowManager";
 
 /** Nombre max de headlines dans la piste (borne le DOM ; les items sont triés récents d'abord). */
 const MAX_ITEMS = 30;
@@ -175,6 +177,7 @@ function rendreInerte(el: HTMLDivElement | null): void {
 }
 
 export function TickerBand() {
+  const mobile = useMobileLayout();
   const visible = useStore(tickerBandStore, (s) => s.visible);
   const items = useStore(newsStore, (s) => s.items);
   // Booléen dérivé (sélecteur → re-render uniquement quand il bascule, basse fréquence) :
@@ -196,6 +199,17 @@ export function TickerBand() {
   const maintenant = Date.now();
   // Durée ∝ largeur estimée d'une copie, arrondie par paliers (cf. dureeDefilementS).
   const dureeS = dureeDefilementS(defilants);
+
+  // La liste NEWS fournit la lecture au toucher ; une ligne statique évite de
+  // poursuivre des liens défilants et garde une commande de masquage explicite.
+  if (mobile) return <div className="axiom-ticker-mobile flex min-h-11 shrink-0 items-center border-b border-border bg-surface text-xs text-text-dim">
+    <button type="button" onClick={() => windowManagerStore.getState().openWindow("news")}
+      className="min-h-11 min-w-0 flex-1 truncate px-3 text-left" title="Ouvrir les actualités">
+      {defilants[0]?.title ?? (indisponible ? "Actualités indisponibles" : "Chargement des actualités…")}
+    </button>
+    <button type="button" aria-label="Masquer le bandeau d'actualités"
+      onClick={() => tickerBandStore.getState().basculer()} className="min-h-11 min-w-11 px-3">✕</button>
+  </div>;
 
   return (
     <div

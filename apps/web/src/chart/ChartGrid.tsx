@@ -14,7 +14,7 @@
  * Les stores locaux vivent dans un ref (créés une fois) : changer de layout MONTE/DÉMONTE
  * les ChartInstance secondaires (dispose rigoureux) mais préserve leur config.
  */
-import { lazy, Suspense, useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { Timeframe } from "@axiom/types";
 import {
@@ -34,6 +34,7 @@ import { demarrerSyncFenetres } from "../store/sync";
 import { setFocusChart } from "./drawing";
 import { Chart } from "./Chart";
 import { ChartInstance } from "./ChartInstance";
+import { useMobileLayout } from "../hooks/useMobileLayout";
 
 /** Classes Tailwind de grille par mode (littérales → scannées par le JIT). */
 const GRID_CLASS: Record<ChartLayoutMode, string> = {
@@ -54,9 +55,35 @@ const LAYOUT_BUTTONS: { mode: ChartLayoutMode; label: string; title: string }[] 
 const ChartSyncControls = lazy(() => import("./ChartSyncControls"));
 
 export function ChartGrid() {
+  const mobile = useMobileLayout();
+  const [controlsOpen, setControlsOpen] = useState(false);
   const layout = useStore(chartLayoutStore, (s) => s.layout);
+  const focus = useStore(chartLayoutStore, (s) => s.focus);
   const linked = useStore(chartLayoutStore, (s) => s.linked);
+  const slots = useStore(chartLayoutStore, (s) => s.slots);
+  const masterSymbol = useStore(marketStore, (s) => s.symbol);
   const count = visibleSlotCount(layout);
+  const controlsRef = useRef<HTMLDivElement>(null);
+  const controlsButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!controlsOpen) return;
+    const outside = (event: PointerEvent): void => {
+      if (!controlsRef.current?.contains(event.target as Node)) setControlsOpen(false);
+    };
+    const escape = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setControlsOpen(false);
+      controlsButtonRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [controlsOpen]);
 
   // Stores locaux des 3 slots secondaires (créés UNE fois, config initiale = chart-layout).
   const storesRef = useRef<MarketStore[] | null>(null);
@@ -161,12 +188,47 @@ export function ChartGrid() {
     }
   };
 
+  const slotClass = (slot: number): string => `min-h-0 min-w-0 overflow-hidden bg-bg ${
+    mobile ? `absolute inset-0 ${focus === slot ? "visible" : "invisible pointer-events-none"}` : "relative"
+  }`;
+  const commandSize = mobile ? "min-h-11 min-w-11 px-2 text-xs" : "px-1.5 py-0.5 text-[10px]";
+
   return (
-    <div className="relative h-full w-full">
+    <div className="relative flex h-full w-full min-w-0 flex-col">
+      {mobile && (
+        <div className="flex shrink-0 items-center gap-1 border-b border-border bg-surface px-1">
+          <nav aria-label="Vues du graphique" className="flex min-w-0 flex-1 gap-1">
+            {Array.from({ length: count }, (_, slot) => (
+              <button key={slot} type="button"
+                aria-label={`Vue ${slot + 1} : ${slot === 0 ? masterSymbol : slots[slot - 1]?.symbol}`}
+                aria-pressed={focus === slot}
+                aria-controls={`chart-slot-${slot}`}
+                onClick={() => {
+                  chartLayoutStore.getState().setFocus(slot);
+                  setFocusChart(slot);
+                  setControlsOpen(false);
+                }}
+                className={`min-h-11 min-w-11 flex-1 truncate rounded px-2 text-xs ${focus === slot ? "bg-accent/20 text-accent" : "text-text-dim"}`}
+              >{count === 1 ? "Graphique" : `Vue ${slot + 1}`}</button>
+            ))}
+          </nav>
+          <div ref={controlsRef} className="relative shrink-0">
+            <button ref={controlsButtonRef} type="button" aria-expanded={controlsOpen}
+              aria-controls="chart-grid-controls" onClick={() => setControlsOpen((open) => !open)}
+              className="min-h-11 rounded px-3 text-xs text-text"
+            >Vues ▾</button>
+          </div>
+        </div>
+      )}
       {/* Barre flottante : disposition + liaison. Ancrée en BAS à droite — en haut, elle
           occupait le pixel de départ de la légende d'indicateurs overlay
           (chart/overlayLegend.ts, z-10) et la recouvrait, avec un z supérieur. */}
-      <div className="pointer-events-auto absolute bottom-2 right-2 z-20 flex items-center gap-1 rounded border border-border bg-surface/85 px-1 py-0.5 backdrop-blur">
+      <div id="chart-grid-controls"
+        onPointerDown={(event) => event.stopPropagation()}
+        className={mobile
+          ? `${controlsOpen ? "flex" : "hidden"} pointer-events-auto absolute right-1 top-12 z-30 max-h-[65dvh] w-[min(23rem,calc(100%-0.5rem))] flex-wrap items-center gap-1 overflow-y-auto rounded border border-border bg-surface p-2 shadow-xl`
+          : "pointer-events-auto absolute bottom-2 right-2 z-20 flex items-center gap-1 rounded border border-border bg-surface/85 px-1 py-0.5 backdrop-blur"}
+      >
         {LAYOUT_BUTTONS.map((b) => (
           <button
             key={b.mode}
@@ -175,7 +237,7 @@ export function ChartGrid() {
             aria-label={b.title}
             aria-pressed={layout === b.mode}
             onClick={() => chartLayoutStore.getState().setLayout(b.mode)}
-            className={`rounded px-1.5 py-0.5 font-mono text-[10px] transition ${
+            className={`rounded ${commandSize} font-mono transition ${
               layout === b.mode ? "bg-accent/25 text-text" : "text-text-dim hover:bg-bg hover:text-text"
             }`}
           >
@@ -189,37 +251,37 @@ export function ChartGrid() {
           aria-label="Lier les symboles des slots"
           aria-pressed={linked}
           onClick={onToggleLink}
-          className={`rounded px-1.5 py-0.5 text-[11px] leading-none transition ${
+          className={`rounded ${commandSize} leading-none transition ${
             linked ? "bg-accent/25 text-text" : "text-text-dim hover:bg-bg hover:text-text"
           }`}
         >
-          ⛓
+          {mobile ? "⛓ Symboles liés" : "⛓"}
         </button>
         {count > 1 && (
           <Suspense fallback={null}>
-            <ChartSyncControls />
+            <ChartSyncControls mobile={mobile} />
           </Suspense>
         )}
       </div>
 
-      <div className={`grid h-full w-full gap-px bg-border ${GRID_CLASS[layout]}`}>
+      <div className={mobile ? "relative min-h-0 w-full flex-1" : `grid min-h-0 w-full flex-1 gap-px bg-border ${GRID_CLASS[layout]}`}>
         {/* Slot 0 : maître (store global, jeu complet de contrôleurs). */}
-        <div className="relative min-h-0 min-w-0 overflow-hidden bg-bg">
+        <div id="chart-slot-0" data-chart-slot="0" aria-hidden={mobile && focus !== 0} className={slotClass(0)}>
           <Chart />
         </div>
         {/* Slots secondaires visibles selon le mode. */}
         {count >= 2 && stores[0] && (
-          <div className="relative min-h-0 min-w-0 overflow-hidden bg-bg">
+          <div id="chart-slot-1" data-chart-slot="1" aria-hidden={mobile && focus !== 1} className={slotClass(1)}>
             <ChartInstance store={stores[0]} slot={1} role="secondary" {...makeHandlers(1)} />
           </div>
         )}
         {count >= 4 && stores[1] && (
-          <div className="relative min-h-0 min-w-0 overflow-hidden bg-bg">
+          <div id="chart-slot-2" data-chart-slot="2" aria-hidden={mobile && focus !== 2} className={slotClass(2)}>
             <ChartInstance store={stores[1]} slot={2} role="secondary" {...makeHandlers(2)} />
           </div>
         )}
         {count >= 4 && stores[2] && (
-          <div className="relative min-h-0 min-w-0 overflow-hidden bg-bg">
+          <div id="chart-slot-3" data-chart-slot="3" aria-hidden={mobile && focus !== 3} className={slotClass(3)}>
             <ChartInstance store={stores[2]} slot={3} role="secondary" {...makeHandlers(3)} />
           </div>
         )}

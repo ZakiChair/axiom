@@ -95,6 +95,7 @@ import { MeasureTool } from "./measureTool";
 import { CandleReadout } from "./candleReadout";
 import { SymbolBanner } from "../components/SymbolBanner";
 import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
+import { useMobileLayout } from "../hooks/useMobileLayout";
 
 /** Type d'échelle de l'axe prix (miroir de YAxisType klinecharts). */
 export type PriceScaleType = "normal" | "log" | "percentage";
@@ -550,6 +551,7 @@ export function ChartInstance({
   onChangeSymbol,
   onChangeTimeframe,
 }: ChartInstanceProps) {
+  const mobile = useMobileLayout();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null); // footprint (orderflow)
@@ -1469,8 +1471,9 @@ export function ChartInstance({
     // (pointer-events:none → pan/zoom passent au graphe). Clic = focus de ce slot.
     <div
       ref={containerRef}
+      data-mobile={mobile}
       className={`relative h-full w-full ${isFocus ? "ring-1 ring-accent/70 ring-inset" : ""}`}
-      onMouseDownCapture={() => {
+      onPointerDownCapture={() => {
         if (chartLayoutStore.getState().focus !== slot) chartLayoutStore.getState().setFocus(slot);
         setFocusChart(slot);
       }}
@@ -1494,7 +1497,7 @@ export function ChartInstance({
         if (cible !== null) indicatorMenuUiStore.getState().ouvrirSurInstance(cible);
       }}
     >
-      <div ref={chartRef} className="absolute inset-0" />
+      <div ref={chartRef} className="absolute inset-0 touch-none" />
       {/* Bannière REPLAY (roadmap 4.4) : visible tant que ce slot rejoue un jour passé. */}
       {replayLabel !== "" && (
         <div className="pointer-events-none absolute left-1/2 top-1 z-20 -translate-x-1/2 rounded border border-accent/60 bg-surface/90 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-accent backdrop-blur">
@@ -1518,6 +1521,7 @@ export function ChartInstance({
           timeframe={timeframe}
           onChangeSymbol={onChangeSymbol}
           onChangeTimeframe={onChangeTimeframe}
+          mobile={mobile}
         />
       )}
       <canvas ref={vpCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
@@ -1532,7 +1536,7 @@ export function ChartInstance({
         <div
           data-chart-status="partial"
           role="status"
-          className="pointer-events-none absolute bottom-8 left-1/2 z-20 -translate-x-1/2 rounded border border-warn/60 bg-surface/90 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-warn backdrop-blur"
+          className="pointer-events-none absolute bottom-8 left-1/2 z-20 max-w-[calc(100%-1rem)] -translate-x-1/2 rounded border border-warn/60 bg-surface/90 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-warn backdrop-blur"
         >
           PARTIAL · {MESSAGE_LIMITE_KRAKEN}
         </div>
@@ -1580,7 +1584,7 @@ function ChartDataStatusOverlay({
       aria-live={isError ? "assertive" : "polite"}
       aria-busy={!isError}
     >
-      <div className="max-w-sm rounded border border-border bg-surface px-4 py-3 text-center shadow-lg">
+      <div className="max-h-full max-w-sm overflow-y-auto rounded border border-border bg-surface px-4 py-3 text-center shadow-lg">
         <p className="font-mono text-[11px] font-semibold uppercase tracking-wider text-text">
           {isError ? "Données indisponibles" : "Chargement des bougies…"}
         </p>
@@ -1605,7 +1609,7 @@ function ChartDataStatusOverlay({
           <button
             type="button"
             onClick={onRetry}
-            className="mt-3 rounded border border-accent/60 bg-accent/15 px-3 py-1 text-[11px] font-semibold text-accent transition hover:bg-accent/25"
+            className="mt-3 min-h-11 rounded border border-accent/60 bg-accent/15 px-3 py-1 text-[11px] font-semibold text-accent transition hover:bg-accent/25"
           >
             Réessayer
           </button>
@@ -1622,16 +1626,18 @@ function SecondaryHeader({
   timeframe,
   onChangeSymbol,
   onChangeTimeframe,
+  mobile,
 }: {
   exchange: ExchangeId;
   symbol: string;
   timeframe: Timeframe;
   onChangeSymbol?: (symbol: string) => void;
   onChangeTimeframe?: (tf: Timeframe) => void;
+  mobile: boolean;
 }) {
   const timeframes = supportedTimeframesFor(exchange, symbol);
   return (
-    <div className="pointer-events-auto absolute left-1 top-1 z-20 flex items-center gap-1 rounded bg-surface/80 px-1 py-0.5 text-[10px] backdrop-blur">
+    <div className={`pointer-events-auto absolute left-1 top-1 z-20 flex max-w-[calc(100%-0.5rem)] items-center gap-1 rounded bg-surface/80 px-1 py-0.5 text-[10px] backdrop-blur ${mobile ? "right-1" : ""}`}>
       <input
         aria-label="Symbole du slot"
         defaultValue={symbol}
@@ -1640,13 +1646,13 @@ function SecondaryHeader({
           if (e.key === "Enter") onChangeSymbol?.((e.target as HTMLInputElement).value.trim());
         }}
         onBlur={(e) => onChangeSymbol?.(e.target.value.trim())}
-        className={`w-20 rounded bg-bg px-1 py-0.5 font-mono text-text outline-none focus:ring-1 focus:ring-accent/60 ${exchange === "synthetic" ? "" : "uppercase"}`}
+        className={`${mobile ? "min-h-11 min-w-0 flex-1 text-base" : "w-20"} rounded bg-bg px-1 py-0.5 font-mono text-text outline-none focus:ring-1 focus:ring-accent/60 ${exchange === "synthetic" ? "" : "uppercase"}`}
       />
       <select
         aria-label="Timeframe du slot"
         value={timeframe}
         onChange={(e) => onChangeTimeframe?.(e.target.value as Timeframe)}
-        className="rounded bg-bg px-0.5 py-0.5 text-text outline-none"
+        className={`${mobile ? "min-h-11 text-base" : ""} rounded bg-bg px-0.5 py-0.5 text-text outline-none`}
       >
         {timeframes.map((tf) => (
           <option key={tf} value={tf}>
@@ -1654,7 +1660,7 @@ function SecondaryHeader({
           </option>
         ))}
       </select>
-      <span title="Source sélectionnée automatiquement" className="px-1 text-text-dim">
+      <span title="Source sélectionnée automatiquement" className="min-w-0 truncate px-1 text-text-dim">
         Auto · {exchange}
       </span>
     </div>

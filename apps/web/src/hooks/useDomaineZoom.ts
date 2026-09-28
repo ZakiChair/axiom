@@ -73,16 +73,21 @@ export function useDomaineZoom(
       onGesteRef.current?.();
     };
 
+    // Le navigateur conserve le défilement vertical ; le graphe prend le glissement horizontal.
+    const touchActionPrecedente = cvs.style.touchAction;
+    cvs.style.touchAction = "pan-y";
     let panDepuisX: number | null = null;
+    let pointeurActif: number | null = null;
     const surPointerDown = (e: PointerEvent): void => {
-      if (e.button !== 0) return;
+      if (e.button !== 0 || pointeurActif !== null) return;
+      pointeurActif = e.pointerId;
       panDepuisX = e.clientX;
       cvs.setPointerCapture(e.pointerId);
     };
     const surPointerMove = (e: PointerEvent): void => {
       const d = domaineRef.current;
       const b = bornesRef.current;
-      if (panDepuisX === null || d === null || b === null) return;
+      if (e.pointerId !== pointeurActif || panDepuisX === null || d === null || b === null) return;
       const rect = cvs.getBoundingClientRect();
       const dx = e.clientX - panDepuisX;
       if (dx === 0) return;
@@ -91,7 +96,9 @@ export function useDomaineZoom(
       onGesteRef.current?.();
     };
     const surPointerFin = (e: PointerEvent): void => {
+      if (e.pointerId !== pointeurActif) return;
       panDepuisX = null;
+      pointeurActif = null;
       if (cvs.hasPointerCapture(e.pointerId)) cvs.releasePointerCapture(e.pointerId);
     };
     const surDoubleClic = (): void => {
@@ -106,6 +113,7 @@ export function useDomaineZoom(
     cvs.addEventListener("pointermove", surPointerMove);
     cvs.addEventListener("pointerup", surPointerFin);
     cvs.addEventListener("pointercancel", surPointerFin);
+    cvs.addEventListener("lostpointercapture", surPointerFin);
     cvs.addEventListener("dblclick", surDoubleClic);
     return () => {
       cvs.removeEventListener("wheel", surMolette);
@@ -113,7 +121,10 @@ export function useDomaineZoom(
       cvs.removeEventListener("pointermove", surPointerMove);
       cvs.removeEventListener("pointerup", surPointerFin);
       cvs.removeEventListener("pointercancel", surPointerFin);
+      cvs.removeEventListener("lostpointercapture", surPointerFin);
       cvs.removeEventListener("dblclick", surDoubleClic);
+      if (pointeurActif !== null && cvs.hasPointerCapture(pointeurActif)) cvs.releasePointerCapture(pointeurActif);
+      cvs.style.touchAction = touchActionPrecedente;
     };
   }, [actif, domaineMonte]);
 

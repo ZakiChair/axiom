@@ -260,8 +260,9 @@ function Graphe({
       </span>
       <canvas
         ref={ref}
-        onMouseMove={onMove}
-        onMouseLeave={() => onSurvol(null)}
+        onPointerDown={onMove}
+              onPointerMove={onMove}
+        onPointerLeave={(event) => { if (event.pointerType !== "touch") onSurvol(null); }}
         className="h-full w-full"
         aria-label={titre}
       />

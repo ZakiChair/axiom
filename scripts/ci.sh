@@ -6,12 +6,16 @@
 #   pnpm check
 #   ./scripts/ci.sh
 #   pnpm check:e2e   # parcours navigateur hermétiques uniquement (Chromium installé)
+#   ./scripts/ci.sh --mobile   # parcours téléphone Chromium + WebKit
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-if [[ "${1:-}" == "--e2e" && "$#" == 1 ]]; then
+if [[ "${1:-}" == "--mobile" && "$#" == 1 ]]; then
+  export AXIOM_E2E_PORT="${AXIOM_E2E_PORT:-5281}"
+  exec pnpm --filter @axiom/web exec playwright test --config=playwright.mobile.config.ts
+elif [[ "${1:-}" == "--e2e" && "$#" == 1 ]]; then
   # Port isolé du lot maintenance ; un appel explicite peut le remplacer si nécessaire.
   export AXIOM_E2E_PORT="${AXIOM_E2E_PORT:-5239}"
   exec pnpm --filter @axiom/web exec playwright test \
@@ -25,7 +29,7 @@ if [[ "${1:-}" == "--e2e" && "$#" == 1 ]]; then
     quatre-lots-decisions quatre-lots-alertes quatre-lots-indicateurs quatre-lots-data \
     analyse-liquidite analyse-macro analyse-chain-geo analyse-brief analyse-risque-carry analyse-expy
 elif [[ "$#" != 0 ]]; then
-  echo "Usage : $0 [--e2e]" >&2
+  echo "Usage : $0 [--e2e|--mobile]" >&2
   exit 2
 fi
 

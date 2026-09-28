@@ -33,9 +33,10 @@ export class CandleReadout {
 
   constructor(
     private readonly chart: KLineChartInstance,
-    container: HTMLElement,
+    private readonly container: HTMLElement,
   ) {
     this.box = document.createElement("div");
+    this.box.setAttribute("data-candle-readout", "");
     this.box.style.cssText =
       "position:absolute;pointer-events:none;z-index:29;display:none;white-space:nowrap;" +
       "font-family:ui-monospace,monospace;font-size:10px;line-height:1.35;padding:4px 6px;" +
@@ -65,6 +66,7 @@ export class CandleReadout {
 
   /** Affiche l'encart pour la bougie `c` au pixel (x,y) du crosshair. */
   montrer(c: KLineData, x: number, y: number): void {
+    const mobile = this.container.dataset.mobile === "true";
     const r = lectureBougie(c);
     const teinte = r.hausse ? "var(--up)" : "var(--down)";
     this.box.replaceChildren();
@@ -74,7 +76,12 @@ export class CandleReadout {
     this.ligne("C", formatPrice(c.close), teinte);
     this.ligne("Δ", formatPct(r.variationPct), teinte);
     this.ligne("ampl", formatPrice(r.amplitude));
-    this.box.style.display = "block"; // avant mesure d'offsetWidth/Height (0 si display:none)
+    // Sur téléphone, trois lignes et une largeur bornée libèrent le point inspecté.
+    this.box.style.display = mobile ? "grid" : "block";
+    this.box.style.gridTemplateColumns = mobile ? "repeat(2, minmax(0, 1fr))" : "";
+    this.box.style.columnGap = mobile ? "12px" : "";
+    this.box.style.maxWidth = `${Math.max(0, this.container.clientWidth - 8)}px`;
+    this.box.style.overflow = "hidden";
 
     // Positionnement : décalé du curseur, basculé à gauche/haut près des bords du pane.
     const bound = this.chart.getSize(CANDLE_PANE_ID);
@@ -86,8 +93,8 @@ export class CandleReadout {
     if (bound) {
       if (left + bw > bound.left + bound.width) left = x - OFFSET - bw;
       if (top + bh > bound.top + bound.height) top = y - OFFSET - bh;
-      left = Math.max(left, bound.left);
-      top = Math.max(top, bound.top);
+      left = Math.max(bound.left, Math.min(left, bound.left + bound.width - bw));
+      top = Math.max(bound.top, Math.min(top, bound.top + bound.height - bh));
     }
     this.box.style.left = `${left}px`;
     this.box.style.top = `${top}px`;

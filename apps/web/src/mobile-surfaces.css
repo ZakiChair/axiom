@@ -1,0 +1,68 @@
+/* Surfaces denses : adaptations limitées au mode téléphone du shell. */
+.axiom-fermer-mobile { display: none; }
+.axiom-mobile-menu-root { position: fixed; z-index: 65; }
+.axiom-mobile .axiom-fermer-mobile { display: flex; flex-shrink: 0; position: sticky; top: 0; z-index: 60; background: var(--surface); }
+.axiom-mobile .axiom-menu-mobile {
+  position: absolute;
+  inset: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  width: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+  color: var(--text);
+}
+.axiom-mobile .axiom-menu-mobile > * { flex-shrink: 0; }
+.axiom-mobile .axiom-menu-mobile [class*="overflow-y-auto"] { min-height: 120px; }
+.axiom-mobile :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]) {
+  min-height: 44px;
+  max-width: 100%;
+  font-size: 16px;
+}
+.axiom-mobile button { min-height: 40px; min-width: 32px; flex-shrink: 0; }
+.axiom-mobile .axiom-entete-fenetre { flex-wrap: wrap; gap: 8px; }
+.axiom-mobile .axiom-entete-fenetre > :last-child { max-width: 100%; flex-wrap: wrap; }
+.axiom-mobile .axiom-onglets { overflow-x: auto; flex-shrink: 0; }
+.axiom-mobile .axiom-onglets > button { flex-shrink: 0; white-space: nowrap; }
+.axiom-mobile .axiom-segmente { max-width: 100%; flex-wrap: wrap; }
+.axiom-mobile .axiom-segmente > button { flex-shrink: 0; }
+.axiom-mobile .axiom-segmente > button.flex-1 { flex: 1 0 auto; }
+.axiom-mobile .axiom-synth-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.axiom-mobile .axiom-synth-grid > :nth-child(2) { order: 2; flex-direction: row; padding-top: 0; }
+.axiom-mobile .axiom-synth-grid > :nth-child(4) { order: 3; margin-top: 0; }
+.axiom-mobile .axiom-pair-search { min-width: 0; max-width: 100%; }
+.axiom-mobile .axiom-pair-search > div:first-child input { min-width: 0; width: 100%; }
+.axiom-mobile .axiom-action-tactile { opacity: 1; display: inline-flex; align-items: center; justify-content: center; }
+.axiom-mobile .axiom-watchlist-actions { position: static; transform: none; flex-direction: row; }
+.axiom-mobile .axiom-watchlist-remove { position: static; transform: none; flex-shrink: 0; }
+.axiom-mobile .axiom-watchlist-row { flex-wrap: wrap; }
+.axiom-mobile .axiom-table-scroll { max-width: 100%; max-height: var(--axiom-table-height, none); overflow: auto; overscroll-behavior: contain; }
+.axiom-mobile .axiom-table-contenu { min-width: var(--axiom-table-width); }
+.axiom-mobile .axiom-table-corps { max-height: none !important; overflow: visible; }
+.axiom-mobile .axiom-table-entete { position: sticky; top: 0; z-index: 1; background: var(--bg); }
+.axiom-mobile .axiom-liquidations-table { overflow-x: auto; }
+.axiom-mobile .axiom-liquidations-table > * { min-width: 430px; }
+.axiom-mobile .axiom-palette { padding-top: max(8px, env(safe-area-inset-top)); padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+.axiom-mobile .axiom-palette-dialog { display: flex; flex-direction: column; max-height: 100%; overflow-y: auto; }
+.axiom-mobile .axiom-palette-raccourcis { display: none; }
+.axiom-mobile .axiom-palette-categorie { display: none; }
+.axiom-mobile .axiom-onboarding { align-items: flex-start; overflow-y: auto; }
+.axiom-mobile .axiom-onboarding-dialog { max-height: calc(100dvh - 32px); overflow-y: auto; }
+.axiom-mobile-menu-root > :is(.axiom-palette, .axiom-onboarding, .axiom-settings-shell) { position: absolute; }
+.axiom-mobile-menu-root .axiom-onboarding-dialog { max-height: 100%; }
+.axiom-mobile .axiom-badge { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.axiom-mobile .axiom-tuile-stat { min-width: 0; flex-wrap: wrap; }
+.axiom-mobile .axiom-tuile-stat > :is(div, span) { min-width: 0; max-width: 100%; flex-wrap: wrap; }
+.axiom-mobile .axiom-tuile-stat > div > span { min-width: 0; max-width: 100%; flex-wrap: wrap; overflow-wrap: anywhere; }
+.axiom-mobile .axiom-tuile-stat .truncate { white-space: normal; }
+.axiom-mobile .axiom-note-source { overflow-wrap: anywhere; }
+.axiom-mobile .axiom-screener-ligne { flex-wrap: wrap; min-width: 0; }
+.axiom-mobile .axiom-screener-ligne > select:first-child { flex-basis: 100%; }
+.axiom-mobile .axiom-screener-ligne > input.flex-1 { flex-basis: 140px; }
+.axiom-mobile .axiom-operande { min-width: 0; max-width: 100%; flex-wrap: wrap; }
+.axiom-mobile .axiom-operande > select { min-width: 0; max-width: 100%; }
+.axiom-mobile .axiom-backtest .flex > input.flex-1 { min-width: 0; }
+.axiom-mobile [data-window-id="data"] :is(p, li) { overflow-wrap: anywhere; }
+.axiom-mobile [data-window-id="brief"] article { min-width: 0; overflow-wrap: anywhere; }

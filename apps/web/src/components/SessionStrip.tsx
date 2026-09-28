@@ -129,7 +129,7 @@ export function SessionStrip() {
     <div
       role="status"
       aria-label="Session : P&L jour, alertes, santé"
-      className="flex shrink-0 items-center gap-3 border-b border-border bg-surface px-3 py-0.5 text-[11px] leading-tight text-text-dim"
+      className="axiom-session-strip flex shrink-0 items-center gap-3 border-b border-border bg-surface px-3 py-0.5 text-[11px] leading-tight text-text-dim"
     >
       <button
         type="button"

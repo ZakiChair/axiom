@@ -4,7 +4,7 @@
  * EQS/BT). Composant CONTRÔLÉ et SANS hook : l'état de tri vit dans la fenêtre
  * (persistable), les helpers sont purs (contrat vitest node du repo).
  */
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { Vide } from "./ui";
 
 export interface ColonneTable<L> {
@@ -86,7 +86,7 @@ export function TableTriable<L>({
     <div
       role={ariaLabel ? "rowgroup" : undefined}
       style={maxHauteur !== undefined ? { maxHeight: maxHauteur } : undefined}
-      className={maxHauteur !== undefined ? "overflow-y-auto" : undefined}
+      className={`axiom-table-corps axiom-table-contenu ${maxHauteur !== undefined ? "overflow-y-auto" : ""}`}
     >
       {lignes.length === 0 && vide !== undefined ? (
         <Vide>{vide}</Vide>
@@ -121,10 +121,11 @@ export function TableTriable<L>({
     </div>
   );
   return (
-    <section role={ariaLabel ? "table" : undefined} aria-label={ariaLabel} className="rounded-md border border-border bg-bg">
+    <section role={ariaLabel ? "table" : undefined} aria-label={ariaLabel} className="axiom-table-scroll rounded-md border border-border bg-bg"
+      style={{ "--axiom-table-width": `${colonnes.reduce((total, c) => total + (c.largeur?.endsWith("px") ? Number.parseFloat(c.largeur) : 104), 24 + Math.max(0, colonnes.length - 1) * 8)}px`, "--axiom-table-height": maxHauteur ?? "none" } as CSSProperties}>
       <div
         role={ariaLabel ? "row" : undefined}
-        className="grid items-center gap-2 border-b border-border px-3 py-1.5"
+        className="axiom-table-entete axiom-table-contenu grid items-center gap-2 border-b border-border px-3 py-1.5"
         style={{ gridTemplateColumns: grille }}
       >
         {colonnes.map((c) =>

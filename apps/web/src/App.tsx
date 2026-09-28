@@ -10,9 +10,11 @@
  * composant passent par `commands/windowPanels.ts` (windowManager only) pour ne
  * pas tirer le graphe chart/canvas au démarrage.
  */
-import { lazy, Suspense, useEffect, useRef, useState, type ComponentType, type LazyExoticComponent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentType, type LazyExoticComponent } from "react";
 import { useStore } from "zustand";
 import { Toolbar } from "./components/Toolbar";
+import { MobileNavigation } from "./components/MobileNavigation";
+import { useMobileLayout } from "./hooks/useMobileLayout";
 import { SessionStrip } from "./components/SessionStrip";
 import { TickerBand } from "./components/TickerBand";
 import { DrawingToolbar } from "./components/DrawingToolbar";
@@ -247,6 +249,13 @@ function AlertsPanelFallback() {
 }
 
 export function App() {
+  const mobile = useMobileLayout();
+  const [panneauxOuverts, setPanneauxOuverts] = useState(false);
+  const [panneauxCharges, setPanneauxCharges] = useState(!mobile);
+  const [dessinsOuverts, setDessinsOuverts] = useState(false);
+  const [optionsOuvertes, setOptionsOuvertes] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const panneauxRef = useRef<HTMLElement>(null);
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
   const reglagesOuverts = useStore(settingsUiStore, (s) => s.open);
   const onboardingTermine = useStore(onboardingStore, (s) => s.completed);
@@ -258,6 +267,47 @@ export function App() {
   useEffect(() => { if (paletteOuverte) setPaletteChargee(true); }, [paletteOuverte]);
   const plein = useStore(fullscreenStore, (s) => s.plein);
   const chartAreaRef = useRef<HTMLDivElement>(null);
+  const panneauxMasques = plein || (mobile && !panneauxOuverts);
+  const fermerFeuilles = useCallback(() => {
+    setPanneauxOuverts(false);
+    setDessinsOuverts(false);
+    setOptionsOuvertes(false);
+  }, []);
+
+  // Même durée de vie que la sidebar desktop après sa première utilisation :
+  // fermer le tiroir ne doit pas jeter le formulaire d'alerte en cours.
+  useEffect(() => {
+    if (!mobile || panneauxOuverts) setPanneauxCharges(true);
+  }, [mobile, panneauxOuverts]);
+  useLayoutEffect(() => {
+    if (panneauxRef.current) panneauxRef.current.inert = panneauxMasques;
+  }, [panneauxMasques, panneauxCharges]);
+
+  // Toutes les entrées vers une fenêtre (menu, ticker, raccourci, restauration)
+  // révèlent le contenu demandé plutôt que de le laisser sous un tiroir.
+  useEffect(() => windowManagerStore.subscribe((next, prev) => {
+    if (next.windows !== prev.windows && Object.entries(next.windows).some(([id, w]) => {
+      const avant = prev.windows[id];
+      return w.open && !w.minimized && (!avant?.open || avant.minimized || avant.z !== w.z);
+    })) fermerFeuilles();
+  }), [fermerFeuilles]);
+
+  useEffect(() => {
+    if (!mobile || reglagesOuverts || paletteOuverte || plein) {
+      setPanneauxOuverts(false);
+      setDessinsOuverts(false);
+      setOptionsOuvertes(false);
+    }
+  }, [mobile, reglagesOuverts, paletteOuverte, plein]);
+
+  useEffect(() => {
+    if (!panneauxOuverts && !dessinsOuverts) return;
+    const echap = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { setPanneauxOuverts(false); setDessinsOuverts(false); }
+    };
+    document.addEventListener("keydown", echap);
+    return () => document.removeEventListener("keydown", echap);
+  }, [panneauxOuverts, dessinsOuverts]);
 
   // Écouteur clavier global unique (TF, toggles, plein écran, palette…).
   useRaccourcisGlobaux();
@@ -278,13 +328,23 @@ export function App() {
 
   // Zone de travail des fenêtres flottantes = la zone du graphe (exclut toolbar/barre
   // de dessin/panneau latéral) — mesurée sur ce div, PAS sur window.innerWidth/innerHeight.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = chartAreaRef.current;
     if (!el) return;
     let minuteur: ReturnType<typeof setTimeout> | undefined;
     const mesurer = (): void => {
       const rect = el.getBoundingClientRect();
-      windowManagerStore.getState().setWorkspace({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+      // Le cadrage téléphone est uniquement visuel : setWorkspace reclampe et
+      // persiste les fenêtres desktop, donc ne doit pas recevoir ce petit rectangle.
+      if (mobile) {
+        const style = rootRef.current?.style;
+        style?.setProperty("--mobile-workspace-x", `${rect.x}px`);
+        style?.setProperty("--mobile-workspace-y", `${rect.y}px`);
+        style?.setProperty("--mobile-workspace-width", `${rect.width}px`);
+        style?.setProperty("--mobile-workspace-height", `${rect.height}px`);
+      } else {
+        windowManagerStore.getState().setWorkspace({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+      }
     };
     mesurer();
     const observer = new ResizeObserver(() => {
@@ -296,21 +356,24 @@ export function App() {
       if (minuteur !== undefined) clearTimeout(minuteur);
       observer.disconnect();
     };
-  }, []);
+  }, [mobile, plein]);
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg text-text">
+    <div ref={rootRef} className={`axiom-app flex h-screen w-full flex-col overflow-hidden bg-bg text-text${mobile ? " axiom-mobile" : ""}`}>
       {/* Plein écran : toolbars et sidebar masquées, le graphe occupe tout l'écran. */}
-      {!plein && <Toolbar />}
+      {!plein && <Toolbar optionsOuvertes={optionsOuvertes} onOptionsChange={(open) => {
+        setOptionsOuvertes(open);
+        if (open) { setPanneauxOuverts(false); setDessinsOuverts(false); }
+      }} />}
       {/* Strip session (P&L jour · alertes · santé) — hors plein écran, dense 11px. */}
       {!plein && <SessionStrip />}
       {/* Bandeau news défilant (enfant flex : le workspace mesuré par chartAreaRef se
           rétrécit automatiquement). Se masque lui-même selon tickerBandStore (⌘K TICKER). */}
       {!plein && <TickerBand />}
       {/* min-h-0 indispensable pour que le graphe (flex-1) prenne une hauteur réelle. */}
-      <main className="flex min-h-0 flex-1">
+      <main className="relative flex min-h-0 flex-1">
         {/* Barre d'outils de dessin verticale, à gauche du graphe. */}
-        {!plein && <DrawingToolbar />}
+        {!plein && <DrawingToolbar mobileOpen={dessinsOuverts} onClose={() => setDessinsOuverts(false)} />}
         {/* min-w-0 : la grille de graphes peut rétrécir face aux panneaux latéraux. */}
         <div ref={chartAreaRef} className="relative isolate z-0 min-w-0 flex-1">
           <ErrorBoundary scope="Graphiques">
@@ -320,8 +383,12 @@ export function App() {
         {/* Colonne droite : en-tête (accès Réglages) + panneaux empilés, tous harmonisés
             via SidebarSection. Ordre : Watchlist, Alertes, Comparer, Santé. Les mesures
             macro ont quitté la sidebar pour l'onglet « Macro » du menu Indicateurs. */}
-        {!plein && (
-          <aside className="hidden w-60 shrink-0 flex-col min-h-0 overflow-y-auto border-l border-border bg-surface sm:flex">
+        {(!mobile || panneauxOuverts || panneauxCharges) && (
+          <aside ref={panneauxRef} id="panneaux-terminal" aria-label="Panneaux du terminal"
+            role={mobile ? "dialog" : undefined}
+            aria-hidden={panneauxMasques || undefined}
+            style={{ display: panneauxMasques ? "none" : undefined }}
+            className={`${mobile ? "axiom-mobile-sidebar" : "flex w-60 shrink-0"} flex-col min-h-0 overflow-y-auto border-l border-border bg-surface`}>
             <div className="flex shrink-0 items-center justify-between px-3 py-2">
               <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
                 Panneaux
@@ -337,6 +404,8 @@ export function App() {
                   ⚙
                 </span>
               </button>
+              {mobile && <button type="button" aria-label="Fermer les panneaux" onClick={() => setPanneauxOuverts(false)}
+                className="rounded px-3 text-text-dim">✕</button>}
             </div>
             <Watchlist />
             <Suspense fallback={<AlertsPanelFallback />}>
@@ -351,17 +420,25 @@ export function App() {
       {/* Taskbar des fenêtres ouvertes — DANS LE FLUX (dernier enfant du flex-col) : elle
           réserve sa hauteur, donc le workspace mesuré par chartAreaRef se rétrécit et l'axe
           temporel du chart n'est plus masqué. Rien quand aucune fenêtre n'est ouverte. */}
-      <Taskbar />
+      <Taskbar onNavigate={fermerFeuilles} feuilleOuverte={mobile && (panneauxOuverts || dessinsOuverts || optionsOuvertes)} />
+      {mobile && !plein && <MobileNavigation panneauxOuverts={panneauxOuverts} dessinsOuverts={dessinsOuverts}
+        onNavigate={fermerFeuilles}
+        onPanneaux={() => { setPanneauxOuverts((o) => !o); setDessinsOuverts(false); setOptionsOuvertes(false); }}
+        onDessins={() => {
+          if (!dessinsOuverts) windowManagerStore.getState().minimizeAll();
+          setDessinsOuverts((o) => !o); setPanneauxOuverts(false); setOptionsOuvertes(false);
+        }} />}
 
       {/* Indice discret pour sortir du plein écran (aucune toolbar visible alors). */}
       {plein && (
-        <div className="pointer-events-none fixed bottom-3 left-3 z-30 rounded border border-border bg-surface/80 px-2 py-1 text-[10px] text-text-dim">
-          F ou Échap : quitter le plein écran
-        </div>
+        <button type="button" onClick={() => fullscreenStore.getState().definir(false)}
+          className="fixed bottom-3 left-3 z-30 min-h-11 rounded border border-border bg-surface px-3 py-1 text-xs text-text-dim">
+          Quitter le plein écran
+        </button>
       )}
 
-      {/* Fenêtres Bloomberg : chunk chargé à la première ouverture (FloatingWindow
-          ne monte les enfants que si open && !minimized). */}
+      {/* Fenêtres Bloomberg : chunk chargé à la première ouverture. Sur mobile,
+          les fenêtres réduites restent montées pour conserver leurs brouillons. */}
       {WINDOW_REGISTRY.map((entry) => {
         const Contenu = WINDOW_COMPONENTS[entry.id];
         if (!Contenu) return null;

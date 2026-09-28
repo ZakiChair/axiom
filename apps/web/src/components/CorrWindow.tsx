@@ -794,8 +794,9 @@ export function CorrWindow() {
             <div className="overflow-x-auto">
               <canvas
                 ref={matrixCanvasRef}
-                onMouseMove={onMove}
-                onMouseLeave={onLeave}
+                onPointerDown={onMove}
+              onPointerMove={onMove}
+                onPointerLeave={(event) => { if (event.pointerType !== "touch") onLeave(); }}
                 onClick={onClick}
                 className="cursor-pointer"
               />

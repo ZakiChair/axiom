@@ -20,10 +20,25 @@ import {
   MIN_WIDTH,
   MIN_HEIGHT,
   GROUP_PALETTE,
+  type EtatFenetre,
   type SnapZone,
 } from "../store/windowManager";
 import { couleurAffichable } from "../store/compare";
 import { LARGEUR_MNEMONIQUE } from "./ui";
+import { useMobileLayout } from "../hooks/useMobileLayout";
+
+/** Une seule fenêtre au téléphone ; départage stable aussi les anciens z égaux. */
+export function fenetreMobileActive(windows: Record<string, EtatFenetre>): string | null {
+  let active: EtatFenetre | undefined;
+  let idActif: string | null = null;
+  for (const [id, w] of Object.entries(windows)) {
+    if (w.open && !w.minimized && (!active || w.z > active.z)) {
+      active = w;
+      idActif = id;
+    }
+  }
+  return idActif;
+}
 
 export interface FloatingWindowProps {
   id: string;
@@ -46,10 +61,20 @@ const POIGNEES: { id: PoigneeResize; className: string; dw: number; dh: number; 
 ];
 
 export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindowProps) {
+  const mobile = useMobileLayout();
   const etat = useStore(windowManagerStore, (s) => s.windows[id]);
+  const activeMobile = useStore(windowManagerStore, (s) => mobile ? fenetreMobileActive(s.windows) : null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const masqueeMobile = mobile && activeMobile !== id;
   const [menuGroupeOuvert, setMenuGroupeOuvert] = useState(false);
   const groupeRef = useRef<HTMLDivElement>(null);
+
+  // Garder le contenu monté conserve les brouillons et onglets lorsqu'on change
+  // de fenêtre ou revient au graphique sur mobile ; inert retire en même temps
+  // les contrôles cachés du focus tactile/clavier.
+  useEffect(() => {
+    if (rootRef.current) rootRef.current.inert = masqueeMobile;
+  }, [masqueeMobile, etat?.open, etat?.minimized]);
 
   // Menu « couleur de groupe » : fermeture sur Échap + clic extérieur (mêmes
   // gestes que les menus déroulants de la Toolbar — cf. MenuDeroulant).
@@ -69,7 +94,7 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
     };
   }, [menuGroupeOuvert]);
 
-  if (!etat || !etat.open || etat.minimized) return null;
+  if (!etat || !etat.open || (!mobile && etat.minimized)) return null;
 
   const focus = (): void => windowManagerStore.getState().focusWindow(id);
 
@@ -78,6 +103,7 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
    * nul), on restaure la géométrie mémorisée ; sinon on maximise plein workspace
    * (`snapGeometry("top")`), `snapWindow` sauvegardant la géométrie courante au passage. */
   const basculerMaximiser = (): void => {
+    if (mobile) return;
     const store = windowManagerStore.getState();
     const courant = store.windows[id];
     if (!courant) return;
@@ -100,6 +126,7 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
   };
 
   const demarrerDrag = (e: React.PointerEvent): void => {
+    if (mobile) return;
     if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
     e.preventDefault();
     focus();
@@ -214,8 +241,18 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
       data-window-id={id}
       role="complementary"
       aria-label={title}
+      aria-hidden={masqueeMobile || undefined}
       onPointerDownCapture={focus}
-      style={{
+      style={mobile ? {
+        position: "fixed",
+        left: "var(--mobile-workspace-x, 0px)",
+        top: "var(--mobile-workspace-y, 56px)",
+        width: "var(--mobile-workspace-width, 100%)",
+        height: "var(--mobile-workspace-height, calc(100dvh - 112px))",
+        zIndex: 30,
+        visibility: masqueeMobile ? "hidden" : undefined,
+        pointerEvents: masqueeMobile ? "none" : undefined,
+      } : {
         position: "fixed",
         left: etat.x,
         top: etat.y,
@@ -223,12 +260,12 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
         height: etat.height,
         zIndex: etat.z,
       }}
-      className="flex flex-col rounded border border-border bg-surface shadow-2xl"
+      className="axiom-floating-window flex min-h-0 min-w-0 flex-col rounded border border-border bg-surface shadow-2xl"
     >
       <header
         onPointerDown={demarrerDrag}
         onDoubleClick={doubleClicEntete}
-        className="flex shrink-0 cursor-move items-center justify-between gap-2 rounded-t border-b border-border bg-bg px-2 py-1.5"
+        className="axiom-window-header flex shrink-0 cursor-move items-center justify-between gap-2 rounded-t border-b border-border bg-bg px-2 py-1.5"
       >
         <div className="flex min-w-0 items-center gap-2">
           <span className={`${LARGEUR_MNEMONIQUE} shrink-0 text-[10px] font-semibold uppercase tracking-wider text-text-dim`}>
@@ -245,7 +282,7 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
             style={{ backgroundColor: etat.groupColor ? couleurAffichable(etat.groupColor) : "transparent" }}
           />
           {menuGroupeOuvert && (
-            <div className="absolute right-0 top-5 z-10 flex gap-1 rounded border border-border bg-surface p-1 shadow-xl">
+            <div className="axiom-window-groups absolute right-0 top-5 z-10 flex gap-1 rounded border border-border bg-surface p-1 shadow-xl">
               <button
                 type="button"
                 title="Aucun groupe"
@@ -259,6 +296,7 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
                 <button
                   key={couleur}
                   type="button"
+                  aria-label={`Groupe ${couleur}`}
                   onClick={() => {
                     windowManagerStore.getState().setGroup(id, couleur);
                     setMenuGroupeOuvert(false);
@@ -277,14 +315,14 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
           >
             —
           </button>
-          <button
+          {!mobile && <button
             type="button"
             title="Maximiser / Restaurer"
             onClick={basculerMaximiser}
             className="rounded px-1 text-xs leading-none text-text-dim hover:bg-bg hover:text-text"
           >
             ▢
-          </button>
+          </button>}
           <button
             type="button"
             title="Fermer"
@@ -299,8 +337,8 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
           bloc où flex-1 était inerte, source de doubles ascenseurs). Convention :
           fenêtre défilante = corps `px-4 py-3` nu ; géométrie fixe = corps
           `flex min-h-0 flex-1 flex-col px-4 py-3`. */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</div>
-      {POIGNEES.map((p) => (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">{children}</div>
+      {!mobile && POIGNEES.map((p) => (
         <div key={p.id} onPointerDown={demarrerResize(p)} className={`absolute ${p.className}`} />
       ))}
     </div>

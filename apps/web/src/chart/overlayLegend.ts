@@ -33,6 +33,7 @@ import {
   majEtiquettes,
   majLibelle,
   majPastille,
+  adapterCiblesTactiles,
 } from "./legendeControles";
 import { abonnerStatutsIndicateurs, statutIndicateur } from "./indicators";
 import { majBadgeStatut } from "./paneHeaders";
@@ -69,6 +70,9 @@ export class OverlayLegend {
   private readonly chart: Chart;
   private readonly container: HTMLElement;
   private readonly els = new Map<string, HTMLDivElement>();
+  private readonly panel: HTMLDivElement;
+  private readonly toggle: HTMLButtonElement;
+  private expanded = false;
   private readonly onPaneDrag = (): void => this.repositionnerTout();
   private readonly onDataReady = (): void => this.repositionnerTout();
   private readonly desabonnerStatuts: () => void;
@@ -76,6 +80,23 @@ export class OverlayLegend {
   constructor(chart: Chart, container: HTMLElement) {
     this.chart = chart;
     this.container = container;
+    this.panel = document.createElement("div");
+    this.panel.setAttribute("data-overlay-legend", "");
+    this.toggle = document.createElement("button");
+    this.toggle.type = "button";
+    this.toggle.className = "pointer-events-auto absolute z-20 min-h-11 rounded border border-border bg-surface/95 px-3 text-xs text-text";
+    this.toggle.addEventListener("click", () => {
+      this.expanded = !this.expanded;
+      this.repositionnerTout();
+    });
+    this.panel.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      this.expanded = false;
+      this.repositionnerTout();
+      this.toggle.focus();
+    });
+    this.container.append(this.panel, this.toggle);
     this.chart.subscribeAction(ActionType.OnPaneDrag, this.onPaneDrag);
     this.chart.subscribeAction(ActionType.OnDataReady, this.onDataReady);
     this.desabonnerStatuts = abonnerStatutsIndicateurs(chart, (instanceId) => {
@@ -101,7 +122,7 @@ export class OverlayLegend {
       if (!el) {
         el = this.creerElement(entry);
         this.els.set(entry.instanceId, el);
-        this.container.appendChild(el);
+        this.panel.appendChild(el);
       } else {
         majPastille(el, entry.couleurIdx);
         majLibelle(el, entry.label);
@@ -133,15 +154,33 @@ export class OverlayLegend {
 
   private repositionnerTout(): void {
     const main = this.chart.getSize(CANDLE_PANE_ID, DomPosition.Main);
+    const mobile = this.container.dataset.mobile === "true";
+    const entries = overlayIndicators(indicatorsStore.getState().indicators);
+    this.toggle.style.display = mobile && main && entries.length > 0 ? "" : "none";
+    this.toggle.textContent = `Indicateurs (${entries.length}) ${this.expanded ? "▾" : "▴"}`;
+    this.toggle.setAttribute("aria-expanded", String(this.expanded));
+    this.toggle.style.left = "4px";
+    this.toggle.style.bottom = "32px";
+    this.panel.style.cssText = mobile
+      ? `position:absolute;z-index:21;left:4px;bottom:80px;width:${Math.max(0, (main?.width ?? 0) - 8)}px;max-height:45%;overflow-y:auto;overscroll-behavior:contain;display:${this.expanded ? "flex" : "none"};flex-direction:column;gap:2px;pointer-events:auto;`
+      : "display:contents";
     if (!main) {
       for (const el of this.els.values()) el.style.display = "none";
       return;
     }
     let y = main.top + 2;
-    for (const entry of overlayIndicators(indicatorsStore.getState().indicators)) {
+    for (const entry of entries) {
       const el = this.els.get(entry.instanceId);
       if (!el) continue;
       el.style.display = "";
+      el.style.position = mobile ? "relative" : "absolute";
+      adapterCiblesTactiles(el, mobile);
+      if (mobile) {
+        el.style.top = "";
+        el.style.left = "";
+        el.style.flexShrink = "0";
+        continue;
+      }
       el.style.top = `${y}px`;
       el.style.left = `${Math.max(2, main.left + main.width - el.offsetWidth - 4)}px`;
       y += el.offsetHeight + ROW_GAP;
@@ -154,5 +193,7 @@ export class OverlayLegend {
     this.desabonnerStatuts();
     for (const el of this.els.values()) el.remove();
     this.els.clear();
+    this.panel.remove();
+    this.toggle.remove();
   }
 }

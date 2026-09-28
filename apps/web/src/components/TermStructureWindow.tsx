@@ -494,8 +494,9 @@ export function TermStructureWindow() {
             <canvas
               ref={refCanvas}
               className="h-[200px] w-full"
-              onMouseMove={onSurvol}
-              onMouseLeave={() => setSurvol(null)}
+              onPointerDown={onSurvol}
+              onPointerMove={onSurvol}
+              onPointerLeave={(event) => { if (event.pointerType !== "touch") setSurvol(null); }}
             />
             {survol && (
               <InfobulleGraphe

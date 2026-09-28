@@ -466,8 +466,9 @@ export function CbpremWindow() {
             )}
             <canvas
               ref={canvasRef}
-              onMouseMove={onMove}
-              onMouseLeave={onLeave}
+              onPointerDown={onMove}
+              onPointerMove={onMove}
+              onPointerLeave={(event) => { if (event.pointerType !== "touch") onLeave(); }}
               className="h-full w-full"
             />
             {survol && (

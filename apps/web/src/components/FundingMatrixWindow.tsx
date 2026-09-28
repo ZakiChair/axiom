@@ -122,7 +122,7 @@ export function FundingMatrixWindow() {
         }
       />
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
-        <nav aria-label="Vue du funding" className="flex gap-2">
+        <nav aria-label="Vue du funding" className="flex flex-wrap gap-2">
           <button type="button" aria-pressed={vue === "live"} onClick={() => setVue("live")}
             className="rounded border border-border px-2 py-1 text-xs">Instantané live</button>
           <button type="button" aria-pressed={vue === "historique"} onClick={() => setVue("historique")}

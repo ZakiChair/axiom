@@ -50,13 +50,14 @@ function EvolutionMacro({ courbes, unite, label, horizon }: { courbes: CourbeMac
   const x = (t: number) => gauche + (t - minT) / (maxT - minT || 1) * largeur;
   const y = (v: number) => 12 + (haut - v) / (haut - bas) * 190;
   const axeDate = (ts: number): string => new Intl.DateTimeFormat("fr-FR", horizon === "max" || horizon >= 30 ? { year: "numeric", timeZone: "UTC" } : { month: "short", year: "2-digit", timeZone: "UTC" }).format(ts);
+  const lireObservation = (event: React.PointerEvent<SVGSVGElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const cible = minT + ((event.clientX - rect.left) / rect.width * 680 - gauche) / largeur * (maxT - minT);
+    setSurvol(times.reduce((a, b) => Math.abs(b - cible) < Math.abs(a - cible) ? b : a, times[0]!));
+  };
   return (
     <div>
-      <svg viewBox="0 0 680 228" className="block w-full" role="img" aria-label={`Évolution · ${label}`} onMouseLeave={() => setSurvol(null)} onMouseMove={(event) => {
-        const rect = event.currentTarget.getBoundingClientRect();
-        const cible = minT + ((event.clientX - rect.left) / rect.width * 680 - gauche) / largeur * (maxT - minT);
-        setSurvol(times.reduce((a, b) => Math.abs(b - cible) < Math.abs(a - cible) ? b : a, times[0]!));
-      }}>
+      <svg viewBox="0 0 680 228" className="block w-full" role="img" aria-label={`Évolution · ${label}`} onPointerLeave={(event) => { if (event.pointerType !== "touch") setSurvol(null); }} onPointerDown={lireObservation} onPointerMove={lireObservation}>
         <title>{label} · unité : {unite === "pourcent-pib" ? "% du PIB" : unite}. Valeurs et périodes disponibles dans le tableau.</title>
         {Array.from({ length: 5 }, (_, i) => bas + (haut - bas) * i / 4).map((v, i) => <g key={i}>
           <line x1={gauche} x2={656} y1={y(v)} y2={y(v)} stroke="var(--border)" opacity="0.5" />
@@ -71,7 +72,7 @@ function EvolutionMacro({ courbes, unite, label, horizon }: { courbes: CourbeMac
         {survol !== null && <line x1={x(survol)} x2={x(survol)} y1={12} y2={202} stroke="var(--text-dim)" strokeDasharray="3 3" />}
       </svg>
       <div className="flex min-h-6 flex-wrap gap-x-3 gap-y-1 text-[10px] text-text-dim" aria-live="polite">
-        {survol === null ? <span>Survolez la courbe pour lire les observations. Les périodes manquantes interrompent le tracé.</span> : courbes.flatMap((c) => {
+        {survol === null ? <span>Touchez ou survolez la courbe pour lire les observations. Les périodes manquantes interrompent le tracé.</span> : courbes.flatMap((c) => {
           const p = c.points.find((point) => point.time === survol);
           return p ? [<span key={c.def.id}><span style={{ color: c.couleur }}>{c.def.libelleSerie ?? c.def.libelleRegion}</span> · {formatPeriodeMacro(p.time, c.def)} : {formatValeurMacro(p.value, unite)}{p.qualite ? ` · ${p.qualite}` : ""}</span>] : [];
         })}

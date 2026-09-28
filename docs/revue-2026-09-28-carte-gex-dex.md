@@ -41,3 +41,33 @@ Les tests de données couvrent les frontières exactes des huit bandes sur plusi
 - `git diff --check` propre. Logs de la session : `/tmp/axiom-gex-refonte-20260928/check-final.log` et `e2e-final.log`.
 
 Le travail reste local ; aucun déploiement n'est effectué dans ce lot. Limite antérieure hors périmètre : CBOE conserve temporairement sa précédente chaîne pendant un changement de ticker ; la refonte ne modifie pas ce chargement. Les bascules BTC/ETH restent isolées et testées.
+
+## Complément visuel demandé à 14:30
+
+Le propriétaire demande de conserver les chiffres tout en ajoutant un véritable graphique.
+La vue **Graphique** est désormais sélectionnée par défaut dans OMON GEX/DEX. Elle montre
+un histogramme signé par strike sur un axe de prix proportionnel, avec repère du spot,
+puis un histogramme par échéance. Carte chiffrée et profil simulé restent accessibles.
+
+Le cadrage initial de ±30 % du spot indique le nombre de strikes uniques visibles et le
+net de cette plage. « Tous les strikes » rétablit la série entière. Les totaux en tête et
+les barres par échéance conservent toujours la portée choisie. Les valeurs se lisent au
+survol, au clic ou avec les curseurs au clavier. Un net nul est marqué par un point neutre,
+une absence par un tiret ; aucune hauteur minimale ne grossit les petites contributions.
+
+La nouvelle transformation ne recalcule aucun grec. Sur les mêmes instantanés réels,
+90 strikes BTC et 84 strikes ETH sont consolidés ; le cadrage en contient respectivement
+54 et 48. L'écart maximal avec le moteur précédent filtré en prix est de 0,000000060 USD.
+Les douze échéances et les totaux généraux restent strictement identiques entre cadrages.
+
+Validation : revue indépendante favorable, `pnpm check` réussi (**8 181 tests**, dont
+5 731 web) et **21/21 parcours Chromium** réussis. Après l'ajustement final de contraste,
+les trois tests du composant et le build ont été relancés avec succès. Le budget initial
+reste à **1 188 014 / 354 245 octets bruts/gzip**, plafonds inchangés. Les contrôles de
+cadrage, de survol/clic persistant et de clavier sont intégrés à `options-carte.e2e.ts`.
+
+Contrôle navigateur sur données réelles : BTC/GEX et ETH/DEX, bascule vers tous les
+strikes sans changement du net global, thème clair, puis fenêtre de 320 px sans
+débordement. Le mélange local des couleurs avec le texte assure un contraste minimal
+de **3,073:1** sur les cinq thèmes sans modifier les hauteurs des barres. Logs :
+`/tmp/axiom-options-graphiques-20260928/{check-final,e2e-final,build-final}.log`.

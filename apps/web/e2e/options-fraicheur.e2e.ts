@@ -128,6 +128,8 @@ test("portée unique : net et carte passent de toutes échéances à la sélecti
   await f.getByRole("button", { name: "Échéance sélectionnée", exact: true }).click();
   await expect(net).toContainText("−$");
   await expect(f.getByRole("region", { name: "Analyse des expositions" })).toContainText("échéance sélectionnée");
+  await expect(f.getByRole("img", { name: "GEX net par strike" })).toBeVisible();
+  await f.getByRole("button", { name: "Carte des expositions", exact: true }).click();
   await expect(f.getByRole("region", { name: "Carte des expositions nettes" })).toBeVisible();
   await f.getByRole("button", { name: "Sensibilité au prix", exact: true }).click();
   await expect(f.getByText("GEX net · échéance sélectionnée", { exact: true })).toBeVisible();

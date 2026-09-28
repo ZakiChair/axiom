@@ -310,6 +310,8 @@ test("GEX/DEX Actions : IBIT différé converti en niveaux BTC au dernier échan
   await expect(tuile("Notionnel OI")).toContainText("≈ 833 BTC");
 
   // La cellule +5 à +15 % contient le strike 50 ; détail persistant accessible au clic.
+  await expect(fenetre.getByRole("img", { name: "GEX net par strike" })).toBeVisible();
+  await fenetre.getByRole("button", { name: "Carte des expositions", exact: true }).click();
   await fenetre.getByRole("region", { name: "Carte des expositions nettes" })
     .getByRole("button", { name: /\+5 à \+15/ }).click();
   const detail = fenetre.getByRole("region", { name: "Détail de la cellule" });

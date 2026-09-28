@@ -1211,3 +1211,26 @@ Chromium** réussis. Budget initial : **1 188 014 / 354 236** octets bruts/gzip
 (Node 24.13.0, zlib 1.3.1), plafonds inchangés. Les deux nouveaux parcours carte/profil
 sont inclus dans `pnpm check:e2e`. Preuves et limites :
 [`docs/revue-2026-09-28-carte-gex-dex.md`](docs/revue-2026-09-28-carte-gex-dex.md).
+
+### Graphiques visuels complémentaires (demande du 28 septembre à 14:30)
+
+Le propriétaire souhaite conserver les chiffres et disposer également d'un véritable
+graphique. OMON GEX/DEX ouvre désormais la vue **Graphique** : histogramme signé par strike
+sur un axe de prix proportionnel, repère du spot, et barres d'exposition par échéance.
+La carte chiffrée et la sensibilité au prix restent disponibles dans leurs onglets.
+
+- Le cadrage initial à ±30 % du spot concerne uniquement l'histogramme par strike ; le
+  nombre de strikes visibles et le net de la zone sont explicités. « Tous les strikes »
+  rétablit la totalité. Aucun seuil de petite exposition n'est introduit.
+- Les totaux affichés, les barres par échéance, les calculs et la portée choisie ne changent
+  pas lors du cadrage. Les dates du second graphique sont des catégories.
+- Les graphiques sont calculés à partir des mêmes expositions déjà présentes dans la
+  carte, sans nouveau calcul de greeks, fournisseur, dépendance ou formule financière.
+- Le choix GEX/DEX pilote les deux histogrammes ; unités, zéro, absence et signe restent
+  explicites. Les détails sont accessibles à la souris et au clavier. La vue CBOE dispose
+  des graphiques et de la carte, toujours sans simulation de greeks figés.
+
+Revue indépendante favorable, `pnpm check` réussi (**8 181 tests**), **21 parcours
+Chromium** réussis. Contraste vérifié sur cinq thèmes ; build final à **1 188 014 /
+354 245 octets bruts/gzip**, plafonds inchangés. Les contrôles de conservation des chiffres
+au cadrage et d'interaction sont intégrés à la suite `options-carte` existante.

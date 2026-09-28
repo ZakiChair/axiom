@@ -31,6 +31,7 @@ async function ouvrir(page: Page) {
 
 test("carte nette : zéro distinct du vide, détail persistant et navigation clavier", async ({ page }) => {
   const f = await ouvrir(page);
+  await f.getByRole("button", { name: "Carte des expositions", exact: true }).click();
   const carte = f.getByRole("region", { name: "Carte des expositions nettes" });
   await expect(carte).toBeVisible();
   await expect(carte.getByRole("button", { name: /30 oct.*0 à \+5.*GEX \$0/ })).toBeVisible();
@@ -48,6 +49,37 @@ test("carte nette : zéro distinct du vide, détail persistant et navigation cla
   await expect(carte).toContainText("DEX en USD notionnels");
   await expect(detail).toContainText("$90,000");
   await expect(carte).toContainText("Échelle commune");
+});
+
+test("graphique par défaut : cadrage explicite, sélection clavier et nets inchangés", async ({ page }) => {
+  const f = await ouvrir(page);
+  const graphique = f.getByRole("img", { name: "GEX net par strike" });
+  await expect(graphique).toBeVisible();
+  await expect(f.getByRole("img", { name: "GEX net par échéance" })).toBeVisible();
+  await expect(f).toContainText("2 strikes affichés sur 3");
+  const net = await f.getByRole("group", { name: "GEX net", exact: true }).textContent();
+  const echeances = await f.getByRole("img", { name: "GEX net par échéance" }).innerHTML();
+  const detail = f.getByRole("region", { name: "Détail du strike" });
+  await graphique.locator('[data-strike="100000"]').hover();
+  await expect(detail).toContainText("$100,000");
+  await graphique.locator('[data-strike="100000"]').click();
+  await page.mouse.move(0, 0);
+  await expect(detail).toContainText("$100,000");
+  const curseur = f.getByRole("slider", { name: "Strike sélectionné" });
+  await curseur.focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(detail).toContainText("$90,000");
+  await expect(detail).toContainText("GEX");
+  await expect(detail).toContainText("DEX");
+  await page.mouse.move(0, 0);
+  await expect(detail).toContainText("$90,000");
+  await f.getByRole("button", { name: "Tous les strikes", exact: true }).click();
+  await expect(f).toContainText("3 strikes affichés sur 3");
+  await expect(f.getByRole("group", { name: "GEX net", exact: true })).toHaveText(net!);
+  expect(await f.getByRole("img", { name: "GEX net par échéance" }).innerHTML()).toBe(echeances);
+  await f.getByRole("button", { name: "DEX", exact: true }).click();
+  await expect(f.getByRole("img", { name: "DEX net par strike" })).toBeVisible();
+  await expect(f.getByRole("img", { name: "DEX net par échéance" })).toBeVisible();
 });
 
 test("sensibilité GEX et DEX : vraie courbe métrique et curseur au clavier", async ({ page }) => {

@@ -7,6 +7,7 @@ import { formatDec, formatEntier, formatPct, formatPourcentage, formatUsd } from
 import { Badge, ErreurBloc, NoteSource, Fraicheur, Segmente } from "../ui";
 import { CarteExpositions } from "./CarteExpositions";
 import { ProfilExpositions } from "./ProfilExpositions";
+import { GraphiqueExpositions } from "./GraphiqueExpositions";
 import { formatUsdExact } from "./format";
 
 export interface LectureEtf {
@@ -43,7 +44,7 @@ interface Props {
 }
 export function VueGexDex({ metrique, classe, portee, loading, cboeLoading, majTs, erreur, cboeErreur,
   carte, profil, gexNet, dexNet, spotVerdict, flip, strikePicGex, verdict, murs, scenariosGamma, flipReel, etf }: Props) {
-  const [mode, setMode] = useState<"carte" | "profil">("carte");
+  const [mode, setMode] = useState<"graphique" | "carte" | "profil">("graphique");
   const porteeNet = classe === "crypto" && portee === "toutes" ? "toutes échéances actives" : "échéance sélectionnée";
   const converti = (strike: number | null) => etf ? `≈ ${formatUsdExact(niveauCrypto(strike, etf.prixEtf, etf.prixCrypto))} ${etf.sousJacent}` : "";
   const niveaux: [string, number | null][] = [["Call wall", murs.callWall], ["Put wall", murs.putWall], ["Strike |GEX| max", strikePicGex]];
@@ -58,10 +59,11 @@ export function VueGexDex({ metrique, classe, portee, loading, cboeLoading, majT
       <div role="group" aria-label="DEX net" className="flex flex-wrap items-baseline gap-x-2"><span className="text-[10px] text-text-dim">DEX $</span><span className="text-[13px] font-medium">{formatUsd(dexNet)}</span></div>
       <div role="group" aria-label="Spot" className="flex flex-wrap items-baseline gap-x-2"><span className="text-[10px] text-text-dim">Spot</span><span className="text-[13px] font-medium">{formatUsdExact(spotVerdict)}</span>{etf && <small className="block w-full text-text-dim">{converti(spotVerdict)}</small>}</div>
     </div>
-    {classe === "crypto" && <div className="mb-2 flex flex-wrap items-center justify-between gap-1"><Segmente options={[
-      { id: "carte", label: "Carte des expositions" }, { id: "profil", label: "Sensibilité au prix" },
-    ] as const} actif={mode} onChange={setMode} /><span className="text-[10px] text-text-dim">{porteeNet} · calls + / puts −{loading ? " · maj…" : ""}</span></div>}
-    {classe === "actions" || mode === "carte"
+    <div className="mb-2 flex flex-wrap items-center justify-between gap-1"><Segmente options={[
+      { id: "graphique", label: "Graphique" }, { id: "carte", label: "Carte des expositions" },
+      ...(classe === "crypto" ? [{ id: "profil" as const, label: "Sensibilité au prix" }] : []),
+    ] as const} actif={mode} onChange={setMode} /><span className="text-[10px] text-text-dim">{porteeNet} · calls + / puts −{loading ? " · maj…" : ""}</span></div>
+    {mode === "graphique" ? <GraphiqueExpositions carte={carte} metrique={metrique} spot={spotVerdict} convertirStrike={etf ? converti : undefined} /> : mode === "carte"
       ? <CarteExpositions carte={carte} metrique={metrique} spot={spotVerdict} convertirStrike={etf ? converti : undefined} />
       : <ProfilExpositions points={profil.points} spot={spotVerdict} metrique={metrique} portee={porteeNet} />}
     <div className="mt-3 grid grid-cols-3 gap-3 border-y border-border py-2 text-[11px] tabular-nums">

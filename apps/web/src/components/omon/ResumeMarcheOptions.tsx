@@ -31,6 +31,11 @@ export function ResumeMarcheOptions({ compacte = false, devise, resume, loading,
   const age = majTs === null ? null : nowMs - Math.min(majTs, observedAt ?? majTs);
   const perime = age !== null && age > 4 * 60_000;
   const present = majTs !== null && resume.echeances.length > 0;
+  // Tolère seulement le bruit d’addition flottante, pas une vraie lacune masquée par l’arrondi.
+  const couverturePartielle = resume.couvertureOiPct !== null && resume.couvertureOiPct < 100 - 1e-9;
+  const couvertureCompacte = resume.couvertureOiPct === null ? "indisponible"
+    : couverturePartielle && resume.couvertureOiPct.toFixed(1) === "100.0" ? "<100 %"
+    : formatPourcentage(resume.couvertureOiPct, 1);
   const avertissementCouverture = resume.nbOiInconnus > 0
     ? <p className="mt-1 text-[10px] text-warn">Couverture partielle : OI inconnu pour {resume.nbOiInconnus} options. Montants et parts portent sur l’OI connu.</p>
     : null;
@@ -65,8 +70,8 @@ export function ResumeMarcheOptions({ compacte = false, devise, resume, loading,
         <span>Reçu : {majTs === null ? "—" : <time data-reception dateTime={new Date(majTs).toISOString()} title={new Date(majTs).toISOString()}>{heure(majTs)}</time>}</span>
         <span>Calculé : {heure(nowMs)}</span>
         {compacte && present && <span title="Part de l'OI connu dont IV, forward et index permettent de calculer les greeks.">
-          Greeks / OI connu : {resume.couvertureOiPct === null ? "indisponible" : formatPourcentage(resume.couvertureOiPct, 1)}
-          {resume.couvertureOiPct !== null && resume.couvertureOiPct < 100 && " (partiel)"}
+          Greeks / OI connu : {couvertureCompacte}
+          {couverturePartielle && " (partiel)"}
         </span>}
       </div>
   );

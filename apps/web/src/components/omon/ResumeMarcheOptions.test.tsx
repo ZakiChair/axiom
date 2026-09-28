@@ -93,4 +93,21 @@ describe("résumé options", () => {
     expect(html).not.toContain("Contexte de chaîne");
     expect(html.match(/<details/g)).toHaveLength(1);
   });
+
+  it("l’arrondi flottant presque égal à 100 % ne crée pas de couverture partielle", () => {
+    const html = renderToStaticMarkup(<ResumeMarcheOptions {...props} compacte
+      resume={{ ...resume, couvertureOiPct: 99.99999999999999 }} />);
+    const visible = html.slice(0, html.indexOf("<details"));
+    expect(visible).toContain("100.0 %");
+    expect(visible).not.toContain("(partiel)");
+  });
+
+  it("une vraie couverture à 99,99 % reste partielle sans afficher un trompeur 100,0 %", () => {
+    const html = renderToStaticMarkup(<ResumeMarcheOptions {...props} compacte
+      resume={{ ...resume, couvertureOiPct: 99.99 }} />);
+    const visible = html.slice(0, html.indexOf("<details"));
+    expect(visible).toContain("&lt;100 %");
+    expect(visible).toContain("(partiel)");
+    expect(visible).not.toContain("100.0 %");
+  });
 });

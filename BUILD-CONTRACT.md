@@ -1206,8 +1206,8 @@ distance au spot × échéance et le profil de sensibilité de la métrique sél
 - Fraîcheur, couverture, périmètre et limites du modèle restent lisibles. La refonte
   n'ajoute ni dépendance, ni service, ni exécution de trading.
 
-Revue indépendante favorable, `pnpm check` réussi (**8 164 tests**) et **20 parcours
-Chromium** réussis. Budget initial : **1 188 014 / 354 239** octets bruts/gzip
+Revue indépendante favorable, `pnpm check` réussi (**8 166 tests**) et **20 parcours
+Chromium** réussis. Budget initial : **1 188 014 / 354 236** octets bruts/gzip
 (Node 24.13.0, zlib 1.3.1), plafonds inchangés. Les deux nouveaux parcours carte/profil
 sont inclus dans `pnpm check:e2e`. Preuves et limites :
 [`docs/revue-2026-09-28-carte-gex-dex.md`](docs/revue-2026-09-28-carte-gex-dex.md).

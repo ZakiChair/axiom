@@ -31,12 +31,13 @@ Les tests de données couvrent les frontières exactes des huit bandes sur plusi
 ## Validation finale
 
 - Revue indépendante favorable : invariants financiers, échelles, absence/zéro, isolation BTC/ETH, unités du profil et raccords de portée. Le zéro du profil GEX réutilise le moteur existant et son traitement des plateaux nuls.
-- `pnpm check` réussi sur le code final sous Node 24.13.0 / zlib 1.3.1 : build, typage du monorepo et **8 164 tests** (indicateurs 1 487, alertes 79, backtest 128, daemon 756, web 5 714).
+- `pnpm check` réussi sur le code final sous Node 24.13.0 / zlib 1.3.1 : build, typage du monorepo et **8 166 tests** (indicateurs 1 487, alertes 79, backtest 128, daemon 756, web 5 716).
 - **20/20 parcours Chromium réussis** : `options-carte`, `options-fraicheur`, `omon-lectures-options`, `niveaux-chart`, `revue-outils-avances`. Les deux nouveaux parcours de carte/profil sont intégrés à `pnpm check:e2e`.
-- Budget initial : **1 188 014 octets bruts / 354 239 gzip**, plafonds 1 220 000 / 360 000 inchangés. Pas de nouvelle dépendance.
+- Budget initial : **1 188 014 octets bruts / 354 236 gzip**, plafonds 1 220 000 / 360 000 inchangés. Pas de nouvelle dépendance.
 - Vérification manuelle sur API réelles : carte BTC/GEX, sélection d'une zone et de ses principaux strikes, carte ETH/DEX, profil DEX et curseur au clavier. Au spot courant, valeurs du profil conformes aux totaux affichés.
 - Fenêtres de 320 et 400 px : aucun débordement horizontal du composant ; seul le conteneur de la matrice défile. Contrôles compactés, hauteur réduite avant le graphique. Graduations trop proches du zéro masquées pour éviter leur superposition ; valeurs exactes toujours disponibles via le curseur.
 - Contraste vérifié dans les cinq thèmes : opacité maximale des cellules 0,4, toujours proportionnelle à l'exposition absolue sur l'échelle commune.
+- Correction issue de la capture finale : un bruit flottant proche de 100 % ne déclenche plus de faux avertissement de couverture partielle ; une couverture réellement incomplète mais arrondie à 100,0 % affiche `<100 % (partiel)`. Deux régressions SSR, contre-revue indépendante, contrôle global et six parcours de fraîcheur relancés avec succès après ce correctif de libellé.
 - `git diff --check` propre. Logs de la session : `/tmp/axiom-gex-refonte-20260928/check-final.log` et `e2e-final.log`.
 
 Le travail reste local ; aucun déploiement n'est effectué dans ce lot. Limite antérieure hors périmètre : CBOE conserve temporairement sa précédente chaîne pendant un changement de ticker ; la refonte ne modifie pas ce chargement. Les bascules BTC/ETH restent isolées et testées.

@@ -195,12 +195,16 @@ test("le glissement tactile déplace réellement les bougies du graphique", asyn
   const session = await page.context().newCDPSession(page);
   const x = box.x + box.width * 0.4;
   const y = box.y + box.height * 0.65;
+  // Dépasser la marge droite initiale (80 px) : `from` reste borné tant qu'elle
+  // est visible. Le geste finit à 80 % du pane, toujours dans le canvas.
+  const distance = box.width * 0.4;
   await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
   for (let step = 1; step <= 8; step++) await session.send("Input.dispatchTouchEvent", {
-    type: "touchMove", touchPoints: [{ x: x + step * 10, y }],
+    type: "touchMove", touchPoints: [{ x: x + distance * step / 8, y }],
   });
-  await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  // Vérifier le pan doigt posé, sans dépendre de l'inertie après relâchement.
   await expect.poll(async () => (await etatChart(page)).from).toBeLessThan(avant.from!);
+  await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await session.detach();
 });
 

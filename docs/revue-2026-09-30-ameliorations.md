@@ -113,6 +113,20 @@ synchronisation décrit ci-dessus ; leurs corrections ont été revues et
 rejouées séparément. Le passage intégré final est suivi dans la
 [CI du dépôt](https://github.com/ZakiChair/axiom/actions/workflows/ci.yml).
 
+Le [job bureau distant](https://github.com/ZakiChair/axiom/actions/runs/36789408945/job/110138486481)
+passe ensuite intégralement : **156/156 parcours**, sans nouvelle tentative,
+ainsi que TypeScript, tests unitaires et budget de build.
+
+La première exécution mobile Linux a réussi 38 parcours, ignoré le geste natif
+WebKit et échoué sur le glissement Chromium. Le geste de 80 px absorbait
+exactement la marge droite initiale ; sa réussite locale dépendait de l'inertie
+après relâchement. La reproduction indépendante confirme ce mécanisme dans
+KLineCharts. Le test déplace désormais le doigt de 40 % de la largeur utile et
+exige le déplacement des bougies avant relâchement. Aucune logique produit ni
+assertion assouplie : **5/5 répétitions ciblées**, puis **39 réussis / 1 ignoré**
+en local. Les deux jobs CI conservent maintenant résultats et traces sept jours
+en cas d'échec, pour rendre ces diagnostics vérifiables sur le runner distant.
+
 La version de contrôle `dpl_B3Qnen7TC5Ck9q6a5LK8waFaxmXq` est **Ready** sur
 Vercel. Les 1 432 fichiers de produit comparés sont identiques à ceux validés
 localement. Contrôle dans un navigateur vierge : graphique live, Backtest et

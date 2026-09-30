@@ -88,6 +88,15 @@ jobs:
           AXIOM_E2E_PORT: 5239
         timeout-minutes: 9 # observé 312 s (24/09 matin) puis > 360 s le soir (139 tests)
 
+      - name: diagnostics playwright bureau en cas d'échec
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-check-${{ github.run_attempt }}
+          path: apps/web/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
   mobile:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -111,3 +120,12 @@ jobs:
         env:
           AXIOM_E2E_PORT: 5281
         timeout-minutes: 9
+
+      - name: diagnostics playwright téléphone en cas d'échec
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-mobile-${{ github.run_attempt }}
+          path: apps/web/test-results/
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,3 +1,5 @@
+import { withDemoKey } from "../marketOverview";
+import { IS_VERCEL } from "../../lib/deployment";
 /**
  * Activité DEX — volume DEX 24 h (DefiLlama overview, tous protocoles) rapporté au volume
  * total 24 h du marché crypto (CoinGecko global, CEX + DEX) : part de l'activité qui passe
@@ -17,7 +19,7 @@ import type { ResultatFrais } from "./mempool";
 export const DEX_TTL_MS = 60 * 60 * 1000;
 /** Sans ventilation par protocole : la réponse reste lourde (liste des protocoles) mais lisible. */
 const URL_DEX = "https://api.llama.fi/overview/dexs?excludeTotalDataChartBreakdown=true";
-const URL_GLOBAL = "https://api.coingecko.com/api/v3/global";
+const URL_GLOBAL = IS_VERCEL ? "/coingeckoapi/global" : "https://api.coingecko.com/api/v3/global";
 const POINTS_SERIE = 90;
 
 export interface OverviewDex {
@@ -66,7 +68,7 @@ export async function fetchActiviteDex(signal?: AbortSignal): Promise<ResultatFr
         if (!res.ok) throw new Error(`DefiLlama dexs ${res.status}`);
         return parseOverviewDex((await res.json()) as unknown);
       }),
-      fetch(URL_GLOBAL, { signal })
+      fetch(withDemoKey(URL_GLOBAL), { signal })
         .then(async (res) => {
           if (!res.ok) return null;
           const j = (await res.json()) as { data?: { total_volume?: { usd?: unknown } } };

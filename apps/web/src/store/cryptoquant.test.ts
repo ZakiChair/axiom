@@ -153,7 +153,7 @@ describe("clé CryptoQuant personnelle", () => {
       "Clé CryptoQuant personnelle requise (Réglages ⚙) — ou CRYPTOQUANT_API_KEY dans apps/web/.env pour le proxy Vite et le daemon.",
     );
     expect(vercel).toBe(
-      "Clé CryptoQuant personnelle requise (Réglages ⚙) — licence personnelle, aucun repli serveur sur ce déploiement.",
+      "Clé CryptoQuant personnelle requise (Réglages ⚙) — licence personnelle, aucune clé serveur configurée sur ce déploiement.",
     );
     for (const message of [local, vercel]) {
       expect(message.endsWith(".")).toBe(true);

@@ -30,7 +30,7 @@ export const RAISON_CLE_CRYPTOQUANT = "Clé CryptoQuant personnelle requise (Ré
 export function messageSansCleCq(vercel: boolean): string {
   const base = RAISON_CLE_CRYPTOQUANT.slice(0, -1);
   return vercel
-    ? `${base} — licence personnelle, aucun repli serveur sur ce déploiement.`
+    ? `${base} — licence personnelle, aucune clé serveur configurée sur ce déploiement.`
     : `${base} — ou CRYPTOQUANT_API_KEY dans apps/web/.env pour le proxy Vite et le daemon.`;
 }
 

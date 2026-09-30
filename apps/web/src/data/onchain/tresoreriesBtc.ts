@@ -1,3 +1,4 @@
+import { hasServerCredential } from "../../store/serverCredentials";
 /**
  * Trésoreries d'entreprises BTC — CoinGecko `companies/public_treasury/bitcoin` (CORS `*`,
  * appel direct, clé Demo personnelle optionnelle).
@@ -140,7 +141,7 @@ export function resumerTresoreries(t: TresoreriesBtc, spotUsd?: number | null): 
 
 /** Régime d'accès de l'appel : clé Demo personnelle présente ou public. */
 export function accesTresoreries(): "cle" | "public" {
-  return resolveDemoKey() ? "cle" : "public";
+  return resolveDemoKey() || hasServerCredential("coingecko") ? "cle" : "public";
 }
 
 /** Résultat du chargement (null sans donnée exploitable) et motif du dernier échec CoinGecko. */

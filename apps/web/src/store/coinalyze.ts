@@ -11,6 +11,7 @@
  */
 import { createStore } from "zustand/vanilla";
 import { setCoinalyzeApiKey } from "../data/coinalyze";
+import { hasServerCredential, serverCredentialsStore } from "./serverCredentials";
 import { IS_VERCEL } from "../lib/deployment";
 
 const STORAGE_KEY = "axiom:coinalyze:key";
@@ -18,7 +19,7 @@ const STORAGE_KEY = "axiom:coinalyze:key";
 /**
  * Lecture tolérante de la clé PERSONNELLE : clé persistée, sinon `null`.
  * En local, `null` laisse le proxy /coinalyzeapi fournir le repli `.env` ; sur Vercel,
- * aucune clé de proxy n'existe. Aucune clé « par défaut » n'est committée dans le source.
+ * le repli serveur est annoncé par /api/config. Aucune valeur par défaut ne vit dans le source.
  */
 function readKey(): string | null {
   try {
@@ -29,8 +30,8 @@ function readKey(): string | null {
   }
 }
 
-export function hasUsableCoinalyzeKey(personalKey: string | null, isVercel: boolean): boolean {
-  return !isVercel || (personalKey?.trim().length ?? 0) > 0;
+export function hasUsableCoinalyzeKey(personalKey: string | null, isVercel: boolean, serverConfigured = hasServerCredential("coinalyze")): boolean {
+  return !isVercel || serverConfigured || (personalKey?.trim().length ?? 0) > 0;
 }
 
 /** Écriture/suppression tolérante (quota / mode privé => silencieux). */
@@ -46,9 +47,10 @@ function writeKey(key: string | null): void {
 export interface CoinalyzeKeyState {
   /**
    * En local, le proxy conserve le repli `.env` historique. Sur Vercel, true seulement
-   * si une clé personnelle est présente dans localStorage.
+   * si une clé personnelle ou une capacité serveur est disponible.
    */
   hasKey: boolean;
+  hasPersonalKey: boolean;
   /** Enregistre une clé personnelle (localStorage + provider). Vide => équivaut à clearKey. */
   setKey: (key: string) => void;
   /** Supprime la clé personnelle (retour au repli du proxy local). */
@@ -59,6 +61,7 @@ const persistedKey = readKey();
 setCoinalyzeApiKey(persistedKey);
 
 export const coinalyzeKeyStore = createStore<CoinalyzeKeyState>((set) => ({
+  hasPersonalKey: readKey() !== null,
   hasKey: hasUsableCoinalyzeKey(persistedKey, IS_VERCEL),
 
   setKey: (key) => {
@@ -66,12 +69,16 @@ export const coinalyzeKeyStore = createStore<CoinalyzeKeyState>((set) => ({
     const value = k.length > 0 ? k : null;
     writeKey(value);
     setCoinalyzeApiKey(value);
-    set({ hasKey: hasUsableCoinalyzeKey(value, IS_VERCEL) });
+    set({ hasPersonalKey: readKey() !== null, hasKey: hasUsableCoinalyzeKey(value, IS_VERCEL) });
   },
 
   clearKey: () => {
     writeKey(null);
     setCoinalyzeApiKey(null);
-    set({ hasKey: hasUsableCoinalyzeKey(null, IS_VERCEL) });
+    set({ hasPersonalKey: readKey() !== null, hasKey: hasUsableCoinalyzeKey(null, IS_VERCEL) });
   },
 }));
+
+serverCredentialsStore.subscribe(() => {
+  coinalyzeKeyStore.setState({ hasKey: hasUsableCoinalyzeKey(readKey(), IS_VERCEL) });
+});

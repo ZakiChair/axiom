@@ -1,3 +1,4 @@
+import { serverCredentialsStore } from "../store/serverCredentials";
 /**
  * Fenêtre « CHAIN » — panneau ON-CHAIN, dockable à droite, NON MODAL (pattern DerivativesWindow).
  *
@@ -478,10 +479,14 @@ function publierQualiteChain(
 
 export function OnchainWindow() {
   const open = useStore(onchainUiStore, (s) => s.open);
-  const bgHasKey = useStore(bgeometricsKeyStore, (s) => s.hasKey);
+  const serverKeys = useStore(serverCredentialsStore, s => s.providers);
+  const bgHasLocalKey = useStore(bgeometricsKeyStore, (s) => s.hasKey);
+  const bgHasKey = bgHasLocalKey || serverKeys.bgeometrics === true;
   const bgVersion = useStore(bgeometricsKeyStore, (s) => s.version);
-  const soSoHasKey = useStore(soSoValueKeyStore, (s) => s.hasKey);
-  const etherscanHasKey = useStore(etherscanKeyStore, (s) => s.hasKey);
+  const soSoHasLocalKey = useStore(soSoValueKeyStore, (s) => s.hasKey);
+  const soSoHasKey = soSoHasLocalKey || serverKeys.sosovalue === true;
+  const etherscanHasLocalKey = useStore(etherscanKeyStore, (s) => s.hasKey);
+  const etherscanHasKey = etherscanHasLocalKey || serverKeys.etherscan === true;
   // `version` (et non `hasKey`) en dépendance d'effet : remplacer une clé existante
   // laisse hasKey à true→true et ne déclencherait aucun re-fetch.
   const soSoVersion = useStore(soSoValueKeyStore, (s) => s.version);

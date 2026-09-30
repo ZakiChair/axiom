@@ -1,0 +1,25 @@
+# Secrets et état personnel : jamais inclus dans l'archive envoyée à Vercel.
+**/.env*
+!**/.env.example
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.sqlite
+**/*.sqlite3
+.worktrees
+.git
+.vercel
+**/node_modules
+**/dist
+.playwright-mcp
+**/test-results
+**/tests-results
+**/playwright-report
+**/coverage
+.remember
+.superpowers
+**/*.log
+.cache
+**/.cache
+.claude
+logs

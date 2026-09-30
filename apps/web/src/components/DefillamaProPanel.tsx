@@ -1,3 +1,4 @@
+import { serverCredentialsStore } from "../store/serverCredentials";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { calculerRatiosUnlock, chargerDefillamaPro, enrichirDenominateurs, exporterCalendrier, importerCalendrier, mapperBridgeVolumes, mapperDetailEmission, mapperEmissions, typeProchainUnlock, type BridgeVolume, type DetailEmission, type TokenUnlock } from "../data/onchain/defillamaPro";
@@ -24,7 +25,9 @@ function dateUtc(time: number): string {
 }
 
 export function DefillamaProPanel({ initialMode = "unlocks" }: { initialMode?: Mode }) {
-  const hasKey = useStore(defillamaKeyStore, (s) => s.hasKey);
+  const personalKey = useStore(defillamaKeyStore, (s) => s.hasKey);
+  const serverKey = useStore(serverCredentialsStore, s => s.providers.defillama === true);
+  const hasKey = personalKey || serverKey;
   const version = useStore(defillamaKeyStore, (s) => s.version);
   const marchesMcap = useStore(mcapStore, (s) => s.marches);
   const [mode, setMode] = useState<Mode>(initialMode);

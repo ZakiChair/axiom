@@ -1,3 +1,4 @@
+import { serverCredentialsStore, type ServerProvider } from "../store/serverCredentials";
 /**
  * SettingsPanel — panneau Réglages dédié (slide-over depuis la droite).
  *
@@ -44,6 +45,7 @@ import { ThemeSwitcher } from "./ThemeSwitcher";
 import { Badge, BTN_SECONDAIRE, Chargement, PortailMobile, Unusable, Vide } from "./ui";
 
 interface ApiKeyFieldProps {
+  provider: ServerProvider;
   /** Nom de la source (ex. « Coinalyze »). */
   name: string;
   /** À quoi sert la clé (une phrase). */
@@ -67,6 +69,7 @@ interface ApiKeyFieldProps {
  * state LOCAL (jamais loggé, jamais persisté).
  */
 function ApiKeyField({
+  provider,
   name,
   purpose,
   domain,
@@ -77,11 +80,12 @@ function ApiKeyField({
   onSave,
   onClear,
 }: ApiKeyFieldProps) {
+  const serverKey = useStore(serverCredentialsStore, s => s.providers[provider] === true);
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState(false);
 
   // Formulaire visible si aucune clé OU si l'utilisateur a cliqué « Modifier ».
-  const showForm = !hasKey || editing;
+  const showForm = (!hasKey && !serverKey) || editing;
 
   const save = () => {
     onSave(draft);
@@ -99,8 +103,8 @@ function ApiKeyField({
     <div className="rounded-md border border-border bg-bg p-3">
       <div className="flex items-start justify-between gap-2">
         <span className="text-sm font-medium text-text">{name}</span>
-        <Badge ton={hasKey ? "up" : "neutre"}>
-          {hasKey ? "clé ✓ configurée" : "non configurée"}
+        <Badge ton={hasKey || serverKey ? "up" : "neutre"}>
+          {hasKey ? "clé personnelle ✓" : serverKey ? "clé serveur ✓" : "non configurée"}
         </Badge>
       </div>
       <p className="mt-1 text-[11px] leading-snug text-text-dim">{purpose}</p>
@@ -157,20 +161,21 @@ function ApiKeyField({
             onClick={() => setEditing(true)}
             className="rounded border border-border bg-surface px-3 py-1.5 text-[11px] text-text-dim transition hover:text-text"
           >
-            Modifier
+            {hasKey ? "Modifier" : "Ajouter une clé personnelle"}
           </button>
-          <button
+          {hasKey && <button
             type="button"
             onClick={remove}
             className="rounded border border-border bg-surface px-3 py-1.5 text-[11px] text-down transition hover:opacity-90"
           >
             Supprimer
-          </button>
+          </button>}
         </div>
       )}
 
       <p className="mt-2 text-[10px] leading-snug text-text-dim">
-        Stockée localement (localStorage), envoyée uniquement à {domain}.{" "}
+        {serverKey ? "Clé serveur disponible automatiquement. Une clé personnelle la remplace sur cet appareil. " : "Clé personnelle stockée sur cet appareil. "}
+        Transmise à {domain}{IS_VERCEL ? " via le proxy AXIOM" : ""}.{" "}
         <a
           href={signupUrl}
           target="_blank"
@@ -486,7 +491,7 @@ export function SettingsPanel() {
   const open = useStore(settingsUiStore, (s) => s.open);
   const closeSettings = useStore(settingsUiStore, (s) => s.closeSettings);
 
-  const coinalyzeHasKey = useStore(coinalyzeKeyStore, (s) => s.hasKey);
+  const coinalyzeHasKey = useStore(coinalyzeKeyStore, (s) => s.hasPersonalKey);
   const coinalyzeSetKey = useStore(coinalyzeKeyStore, (s) => s.setKey);
   const coinalyzeClearKey = useStore(coinalyzeKeyStore, (s) => s.clearKey);
 
@@ -494,7 +499,7 @@ export function SettingsPanel() {
   const twelveDataSetKey = useStore(twelveDataKeyStore, (s) => s.setKey);
   const twelveDataClearKey = useStore(twelveDataKeyStore, (s) => s.clearKey);
 
-  const fredHasKey = useStore(fredKeyStore, (s) => s.hasKey);
+  const fredHasKey = useStore(fredKeyStore, (s) => s.hasPersonalKey);
   const fredSetKey = useStore(fredKeyStore, (s) => s.setKey);
   const fredClearKey = useStore(fredKeyStore, (s) => s.clearKey);
 
@@ -591,15 +596,14 @@ export function SettingsPanel() {
             Clés API
           </h3>
           <p className="mt-1 text-[11px] leading-snug text-text-dim">
-            Saisissez vos clés personnelles (gratuites). Elles restent sur cet appareil.
+            Les clés serveur sont disponibles automatiquement. Vous pouvez les remplacer sur cet appareil par vos clés personnelles.
           </p>
 
           <div className="mt-3 space-y-3">
             <ApiKeyField
+              provider="coinalyze"
               name="Coinalyze"
-              purpose={IS_VERCEL
-                ? "Dérivés avancés — clé personnelle requise sur Vercel ; OI/funding du graphe gardent un repli Binance sans clé."
-                : "Dérivés — Open Interest, funding, long/short et liquidations (Binance)."}
+              purpose="Dérivés — Open Interest, funding, long/short et liquidations (Binance)."
               domain="api.coinalyze.net"
               signupUrl="https://coinalyze.net"
               signupLabel="Obtenir une clé"
@@ -609,8 +613,9 @@ export function SettingsPanel() {
               onClear={coinalyzeClearKey}
             />
             <ApiKeyField
+              provider="twelvedata"
               name="Twelve Data"
-              purpose="Marchés traditionnels — actions, forex et ETF. Requise sur Vercel ; en local, TWELVE_DATA_KEY reste disponible en repli."
+              purpose="Marchés traditionnels — actions, forex et ETF. Clé personnelle ou clé serveur."
               domain="api.twelvedata.com"
               signupUrl="https://twelvedata.com"
               signupLabel="Obtenir une clé"
@@ -620,10 +625,9 @@ export function SettingsPanel() {
               onClear={twelveDataClearKey}
             />
             <ApiKeyField
+              provider="fred"
               name="FRED (M2 US)"
-              purpose={IS_VERCEL
-                ? "Masse monétaire M2 — clé personnelle FRED requise sur Vercel."
-                : "Masse monétaire — série M2 hebdomadaire de la Fed de Saint-Louis."}
+              purpose="Masse monétaire — série M2 de la Fed de Saint-Louis."
               domain="api.stlouisfed.org"
               signupUrl="https://fredaccount.stlouisfed.org/apikeys"
               signupLabel="Obtenir une clé"
@@ -633,6 +637,7 @@ export function SettingsPanel() {
               onClear={fredClearKey}
             />
             <ApiKeyField
+              provider="bgeometrics"
               name="BGeometrics (on-chain)"
               purpose="Valorisation BTC — MVRV Z-Score, SOPR, NUPL. Optionnelle : la source marche sans clé (quota IP ~15 req/jour). Une clé gratuite plafonne aussi à 10 req/heure et 15 req/jour ; seule une offre payante relève le quota."
               domain="bitcoin-data.com"
@@ -644,10 +649,9 @@ export function SettingsPanel() {
               onClear={bgClearKey}
             />
             <ApiKeyField
+              provider="sosovalue"
               name="SoSoValue (ETF)"
-              purpose={IS_VERCEL
-                ? "Flux ETF spot BTC/ETH/SOL — clé personnelle Demo requise sur Vercel."
-                : "Flux ETF spot BTC/ETH/SOL — plan Demo gratuit. Optionnelle si SOSOVALUE_API_KEY est renseignée dans .env (repli proxy) ; une clé saisie ici reste prioritaire."}
+              purpose="Flux ETF spot BTC/ETH/SOL — plan Demo. Clé personnelle ou clé serveur."
               domain="openapi.sosovalue.com"
               signupUrl="https://sosovalue.com/developer"
               signupLabel="Obtenir une clé gratuite"
@@ -657,6 +661,7 @@ export function SettingsPanel() {
               onClear={soSoClearKey}
             />
             <ApiKeyField
+              provider="finnhub"
               name="Finnhub"
               purpose="Fondamentaux, earnings (FUND) et actualités générales (NEWS)."
               domain="finnhub.io"
@@ -668,10 +673,9 @@ export function SettingsPanel() {
               onClear={finnhubClearKey}
             />
             <ApiKeyField
+              provider="etherscan"
               name="Etherscan v2"
-              purpose={IS_VERCEL
-                ? "Réseau ETH — clé personnelle Etherscan v2 requise sur Vercel."
-                : "Réseau ETH — gas recommandé, supply, nombre de nœuds. Optionnelle si ETHERSCAN_API_KEY est renseignée dans .env (repli proxy) ; une clé saisie ici reste prioritaire."}
+              purpose="Réseau ETH — gas recommandé, supply, nombre de nœuds. Clé personnelle ou clé serveur."
               domain="api.etherscan.io"
               signupUrl="https://etherscan.io/register"
               signupLabel="Obtenir une clé gratuite"
@@ -681,6 +685,7 @@ export function SettingsPanel() {
               onClear={etherscanClearKey}
             />
             <ApiKeyField
+              provider="ccdata"
               name="CoinDesk Data (CCData, repli)"
               purpose="Repli optionnel pour TOTAL/TOTAL2/TOTAL3 si la source publique CoinMarketCap devient indisponible. Aucune clé n'est requise en fonctionnement normal."
               domain="min-api.cryptocompare.com"
@@ -692,6 +697,7 @@ export function SettingsPanel() {
               onClear={ccdataClearKey}
             />
             <ApiKeyField
+              provider="coingecko"
               name="CoinGecko (Demo)"
               purpose="Capitalisations et dominances (fenêtre CAP, treemap MAP). Optionnelle : tout marche sans clé, mais elle relève les quotas — la reconstruction de l'historique CAP passe d'environ 15 min à 3,5 min."
               domain="api.coingecko.com"
@@ -703,6 +709,7 @@ export function SettingsPanel() {
               onClear={cgClearKey}
             />
             <ApiKeyField
+              provider="defillama"
               name="DefiLlama Pro"
               purpose="Unlocks et historique des bridges. Abonnement payant requis ; AXIOM utilise seulement une clé personnelle déjà obtenue et n’effectue aucun achat."
               domain="pro-api.llama.fi, via la route locale sécurisée /defillamapro"
@@ -714,10 +721,9 @@ export function SettingsPanel() {
               onClear={defillamaClearKey}
             />
             <ApiKeyField
+              provider="cryptoquant"
               name="CryptoQuant (takers et mineurs cotés)"
-              purpose={IS_VERCEL
-                ? "Flux takers toutes places (DES) et production des mineurs cotés (CHAIN), offre BASIC : clé personnelle requise — aucun repli serveur, licence personnelle."
-                : "Flux takers toutes places (DES) et production des mineurs cotés (CHAIN), offre BASIC : repli CRYPTOQUANT_API_KEY de .env pour le proxy Vite et le daemon local uniquement ; une clé saisie ici reste prioritaire."}
+              purpose="Flux takers toutes places (DES) et production des mineurs cotés (CHAIN), offre BASIC. Une clé personnelle reste prioritaire sur la clé serveur."
               domain="api.cryptoquant.com, via la route locale /cqapi"
               signupUrl="https://cryptoquant.com"
               signupLabel="Offres CryptoQuant"

@@ -257,7 +257,6 @@ function redirectedMethod(status: number, method: string): string {
 
 async function fetchUpstream(
   plan: ProxyPlan,
-  requestHeaders: Headers,
   initialBody: ArrayBuffer | undefined,
   signal: AbortSignal,
 ): Promise<Response> {
@@ -269,7 +268,8 @@ async function fetchUpstream(
     await validatePublicDestination(target, signal);
     const response = await fetch(target, {
       method,
-      headers: proxyUpstreamHeaders(requestHeaders, target.hostname, method),
+      // Le plan contient les credentials effectifs (override ou repli serveur).
+      headers: redirects === 0 ? plan.upstreamHeaders : proxyUpstreamHeaders(plan.upstreamHeaders, target.hostname, method),
       body,
       redirect: "manual",
       signal,
@@ -294,6 +294,39 @@ async function fetchUpstream(
     if (method === "GET" || method === "HEAD") body = undefined;
     target = redirected;
   }
+}
+
+/** Le fournisseur peut réimprimer sa clé, y compris dans une erreur HTTP 200. */
+function redactSecrets(text: string, secrets: readonly string[]): string {
+  let result = text;
+  const variants = new Set(secrets.flatMap((secret) => [secret, encodeURIComponent(secret), JSON.stringify(secret).slice(1, -1)]));
+  for (const value of [...variants].filter(Boolean).sort((a, b) => b.length - a.length)) result = result.split(value).join("***");
+  return result;
+}
+
+function redactResponseBody(bytes: Uint8Array<ArrayBuffer>, contentType: string, secrets: readonly string[]): Uint8Array<ArrayBuffer> {
+  if (secrets.length === 0) return bytes;
+  // Refus d'un encodage non textuel pour une réponse credentialée : pas de conversion
+  // silencieuse d'octets. Les lectures à clé d'AXIOM sont JSON, XML ou texte.
+  let text: string;
+  try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+  catch { throw new ProxyPolicyError(502, "encodage amont refusé"); }
+  if (contentType.toLowerCase().includes("json")) {
+    // Décode uniquement les chaînes JSON : les grands nombres financiers restent intacts.
+    text = text.replace(/"(?:[^"\\]|\\.)*"/g, (token) => {
+      try { return JSON.stringify(redactSecrets(JSON.parse(token) as string, secrets)); }
+      catch { return token; }
+    });
+  }
+  return new TextEncoder().encode(redactSecrets(text, secrets));
+}
+
+/** Délai borné à 24 h, numérique en sortie ; aucune valeur arbitraire n'est relayée. */
+function retryAfterSeconds(value: string | null): string | null {
+  if (value === null) return null;
+  const raw = value.trim();
+  const seconds = /^\d+$/.test(raw) ? Number(raw) : (Date.parse(raw) - Date.now()) / 1000;
+  return Number.isFinite(seconds) && seconds >= 0 ? String(Math.min(86_400, Math.max(1, Math.ceil(seconds)))) : null;
 }
 
 async function handle(request: Request): Promise<Response> {
@@ -322,11 +355,14 @@ async function handle(request: Request): Promise<Response> {
       try { valide = validerRequeteNbs(JSON.parse(new TextDecoder().decode(body))); } catch { /* JSON invalide */ }
       if (!valide) throw new ProxyPolicyError(400, "requête statistique NBS invalide");
     }
-    const upstream = await fetchUpstream(plan, request.headers, body, controller.signal);
+    const upstream = await fetchUpstream(plan, body, controller.signal);
     if (plan.route === "defillamapro" && (upstream.status < 200 || upstream.status >= 300)) {
       await upstream.body?.cancel().catch(() => undefined);
       const message = upstream.status === 401 ? "clé DefiLlama Pro refusée" : upstream.status === 402 || upstream.status === 403 ? "abonnement DefiLlama Pro requis ou accès refusé" : upstream.status === 429 ? "quota DefiLlama Pro atteint" : "amont DefiLlama Pro indisponible";
-      return jsonError(upstream.status, message);
+      const response = jsonError(upstream.status, message);
+      const retry = retryAfterSeconds(upstream.headers.get("retry-after"));
+      if ((upstream.status === 429 || upstream.status === 503) && retry !== null) response.headers.set("retry-after", retry);
+      return response;
     }
     const contentType = upstream.headers.get("content-type") ?? "application/octet-stream";
     const geo = sourceGeoExtraite(plan.target);
@@ -347,14 +383,16 @@ async function handle(request: Request): Promise<Response> {
     }
     if (!proxyMimeAllowed(contentType)) {
       await upstream.body?.cancel().catch(() => undefined);
-      return jsonError(502, `type MIME amont refusé : ${contentType.split(";", 1)[0] ?? "inconnu"}`);
+      return jsonError(502, "type MIME amont refusé");
     }
     const responseHeaders = new Headers({
-      "content-type": contentType,
-      "cache-control": plan.cacheControl,
+      "content-type": redactSecrets(contentType, plan.secretValues),
+      "cache-control": upstream.ok ? plan.cacheControl : "private, no-store",
       "x-axiom-proxy": "vercel",
       ...SECURITY_HEADERS,
     });
+    const retry = retryAfterSeconds(upstream.headers.get("retry-after"));
+    if ((upstream.status === 429 || upstream.status === 503) && retry !== null) responseHeaders.set("retry-after", retry);
     if (plan.route === "cqapi") {
       // Quota et coût crédits CryptoQuant (§13) : ensemble FERMÉ d'en-têtes amont recopiés,
       // liste unique partagée avec le daemon (shared/cryptoquant-proxy.ts). Le corps amont
@@ -362,7 +400,7 @@ async function handle(request: Request): Promise<Response> {
       // voyage en en-tête et jamais dans l'URL.
       for (const nom of ENTETES_RELAYES_CQ) {
         const valeur = upstream.headers.get(nom);
-        if (valeur !== null) responseHeaders.set(nom, valeur);
+        if (valeur !== null && /^\d+(?:\.\d+)?$/.test(valeur)) responseHeaders.set(nom, valeur);
       }
     }
     if (plan.method === "HEAD" || BODYLESS_STATUSES.has(upstream.status)) {
@@ -370,7 +408,8 @@ async function handle(request: Request): Promise<Response> {
       return new Response(null, { status: upstream.status, headers: responseHeaders });
     }
     const bodyResponse = await responseBody(upstream, controller.signal);
-    return new Response(bodyResponse, { status: upstream.status, headers: responseHeaders });
+    const safeBody = redactResponseBody(bodyResponse, contentType, plan.secretValues);
+    return new Response(safeBody, { status: upstream.status, headers: responseHeaders });
   } catch (error) {
     if (error instanceof ProxyPolicyError) return jsonError(error.status, error.message, error.allow);
     if (timedOut) return jsonError(504, "délai amont dépassé");

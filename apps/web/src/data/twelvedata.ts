@@ -6,7 +6,7 @@
  * POURQUOI Twelve Data (et pas Yahoo/Stooq) : ces sources keyless sont anti-bot et
  * bloquent l'IP (Yahoo 429, Stooq Proof-of-Work). Twelve Data authentifie par CLÉ →
  * pas de blocage IP, CORS ouvert, officiel/stable. La clé PERSONNELLE reste côté
- * navigateur ; sur Vercel l'API est appelée directement, en local /tdapi garde le repli .env.
+ * navigateur et reste prioritaire ; /tdapi complète la clé côté serveur si elle est absente.
  *
  * - fetchKlines : GET time_series?symbol=&interval=&outputsize=&order=ASC&timezone=UTC
  * - subscribeKline : pas de WebSocket en gratuit → POLLING (~30 s) de la bougie courante.
@@ -26,10 +26,10 @@ import { pollLoop } from "./pollLoop";
 import { classifyTradfi, isMarketOpen } from "./heuresMarche";
 import { healthStore } from "../store/health";
 
-/** Base directe sur Vercel, proxifiée par /tdapi en local pour conserver le repli .env. */
+/** Proxy /tdapi en local comme sur Vercel ; une base explicite reste testable. */
 const TWELVE_DATA_API_BASE = import.meta.env.VITE_TWELVE_DATA_API_BASE || "/tdapi";
 const SERIES_URL = `${TWELVE_DATA_API_BASE}/time_series`;
-/** Base directe (build Vercel) : sans clé personnelle, la réponse serait une 401 certaine. */
+/** Base directe explicite : sans clé personnelle, la réponse serait une 401 certaine. */
 const BASE_DIRECTE = /^https?:\/\//.test(TWELVE_DATA_API_BASE);
 const MSG_CLE_REQUISE = "Twelve Data : clé Twelve Data requise — ajoutez votre clé personnelle dans les Réglages.";
 

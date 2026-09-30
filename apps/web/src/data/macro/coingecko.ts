@@ -1,3 +1,4 @@
+import { IS_VERCEL } from "../../lib/deployment";
 /**
  * Fournisseur MACRO — capitalisation TOTALE du marché crypto (CoinGecko, tier gratuit).
  *
@@ -33,7 +34,7 @@
  */
 import type { IMacroProvider, MacroFetchOptions, MacroPoint, MacroSeries } from "./types";
 
-const GLOBAL_URL = "https://api.coingecko.com/api/v3/global";
+const GLOBAL_URL = IS_VERCEL ? "/coingeckoapi/global" : "https://api.coingecko.com/api/v3/global";
 const DEMO_KEY_STORAGE = "axiom.coingecko.demoApiKey";
 
 /** Mesure de capitalisation exposée par ce fournisseur. */

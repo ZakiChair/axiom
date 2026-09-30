@@ -1,3 +1,5 @@
+import { IS_VERCEL } from "../lib/deployment";
+import { hasServerCredential } from "../store/serverCredentials";
 /**
  * Flux NEWS crypto agrégés — RSS 2.0 + Atom via le proxy générique /extapi.
  *
@@ -437,9 +439,9 @@ export function tempsRelatif(ts: number, maintenant: number = Date.now()): strin
 async function fetchFlux(feed: NewsFeed, signal?: AbortSignal): Promise<NewsItem[]> {
   if (feed.kind === "finnhub") {
     const cle = getFinnhubKey();
-    if (cle === null) throw new Error(`${feed.label} : clé absente`);
+    if (cle === null && !hasServerCredential("finnhub")) throw new Error(`${feed.label} : clé absente`);
     const categorie = feed.category ?? "general";
-    const res = await fetch(`https://finnhub.io/api/v1/news?category=${categorie}&token=${cle}`, { signal });
+    const res = await fetch(`${IS_VERCEL ? "/finnhubapi" : "https://finnhub.io/api/v1"}/news?category=${encodeURIComponent(categorie)}${cle ? `&token=${encodeURIComponent(cle)}` : ""}`, { signal });
     if (!res.ok) throw new Error(`${feed.label} HTTP ${res.status}`);
     return parseFinnhubNews(await res.json(), feed.id);
   }

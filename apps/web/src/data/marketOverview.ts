@@ -1,3 +1,4 @@
+import { IS_VERCEL } from "../lib/deployment";
 /**
  * Vue marché — agrégat CoinGecko (public, tier gratuit) pour le panneau IMAP.
  *
@@ -103,7 +104,7 @@ export interface FearGreed {
 // ─────────────────────────── Constantes ───────────────────────────
 
 /** Base publique CoinGecko (le `pro-api.*` est payant). Exportée : `data/mcap.ts` la réutilise. */
-export const CG_BASE = "https://api.coingecko.com/api/v3";
+export const CG_BASE = IS_VERCEL ? "/coingeckoapi" : "https://api.coingecko.com/api/v3";
 const DEMO_KEY_STORAGE = "axiom.coingecko.demoApiKey";
 const MARKETS_PER_PAGE = 250;
 

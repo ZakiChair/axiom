@@ -47,15 +47,13 @@ describe("proxy Vercel", () => {
     const handlerSource = await Bun.file(new URL("../../../api/proxy.ts", import.meta.url)).text();
     expect(policySource).not.toMatch(/export\s+default/);
     expect(handlerSource).toContain("export default { fetch: handle }");
-    // Exception ACTÉE (BUILD-CONTRACT, 2026-09-14) : la seule lecture d'environnement admise
-    // est le repli BGeometrics, via le paramètre par défaut typé `ProxyEnv` (une variable).
-    const sansRepliBg = `${policySource}\n${handlerSource}`.replace(/env: ProxyEnv = process\.env/g, "");
-    expect(sansRepliBg).not.toMatch(/\b(?:process|Bun|Deno)\.env\b/);
-    expect(policySource.match(/\benv\[/g)).toHaveLength(1);
-    expect(policySource).toContain('env["BGEOMETRICS_API_KEY"]');
+    // Les valeurs restent dans la politique serveur ; les modules partagés sont des métadonnées.
+    const sansLectureServeur = `${policySource}\n${handlerSource}`.replace(/env: ProxyEnv = process\.env/g, "");
+    expect(sansLectureServeur).not.toMatch(/\b(?:process|Bun|Deno)\.env\b/);
+
   });
 
-  test("place les onze rewrites du proxy et celui de /hlpool avant le fallback SPA", async () => {
+  test("place les treize rewrites du proxy et celui de /hlpool avant le fallback SPA", async () => {
     const config = (await Bun.file(new URL("../../../vercel.json", import.meta.url)).json()) as {
       rewrites: Array<{ source: string; destination: string }>;
     };
@@ -71,6 +69,8 @@ describe("proxy Vercel", () => {
       "/ccdataapi/:path*",
       "/defillamapro/:path*",
       "/cqapi/:path*",
+      "/finnhubapi/:path*",
+      "/coingeckoapi/:path*",
     ];
     const fallbackIndex = config.rewrites.findIndex((rewrite) => rewrite.destination === "/index.html");
     const avantFallback = config.rewrites.slice(0, fallbackIndex);
@@ -322,9 +322,9 @@ describe("repli serveur BGeometrics (BGEOMETRICS_API_KEY)", () => {
   test("sans clé client : le proxy porte la clé d'environnement vers bitcoin-data.com", () => {
     const plan = planProxyRequest(url("bgapi", "v1/sopr"), "GET", new Headers(), env);
     expect(plan.upstreamHeaders.get("authorization")).toBe("Bearer repli-serveur");
-    // Aucune clé côté client : la réponse reste publiquement cachable (la clé n'y figure pas).
-    expect(plan.privateResponse).toBe(false);
-    expect(plan.cacheControl).toBe("public, max-age=60, s-maxage=60");
+    // Credential effectif côté serveur : la réponse reste privée.
+    expect(plan.privateResponse).toBe(true);
+    expect(plan.cacheControl).toBe("private, no-store");
   });
 
   test("une clé personnelle du client reste prioritaire", () => {
@@ -347,17 +347,14 @@ describe("route CryptoQuant /cqapi (licence personnelle, liste fermée)", () => 
   const CHEMIN = "v2/market/cq/spot/trade";
   const QUERY = "symbol=btc_all&window=day&limit=30";
   const CIBLE = "https://api.cryptoquant.com/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30";
-  // Variables serveur posées par erreur : aucune ne doit servir de repli CryptoQuant.
-  const envServeur = { BGEOMETRICS_API_KEY: "repli-serveur", CRYPTOQUANT_API_KEY: "repli-cq-interdit" };
+  // Repli serveur autorisé depuis la demande du propriétaire du 30 septembre.
+  const envServeur = { BGEOMETRICS_API_KEY: "repli-serveur", CRYPTOQUANT_API_KEY: "repli-cq-serveur" };
   const bearer = (): Headers =>
     new Headers({ authorization: "Bearer CLE-TEST-SECRETE", cookie: "session=secret", "x-extra": "interdit" });
 
-  test("GET sans Authorization : 401 local, y compris avec des variables serveur", () => {
-    for (const env of [{}, envServeur]) {
-      const error = policyError(() => planProxyRequest(url("cqapi", CHEMIN, QUERY), "GET", new Headers(), env));
-      expect(error.status).toBe(401);
-      expect(error.message).toBe("clé CryptoQuant personnelle requise");
-    }
+  test("GET sans clé effective : 401 local ; sinon repli serveur", () => {
+    expect(policyError(() => planProxyRequest(url("cqapi", CHEMIN, QUERY), "GET", new Headers(), {})).status).toBe(401);
+    expect(planProxyRequest(url("cqapi", CHEMIN, QUERY), "GET", new Headers(), envServeur).upstreamHeaders.get("authorization")).toBe("Bearer repli-cq-serveur");
   });
 
   test("Bearer personnel : cible exacte, en-tête relayé, sans cookie, privé, zéro redirection", () => {
@@ -442,7 +439,7 @@ describe("route CryptoQuant /cqapi (licence personnelle, liste fermée)", () => 
     }
   });
 
-  test("aucune variable serveur ne part vers api.cryptoquant.com, le Bearer ne part vers aucun autre hôte fixe", () => {
+  test("le Bearer effectif reste propre à son fournisseur", () => {
     const plan = planProxyRequest(
       url("cqapi", CHEMIN, QUERY),
       "GET",
@@ -477,7 +474,7 @@ describe("fonction Vercel /hlpool (pool LIQHL réduit, extension du 25 septembre
     });
   const get = (): Request => new Request("https://axiom.test/api/hlpool");
 
-  test("aucune fonction de api/ ne lit l'environnement, hors l'exception BGeometrics de _policy.ts", async () => {
+  test("les lectures de l’environnement restent dans la politique et la configuration serveur", async () => {
     const fichiers = readdirSync(racineApi).filter((f) => f.endsWith(".ts"));
     expect(fichiers).toContain("hlpool.ts");
     for (const fichier of fichiers) {

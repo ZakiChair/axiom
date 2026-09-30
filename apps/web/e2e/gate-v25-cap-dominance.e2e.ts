@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
 /**
  * Gate e2e du lot v2.5 — fenêtre CAP (TOTAL, TOTAL3, dominances).
@@ -94,7 +95,13 @@ async function bouchonnerCoinGecko(page: import("@playwright/test").Page): Promi
 }
 
 test.beforeEach(async ({ page }) => {
+  // Tous les appels non couverts restent fermés, y compris le graphe et les WS :
+  // le scénario sans historique ne doit pas dépendre des catalogues live.
+  await bouchonnerReseau(page);
   await bouchonnerCoinGecko(page);
+  await page.route("**/api.binance.com/api/v3/exchangeInfo*", (route) => route.fulfill({
+    json: { symbols: [{ symbol: "BTCUSDT", status: "TRADING" }, { symbol: "ETHUSDT", status: "TRADING" }] },
+  }));
   await page.addInitScript(() => {
     window.localStorage.setItem("axiom:onboarding:v1", JSON.stringify({ completed: true, step: 0 }));
   });
@@ -102,12 +109,6 @@ test.beforeEach(async ({ page }) => {
 
 test.describe("avec historique reconstruit", () => {
   test.beforeEach(async ({ page }) => {
-    // Catalogue Binance bouchonné : sans lui, un runner sans accès à api.binance.com
-    // (bloqué géographiquement depuis les runners GitHub US) affiche « Catalogue
-    // indisponible » par-dessus la liste d'options — le parcours doit rester hermétique.
-    await page.route("**/api.binance.com/api/v3/exchangeInfo*", (route) => route.fulfill({
-      json: { symbols: [{ symbol: "BTCUSDT", status: "TRADING" }, { symbol: "ETHUSDT", status: "TRADING" }] },
-    }));
     await page.addInitScript(
       ([hist, dominances, macroHist]) => {
         window.localStorage.setItem("axiom:mcap:v1", hist as string);
@@ -246,10 +247,10 @@ test.describe("avec historique reconstruit", () => {
 test.describe("sans historique local", () => {
   test("propose de reconstruire les 365 jours en annonçant la durée", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
-    await page.keyboard.press("ControlOrMeta+k");
-    await page.getByPlaceholder(/^Commande/).fill("CAP");
-    await page.keyboard.press("Enter");
+    // Ici on vérifie l'état vide de CAP ; l'ouverture par commande reste couverte
+    // par le premier scénario, indépendant de celui-ci.
+    await page.getByRole("button", { name: "Fonctions", exact: true }).click();
+    await page.getByRole("menuitem", { name: /Capitalisation & dominance/ }).click();
 
     await expect(page.getByRole("button", { name: /Construire l'historique/ })).toBeVisible();
     await expect(page.getByText(/100 appels cadencés/)).toBeVisible();

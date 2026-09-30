@@ -1,3 +1,4 @@
+import { hasServerCredential } from "../../store/serverCredentials";
 /**
  * BGeometrics — bitcoin-data.com : indicateurs de VALORISATION BTC (MVRV Z-Score, SOPR, NUPL).
  *
@@ -56,7 +57,7 @@ export const BG_CLE_ENV_PRESENTE: boolean =
 
 /** Une clé est-elle active ? Clé personnelle non vide OU repli .env présent. */
 export function cleActive(cle?: string | null): boolean {
-  return (typeof cle === "string" && cle.length > 0) || BG_CLE_ENV_PRESENTE;
+  return (typeof cle === "string" && cle.length > 0) || BG_CLE_ENV_PRESENTE || hasServerCredential("bgeometrics");
 }
 /** Profondeur d'historique demandée (jours) pour la sparkline. */
 const FENETRE_JOURS = 120;

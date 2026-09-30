@@ -1,3 +1,4 @@
+import { serverCredentialsStore } from "../store/serverCredentials";
 /**
  * Fenêtre « FUND » — Fiche société (fondamentaux tradfi). Dockable à droite, NON MODALE.
  *
@@ -169,7 +170,10 @@ function VueEarnings({ data }: { data: EarningsEvent[] }) {
 
 export function FundWindow() {
   const open = useStore(fundUiStore, (s) => s.open);
-  const hasKey = useStore(finnhubKeyStore, (s) => s.hasKey);
+  const personalKey = useStore(finnhubKeyStore, (s) => s.hasKey);
+  const serverKey = useStore(serverCredentialsStore, s => s.providers.finnhub === true);
+  const keyVersion = useStore(finnhubKeyStore, s => s.version);
+  const hasKey = personalKey || serverKey;
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
 
   // Annuaire SEC EDGAR (tickers), chargé une seule fois à la première ouverture.
@@ -248,7 +252,7 @@ export function FundWindow() {
     });
 
     const cle = getFinnhubKey();
-    if (hasKey && cle !== null) {
+    if (hasKey) {
       setStatutFinnhub("loading");
       setProfilFinnhub(null);
       void chargerProfilFinnhub(selected.ticker, cle, ctrl.signal).then((r) => {
@@ -276,7 +280,7 @@ export function FundWindow() {
       ignore = true;
       ctrl.abort();
     };
-  }, [selected, hasKey]);
+  }, [selected, hasKey, keyVersion]);
 
   const choisir = (entry: EntreeTicker) => {
     setSelected(entry);

@@ -1,8 +1,7 @@
 /**
  * Preuve de bout en bout sur le HANDLER `api/proxy.ts` : la clé de repli BGeometrics
- * (BGEOMETRICS_API_KEY) est émise vers bitcoin-data.com et NE SUIT PAS une redirection
- * vers un autre hôte de la whitelist (route `extapi`, deux sauts). Sur la route fixe
- * `bgapi`, toute redirection hors bitcoin-data.com est refusée.
+ * (BGEOMETRICS_API_KEY) reste exclusivement sur bgapi. Le proxy générique extapi
+ * ne l’injecte jamais ; toute redirection avec un credential est refusée.
  *
  * `fetch` global et la résolution DNS sont simulés : aucun appel réseau réel.
  */
@@ -34,7 +33,7 @@ describe("repli BGeometrics et redirections (handler)", () => {
     else process.env["BGEOMETRICS_API_KEY"] = envOriginal;
   });
 
-  test("extapi : la clé part vers bitcoin-data.com puis DISPARAÎT au saut vers api.llama.fi", async () => {
+  test("extapi : aucune clé serveur, même lors des redirections entre hôtes autorisés", async () => {
     const { default: proxyFunction } = await import("../../../api/proxy");
     const appels: Array<{ host: string; authorization: string | null }> = [];
     globalThis.fetch = (async (entree: string | URL | Request, init?: RequestInit) => {
@@ -49,7 +48,7 @@ describe("repli BGeometrics et redirections (handler)", () => {
     const reponse = await proxyFunction.fetch(new Request(url("extapi", "bitcoin-data.com/v1/sopr")));
     expect(reponse.status).toBe(200);
     expect(appels).toEqual([
-      { host: "bitcoin-data.com", authorization: "Bearer repli-test" },
+      { host: "bitcoin-data.com", authorization: null },
       { host: "api.llama.fi", authorization: null },
     ]);
   });
@@ -90,8 +89,8 @@ describe("route CryptoQuant /cqapi (handler complet)", () => {
   const cqOriginal = process.env["CRYPTOQUANT_API_KEY"];
 
   beforeEach(() => {
-    // Une variable posée par erreur sur le déploiement ne doit JAMAIS servir de repli.
-    process.env["CRYPTOQUANT_API_KEY"] = "repli-interdit";
+    // Repli serveur autorisé pour les lectures CryptoQuant.
+    process.env["CRYPTOQUANT_API_KEY"] = "repli-serveur-cq";
   });
   afterEach(() => {
     globalThis.fetch = fetchOriginal;
@@ -173,7 +172,7 @@ describe("route CryptoQuant /cqapi (handler complet)", () => {
     expect(await reponse.json()).toEqual(corps);
   });
 
-  test("sans clé personnelle : 401 local et zéro appel, malgré la variable serveur", async () => {
+  test("sans clé personnelle : repli serveur utilisé, réponse privée", async () => {
     const { default: proxyFunction } = await import("../../../api/proxy");
     let appels = 0;
     globalThis.fetch = (async () => {
@@ -182,9 +181,9 @@ describe("route CryptoQuant /cqapi (handler complet)", () => {
     }) as unknown as typeof fetch;
 
     const reponse = await proxyFunction.fetch(new Request(url("cqapi", CHEMIN, QUERY)));
-    expect(reponse.status).toBe(401);
-    expect(appels).toBe(0);
+    expect(reponse.status).toBe(200);
+    expect(appels).toBe(1);
     expect(reponse.headers.get("cache-control")).toBe("private, no-store");
-    expect(await reponse.json()).toEqual({ erreur: "clé CryptoQuant personnelle requise", statut: 401 });
+    expect(await reponse.json()).toEqual({});
   });
 });

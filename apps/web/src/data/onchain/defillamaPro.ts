@@ -1,3 +1,4 @@
+import { hasServerCredential } from "../../store/serverCredentials";
 import { getDefillamaProKey } from "../../store/defillamaKey";
 
 export type TypeUnlock = "cliff" | "lineaire" | "autre";
@@ -180,10 +181,10 @@ export class ErreurAccesDefillama extends Error { constructor(readonly statut: n
 
 export async function chargerDefillamaPro(path: string, signal?: AbortSignal): Promise<unknown> {
   const key = getDefillamaProKey();
-  if (key === null) throw new ErreurAccesDefillama(401);
+  if (key === null && !hasServerCredential("defillama")) throw new ErreurAccesDefillama(401);
   const allowed = cheminDefillamaPro(path);
   if (allowed === null) throw new ErreurAccesDefillama(400);
-  const response = await fetch(`/defillamapro/${path}`, { headers: { "x-defillama-pro-key": key, accept: "application/json" }, cache: "no-store", redirect: "error", signal });
+  const response = await fetch(`/defillamapro/${path}`, { headers: { ...(key ? { "x-defillama-pro-key": key } : {}), accept: "application/json" }, cache: "no-store", redirect: "error", signal });
   if (!response.ok) throw new ErreurAccesDefillama(response.status);
   return response.json();
 }

@@ -101,7 +101,7 @@ export default defineConfig(({ mode }) => {
   const SOSOVALUE_API_KEY = loadEnv(mode, process.cwd(), "").SOSOVALUE_API_KEY ?? "";
   const ETHERSCAN_API_KEY = loadEnv(mode, process.cwd(), "").ETHERSCAN_API_KEY ?? "";
   const BGEOMETRICS_API_KEY = loadEnv(mode, process.cwd(), "").BGEOMETRICS_API_KEY ?? "";
-  // CryptoQuant BASIC (licence PERSONNELLE) : repli réservé au proxy de dev et au daemon local.
+  // CryptoQuant BASIC : présence du repli local ; les capacités Vercel viennent de /api/config.
   const CRYPTOQUANT_API_KEY = loadEnv(mode, process.cwd(), "").CRYPTOQUANT_API_KEY ?? "";
   const isVercelBuild = process.env.VERCEL === "1";
   // Repli CryptoQuant validé UNE fois, avec le prédicat du daemon : une clé `.env` mal formée
@@ -112,7 +112,7 @@ export default defineConfig(({ mode }) => {
   // build Vercel ne doit jamais faire croire au client qu'un repli existe (appels puis 401).
   const CQ_CLE_ENV = !isVercelBuild && CQ_REPLI !== null;
   const AXIOM_DEPLOYMENT = isVercelBuild ? "vercel" : "local";
-  const TWELVE_DATA_API_BASE = isVercelBuild ? "https://api.twelvedata.com" : "/tdapi";
+  const TWELVE_DATA_API_BASE = "/tdapi";
 
   return {
   plugins: [geoProxyDev(), react()],
@@ -124,7 +124,7 @@ export default defineConfig(({ mode }) => {
   define: {
     __BG_CLE_ENV__: JSON.stringify(BGEOMETRICS_API_KEY !== ""),
     // CryptoQuant : PRÉSENCE du repli local seulement (booléen), jamais sa valeur ; toujours
-    // faux sur un build Vercel (aucun repli serveur, licence personnelle).
+    // faux sur un build Vercel (présence du repli lue au démarrage via /api/config).
     __CQ_CLE_ENV__: JSON.stringify(CQ_CLE_ENV),
     "import.meta.env.VITE_AXIOM_DEPLOYMENT": JSON.stringify(AXIOM_DEPLOYMENT),
     "import.meta.env.VITE_TWELVE_DATA_API_BASE": JSON.stringify(TWELVE_DATA_API_BASE),

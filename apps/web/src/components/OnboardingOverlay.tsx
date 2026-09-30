@@ -1,3 +1,4 @@
+import { hasServerCredential } from "../store/serverCredentials";
 /**
  * OnboardingOverlay — parcours premier lancement en 3 étapes (≤5 min).
  *
@@ -26,6 +27,7 @@ import { URL_SIGNALER_PROBLEME } from "../lib/lienRetours";
 const COINALYZE_KEY_LS = "axiom:coinalyze:key";
 
 function aCleCoinalyzePersonnelle(): boolean {
+  if (hasServerCredential("coinalyze")) return true;
   try {
     const v = localStorage.getItem(COINALYZE_KEY_LS);
     return v !== null && v.length > 0;
@@ -179,7 +181,7 @@ export function OnboardingOverlay() {
               </p>
               {clePerso ? (
                 <p className="rounded border border-up/40 bg-bg px-3 py-2 text-[11px] text-up">
-                  Clé personnelle déjà configurée — vous pouvez passer.
+                  Clé déjà configurée — vous pouvez passer.
                 </p>
               ) : (
                 <div className="space-y-2">

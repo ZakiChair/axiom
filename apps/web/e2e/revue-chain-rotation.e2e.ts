@@ -118,7 +118,7 @@ test("CHAIN publie les sources rapides puis invalide une réponse BGeometrics ap
   await blocBgeometrics.getByRole("button", { name: "Modifier" }).click();
   await blocBgeometrics.getByPlaceholder("Clé API BGeometrics (optionnelle)").fill(CLE_NOUVELLE_FIXTURE);
   await blocBgeometrics.getByRole("button", { name: "Enregistrer" }).click();
-  await expect(blocBgeometrics).toContainText("clé ✓ configurée");
+  await expect(blocBgeometrics).toContainText("clé personnelle ✓");
   await reglages.getByRole("button", { name: "Fermer les réglages" }).click();
 
   await expect.poll(() => CHEMINS_VALORISATION.every((chemin) => cheminsNouveaux.has(chemin))).toBe(true);

@@ -3,6 +3,14 @@
 Ce fichier est la **source de vérité** des conventions et du périmètre. Il prime sur toute supposition.
 Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 
+> **Amendement du 30 septembre 2026 — clés par défaut en ligne :** la demande
+> explicite du propriétaire autorise désormais les clés des onze fournisseurs
+> existants en variables serveur Vercel. Elle remplace les restrictions historiques
+> « BGeometrics seulement » et « aucun repli CryptoQuant sur Vercel » ci-dessous.
+> Le propriétaire conserve expressément le lien public sans connexion et accepte
+> que ses visiteurs puissent consommer les quotas. Voir la section dédiée en fin
+> de document ; aucune valeur de clé ne doit être envoyée au navigateur.
+
 > **Routage multi-modèles** : avant d'agir, lire aussi `.devin/provider-rules.md`
 > (rôles d’orchestration, développement et revue indépendante ; aucun modèle
 > exclusif ni visa Fable requis).
@@ -1263,3 +1271,38 @@ calcul financier, fenêtre métier ni dépendance.
 
 Constats, vérifications et limites :
 [`docs/revue-2026-09-28-mobile.md`](docs/revue-2026-09-28-mobile.md).
+
+## Clés par défaut en ligne (demande du 30 septembre 2026)
+
+Le propriétaire demande la réutilisation automatique des clés déjà renseignées
+sur l'application Vercel. Il choisit explicitement de conserver le lien public,
+sans connexion, en acceptant la consommation de ses quotas par ses visiteurs.
+Cette décision remplace les restrictions historiques sur les secrets serveur ;
+elle n'autorise ni ordre réel, ni clé de trading, ni achat d'abonnement.
+
+- Les onze fournisseurs déjà présents dans les Réglages peuvent recevoir une
+  clé serveur : FRED, Coinalyze, Twelve Data, SoSoValue, Etherscan, BGeometrics,
+  CryptoQuant, CCData, DefiLlama Pro, Finnhub et CoinGecko. Seules les clés
+  effectivement disponibles sont configurées ; une capacité ne signifie pas
+  que l'abonnement ou la clé est valide auprès du fournisseur.
+- Les secrets de production vivent dans les variables Vercel, jamais dans une
+  variable `VITE_*`, un fichier suivi, le bundle ou une réponse de configuration.
+  Une clé explicite du navigateur garde la priorité sur le repli serveur.
+- `/api/config` expose uniquement la présence booléenne des clés. Les Réglages
+  distinguent présence locale et serveur ; supprimer une clé locale ne supprime
+  pas le secret du serveur. Le chargement de cette configuration est borné et
+  son échec ne doit pas empêcher le terminal de démarrer.
+- L'injection se fait uniquement vers l'hôte du fournisseur sur sa route dédiée.
+  Finnhub et CoinGecko disposent de routes de lecture dédiées ; les appels Twelve
+  Data passent par le proxy en ligne pour ne pas exposer la clé serveur.
+  Les chemins fermés CryptoQuant et DefiLlama restent fermés.
+- Une requête authentifiée effectivement envoyée au fournisseur produit une
+  réponse `private, no-store` et ne suit pas de redirection avec son credential.
+  Les erreurs ne doivent pas refléter les secrets. Le proxy conserve les
+  indications bornées de reprise après quota (`Retry-After`).
+- Le fonctionnement local et les appels publics sans clé restent disponibles.
+  Les clés restent exclues des sauvegardes du terminal. Aucun nouveau fournisseur,
+  package runtime, système de comptes ou stockage serveur n'est ajouté.
+
+La revue, les preuves et les limites figurent dans
+[`docs/revue-2026-09-30.md`](docs/revue-2026-09-30.md).

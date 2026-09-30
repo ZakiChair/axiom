@@ -1,3 +1,5 @@
+import { withDemoKey } from "../marketOverview";
+import { IS_VERCEL } from "../../lib/deployment";
 /**
  * Réseau SOL — époque, TPS, inflation, validateurs (RPC public) + supply (CoinGecko).
  * Appels DIRECTS sans clé : un POST batch JSON-RPC de 4 méthodes + un GET CoinGecko.
@@ -32,7 +34,7 @@ const TTL_MS = 10 * 60 * 1000; // même cadence que le réseau ETH (TPS/époque 
 const LAMPORTS_PAR_SOL = 1e9;
 
 /** Supply circulante SOL (cf. en-tête : `getSupply` RPC écarté car throttlé). */
-const URL_SUPPLY_COINGECKO = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=solana";
+const URL_SUPPLY_COINGECKO = IS_VERCEL ? "/coingeckoapi/coins/markets?vs_currency=usd&ids=solana" : "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=solana";
 
 /** Batch envoyé tel quel — les ids servent à réassocier les réponses (ordre non garanti). */
 const REQUETES_BATCH = [
@@ -156,7 +158,7 @@ export async function fetchReseauSol(signal?: AbortSignal): Promise<ResultatFrai
     // Deux sources indépendantes en parallèle : l'échec de l'une ne prive pas de l'autre.
     const [json, supplyJson] = await Promise.all([
       fetchBatchRpc(signal),
-      fetch(URL_SUPPLY_COINGECKO, { signal })
+      fetch(withDemoKey(URL_SUPPLY_COINGECKO), { signal })
         .then((res) => (res.ok ? (res.json() as Promise<unknown>) : null))
         .catch((e) => {
           if (signal?.aborted) throw e;

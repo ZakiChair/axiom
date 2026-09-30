@@ -26,18 +26,15 @@ describe("Réglages — clé CryptoQuant", () => {
     expect(SOURCE).not.toContain("getCryptoquantKey");
   });
 
-  it("place le bloc après DefiLlama Pro avec les deux textes Vercel / local de la spec", () => {
+  it("place le bloc après DefiLlama Pro avec la priorité de la clé personnelle", () => {
     const defillama = SOURCE.indexOf('name="DefiLlama Pro"');
     const cryptoquant = SOURCE.indexOf('name="CryptoQuant (takers et mineurs cotés)"');
     expect(defillama).toBeGreaterThan(-1);
     expect(cryptoquant).toBeGreaterThan(defillama);
 
     const bloc = SOURCE.slice(cryptoquant, SOURCE.indexOf("/>", cryptoquant));
-    expect(bloc).toContain("purpose={IS_VERCEL");
-    expect(bloc).toContain("clé personnelle requise — aucun repli serveur, licence personnelle");
-    expect(bloc).toContain(
-      "repli CRYPTOQUANT_API_KEY de .env pour le proxy Vite et le daemon local uniquement ; une clé saisie ici reste prioritaire",
-    );
+    expect(bloc).toContain("Une clé personnelle reste prioritaire sur la clé serveur");
+    expect(bloc).not.toContain("aucun repli serveur");
     expect(bloc).toContain('domain="api.cryptoquant.com, via la route locale /cqapi"');
     expect(bloc).toContain('signupUrl="https://cryptoquant.com"');
     expect(bloc).toContain("hasKey={cryptoquantHasKey}");

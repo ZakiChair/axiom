@@ -1,14 +1,15 @@
 /**
- * Finnhub — profil société + calendrier de résultats. Appel DIRECT (CORS confirmé
- * `access-control-allow-origin: *`, vérifié 2026-07-08). Clé requise (60 req/min gratuit).
+ * Finnhub — profil société + calendrier de résultats. Appel direct local (CORS confirmé
+ * `access-control-allow-origin: *`, vérifié 2026-07-08), proxy sur Vercel. Clé requise.
  *
  * Schémas RÉELS confirmés par curl direct le 2026-07-08 (identiques aux placeholders
  * du plan) : `stock/profile2` → `{ name, finnhubIndustry, marketCapitalization, weburl, ... }` ;
  * `calendar/earnings` → `{ earningsCalendar: [{ symbol, date, epsEstimate, epsActual, ... }] }`.
  */
+import { IS_VERCEL } from "../../lib/deployment";
 import { ecrireCache, estFrais, lireCache } from "../onchain/cache";
 
-const BASE = "https://finnhub.io/api/v1";
+const BASE = IS_VERCEL ? "/finnhubapi" : "https://finnhub.io/api/v1";
 const TTL_PROFIL_MS = 12 * 60 * 60 * 1000;
 const TTL_EARNINGS_MS = 6 * 60 * 60 * 1000;
 
@@ -43,7 +44,7 @@ export type ChargementFinnhub<T> = { ok: true; donnee: T } | { ok: false };
 
 export async function chargerProfilFinnhub(
   ticker: string,
-  cle: string,
+  cle: string | null,
   signal?: AbortSignal,
 ): Promise<ChargementFinnhub<ProfilFinnhub | null>> {
   const cacheCle = `finnhub:profil:${ticker}`;
@@ -51,7 +52,7 @@ export async function chargerProfilFinnhub(
   if (estFrais(cache, TTL_PROFIL_MS) && cache !== null) return { ok: true, donnee: cache.donnee };
 
   try {
-    const url = `${BASE}/stock/profile2?symbol=${encodeURIComponent(ticker)}&token=${encodeURIComponent(cle)}`;
+    const url = `${BASE}/stock/profile2?symbol=${encodeURIComponent(ticker)}${cle ? `&token=${encodeURIComponent(cle)}` : ""}`;
     const res = await fetch(url, { signal });
     // Un cache périmé reste préférable à une erreur : dégradation, pas panne.
     if (!res.ok) return cache === null ? { ok: false } : { ok: true, donnee: cache.donnee };
@@ -90,7 +91,7 @@ export function parseEarnings(json: unknown, ticker: string): EarningsEvent[] {
 
 export async function chargerEarnings(
   ticker: string,
-  cle: string,
+  cle: string | null,
   signal?: AbortSignal,
 ): Promise<ChargementFinnhub<EarningsEvent[]>> {
   const cacheCle = `finnhub:earnings:${ticker}`;
@@ -100,7 +101,7 @@ export async function chargerEarnings(
   try {
     const dansUnAn = new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10);
     const aujourdhui = new Date().toISOString().slice(0, 10);
-    const url = `${BASE}/calendar/earnings?from=${aujourdhui}&to=${dansUnAn}&symbol=${encodeURIComponent(ticker)}&token=${encodeURIComponent(cle)}`;
+    const url = `${BASE}/calendar/earnings?from=${aujourdhui}&to=${dansUnAn}&symbol=${encodeURIComponent(ticker)}${cle ? `&token=${encodeURIComponent(cle)}` : ""}`;
     const res = await fetch(url, { signal });
     // Cache périmé servi de préférence à une erreur (cf. chargerProfilFinnhub).
     if (!res.ok) return cache === null ? { ok: false } : { ok: true, donnee: cache.donnee };

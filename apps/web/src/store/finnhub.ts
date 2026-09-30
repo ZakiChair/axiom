@@ -31,20 +31,22 @@ export function getFinnhubKey(): string | null {
 
 export interface FinnhubKeyState {
   hasKey: boolean;
+  version: number;
   setKey: (key: string) => void;
   clearKey: () => void;
 }
 
 export const finnhubKeyStore = createStore<FinnhubKeyState>((set) => ({
   hasKey: readKey() !== null,
+  version: 0,
   setKey: (key) => {
     const k = key.trim();
     const value = k.length > 0 ? k : null;
     writeKey(value);
-    set({ hasKey: value !== null });
+    set(s => ({ hasKey: readKey() !== null, version: s.version + 1 }));
   },
   clearKey: () => {
     writeKey(null);
-    set({ hasKey: false });
+    set(s => ({ hasKey: false, version: s.version + 1 }));
   },
 }));

@@ -95,6 +95,22 @@
       "destination": "/api/proxy?__axiom_route=cqapi&__axiom_path=:path/"
     },
     {
+      "source": "/finnhubapi/:path*",
+      "destination": "/api/proxy?__axiom_route=finnhubapi&__axiom_path=:path"
+    },
+    {
+      "source": "/finnhubapi/:path*/",
+      "destination": "/api/proxy?__axiom_route=finnhubapi&__axiom_path=:path/"
+    },
+    {
+      "source": "/coingeckoapi/:path*",
+      "destination": "/api/proxy?__axiom_route=coingeckoapi&__axiom_path=:path"
+    },
+    {
+      "source": "/coingeckoapi/:path*/",
+      "destination": "/api/proxy?__axiom_route=coingeckoapi&__axiom_path=:path/"
+    },
+    {
       "source": "/hlpool",
       "destination": "/api/hlpool"
     },

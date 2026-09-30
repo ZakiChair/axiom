@@ -22,6 +22,7 @@
  * l'amont répond 401 → raison explicite affichée dans le panneau.
  * Plan Demo/Beta gratuit, 20 req/min : sosovalue.com/developer.
  */
+import { hasServerCredential } from "../../store/serverCredentials";
 import { healthStore } from "../../store/health";
 import { IS_VERCEL } from "../../lib/deployment";
 import { ecrireCache, estFrais, lireCache } from "./cache";
@@ -59,7 +60,7 @@ export const RAISON_CLE_SOSOVALUE =
   "Clé SoSoValue absente ou invalide (Réglages ⚙).";
 
 export function sosoUnusableWithoutKey(isVercel: boolean, cle: string | null): boolean {
-  return isVercel && (cle?.trim().length ?? 0) === 0;
+  return isVercel && !hasServerCredential("sosovalue") && (cle?.trim().length ?? 0) === 0;
 }
 
 /**

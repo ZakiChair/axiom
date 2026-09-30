@@ -10,44 +10,51 @@ import { startRegimePolling } from "./store/regime";
 // premier rendu (pas de flash « dark -> thème persisté » au rechargement).
 import "./store/theme";
 import "./index.css";
+import { initializeServerCredentials } from "./store/serverCredentials";
 
-// Restaure l'état persisté AVANT le rendu (stores à jour dès le premier montage),
-// puis active la sauvegarde automatique sur changement.
-hydrateStores();
-seedMacroHistoryFromPersistedMcap();
-enablePersistence();
+async function bootstrap(): Promise<void> {
+  await initializeServerCredentials();
 
-// Échantillonnage central de la capitalisation totale crypto (CoinGecko n'expose
-// pas l'historique en gratuit) : construit une série persistée VERS L'AVANT,
-// lue par le panneau Macro et l'overlay du graphe. Indépendant de l'UI.
-startMacroHistoryPolling();
+  // Restaure l'état persisté AVANT le rendu (stores à jour dès le premier montage),
+  // puis active la sauvegarde automatique sur changement.
+  hydrateStores();
+  seedMacroHistoryFromPersistedMcap();
+  enablePersistence();
 
-// Score de régime composite (pastille SessionStrip + chapeau BRIEF) : tick 15 min,
-// les historiques sous-jacents sont cachés 1 h (data/referentiels.ts).
-startRegimePolling();
+  // Échantillonnage central de la capitalisation totale crypto (CoinGecko n'expose
+  // pas l'historique en gratuit) : construit une série persistée VERS L'AVANT,
+  // lue par le panneau Macro et l'overlay du graphe. Indépendant de l'UI.
+  startMacroHistoryPolling();
 
-// Point d'entrée : monte <App/> dans #root.
-const rootElement = document.getElementById("root");
-if (!rootElement) throw new Error("Élément #root introuvable dans index.html");
+  // Score de régime composite (pastille SessionStrip + chapeau BRIEF) : tick 15 min,
+  // les historiques sous-jacents sont cachés 1 h (data/referentiels.ts).
+  startRegimePolling();
 
-// Montage isolé du SPIKE M4 : http://localhost:5173/#spike monte <WebGLSyncSpike/>,
-// sinon l'app normale. Chargé à la demande : le spike ne pèse pas sur le chargement
-// initial de l'application (budget JS d'entrée).
-const isSpike = window.location.hash === "#spike";
-const WebGLSyncSpike = lazy(() =>
-  import("./spike/WebGLSyncSpike").then((m) => ({ default: m.WebGLSyncSpike })),
-);
+  // Point d'entrée : monte <App/> dans #root.
+  const rootElement = document.getElementById("root");
+  if (!rootElement) throw new Error("Élément #root introuvable dans index.html");
 
-createRoot(rootElement).render(
-  <StrictMode>
-    <ErrorBoundary scope="AXIOM">
-      {isSpike ? (
-        <Suspense fallback={null}>
-          <WebGLSyncSpike />
-        </Suspense>
-      ) : (
-        <App />
-      )}
-    </ErrorBoundary>
-  </StrictMode>
-);
+  // Montage isolé du SPIKE M4 : http://localhost:5173/#spike monte <WebGLSyncSpike/>,
+  // sinon l'app normale. Chargé à la demande : le spike ne pèse pas sur le chargement
+  // initial de l'application (budget JS d'entrée).
+  const isSpike = window.location.hash === "#spike";
+  const WebGLSyncSpike = lazy(() =>
+    import("./spike/WebGLSyncSpike").then((m) => ({ default: m.WebGLSyncSpike })),
+  );
+
+  createRoot(rootElement).render(
+    <StrictMode>
+      <ErrorBoundary scope="AXIOM">
+        {isSpike ? (
+          <Suspense fallback={null}>
+            <WebGLSyncSpike />
+          </Suspense>
+        ) : (
+          <App />
+        )}
+      </ErrorBoundary>
+    </StrictMode>
+  );
+
+}
+void bootstrap();

@@ -1,3 +1,4 @@
+import { hasServerCredential } from "./serverCredentials";
 /**
  * Store CAP — capitalisation totale reconstruite et dominances. Zustand VANILLA.
  *
@@ -218,7 +219,7 @@ function lirePeriode(): string {
 
 /** Espacement de base : une clé Demo relève les quotas, donc autorise une cadence plus vive. */
 function espacementParDefaut(): number {
-  return resolveDemoKey() ? ESPACEMENT_AVEC_CLE_MS : ESPACEMENT_SANS_CLE_MS;
+  return resolveDemoKey() || hasServerCredential("coingecko") ? ESPACEMENT_AVEC_CLE_MS : ESPACEMENT_SANS_CLE_MS;
 }
 
 function messageErreur(e: unknown): string {

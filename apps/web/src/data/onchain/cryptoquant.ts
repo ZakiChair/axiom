@@ -5,6 +5,7 @@
  */
 import { CRYPTOQUANT_PREFIXE, IDS_MINEURS_CQ, cleCryptoQuantValide, type IdMineurCq } from "../../../../../shared/cryptoquant-proxy";
 import { RAISON_CLE_CRYPTOQUANT, cryptoquantKeyStore, getCryptoquantKey } from "../../store/cryptoquant";
+import { hasServerCredential } from "../../store/serverCredentials";
 import { healthStore, type QuotaSource } from "../../store/health";
 import { IS_VERCEL } from "../../lib/deployment";
 import { detectDaemon, kvPut, urlDaemon } from "../daemon";
@@ -768,7 +769,7 @@ async function chargerUneFois(serie: SerieCq, signal: AbortSignal): Promise<Char
   if (lecture.versionInconnue) return fin("erreur", RAISON_VERSION_CRYPTOQUANT, false);
   if (diagnostiquer(archive, aujourdhui).hierPresent) return fin("pret", raisonLecture, false);
   const cle = getCryptoquantKey();
-  if (cle === null && !(CQ_CLE_ENV_PRESENTE && !IS_VERCEL)) return fin("cle-requise", RAISON_CLE_CRYPTOQUANT, false);
+  if (cle === null && !(hasServerCredential("cryptoquant") || (CQ_CLE_ENV_PRESENTE && !IS_VERCEL))) return fin("cle-requise", RAISON_CLE_CRYPTOQUANT, false);
   // En-tête impossible (caractère invisible collé, clé trop longue) : `fetch` lèverait avant tout
   // envoi et la série passerait pour « injoignable ». Refus local, sans créneau ni appel.
   if (cle !== null && !cleCryptoQuantValide(`Bearer ${cle}`)) return fin("cle-requise", RAISON_CLE_REFUSEE_CRYPTOQUANT, false);
@@ -924,4 +925,4 @@ export function chargerSerieCq(serie: SerieCq, signal?: AbortSignal): Promise<Ch
  * compteur survit 31 j à un retrait de clé, et `setQuota` amorcerait la source à « polling » —
  * DATA annoncerait une collecte active pour une source qui ne peut plus appeler.
  */
-if (sommeCredits(Date.now()) > 0 && (getCryptoquantKey() !== null || (CQ_CLE_ENV_PRESENTE && !IS_VERCEL))) publierQuota();
+if (sommeCredits(Date.now()) > 0 && (getCryptoquantKey() !== null || hasServerCredential("cryptoquant") || (CQ_CLE_ENV_PRESENTE && !IS_VERCEL))) publierQuota();

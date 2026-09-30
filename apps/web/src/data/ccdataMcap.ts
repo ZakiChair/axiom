@@ -1,3 +1,4 @@
+import { hasServerCredential } from "../store/serverCredentials";
 import type { McapSnapshot } from "../store/macroHistory";
 import { getCcDataApiKey } from "../store/ccdata";
 import { minuitUtc } from "./mcap";
@@ -114,7 +115,7 @@ function dataDepuisReponse(json: unknown): unknown[] | null {
 }
 
 async function fetchPage(
-  apiKey: string,
+  apiKey: string | null,
   toTs: number | undefined,
   deps: FetchCcDataDeps,
 ): Promise<{ brut: unknown[]; points: CcDataMcapPoint[] }> {
@@ -126,7 +127,7 @@ async function fetchPage(
   let response: Response;
   try {
     response = await (deps.fetcher ?? fetch)(`${API_URL}?${params}`, {
-      headers: { Accept: "application/json", Authorization: `Apikey ${apiKey}` },
+      headers: { Accept: "application/json", ...(apiKey ? { Authorization: `Apikey ${apiKey}` } : {}) },
       signal: deps.signal,
     });
   } catch {
@@ -166,11 +167,11 @@ function fusionnerPoints(
 }
 
 export async function fetchHistoriqueCcData(
-  apiKey: string,
+  apiKey: string | null,
   deps: FetchCcDataDeps = {},
 ): Promise<CcDataMcapPoint[]> {
-  const key = apiKey.trim();
-  if (key.length === 0) throw new ErreurCcData("Clé CCData absente.");
+  const key = apiKey?.trim() || null;
+  if (key === null && !hasServerCredential("ccdata")) throw new ErreurCcData("Clé CCData absente.");
   const limit = Math.min(PAGE_LIMIT, Math.max(1, Math.floor(deps.pageLimit ?? PAGE_LIMIT)));
   const maxPages = Math.max(1, Math.floor(deps.maxPages ?? MAX_PAGES));
   let points: CcDataMcapPoint[] = [];
@@ -242,7 +243,7 @@ function ecrireCache(points: CcDataMcapPoint[], majTs: number): void {
 }
 
 export function historiqueCcDataDisponible(): boolean {
-  return lireCache() !== null || getCcDataApiKey() !== null;
+  return lireCache() !== null || getCcDataApiKey() !== null || hasServerCredential("ccdata");
 }
 
 async function chargerInterne(deps: ChargerCcDataDeps): Promise<McapSnapshot[] | null> {
@@ -254,10 +255,11 @@ async function chargerInterne(deps: ChargerCcDataDeps): Promise<McapSnapshot[] |
   const maintenant = deps.maintenant ?? Date.now;
   const now = maintenant();
 
-  if (cache !== null && (apiKey === null || now - cache.majTs < CACHE_TTL_MS)) {
+  const disponible = apiKey !== null || hasServerCredential("ccdata");
+  if (cache !== null && (!disponible || now - cache.majTs < CACHE_TTL_MS)) {
     return snapshotsCcData(cache.points);
   }
-  if (apiKey === null) return cache === null ? null : snapshotsCcData(cache.points);
+  if (!disponible) return cache === null ? null : snapshotsCcData(cache.points);
 
   if (cache !== null) {
     try {

@@ -33,7 +33,7 @@ jobs:
       - uses: pnpm/action-setup@v4 # version pnpm lue depuis packageManager
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24 # même version majeure que la production Vercel
           cache: pnpm
       - uses: oven-sh/setup-bun@v2 # tests du daemon (`bun test src`)
         with:
@@ -87,3 +87,27 @@ jobs:
         env:
           AXIOM_E2E_PORT: 5239
         timeout-minutes: 9 # observé 312 s (24/09 matin) puis > 360 s le soir (139 tests)
+
+  mobile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+
+      - name: navigateurs téléphone (chromium et webkit)
+        run: pnpm --filter @axiom/web exec playwright install --with-deps chromium webkit
+        timeout-minutes: 5
+
+      # Même sélection et mêmes appareils que le gate mobile local.
+      - name: e2e téléphone hermétiques
+        run: bash scripts/ci.sh --mobile
+        env:
+          AXIOM_E2E_PORT: 5281
+        timeout-minutes: 9

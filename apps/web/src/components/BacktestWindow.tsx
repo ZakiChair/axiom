@@ -802,6 +802,13 @@ const RAISON_LABEL: Record<TradeResultat["raison"], string> = {
   "fin-donnees": "fin",
 };
 
+function ExcursionPct({ valeur, sens, partielle }: { valeur: number; sens: "mae" | "mfe"; partielle: boolean }) {
+  return <span
+    className={`text-right tabular-nums ${sens === "mae" ? "text-down" : "text-up"}`}
+    title={partielle ? "Sortie intrabar : ordre des extrêmes inconnu. Borne confirmée sur les barres entièrement détenues, l'ouverture et le prix exécuté." : undefined}
+  >{partielle ? (sens === "mae" ? "≤ " : "≥ ") : ""}{formatPct(valeur)}</span>;
+}
+
 const COLONNES_TRADES: ColonneTable<TradeResultat>[] = [
   {
     id: "funding",
@@ -888,7 +895,7 @@ const COLONNES_TRADES: ColonneTable<TradeResultat>[] = [
     largeur: "0.7fr",
     triable: true,
     valeurTri: (tr) => tr.maePct,
-    rendu: (tr) => <span className="text-right tabular-nums text-down">{formatPct(tr.maePct)}</span>,
+    rendu: (tr) => <ExcursionPct valeur={tr.maePct} sens="mae" partielle={tr.excursionsPartielles === true} />,
   },
   {
     id: "mfePct",
@@ -897,7 +904,7 @@ const COLONNES_TRADES: ColonneTable<TradeResultat>[] = [
     largeur: "0.7fr",
     triable: true,
     valeurTri: (tr) => tr.mfePct,
-    rendu: (tr) => <span className="text-right tabular-nums text-up">{formatPct(tr.mfePct)}</span>,
+    rendu: (tr) => <ExcursionPct valeur={tr.mfePct} sens="mfe" partielle={tr.excursionsPartielles === true} />,
   },
   {
     id: "r",
@@ -1032,11 +1039,12 @@ function StatsGrid({ resultat }: { resultat: ResultatBacktest }) {
       </div>
       <p
         className="text-[10px] text-text-dim"
-        title="Excursions pendant la détention, en % du prix d'entrée, sur les barres détenues (hors barre de fill de sortie)"
+        title="Excursions pendant la détention, en % du prix d'entrée. Les sorties intrabar ne retiennent que les excursions confirmées."
       >
-        MAE moyenne <span className="text-down">{formatPct(s.maeMoyenPct)}</span> · MFE moyenne{" "}
-        <span className="text-up">{formatPct(s.mfeMoyenPct)}</span> — pire creux / meilleur pic pendant la détention,
+        MAE moyenne <ExcursionPct valeur={s.maeMoyenPct} sens="mae" partielle={(s.nbExcursionsPartielles ?? 0) > 0} /> · MFE moyenne{" "}
+        <ExcursionPct valeur={s.mfeMoyenPct} sens="mfe" partielle={(s.nbExcursionsPartielles ?? 0) > 0} /> — pire creux / meilleur pic pendant la détention,
         en % de l'entrée.
+        {(s.nbExcursionsPartielles ?? 0) > 0 && <> {s.nbExcursionsPartielles} {s.nbExcursionsPartielles === 1 ? "trade à excursions partielles" : "trades à excursions partielles"} : moyennes bornées.</>}
       </p>
       {s.expectancyR !== null && (
         <p className="text-[10px] text-text-dim">

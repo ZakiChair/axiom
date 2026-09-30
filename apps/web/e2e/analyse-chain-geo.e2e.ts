@@ -17,6 +17,7 @@ test("CHAIN garde les quatre chaînes et montre une variation de part distincte 
   await page.route("**/api.llama.fi/overview/**", (route) => route.fulfill({ json: { totalDataChart: [] } }));
   await page.route("**/stablecoins.llama.fi/stablecoincharts/**", (route) => route.fulfill({ json: [] }));
   await page.goto("/");
+  await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
   await page.getByPlaceholder(/^Commande/).fill("CHAIN");
   await page.keyboard.press("Enter");
@@ -50,6 +51,7 @@ test("CHAIN ne renormalise jamais une cohorte 3/4", async ({ page }) => {
     return route.fulfill({ json: [] });
   });
   await page.goto("/");
+  await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
   await page.getByPlaceholder(/^Commande/).fill("CHAIN");
   await page.keyboard.press("Enter");

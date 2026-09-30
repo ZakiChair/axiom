@@ -66,33 +66,33 @@ describe("chargerProfilFinnhub / chargerEarnings — échec distingué de l'abse
 
   it("profil : clé invalide (401) SANS cache → échec, pas « pas de données »", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("bad key", { status: 401 })));
-    await expect(chargerProfilFinnhub("AAPL", "cle")).resolves.toEqual({ ok: false });
+    await expect(chargerProfilFinnhub("AAPL", "cle")).resolves.toMatchObject({ ok: false, raison: expect.any(String) });
   });
 
   it("profil : quota atteint (429) SANS cache → échec", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("rate limited", { status: 429 })));
-    await expect(chargerProfilFinnhub("AAPL", "cle")).resolves.toEqual({ ok: false });
+    await expect(chargerProfilFinnhub("AAPL", "cle")).resolves.toMatchObject({ ok: false, raison: expect.any(String) });
   });
 
   it("profil : ticker sans profil (200, corps vide) → succès avec donnee null", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({}))));
-    await expect(chargerProfilFinnhub("ZZZZ", "cle")).resolves.toEqual({ ok: true, donnee: null });
+    await expect(chargerProfilFinnhub("ZZZZ", "cle")).resolves.toMatchObject({ ok: true, donnee: null, perime: false });
   });
 
   it("profil : échec AVEC cache périmé → le cache est servi (dégradation, pas panne)", async () => {
     const profil = { nom: "Apple Inc", secteur: "Technology", capitalisation: 3_000_000, description: "" };
     vi.mocked(lireCache).mockResolvedValue({ ts: 0, donnee: profil } as never);
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("network down"))));
-    await expect(chargerProfilFinnhub("AAPL", "cle")).resolves.toEqual({ ok: true, donnee: profil });
+    await expect(chargerProfilFinnhub("AAPL", "cle")).resolves.toMatchObject({ ok: true, donnee: profil, perime: true, ts: 0 });
   });
 
   it("earnings : réseau coupé SANS cache → échec, pas une liste vide", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("network down"))));
-    await expect(chargerEarnings("AAPL", "cle")).resolves.toEqual({ ok: false });
+    await expect(chargerEarnings("AAPL", "cle")).resolves.toMatchObject({ ok: false, raison: expect.any(String) });
   });
 
   it("earnings : aucun résultat programmé (200, calendrier vide) → succès avec liste vide", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ earningsCalendar: [] }))));
-    await expect(chargerEarnings("AAPL", "cle")).resolves.toEqual({ ok: true, donnee: [] });
+    await expect(chargerEarnings("AAPL", "cle")).resolves.toMatchObject({ ok: true, donnee: [], perime: false });
   });
 });

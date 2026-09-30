@@ -6,6 +6,7 @@ const HEURE = 3_600_000;
 const CLE = "axiom:backtest:history:v1";
 
 async function ouvrirBT(page: Page) {
+  await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
   const fenetre = page.getByRole("complementary", { name: "Backtest" });
   if (!(await fenetre.isVisible())) {
     await page.keyboard.press("ControlOrMeta+k");
@@ -97,4 +98,66 @@ test("snapshot du run, versions complètes et comparaison après rechargement", 
   await expect(comparaison).toContainText("EMA");
   await expect(comparaison).toContainText("2026");
   await expect(comparaison).not.toContainText('"type":"comparaison"');
+});
+
+test("bornes intrabar, fin réelle sans funding et comparaison des archives après rechargement", async ({ page }) => {
+  const candles = Array.from({ length: 80 }, (_, i) => {
+    const time = INSTANT - (80 - i) * HEURE;
+    return [time, "100", i === 79 ? "150" : "100", i === 79 ? "50" : "100", "100", "100", time + HEURE - 1, "10000", 50, "55", "5500", "0"];
+  });
+  await page.route("**/api.binance.com/api/v3/klines*", (route) => route.fulfill({ json: candles }));
+  await page.goto("/");
+  const bt = await ouvrirBT(page);
+  await page.evaluate(async () => {
+    const { backtestStore } = await import("/src/store/backtest.ts");
+    backtestStore.setState({
+      symbol: "BTCUSDT", tf: "1h", modeFunding: "aucun", intrabar: true,
+      direction: "long", tailleFixe: 1000, fraisPct: 0, slippagePct: 0,
+      stopPct: 5, targetPct: null, stopAtr: null, risquePct: null,
+      reglesEntree: [{ type: "comparaison", gauche: { type: "prix", champ: "close" }, comparateur: ">", droite: { type: "constante", valeur: 0 } }],
+      reglesSortie: [],
+    });
+  });
+  await bt.getByRole("button", { name: "Lancer le backtest" }).click();
+  await expect(bt.getByText("Terminé", { exact: true })).toBeVisible();
+  await expect(bt.getByText("≤ -5.00%", { exact: true })).toHaveCount(2);
+  await expect(bt.getByText("≥ +0.00%", { exact: true })).toHaveCount(2);
+  await expect(bt).toContainText("1 trade à excursions partielles");
+  const premiere = await page.evaluate((cle) => JSON.parse(localStorage.getItem(cle)!), CLE);
+  expect(premiere.runs[0].stats.nbExcursionsPartielles).toBe(1);
+  expect(premiere.runs[0].donnees.finDonneesMs).toBe(INSTANT);
+
+  await page.evaluate(async () => {
+    const { backtestStore } = await import("/src/store/backtest.ts");
+    backtestStore.getState().setIntrabar(false);
+  });
+  await bt.getByRole("button", { name: "Lancer le backtest" }).click();
+  await expect(bt.getByText("Terminé", { exact: true })).toBeVisible();
+  const finReelle = await page.evaluate(async () => {
+    const { backtestStore } = await import("/src/store/backtest.ts");
+    const resultat = backtestStore.getState().resultat;
+    return { dureeMs: resultat.trades[0].dureeMs, expositionPct: resultat.stats.expositionPct };
+  });
+  expect(finReelle.dureeMs).toBe(79 * HEURE);
+  expect(finReelle.expositionPct).toBe(98.75);
+  const archives = await page.evaluate((cle) => JSON.parse(localStorage.getItem(cle)!), CLE);
+  expect(archives.runs).toHaveLength(2);
+  const partiel = archives.runs.find((r: { stats: { nbExcursionsPartielles?: number } }) => r.stats.nbExcursionsPartielles === 1);
+  const complet = archives.runs.find((r: { stats: { nbExcursionsPartielles?: number } }) => r.stats.nbExcursionsPartielles === undefined);
+  expect(partiel).toBeDefined();
+  expect(complet).toBeDefined();
+
+  await page.reload();
+  const recharge = await ouvrirBT(page);
+  await recharge.getByRole("button", { name: "Ouvrir versions et historique" }).click();
+  await recharge.getByLabel("Run A").selectOption(partiel.id);
+  await recharge.getByLabel("Run B").selectOption(complet.id);
+  await expect(recharge).toContainText("MAE/MFE : bornes confirmées, delta non calculable");
+  const table = recharge.getByLabel("Comparaison des runs BT");
+  await expect(table).toContainText("≤ -5.00");
+  await expect(table).toContainText("≥ 0.00");
+  for (const label of ["MAE %", "MFE %"]) {
+    const ligne = table.getByText(label, { exact: true }).locator("../..");
+    await expect(ligne).toContainText("—");
+  }
 });

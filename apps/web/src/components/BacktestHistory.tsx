@@ -21,6 +21,13 @@ function nombre(v: number | null | undefined): string {
   return v === null || v === undefined ? "—" : v === Infinity ? "∞" : formatDec(v);
 }
 
+function statistique(stats: StatsBacktest, cle: keyof StatsBacktest): string {
+  const borne = (stats.nbExcursionsPartielles ?? 0) > 0
+    ? cle === "maeMoyenPct" ? "≤ " : cle === "mfeMoyenPct" ? "≥ " : ""
+    : "";
+  return `${borne}${nombre(stats[cle])}`;
+}
+
 function dateBorne(ms: number): string {
   return `${formatDateComplete(ms)} ${new Date(ms).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`;
 }
@@ -59,7 +66,7 @@ const COLONNES_COMPARAISON: ColonneTable<LigneComparaison>[] = [
   { id: "delta", label: "Δ B − A", align: "right", largeur: "minmax(7rem, 15fr)", triable: false, rendu: (l) => l.delta },
 ];
 
-function lignesComparaison(a: ArchiveRunBacktest, b: ArchiveRunBacktest, deltas: ReturnType<typeof comparerArchives>["deltas"]): LigneComparaison[] {
+export function lignesComparaison(a: ArchiveRunBacktest, b: ArchiveRunBacktest, deltas: ReturnType<typeof comparerArchives>["deltas"]): LigneComparaison[] {
   const ligne = (id: string, libelle: string, valeurA: ReactNode, valeurB: ReactNode): LigneComparaison =>
     ({ id, libelle, a: valeurA, b: valeurB, delta: "—" });
   return [
@@ -71,7 +78,7 @@ function lignesComparaison(a: ArchiveRunBacktest, b: ArchiveRunBacktest, deltas:
     ligne("couts", "Capital · frais · slippage", `${a.config.capitalInitial} · ${a.config.fraisPct}% · ${a.config.slippagePct}%`, `${b.config.capitalInitial} · ${b.config.fraisPct}% · ${b.config.slippagePct}%`),
     ligne("entree", "Règles d'entrée", <Regles regles={a.config.reglesEntree} />, <Regles regles={b.config.reglesEntree} />),
     ligne("sortie", "Règles de sortie", <Regles regles={a.config.reglesSortie} />, <Regles regles={b.config.reglesSortie} />),
-    ...STATS.map(({ cle, libelle }) => ({ id: cle, libelle, a: nombre(a.stats[cle]), b: nombre(b.stats[cle]), delta: nombre(deltas?.[cle]), numerique: true })),
+    ...STATS.map(({ cle, libelle }) => ({ id: cle, libelle, a: statistique(a.stats, cle), b: statistique(b.stats, cle), delta: nombre(deltas?.[cle]), numerique: true })),
   ];
 }
 

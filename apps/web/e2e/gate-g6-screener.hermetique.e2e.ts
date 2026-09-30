@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
 /**
  * Gate G100 — G6, JUMEAU HERMÉTIQUE de `gate-g6-screener.e2e.ts`.
@@ -73,6 +74,7 @@ function symboleDe(url: string): string {
  * jamais de 404 qui ferait diverger le run des fixtures.
  */
 async function bouchonnerScreener(page: Page): Promise<void> {
+  await bouchonnerReseau(page);
   await page.route("**/api.binance.com/api/v3/ticker/24hr*", (route) =>
     route.fulfill({ json: TICKER_24H }),
   );

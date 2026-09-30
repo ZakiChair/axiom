@@ -25,7 +25,7 @@
 import { extUrl } from "./extapi";
 import { healthStore } from "../store/health";
 import { getFredKey } from "../store/macro";
-import { conserverConsensusAvantAnnonce, typePublicationDepuisEvenement } from "./macro/publicationArchive";
+import { conserverConsensusAvantAnnonce, typePublicationDepuisEvenement } from "./macro/publicationConsensus";
 
 // ─────────────────────────── Types ───────────────────────────
 

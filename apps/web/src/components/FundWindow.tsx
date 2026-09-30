@@ -36,8 +36,9 @@ import {
   chargerEarnings,
   type ProfilFinnhub,
   type EarningsEvent,
+  type ChargementFinnhub,
 } from "../data/fund/finnhub";
-import { formatUsd, formatDec, formatDateComplete, VALEUR_ABSENTE } from "../lib/format";
+import { formatUsd, formatDec, formatDateComplete, formatDateHeure, VALEUR_ABSENTE } from "../lib/format";
 import { EnTeteFenetre, Onglets, Chargement, ErreurBloc, Bouton, Input, Vide, SansCle } from "./ui";
 import { TableTriable, type ColonneTable } from "./TableTriable";
 
@@ -163,7 +164,17 @@ const COLONNES_EARNINGS: ColonneTable<EarningsEvent>[] = [
 ];
 
 function VueEarnings({ data }: { data: EarningsEvent[] }) {
-  return <TableTriable colonnes={COLONNES_EARNINGS} lignes={data} cle={(e) => e.date} />;
+  return <TableTriable ariaLabel="Résultats trimestriels" colonnes={COLONNES_EARNINGS} lignes={data} cle={(e) => e.date} />;
+}
+
+/** La date décrit la récupération, pas une observation fournie par Finnhub. */
+function FraicheurFinnhub({ resultat }: { resultat: ChargementFinnhub<unknown> | null }) {
+  if (!resultat?.ok) return null;
+  return <p role="status" className={`mb-3 text-[11px] ${resultat.perime ? "text-warn" : "text-text-dim"}`}>
+    {resultat.perime && "Données en cache périmées · "}
+    Récupérées le <time dateTime={new Date(resultat.ts).toISOString()}>{formatDateHeure(resultat.ts)}</time>.
+    {resultat.raison && <> {resultat.raison}</>}
+  </p>;
 }
 
 // ─────────────────────────── Composant principal ───────────────────────────
@@ -192,9 +203,11 @@ export function FundWindow() {
 
   const [profilSec, setProfilSec] = useState<ProfilSec | null>(null);
   const [statutSec, setStatutSec] = useState<Statut>("idle");
-  const [profilFinnhub, setProfilFinnhub] = useState<ProfilFinnhub | null>(null);
+  const [resultatProfil, setResultatProfil] = useState<ChargementFinnhub<ProfilFinnhub | null> | null>(null);
+  const profilFinnhub = resultatProfil?.ok ? resultatProfil.donnee : null;
   const [statutFinnhub, setStatutFinnhub] = useState<Statut>("idle");
-  const [earnings, setEarnings] = useState<EarningsEvent[] | null>(null);
+  const [resultatEarnings, setResultatEarnings] = useState<ChargementFinnhub<EarningsEvent[]> | null>(null);
+  const earnings = resultatEarnings?.ok ? resultatEarnings.donnee : null;
   const [statutEarnings, setStatutEarnings] = useState<Statut>("idle");
 
   // Charge l'annuaire SEC une seule fois, à la première ouverture (10 000 entrées,
@@ -254,26 +267,26 @@ export function FundWindow() {
     const cle = getFinnhubKey();
     if (hasKey) {
       setStatutFinnhub("loading");
-      setProfilFinnhub(null);
+      setResultatProfil(null);
       void chargerProfilFinnhub(selected.ticker, cle, ctrl.signal).then((r) => {
         if (ignore) return;
         // Échec (clé invalide, quota, réseau) ≠ ticker sans profil : deux messages distincts.
-        setProfilFinnhub(r.ok ? r.donnee : null);
+        setResultatProfil(r);
         setStatutFinnhub(r.ok ? "ready" : "error");
       });
 
       setStatutEarnings("loading");
-      setEarnings(null);
+      setResultatEarnings(null);
       void chargerEarnings(selected.ticker, cle, ctrl.signal).then((r) => {
         if (ignore) return;
-        setEarnings(r.ok ? r.donnee : null);
+        setResultatEarnings(r);
         setStatutEarnings(r.ok ? "ready" : "error");
       });
     } else {
       setStatutFinnhub("idle");
-      setProfilFinnhub(null);
+      setResultatProfil(null);
       setStatutEarnings("idle");
-      setEarnings(null);
+      setResultatEarnings(null);
     }
 
     return () => {
@@ -371,6 +384,8 @@ export function FundWindow() {
           <Onglets options={ONGLETS} actif={onglet} onChange={setOnglet} />
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+            {onglet === "profil" && <FraicheurFinnhub resultat={resultatProfil} />}
+            {onglet === "earnings" && <FraicheurFinnhub resultat={resultatEarnings} />}
             {onglet === "profil" &&
               (!hasKey ? (
                 <SansCle
@@ -380,7 +395,7 @@ export function FundWindow() {
               ) : statutFinnhub === "loading" && profilFinnhub === null ? (
                 <Chargement />
               ) : statutFinnhub === "error" ? (
-                <ErreurBloc>Finnhub : clé invalide ou quota atteint — profil non chargé.</ErreurBloc>
+                <ErreurBloc>{resultatProfil?.raison ?? "Profil Finnhub non chargé."}</ErreurBloc>
               ) : profilFinnhub === null ? (
                 <Vide>Profil Finnhub indisponible pour ce ticker.</Vide>
               ) : (
@@ -403,7 +418,7 @@ export function FundWindow() {
               ) : statutEarnings === "loading" && earnings === null ? (
                 <Chargement />
               ) : statutEarnings === "error" ? (
-                <ErreurBloc>Finnhub : clé invalide ou quota atteint — calendrier non chargé.</ErreurBloc>
+                <ErreurBloc>{resultatEarnings?.raison ?? "Calendrier Finnhub non chargé."}</ErreurBloc>
               ) : earnings === null || earnings.length === 0 ? (
                 <Vide>Aucun résultat trimestriel programmé trouvé.</Vide>
               ) : (

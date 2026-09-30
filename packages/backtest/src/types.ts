@@ -213,11 +213,14 @@ export interface TradeResultat {
    * Pire excursion adverse pendant la détention, en % du prix d'entrée (≤ 0) : plus bas des
    * lows pour un long, plus haut des highs pour un short. Barres DÉTENUES seulement : la barre
    * de fill de sortie n'en fait pas partie (sortie à son open) ; la dernière barre d'une
-   * sortie fin-donnees en fait partie (marquée à son close).
+   * sortie fin-donnees en fait partie (marquée à son close). Si `excursionsPartielles`,
+   * la MAE réelle est ≤ cette borne confirmée, faute d'ordre intrabar connu.
    */
   maePct: number;
-  /** Meilleure excursion favorable pendant la détention, en % du prix d'entrée (≥ 0). */
+  /** Meilleure excursion favorable (≥ 0). Si partielle, la MFE réelle est ≥ cette borne. */
   mfePct: number;
+  /** Sortie au cours d'une barre OHLC : ses extrêmes avant le fill sont inconnus. */
+  excursionsPartielles?: true;
 }
 
 /** Un point d'équité valorisé à chaque clôture de bougie, plus un point initial. */
@@ -263,6 +266,8 @@ export interface StatsBacktest {
   maeMoyenPct: number;
   /** Moyenne des MFE des trades (≥ 0), en % du prix d'entrée ; 0 sans trade. */
   mfeMoyenPct: number;
+  /** Nombre de trades à excursions bornées ; présent seulement s'il est non nul. */
+  nbExcursionsPartielles?: number;
 }
 
 /** Résultat complet d'un backtest. */

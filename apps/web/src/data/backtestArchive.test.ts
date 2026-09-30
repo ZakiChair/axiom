@@ -24,6 +24,27 @@ export const archiveFixture: ArchiveRunBacktest = {
 };
 
 describe("archive BT synthétique", () => {
+  it("conserve le nombre d'excursions partielles à l'export et refuse un compteur impossible", () => {
+    const run = { ...archiveFixture, stats: { ...archiveFixture.stats, nbExcursionsPartielles: 1 } };
+    expect(decoderArchive(JSON.parse(encoderArchive(run)))?.stats).toMatchObject({ nbExcursionsPartielles: 1 });
+    for (const valeur of [-1, 0.5, 3, "1", null]) {
+      const brut = JSON.parse(encoderArchive(run));
+      brut.stats.nbExcursionsPartielles = valeur;
+      expect(decoderArchive(brut)).toBeNull();
+    }
+  });
+
+  it("ne soustrait pas des bornes MAE/MFE et signale les versions de moteur différentes", () => {
+    const nouveau = { ...archiveFixture, moteurVersion: "bt-2026-09-30", stats: { ...archiveFixture.stats, pnlTotal: 120, nbExcursionsPartielles: 1 } };
+    for (const [a, b] of [[archiveFixture, nouveau], [nouveau, archiveFixture]] as const) {
+      const comparaison = comparerArchives(a, b);
+      expect(comparaison.deltas?.maeMoyenPct).toBeUndefined();
+      expect(comparaison.deltas?.mfeMoyenPct).toBeUndefined();
+      expect(Math.abs(comparaison.deltas?.pnlTotal ?? 0)).toBe(20);
+      expect(comparaison.avertissements).toContain("Versions du moteur différentes");
+    }
+  });
+
   it("conserve le profit factor infini sans inclure trades, OHLC ni courbe", () => {
     const brut = encoderArchive(archiveFixture);
     expect(brut).toContain('"profitFactor":"Infinity"');

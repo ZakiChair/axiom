@@ -1227,11 +1227,14 @@ describe("excursions MAE / MFE", () => {
         reglesEntree: [croiseClose(100, sens === "long" ? "hausse" : "baisse")],
         reglesSortie: [], direction: sens, stopPct: 5, targetPct: 10, tailleFixe: 1000,
       };
-      const trade = runBacktest(candles, strat, { ...SANS_FRICTION, intrabar: true }).trades[0]!;
+      const resultat = runBacktest(candles, strat, { ...SANS_FRICTION, intrabar: true });
+      const trade = resultat.trades[0]!;
       expect(trade.raison).toBe(issue);
       expect(trade.prixSortie).toBe(prix);
       expect(trade.maePct).toBeCloseTo(mae, 9);
       expect(trade.mfePct).toBeCloseTo(mfe, 9);
+      expect(trade).not.toHaveProperty("excursionsPartielles");
+      expect(resultat.stats).not.toHaveProperty("nbExcursionsPartielles");
     },
   );
 
@@ -1253,6 +1256,7 @@ describe("excursions MAE / MFE", () => {
     expect(trade.prixSortie).toBe(prixSortie);
     expect(trade.maePct).toBeCloseTo(mae, 9);
     expect(trade.mfePct).toBe(0);
+    expect(trade).not.toHaveProperty("excursionsPartielles");
   });
 
   const stratLong: StrategieDef = {
@@ -1280,6 +1284,8 @@ describe("excursions MAE / MFE", () => {
     expect(trades[0]!.maePct).toBeCloseTo(-5, 9); // 95 / 100 − 1
     expect(stats.mfeMoyenPct).toBeCloseTo(20, 9);
     expect(stats.maeMoyenPct).toBeCloseTo(-5, 9);
+    expect(trades[0]).not.toHaveProperty("excursionsPartielles");
+    expect(stats).not.toHaveProperty("nbExcursionsPartielles");
   });
 
   it("short : les rôles des extrêmes s'inversent", () => {

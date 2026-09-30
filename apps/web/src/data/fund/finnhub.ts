@@ -7,7 +7,7 @@
  * `calendar/earnings` → `{ earningsCalendar: [{ symbol, date, epsEstimate, epsActual, ... }] }`.
  */
 import { IS_VERCEL } from "../../lib/deployment";
-import { ecrireCache, estFrais, lireCache } from "../onchain/cache";
+import { ecrireCache, estFrais, lireCache, type CacheEntree } from "../onchain/cache";
 
 const BASE = IS_VERCEL ? "/finnhubapi" : "https://finnhub.io/api/v1";
 const TTL_PROFIL_MS = 12 * 60 * 60 * 1000;
@@ -40,7 +40,30 @@ export function parseProfilFinnhub(json: unknown): ProfilFinnhub | null {
  * indisponible pour ce ticker » ou « Aucun résultat trimestriel programmé trouvé » — des
  * messages d'absence — pour une cause d'authentification ou de quota.
  */
-export type ChargementFinnhub<T> = { ok: true; donnee: T } | { ok: false };
+export type ChargementFinnhub<T> =
+  | { ok: true; donnee: T; ts: number; perime: boolean; raison?: string }
+  | { ok: false; raison: string; annule?: boolean };
+
+function annulation(): ChargementFinnhub<never> {
+  return { ok: false, annule: true, raison: "Chargement annulé." };
+}
+
+function repli<T>(cache: CacheEntree<T> | null, raison: string): ChargementFinnhub<T> {
+  return cache === null ? { ok: false, raison } : { ok: true, donnee: cache.donnee, ts: cache.ts, perime: true, raison };
+}
+
+/** Messages contrôlés : ni réponse amont, ni URL contenant une clé. */
+function raisonHttp(statut: number): string {
+  if (statut === 401 || statut === 403) return "Finnhub : clé ou accès refusé.";
+  if (statut === 429) return "Finnhub : quota atteint.";
+  return `Finnhub indisponible (HTTP ${statut}).`;
+}
+
+/** Un cache importé ne doit pas figer une date future ni faire planter <time>. */
+function cacheDateValide<T>(cache: CacheEntree<T> | null): CacheEntree<T> | null {
+  return cache !== null && Number.isFinite(cache.ts) && cache.ts >= 0 && cache.ts <= Date.now()
+    ? cache : null;
+}
 
 export async function chargerProfilFinnhub(
   ticker: string,
@@ -48,19 +71,23 @@ export async function chargerProfilFinnhub(
   signal?: AbortSignal,
 ): Promise<ChargementFinnhub<ProfilFinnhub | null>> {
   const cacheCle = `finnhub:profil:${ticker}`;
-  const cache = await lireCache<ProfilFinnhub>(cacheCle);
-  if (estFrais(cache, TTL_PROFIL_MS) && cache !== null) return { ok: true, donnee: cache.donnee };
+  const cache = cacheDateValide(await lireCache<ProfilFinnhub>(cacheCle));
+  if (signal?.aborted) return annulation();
+  if (estFrais(cache, TTL_PROFIL_MS) && cache !== null) return { ok: true, donnee: cache.donnee, ts: cache.ts, perime: false };
 
   try {
     const url = `${BASE}/stock/profile2?symbol=${encodeURIComponent(ticker)}${cle ? `&token=${encodeURIComponent(cle)}` : ""}`;
     const res = await fetch(url, { signal });
-    // Un cache périmé reste préférable à une erreur : dégradation, pas panne.
-    if (!res.ok) return cache === null ? { ok: false } : { ok: true, donnee: cache.donnee };
+    if (signal?.aborted) return annulation();
+    if (!res.ok) return repli(cache, raisonHttp(res.status));
     const profil = parseProfilFinnhub((await res.json()) as unknown);
+    if (signal?.aborted) return annulation();
+    if (profil === null && cache !== null) return repli(cache, "Profil non fourni par la dernière réponse Finnhub.");
+    const ts = Date.now();
     if (profil !== null) await ecrireCache(cacheCle, profil);
-    return { ok: true, donnee: profil ?? cache?.donnee ?? null };
+    return { ok: true, donnee: profil, ts, perime: false };
   } catch {
-    return cache === null ? { ok: false } : { ok: true, donnee: cache.donnee };
+    return signal?.aborted ? annulation() : repli(cache, "Finnhub injoignable ; actualisation impossible.");
   }
 }
 
@@ -95,20 +122,27 @@ export async function chargerEarnings(
   signal?: AbortSignal,
 ): Promise<ChargementFinnhub<EarningsEvent[]>> {
   const cacheCle = `finnhub:earnings:${ticker}`;
-  const cache = await lireCache<EarningsEvent[]>(cacheCle);
-  if (estFrais(cache, TTL_EARNINGS_MS) && cache !== null) return { ok: true, donnee: cache.donnee };
+  const cache = cacheDateValide(await lireCache<EarningsEvent[]>(cacheCle));
+  if (signal?.aborted) return annulation();
+  if (estFrais(cache, TTL_EARNINGS_MS) && cache !== null) return { ok: true, donnee: cache.donnee, ts: cache.ts, perime: false };
 
   try {
     const dansUnAn = new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10);
     const aujourdhui = new Date().toISOString().slice(0, 10);
     const url = `${BASE}/calendar/earnings?from=${aujourdhui}&to=${dansUnAn}&symbol=${encodeURIComponent(ticker)}${cle ? `&token=${encodeURIComponent(cle)}` : ""}`;
     const res = await fetch(url, { signal });
-    // Cache périmé servi de préférence à une erreur (cf. chargerProfilFinnhub).
-    if (!res.ok) return cache === null ? { ok: false } : { ok: true, donnee: cache.donnee };
-    const events = parseEarnings((await res.json()) as unknown, ticker);
+    if (signal?.aborted) return annulation();
+    if (!res.ok) return repli(cache, raisonHttp(res.status));
+    const json: unknown = await res.json();
+    if (signal?.aborted) return annulation();
+    if (!Array.isArray((json as { earningsCalendar?: unknown } | null)?.earningsCalendar)) {
+      return repli(cache, "Calendrier Finnhub invalide.");
+    }
+    const events = parseEarnings(json, ticker);
+    const ts = Date.now();
     await ecrireCache(cacheCle, events);
-    return { ok: true, donnee: events };
+    return { ok: true, donnee: events, ts, perime: false };
   } catch {
-    return cache === null ? { ok: false } : { ok: true, donnee: cache.donnee };
+    return signal?.aborted ? annulation() : repli(cache, "Finnhub injoignable ; actualisation impossible.");
   }
 }

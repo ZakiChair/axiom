@@ -36,6 +36,13 @@ function stockage() {
 }
 
 describe("historique BT", () => {
+  it("préserve les bornes d'excursions après sauvegarde et rechargement", () => {
+    const storage = stockage();
+    const historique = creerHistoriqueBacktest(storage);
+    historique.getState().ajouterRun({ ...archiveFixture, stats: { ...archiveFixture.stats, nbExcursionsPartielles: 1 } });
+    const recharge = creerHistoriqueBacktest(storage);
+    expect(recharge.getState().runs[0]?.stats).toMatchObject({ nbExcursionsPartielles: 1, maeMoyenPct: -1, mfeMoyenPct: 3 });
+  });
   it("une version importée ne peut écraser aucune action ou phase du store", () => {
     const avant = backtestStore.getState();
     const version = decoderVersion({ id: "v", nom: "Import", creeMs: 1, schemaVersion: 1,

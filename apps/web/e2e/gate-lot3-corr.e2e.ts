@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { bouchonnerReseau as fermerReseauReel } from "./helpers/reseau-bouchonne";
 
 /**
  * Gate e2e du Lot 3 — CORR v2 (critère de succès no 1 de la spec
@@ -50,6 +51,7 @@ const GLOBAL = {
 
 /** Bouchonne Binance (klines + repli), Twelve Data (/tdapi) et CoinGecko. */
 async function bouchonnerReseau(page: Page): Promise<void> {
+  await fermerReseauReel(page);
   // Repli générique Binance (exchangeInfo…) AVANT la route klines : Playwright teste
   // les routes de la plus récente à la plus ancienne, la plus spécifique gagne.
   await page.route("**/api.binance.com/**", (route) => route.fulfill({ json: [] }));

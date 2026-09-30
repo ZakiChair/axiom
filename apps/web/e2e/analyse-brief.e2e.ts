@@ -26,6 +26,7 @@ test("BRIEF actualise, conserve une référence, compare et réhydrate sans inve
     return route.fulfill({ json: [tuple(FIN - 30 * JOUR, 100), tuple(FIN, fin)] });
   });
   await page.goto("/");
+  await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
   await page.getByPlaceholder(/^Commande/).fill("BRIEF");
   await page.keyboard.press("Enter");

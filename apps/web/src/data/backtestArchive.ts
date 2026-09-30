@@ -5,7 +5,7 @@ import type { ConfigRun } from "../store/backtestSignature";
 import { copierConfigRun, signatureRun } from "../store/backtestSignature";
 
 export const SCHEMA_ARCHIVE_BT = 1;
-export const VERSION_MOTEUR_BT = "bt-2026-09-23";
+export const VERSION_MOTEUR_BT = "bt-2026-09-30";
 
 export interface ArchiveRunBacktest {
   id: string;
@@ -75,6 +75,9 @@ type StatsSerialisees = Omit<StatsBacktest, "profitFactor"> & { profitFactor: nu
 function statsValides(v: unknown): v is StatsSerialisees {
   return objet(v) && CHAMPS_STATS.every((champ) => nombre(v[champ]))
     && (nombre(v.profitFactor) || v.profitFactor === "Infinity")
+    && (v.nbExcursionsPartielles === undefined || (nombre(v.nbExcursionsPartielles)
+      && Number.isInteger(v.nbExcursionsPartielles) && v.nbExcursionsPartielles >= 0
+      && typeof v.nbTrades === "number" && v.nbExcursionsPartielles <= v.nbTrades))
     && nombreOuNull(v.expectancyR);
 }
 
@@ -135,11 +138,15 @@ export function comparerArchives(a: ArchiveRunBacktest, b: ArchiveRunBacktest): 
     || a.donnees.derniereBougieMs !== b.donnees.derniereBougieMs
     || a.donnees.finDonneesMs !== b.donnees.finDonneesMs) avertissements.push("Bornes de données différentes");
   const comparable = avertissements.length === 0;
+  if (a.moteurVersion !== b.moteurVersion) avertissements.push("Versions du moteur différentes");
   if (a.config.fraisPct !== b.config.fraisPct || a.config.slippagePct !== b.config.slippagePct) avertissements.push("Frais différents");
   if (a.config.capitalInitial !== b.config.capitalInitial) avertissements.push("Capitaux initiaux différents");
   if (!comparable) return { comparable, avertissements, deltas: null };
   const deltas: Partial<Record<keyof StatsBacktest, number>> = {};
+  const excursionsPartielles = (a.stats.nbExcursionsPartielles ?? 0) > 0 || (b.stats.nbExcursionsPartielles ?? 0) > 0;
+  if (excursionsPartielles) avertissements.push("MAE/MFE : bornes confirmées, delta non calculable");
   for (const champ of [...CHAMPS_STATS, "expectancyR", "profitFactor"] as const) {
+    if (excursionsPartielles && (champ === "maeMoyenPct" || champ === "mfeMoyenPct")) continue;
     const av = a.stats[champ], bv = b.stats[champ];
     if (typeof av === "number" && typeof bv === "number" && Number.isFinite(av) && Number.isFinite(bv)) deltas[champ] = bv - av;
   }

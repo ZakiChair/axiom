@@ -16,6 +16,7 @@ test("MACRO affiche le quadrant daté à partir des familles existantes", async 
     return route.fulfill({ json: { observations } });
   });
   await page.goto("/");
+  await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
   await page.getByPlaceholder(/^Commande/).fill("MACRO");
   await page.keyboard.press("Enter");

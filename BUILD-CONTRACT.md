@@ -1306,3 +1306,25 @@ elle n'autorise ni ordre réel, ni clé de trading, ni achat d'abonnement.
 
 La revue, les preuves et les limites figurent dans
 [`docs/revue-2026-09-30.md`](docs/revue-2026-09-30.md).
+
+## Suites de la revue (autorisation du 30 septembre 2026)
+
+Le propriétaire autorise les améliorations proposées, en demandant de préserver
+le fonctionnement de l'outil. Le périmètre est limité à quatre lots :
+
+- Backtest : transmettre la fin réelle des données pour les unités de temps
+  fixes, même sans funding. Lors d'une sortie intrabar, ne pas attribuer les
+  extrêmes ultérieurs de la bougie à la détention. Les excursions confirmées
+  constituent des bornes, explicitement qualifiées dans les trades, moyennes et
+  archives. Préserver prix d'exécution, PnL, frais et règlements de funding.
+- Finnhub : conserver le cache utile en cas d'échec, en montrant son âge et le
+  motif du repli. Une donnée périmée ne doit pas sembler fraîche.
+- CI : utiliser Node 24 comme la production et exécuter les parcours mobiles
+  Chromium/WebKit dans un job dédié.
+- Chargement : différer du code facultatif après mesure du graphe d'imports ;
+  garder les plafonds existants et les parcours fonctionnels.
+
+Chaque lot est revu indépendamment. Les validations intégrées et la publication
+sont centralisées par l'orchestrateur ; les clés serveur et le lien public
+conservent les règles du lot précédent. Plan :
+[`docs/superpowers/plans/2026-09-30-corrections-revue.md`](docs/superpowers/plans/2026-09-30-corrections-revue.md).

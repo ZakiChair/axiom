@@ -304,8 +304,8 @@ export function calculerFundingTrade(
  * Excursions d'une position sur les barres DÉTENUES `[indexEntree, indexFinExclusif[`, en %
  * du prix d'entrée : MAE = pire mouvement adverse (≤ 0), MFE = meilleur mouvement favorable
  * (≥ 0), tous deux bornés à 0 (une position qui ne repasse jamais sous son entrée a une MAE
- * nulle). Si la sortie est certaine dès l'open, seule son prix de fill est connu pendant
- * la détention sur cette barre : ses high/low ultérieurs sont exclus. PURE.
+ * nulle). À la sortie intrabar, ses high/low d'ordre inconnu sont exclus : le fill
+ * seul compte en gap, l'open et le fill sinon (bornes confirmées). PURE.
  */
 function excursions(
   sens: SensPosition,
@@ -313,16 +313,17 @@ function excursions(
   candles: Candle[],
   indexEntree: number,
   indexFinExclusif: number,
-  prixSortieALOuverture: number | null = null,
+  prixSortieIntrabar: number | null = null,
+  excursionsPartielles = false,
 ): { maePct: number; mfePct: number } {
   let plusHaut = -Infinity;
   let plusBas = Infinity;
   for (let j = indexEntree; j < indexFinExclusif; j++) {
     const b = candles[j];
     if (b === undefined) continue;
-    if (prixSortieALOuverture !== null && j === indexFinExclusif - 1) {
-      plusHaut = Math.max(plusHaut, prixSortieALOuverture);
-      plusBas = Math.min(plusBas, prixSortieALOuverture);
+    if (prixSortieIntrabar !== null && j === indexFinExclusif - 1) {
+      plusHaut = Math.max(plusHaut, prixSortieIntrabar, excursionsPartielles ? b.open : -Infinity);
+      plusBas = Math.min(plusBas, prixSortieIntrabar, excursionsPartielles ? b.open : Infinity);
       continue;
     }
     if (b.high > plusHaut) plusHaut = b.high;
@@ -341,7 +342,7 @@ function excursions(
  * long (inversé pour un short) ; frais = fraisPct sur le notionnel de CHAQUE côté.
  * `indexFinExclusif` borne les barres détenues pour les excursions : la barre de fill
  * d'une sortie ordinaire (`indexSortie`), ou `n` pour une sortie fin-donnees.
- * Pour un niveau franchi à l'open, le fill remplace les high/low de la barre de sortie.
+ * Pour une sortie intrabar, les prix confirmés remplacent les high/low de sortie.
  */
 function cloturerTrade(
   pos: PositionOuverte,
@@ -354,7 +355,8 @@ function cloturerTrade(
   params: ParamsBacktest,
   candles: Candle[],
   indexFinExclusif: number,
-  prixSortieALOuverture: number | null = null,
+  prixSortieIntrabar: number | null = null,
+  excursionsPartielles = false,
 ): TradeResultat {
   const notionnelEntree = pos.quantite * pos.prixEntree; // ≈ strat.tailleFixe
   const notionnelSortie = pos.quantite * prixSortie;
@@ -395,7 +397,8 @@ function cloturerTrade(
     dureeMs: instantSortieEffectif - pos.tempsEntree,
     risqueInitial,
     r,
-    ...excursions(pos.sens, pos.prixEntree, candles, pos.indexEntree, indexFinExclusif, prixSortieALOuverture),
+    ...excursions(pos.sens, pos.prixEntree, candles, pos.indexEntree, indexFinExclusif, prixSortieIntrabar, excursionsPartielles),
+    ...(excursionsPartielles ? { excursionsPartielles: true as const } : {}),
   };
 }
 
@@ -604,10 +607,10 @@ export function runBacktest(
         : null;
       if (intrabar !== null) {
         const prixSortie = fillSortie(intrabar.prix, pos.sens, params.slippagePct);
-        // La barre i est détenue ; en gap à l'open ses high/low ultérieurs ne comptent
-        // pas, seul le fill connu compte. Le funding reste borné à cet open.
+        // La barre i n'est pas entièrement détenue : seuls l'open et le fill sont
+        // confirmés (fill seul en gap). Le dating/funding du modèle reste inchangé.
         trades.push(
-          cloturerTrade(pos, prixSortie, barreDecision.time, barreDecision.time, i, intrabar.raison, strat, params, candles, i + 1, intrabar.aOuverture ? prixSortie : null),
+          cloturerTrade(pos, prixSortie, barreDecision.time, barreDecision.time, i, intrabar.raison, strat, params, candles, i + 1, prixSortie, !intrabar.aOuverture),
         );
         pos = null;
       } else {
@@ -645,7 +648,8 @@ export function runBacktest(
           params,
           candles,
           n,
-          intrabar?.aOuverture ? prixSortie : null,
+          intrabar !== null ? prixSortie : null,
+          intrabar !== null && !intrabar.aOuverture,
         ),
       );
       pos = null;
@@ -812,6 +816,7 @@ export function calculerStats(
     }
   }
 
+  const nbExcursionsPartielles = trades.filter((trade) => trade.excursionsPartielles === true).length;
   return {
     nbTrades,
     nbGagnants: gagnants.length,
@@ -830,5 +835,6 @@ export function calculerStats(
     expectancyR: nbTradesR > 0 ? sommeR / nbTradesR : null,
     maeMoyenPct: moyenne(trades.map((t) => t.maePct)),
     mfeMoyenPct: moyenne(trades.map((t) => t.mfePct)),
+    ...(nbExcursionsPartielles > 0 ? { nbExcursionsPartielles } : {}),
   };
 }

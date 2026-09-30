@@ -23,6 +23,7 @@ const SRC = dirname(fileURLToPath(import.meta.url)); // apps/web/src
 
 /** Modules différés : jamais sur le chemin initial (chemins src-relatifs, sans extension). */
 const MODULES_DIFFERES: Record<string, string> = {
+  "data/macro/publicationArchive": "archives/import macro — chargés avec EVTS ; seule la capture de consensus appartient au démarrage",
   "store/backtest": "store du backtest — chargé avec BacktestWindow (React.lazy)",
   "data/backtestFunding": "funding réel du backtest — import() au lancement d'un run",
   "data/brief": "overnight de la watchlist — import() depuis rafraichirRegime (commit 7784984)",

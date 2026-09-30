@@ -856,8 +856,8 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
         slippagePct: config.slippagePct,
         capitalInitial: config.capitalInitial,
         ...(config.intrabar ? { intrabar: true } : {}),
+        ...(finDonneesMs !== null ? { finDonneesMs } : {}),
         ...(historiqueFunding !== null && finDonneesMs !== null ? {
-          finDonneesMs,
           funding: { modele: "perp-lineaire" as const, reglements: historiqueFunding.reglements },
         } : {}),
       };

@@ -1,4 +1,4 @@
-import { hasServerCredential } from "../store/serverCredentials";
+import { serverCredentialsStore } from "../store/serverCredentials";
 /**
  * OnboardingOverlay — parcours premier lancement en 3 étapes (≤5 min).
  *
@@ -27,7 +27,6 @@ import { URL_SIGNALER_PROBLEME } from "../lib/lienRetours";
 const COINALYZE_KEY_LS = "axiom:coinalyze:key";
 
 function aCleCoinalyzePersonnelle(): boolean {
-  if (hasServerCredential("coinalyze")) return true;
   try {
     const v = localStorage.getItem(COINALYZE_KEY_LS);
     return v !== null && v.length > 0;
@@ -49,6 +48,9 @@ export function OnboardingOverlay() {
   // Brouillon clé : state local uniquement, vidé après save / step change (jamais loggé).
   const [draftKey, setDraftKey] = useState("");
   const [clePerso, setClePerso] = useState(aCleCoinalyzePersonnelle);
+  const cleServeur = useStore(serverCredentialsStore, (s) => s.providers.coinalyze === true);
+  // Une capacité tardive ne retire jamais un champ dont l’utilisateur a commencé l’édition.
+  const [editionCle, setEditionCle] = useState(false);
   const [alerteCreee, setAlerteCreee] = useState(false);
   const [scalpApplique, setScalpApplique] = useState(false);
 
@@ -56,6 +58,7 @@ export function OnboardingOverlay() {
   useEffect(() => {
     if (step === 0 && !completed) {
       setDraftKey("");
+      setEditionCle(false);
       setAlerteCreee(false);
       setScalpApplique(false);
       setClePerso(aCleCoinalyzePersonnelle());
@@ -90,6 +93,7 @@ export function OnboardingOverlay() {
     if (k.length === 0) return;
     coinalyzeKeyStore.getState().setKey(k);
     setDraftKey("");
+    setEditionCle(false);
     setClePerso(true);
   };
 
@@ -184,12 +188,20 @@ export function OnboardingOverlay() {
                   Clé déjà configurée — vous pouvez passer.
                 </p>
               ) : (
+                <>
+                {cleServeur && (
+                  <p role="status" className="rounded border border-up/40 bg-bg px-3 py-2 text-[11px] text-up">
+                    Clé serveur configurée — vous pouvez passer.
+                  </p>
+                )}
+                {(!cleServeur || editionCle) && (
                 <div className="space-y-2">
                   <input
                     type="password"
                     autoComplete="off"
                     spellCheck={false}
                     value={draftKey}
+                    onFocus={() => setEditionCle(true)}
                     onChange={(e) => setDraftKey(e.target.value)}
                     placeholder="Clé API Coinalyze (optionnel)"
                     className="w-full rounded border border-border bg-bg px-3 py-2 text-[12px] text-text outline-none placeholder:text-text-dim focus:border-accent"
@@ -213,6 +225,8 @@ export function OnboardingOverlay() {
                     </a>
                   </div>
                 </div>
+                )}
+                </>
               )}
               <p className="text-[11px]">
                 Configurable plus tard dans Réglages (⚙). Cette étape est facultative.

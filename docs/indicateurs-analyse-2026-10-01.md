@@ -122,8 +122,8 @@ Les plafonds restent à **1 220 000 octets bruts / 360 000 gzip niveau 9** :
 
 | JavaScript initial | Brut | Gzip |
 | --- | ---: | ---: |
-| Build local | 1 201 440 | 358 789 |
-| Build en mode Vercel | 1 196 070 | 356 864 |
+| Build local final | 1 201 440 | 358 781 |
+| Build final en mode Vercel | 1 196 609 | 357 094 |
 
 Les cartes et explications restent dans le menu chargé à la demande. Le contrôle
 des cinq secrets disponibles sur 1 894 fichiers de sources et de build ne trouve
@@ -132,3 +132,31 @@ aucune occurrence. Aucune valeur de clé n'est ajoutée au code client.
 Application : [AXIOM](https://axiom-iota-vert.vercel.app).
 Les vérifications distantes sont consultables dans la
 [CI du dépôt](https://github.com/ZakiChair/axiom/actions/workflows/ci.yml).
+
+## Contrôle de publication : clés au premier chargement
+
+La [CI du lot d'indicateurs](https://github.com/ZakiChair/axiom/actions/runs/36836101664)
+est passée pour `ab60971`. Les trois préréglages ont été exercés sur le déploiement
+Vercel : ajout, absence de doublon d'EMA, annulation et tracé de compression réel.
+
+Ce contrôle a révélé une limite préexistante : la requête `/api/config` était
+annulée après deux secondes. Une réponse serveur tardive pouvait donc laisser
+les capacités indisponibles jusqu'au rechargement, même avec les cinq clés
+configurées en production. Le premier rendu conserve son attente maximale de
+deux secondes ; la requête continue désormais en arrière-plan avec un délai
+borné de quinze secondes et une seule reprise après panne transitoire.
+L'accueil et les capacités se mettent à jour à l'arrivée de la réponse, en
+préservant une éventuelle saisie personnelle en cours. Seuls les booléens de
+présence circulent dans cette configuration.
+
+La revue indépendante du correctif est favorable : **39 contrôles** couvrent
+notamment l'abandon ignoré, un corps JSON tardif, la concurrence et une ancienne
+réponse arrivant après la reprise. Cinq parcours navigateur vérifient les clés
+serveur/personnelles, la réponse retardée après montage, ainsi que la
+conservation d'un brouillon ou d'un champ simplement focalisé.
+
+Après ce complément, `pnpm check` repasse sous Node 24 : **8 440 tests locaux**
+(dont 5 809 web), typage et build. Les parcours de démarrage, clés et menu
+d'indicateurs repassent **23/23**, ainsi que les **4/4** parcours des préréglages
+sur Chromium/WebKit mobiles. Le build Vercel final est également validé sous
+les mêmes plafonds.

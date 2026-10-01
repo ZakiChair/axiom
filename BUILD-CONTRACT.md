@@ -1292,6 +1292,10 @@ elle n'autorise ni ordre réel, ni clé de trading, ni achat d'abonnement.
   distinguent présence locale et serveur ; supprimer une clé locale ne supprime
   pas le secret du serveur. Le chargement de cette configuration est borné et
   son échec ne doit pas empêcher le terminal de démarrer.
+- Le premier rendu attend au plus deux secondes. Une configuration tardive
+  continue à charger en arrière-plan avec un délai réseau borné et une seule
+  reprise après panne transitoire ; les capacités et l'accueil se mettent à jour
+  sans demander de ressaisir une clé déjà disponible sur le serveur.
 - L'injection se fait uniquement vers l'hôte du fournisseur sur sa route dédiée.
   Finnhub et CoinGecko disposent de routes de lecture dédiées ; les appels Twelve
   Data passent par le proxy en ligne pour ne pas exposer la clé serveur.

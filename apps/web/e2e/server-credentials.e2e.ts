@@ -2,13 +2,45 @@ import { expect, test, type Page } from "@playwright/test";
 import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
 /** Même build Vite que la CI ; seul le module de déploiement simule Vercel. */
-async function preparer(page: Page, configured = true) {
+async function preparer(page: Page, configured = true, onboardingCompleted = true) {
   await bouchonnerReseau(page);
   await page.route("**/src/lib/deployment.ts", route => route.fulfill({ contentType: "text/javascript", body: 'export const IS_VERCEL = true; export const isVercelDeployment = value => value === "vercel";' }));
   await page.route("**/api/config", route => route.fulfill(configured ? {
     json: { providers: Object.fromEntries(["fred", "coinalyze", "twelvedata", "sosovalue", "etherscan", "bgeometrics", "cryptoquant", "ccdata", "defillama", "finnhub", "coingecko"].map(id => [id, true])) },
   } : { status: 503, json: {} }));
-  await page.addInitScript(() => localStorage.setItem("axiom:onboarding:v1", JSON.stringify({ completed: true, step: 0 })));
+  await page.addInitScript((completed) => localStorage.setItem("axiom:onboarding:v1", JSON.stringify({ completed, step: completed ? 0 : 1 })), onboardingCompleted);
+}
+
+for (const edition of ["aucune", "brouillon", "champ focalisé"] as const) {
+  test(`onboarding et configuration tardive : ${edition}, état serveur réactif sans perdre la saisie`, async ({ page }) => {
+    await preparer(page, true, false);
+    let liberer!: () => void;
+    const reponseAutorisee = new Promise<void>((resolve) => { liberer = resolve; });
+    await page.route("**/api/config", async (route) => {
+      await reponseAutorisee;
+      await route.fulfill({ json: { providers: { coinalyze: true } } });
+    });
+    await page.goto("/");
+    const dialogue = page.getByRole("dialog", { name: "Clé Coinalyze (optionnel)" });
+    await expect(dialogue).toBeVisible(); // Le rendu doit être libéré avant la réponse /api/config.
+    const champ = dialogue.getByPlaceholder("Clé API Coinalyze (optionnel)");
+    await expect(champ).toBeVisible();
+    if (edition === "brouillon") await champ.fill("fixture-personnelle");
+    if (edition === "champ focalisé") await champ.focus();
+    liberer();
+    await expect(dialogue.getByText("Clé serveur configurée — vous pouvez passer.", { exact: true })).toBeVisible();
+    if (edition === "aucune") {
+      await expect(champ).toHaveCount(0);
+    } else {
+      await expect(champ).toBeFocused();
+      await expect(champ).toHaveValue(edition === "brouillon" ? "fixture-personnelle" : "");
+      if (edition === "champ focalisé") await champ.fill("fixture-personnelle");
+      expect(await page.evaluate(() => localStorage.getItem("axiom:coinalyze:key"))).toBeNull();
+      await dialogue.getByRole("button", { name: "Enregistrer", exact: true }).click();
+      expect(await page.evaluate(() => localStorage.getItem("axiom:coinalyze:key"))).toBe("fixture-personnelle");
+      await expect(dialogue.getByText("Clé déjà configurée — vous pouvez passer.", { exact: true })).toBeVisible();
+    }
+  });
 }
 
 test("première ouverture sans clé locale : accès serveur, proxy et remplacement personnel", async ({ page }) => {

@@ -33,6 +33,9 @@ import type {
 /** Nombre max d'horodatages conservés par def (fenêtre glissante). */
 const MAX_DECLENCHEMENTS = 20;
 
+/** Ces diagnostics confirmés ne doivent jamais recycler une fenêtre devenue indisponible. */
+const INDICATEURS_CONFIRMES = new Set(["narrowRange", "returnAutocorrelation", "rollingDrawdown"]);
+
 /** Une propriété présente doit être un timestamp positif fini ; l'absence legacy est valide. */
 export function echeanceAlerteValide(def: Pick<AlertDef, "expireTs">): boolean {
   if (!Object.prototype.hasOwnProperty.call(def, "expireTs")) return true;
@@ -207,8 +210,9 @@ function etatCondition(
     case "indicateur-seuil": {
       const serie = calculerSortie(c.indicateurId, c.params, c.output, ctx.candles);
       if (!serie) return null;
-      const v = derniereValeurDefinie(serie);
-      if (v === undefined) return null;
+      const courantExige = INDICATEURS_CONFIRMES.has(c.indicateurId);
+      const v = courantExige ? serie[(ctx.candles?.length ?? 0) - 1] : derniereValeurDefinie(serie);
+      if (v === undefined || (courantExige && !Number.isFinite(v))) return null;
       return { satisfaite: comparer(v, c.comparateur, c.valeur), valeur: v };
     }
     case "indicateur-croisement": {
@@ -220,7 +224,9 @@ function etatCondition(
       const a = res.series[c.outputA];
       const b = res.series[c.outputB];
       if (!a || !b) return null;
-      const paire = deuxDernieresPaires(a, b);
+      const paire = INDICATEURS_CONFIRMES.has(c.indicateurId)
+        ? deuxPairesCourantes(a, b, candles.length)
+        : deuxDernieresPaires(a, b);
       if (!paire) return null;
       const { a0, b0, a1, b1 } = paire;
       const franchitHaut = a0 <= b0 && a1 > b1;
@@ -354,7 +360,9 @@ function evalIndicateurCroisement(
   const b = res.series[c.outputB];
   if (!a || !b) return null;
 
-  const paire = deuxDernieresPaires(a, b);
+  const paire = INDICATEURS_CONFIRMES.has(c.indicateurId)
+    ? deuxPairesCourantes(a, b, candles.length)
+    : deuxDernieresPaires(a, b);
   if (!paire) return null;
   const { a0, b0, a1, b1 } = paire;
 
@@ -531,6 +539,22 @@ function derniereValeurDefinie(serie: Array<number | undefined>): number | undef
     if (v !== undefined) return v;
   }
   return undefined;
+}
+
+/** Les deux derniers indices exacts doivent fournir quatre valeurs finies. */
+function deuxPairesCourantes(
+  a: Array<number | undefined>,
+  b: Array<number | undefined>,
+  n: number
+): { a0: number; b0: number; a1: number; b1: number } | null {
+  if (n < 2) return null;
+  const a0 = a[n - 2];
+  const b0 = b[n - 2];
+  const a1 = a[n - 1];
+  const b1 = b[n - 1];
+  if (a0 === undefined || b0 === undefined || a1 === undefined || b1 === undefined
+    || !Number.isFinite(a0) || !Number.isFinite(b0) || !Number.isFinite(a1) || !Number.isFinite(b1)) return null;
+  return { a0, b0, a1, b1 };
 }
 
 /** Les deux dernières valeurs CONSÉCUTIVES où A et B sont toutes deux définies. */

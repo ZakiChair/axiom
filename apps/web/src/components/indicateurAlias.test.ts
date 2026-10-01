@@ -23,6 +23,12 @@ describe("normaliser", () => {
 });
 
 describe("correspondAlias", () => {
+  it("retrouve compression, liaison des rendements et récupération par leurs noms usuels", () => {
+    expect(correspondAlias("narrowRange", normaliser("NR7"))).toBe(true);
+    expect(correspondAlias("narrowRange", normaliser("bougie intérieure"))).toBe(true);
+    expect(correspondAlias("returnAutocorrelation", normaliser("autocorrélation"))).toBe(true);
+    expect(correspondAlias("rollingDrawdown", normaliser("hausse requise"))).toBe(true);
+  });
   it("trouve les nouveaux indicateurs par leur usage français", () => {
     expect(correspondAlias("rvolSeasonal", normaliser("volume horaire"))).toBe(true);
     expect(correspondAlias("downsideVariance", normaliser("semivariance"))).toBe(true);

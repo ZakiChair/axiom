@@ -17,8 +17,17 @@ const VALID_CATEGORIES = new Set<IndicatorCategory>([
 ]);
 
 describe("registry", () => {
-  it("câble exactement 215 indicateurs", () => {
-    expect(INDICATORS.length).toBe(215);
+  it("câble exactement 218 indicateurs", () => {
+    expect(INDICATORS.length).toBe(218);
+  });
+
+  it("rend les trois nouvelles analyses disponibles sans série auxiliaire", () => {
+    for (const id of ["narrowRange", "returnAutocorrelation", "rollingDrawdown"]) {
+      const def = getIndicator(id);
+      expect(def, id).toBeDefined();
+      expect(def?.pane).toBe("separate");
+      expect(def?.aux ?? []).toEqual([]);
+    }
   });
 
   it("n'a aucun id dupliqué", () => {

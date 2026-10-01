@@ -1,9 +1,82 @@
 import { expect, test, type Page } from "@playwright/test";
 import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
+import { preparerPrereglages, lirePaneAnalyse, lireInstances } from "./helpers/prereglages-indicateurs";
 
 test.beforeEach(async ({ page }) => {
   await bouchonnerReseau(page);
   await page.addInitScript(() => localStorage.setItem("axiom:onboarding:v1", JSON.stringify({ completed: true, step: 0 })));
+});
+
+test("les trois préréglages créent une vraie pane calculée et leur annulation préserve les indicateurs personnels", async ({ page }, testInfo) => {
+  await preparerPrereglages(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: /^Indicateurs/ }).click();
+  await page.getByText("Préréglages d’analyse · 3", { exact: true }).click();
+  const avant = await lireInstances(page);
+  for (const [nom, id, sorties] of [
+    ["Polyvalent", "returnAutocorrelation", ["acf"]],
+    ["Intraday", "narrowRange", ["nr", "inside"]],
+    ["Swing", "rollingDrawdown", ["drawdown", "recovery"]],
+  ] as const) {
+    const ajouter = page.getByRole("button", { name: `Ajouter le préréglage ${nom}`, exact: true });
+    await ajouter.click();
+    await expect(ajouter).toBeDisabled();
+    await expect.poll(async () => {
+      const pane = await lirePaneAnalyse(page, id);
+      return Boolean(pane?.canvas && pane.hauteur > 0 && sorties.every((s) => Number.isFinite(pane.dernier?.[s])));
+    }).toBe(true);
+    await page.getByLabel(`Comprendre le préréglage ${nom}`, { exact: true }).click();
+    if (nom === "Swing") {
+      await expect(page.getByText(/−20 % nécessite \+25 %/)).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath("prereglages-bureau.png") });
+    }
+    await page.getByRole("button", { name: `Annuler l’ajout ${nom}`, exact: true }).click();
+    await expect.poll(() => lireInstances(page)).toEqual(avant);
+    await expect.poll(() => lirePaneAnalyse(page, id)).toBeNull();
+  }
+  await page.getByPlaceholder(/Rechercher… \(CVD/).fill("RSI");
+  await page.getByRole("button", { name: "Ajouter RSI", exact: true }).click();
+  await expect.poll(async () => (await lireInstances(page)).map((i) => i.defId)).toEqual(["ema", "rsi"]);
+});
+
+test("un préréglage persiste sans modifier les jeux personnels ni dupliquer une configuration au rechargement", async ({ page }) => {
+  await preparerPrereglages(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: /^Indicateurs/ }).click();
+  await page.getByText("Préréglages d’analyse · 3", { exact: true }).click();
+  const jeux = await page.evaluate(() => localStorage.getItem("axiom:indicatorSets:v1"));
+  await page.getByRole("button", { name: "Ajouter le préréglage Intraday", exact: true }).click();
+  const avant = await lireInstances(page);
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("axiom:chartState:v1") ?? "{}").indicators)).toEqual(avant);
+  await page.reload();
+  await page.getByRole("button", { name: /^Indicateurs/ }).click();
+  await page.getByText("Préréglages d’analyse · 3", { exact: true }).click();
+  await expect(page.getByRole("button", { name: "Ajouter le préréglage Intraday", exact: true })).toBeDisabled();
+  expect(await lireInstances(page)).toEqual(avant);
+  expect(await page.evaluate(() => localStorage.getItem("axiom:indicatorSets:v1"))).toBe(jeux);
+});
+
+test("un préréglage refuse l’ajout entier au plafond de panneaux et explique comment libérer la place", async ({ page }) => {
+  await preparerPrereglages(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: /^Indicateurs/ }).click();
+  await expect.poll(() => page.evaluate(async () => {
+    const { chartCapaciteStore } = await import("/src/store/chartCapacite.ts");
+    return chartCapaciteStore.getState().paneMax;
+  })).toBeGreaterThan(0);
+  // Remplir la capacité réelle publiée par la géométrie, sans la simuler ni forcer le bouton.
+  await page.evaluate(async () => {
+    const [{ indicatorsStore }, { chartCapaciteStore }] = await Promise.all([import("/src/store/indicators.ts"), import("/src/store/chartCapacite.ts")]);
+    indicatorsStore.getState().append(Array.from({ length: chartCapaciteStore.getState().paneMax }, (_, i) => ({ defId: "rsi", params: { length: 14 + i } })));
+  });
+  await expect.poll(async () => (await lirePaneAnalyse(page, "rsi"))?.canvas).toBe(true);
+  // Le resize stabilise les hauteurs des panes montées et exerce une vraie capacité réduite.
+  await page.setViewportSize({ width: 1280, height: 600 });
+  const avant = await lireInstances(page);
+  await page.getByText("Préréglages d’analyse · 3", { exact: true }).click();
+  await expect(page.getByRole("button", { name: "Ajouter le préréglage Swing", exact: true })).toBeDisabled();
+  await expect(page.locator("#preset-swing-description")).toContainText("fermez un panneau");
+  expect(await lireInstances(page)).toEqual(avant);
 });
 
 test("les deux catalogues chargent au premier clic et Échap rend le focus au déclencheur", async ({ page }) => {

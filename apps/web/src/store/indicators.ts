@@ -240,6 +240,8 @@ export interface IndicatorsState {
   indicators: ActiveIndicator[];
   /** Ajoute une NOUVELLE instance du `defId` aux params par défaut. */
   add: (defId: string) => void;
+  /** Ajoute un groupe en une publication, sans réattribuer les identités/couleurs existantes. */
+  append: (instances: readonly IndicatorInstance[]) => string[];
   /** Retire l'instance identifiée. */
   remove: (instanceId: string) => void;
   /** Duplique une instance (params clonés, nouvel instanceId), insérée juste après. */
@@ -265,6 +267,24 @@ export interface IndicatorsState {
 
 export const indicatorsStore = createStore<IndicatorsState>((set, get) => ({
   indicators: [],
+
+  append: (instances) => {
+    const current = get().indicators;
+    const used = new Set(current.map((i) => i.instanceId));
+    const next = [...current];
+    const ids: string[] = [];
+    for (const instance of instances) {
+      const def = getIndicator(instance.defId);
+      if (!def) continue;
+      const params = resolveParams(def, instance.params);
+      const instanceId = uniqueId(`${def.id}-${shortHash(params)}`, used);
+      used.add(instanceId);
+      next.push({ instanceId, defId: def.id, params, couleurIdx: prochainIndexCouleur(occupationCouleurs(next)) });
+      ids.push(instanceId);
+    }
+    if (ids.length > 0) set({ indicators: next });
+    return ids;
+  },
 
   add: (defId) => {
     const def = getIndicator(defId);

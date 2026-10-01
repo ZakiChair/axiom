@@ -101,6 +101,35 @@ describe("migratePersistedIndicators (fonction PURE)", () => {
 });
 
 describe("actions du store", () => {
+  it("append ajoute un groupe en une publication et conserve les identités et couleurs déjà actives", () => {
+    const existante = { instanceId: "ema-personnelle", defId: "ema", params: { length: 50 }, couleurIdx: 4 };
+    indicatorsStore.setState({ indicators: [existante] });
+    const publications: string[][] = [];
+    const unsubscribe = indicatorsStore.subscribe((s) => publications.push(s.indicators.map((i) => i.defId)));
+    const ids = indicatorsStore.getState().append([
+      { defId: "ema", params: { length: 20 } },
+      { defId: "rsi", params: { length: 14 } },
+    ]);
+    unsubscribe();
+    const instances = indicatorsStore.getState().indicators;
+    expect(publications).toEqual([["ema", "ema", "rsi"]]);
+    expect(instances[0]).toBe(existante);
+    expect(ids).toEqual(instances.slice(1).map((i) => i.instanceId));
+    expect(new Set(instances.map((i) => i.instanceId)).size).toBe(3);
+    expect(instances[1]?.params).toEqual({ length: 20, source: "close" });
+    expect(instances[1]?.couleurIdx).not.toBe(4);
+  });
+
+  it("append vide ne publie aucun changement et une instance ajoutée reste indépendante du paramètre entrant", () => {
+    const avant = indicatorsStore.getState();
+    expect(avant.append([])).toEqual([]);
+    expect(indicatorsStore.getState()).toBe(avant);
+    const params = { length: 20 };
+    avant.append([{ defId: "ema", params }]);
+    params.length = 50;
+    expect(indicatorsStore.getState().indicators[0]?.params.length).toBe(20);
+  });
+
   it("add crée une instance aux params par défaut avec un instanceId unique", () => {
     const s = indicatorsStore.getState();
     s.add("ema");

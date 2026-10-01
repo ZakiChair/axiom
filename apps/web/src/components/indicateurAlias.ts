@@ -43,6 +43,8 @@ export const ALIAS_INDICATEURS: Readonly<Record<string, readonly string[]>> = {
   atrPct: ["volatilite en pourcentage", "volatilite"],
   historicalVol: ["volatilite historique", "volatilite realisee", "ecart type"],
   downsideVariance: ["semivariance", "variance baissiere", "variance haussiere", "risque baissier"],
+  narrowRange: ["nr7", "nr 7", "compression", "inside bar", "bougie interieure", "amplitude etroite"],
+  rollingDrawdown: ["drawdown", "repli", "sommet glissant", "hausse requise", "recuperation"],
   stddev: ["ecart type", "dispersion"],
   garmanKlassVol: ["volatilite garman klass", "volatilite ohlc", "volatilite"],
   rogersSatchellVol: ["volatilite rogers satchell", "volatilite sans derive", "volatilite ohlc", "volatilite"],
@@ -82,6 +84,7 @@ export const ALIAS_INDICATEURS: Readonly<Record<string, readonly string[]>> = {
   fractals: ["fractales", "sommets et creux"],
 
   // Statistiques croisées (vs symbole de référence).
+  returnAutocorrelation: ["autocorrelation", "acf", "liaison des rendements", "alternance", "lag 1"],
   rollingCorrelation: ["correlation glissante", "correlation", "couple"],
   betaRef: ["beta", "sensibilite", "couple"],
   spreadZScore: ["z score du spread", "ecart normalise", "pair trading", "couple"],

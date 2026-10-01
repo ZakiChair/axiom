@@ -82,6 +82,9 @@ import { kdj } from "./momentum/kdj";
 // — volatility —
 import { atr } from "./volatility/atr";
 import { atrRegime } from "./volatility/atrRegime";
+import { narrowRange } from "./volatility/narrowRange";
+import { rollingDrawdown } from "./volatility/rollingDrawdown";
+import { returnAutocorrelation } from "./statistical/returnAutocorrelation";
 import { bbBandwidth } from "./volatility/bbBandwidth";
 import { bbPercentB } from "./volatility/bbPercentB";
 import { bollinger } from "./volatility/bollinger";
@@ -326,6 +329,8 @@ export const INDICATORS: IndicatorDef[] = [
   // volatility
   atr,
   atrRegime,
+  narrowRange,
+  rollingDrawdown,
   bbBandwidth,
   bbPercentB,
   bollinger,
@@ -354,6 +359,7 @@ export const INDICATORS: IndicatorDef[] = [
   skewKurt,
   corwinSchultz,
   // statistical (cross-asset vs symbole de référence)
+  returnAutocorrelation,
   rollingCorrelation,
   betaRef,
   downsideCorrelation,

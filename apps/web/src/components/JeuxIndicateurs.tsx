@@ -14,6 +14,8 @@ import { indicatorsStore, type ActiveIndicator } from "../store/indicators";
 import { indicatorSetsStore, MAX_JEUX } from "../store/indicatorSets";
 import { pousserToast } from "../store/toasts";
 import { Input } from "./ui";
+import { chartCapaciteStore } from "../store/chartCapacite";
+import { PRESETS_ANALYSE, planifierPreset, ajouterPreset, annulerAjoutPreset } from "../lib/indicatorPresets";
 
 export function JeuxIndicateurs({ actives }: { actives: ActiveIndicator[] }) {
   const jeux = useStore(indicatorSetsStore, (s) => s.jeux);
@@ -22,6 +24,9 @@ export function JeuxIndicateurs({ actives }: { actives: ActiveIndicator[] }) {
   const [nom, setNom] = useState("");
   /** Id en attente de confirmation de suppression (second clic sur ✕). */
   const [aConfirmer, setAConfirmer] = useState<string | null>(null);
+  const toutesActives = useStore(indicatorsStore, (s) => s.indicators);
+  const paneMax = useStore(chartCapaciteStore, (s) => s.paneMax);
+  const [dernierAjout, setDernierAjout] = useState<{ nom: string; instances: ActiveIndicator[] } | null>(null);
 
   const peutEnregistrer = nom.trim() !== "" && actives.length > 0;
   const plein = jeux.length >= MAX_JEUX;
@@ -34,7 +39,56 @@ export function JeuxIndicateurs({ actives }: { actives: ActiveIndicator[] }) {
   }
 
   return (
-    <div className="border-b border-neutral-800 p-1">
+    <div className="max-h-[26vh] shrink-0 overflow-y-auto border-b border-neutral-800 p-1">
+      <details>
+        <summary className="cursor-pointer px-2 py-2 text-[11px] font-semibold text-text-dim">Préréglages d’analyse · 3</summary>
+      <div className="px-2 py-1">
+        <p className="mt-1 text-[10px] text-text-dim">Ajoute les réglages manquants. Un panneau par jeu, sans clé API.</p>
+        <p className="mt-1 text-[10px] text-text-dim">Périodes en bougies, pas en jours. Les trois nouvelles analyses attendent la clôture et un historique suffisant ; l’EMA suit aussi la bougie en cours.</p>
+      </div>
+      {PRESETS_ANALYSE.map((preset) => {
+        const plan = planifierPreset(preset, toutesActives, paneMax);
+        const present = plan.ajouts.length === 0;
+        const descriptionId = `preset-${preset.id}-description`;
+        return (
+          <div key={preset.id} className="mx-2 my-1 rounded border border-neutral-800 px-2 py-1">
+            <button
+              type="button"
+              aria-label={`Ajouter le préréglage ${preset.nom}`}
+              aria-describedby={descriptionId}
+              disabled={present || plan.raison !== null}
+              onClick={() => {
+                const resultat = ajouterPreset(preset);
+                if (resultat.raison) pousserToast(resultat.raison);
+                else if (resultat.instances.length > 0) {
+                  setDernierAjout({ nom: preset.nom, instances: resultat.instances });
+                  pousserToast(`${preset.nom} : ${resultat.instances.length} indicateur${resultat.instances.length > 1 ? "s" : ""} ajouté${resultat.instances.length > 1 ? "s" : ""}`);
+                }
+              }}
+              className="flex min-h-9 w-full items-center justify-between gap-2 text-left text-xs text-neutral-200 disabled:text-neutral-500"
+            >
+              <span className="font-semibold">{preset.nom}</span>
+              <span className="text-[10px]">{present ? "Déjà présent" : plan.raison ? "Capacité atteinte" : "＋ Ajouter"}</span>
+            </button>
+            <p id={descriptionId} className="text-[10px] text-text-dim">{preset.resume}{plan.raison ? ` — ${plan.raison}` : ""}</p>
+            <details className="mt-1 text-[10px] text-text-dim">
+              <summary className="cursor-pointer py-1" aria-label={`Comprendre le préréglage ${preset.nom}`}>Comprendre</summary>
+              <p className="pb-1 leading-relaxed">{preset.explication}</p>
+            </details>
+          </div>
+        );
+      })}
+      </details>
+      {dernierAjout !== null && dernierAjout.instances.some((instance) => toutesActives.includes(instance)) && (
+        <button
+          type="button"
+          title="Retirer uniquement les instances ajoutées encore non modifiées"
+          onClick={() => { annulerAjoutPreset(dernierAjout.instances); setDernierAjout(null); }}
+          className="mx-2 min-h-9 text-xs text-accent hover:underline"
+        >
+          Annuler l’ajout {dernierAjout.nom}
+        </button>
+      )}
       <div className="flex items-baseline gap-2 px-2 py-1">
         <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
           Jeux

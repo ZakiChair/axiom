@@ -397,7 +397,7 @@ export function IndicatorMenu() {
           <>
           {/* Section « Actifs » : les instances affichées, éditables par instance. */}
           {activesAnalyse.length > 0 && (
-            <div className="border-b border-neutral-800 p-1">
+            <div className="max-h-[20vh] shrink-0 overflow-y-auto border-b border-neutral-800 p-1">
               <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
                 Actifs <span className="text-neutral-600">{activesAnalyse.length}</span>
               </div>

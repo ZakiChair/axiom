@@ -19,7 +19,7 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 - **Cible** : terminal pour UN utilisateur (ses propres clés). PAS de multi-tenant, PAS d'auth réseau, PAS de SaaS. Crypto d'abord (spot + perp) ; tradfi/commodités en complément.
 - **Renderer-first** : le premier livrable à valeur est un graphe live à l'écran. **AUCUN backend réseau/multi-tenant (Docker/TimescaleDB/Redis interdits). Un daemon localhost mono-process (`apps/daemon`, Bun + SQLite, port 8787) est autorisé depuis la Phase 2 — proxy/cache/persistance/alertes UNIQUEMENT, jamais sur le chemin chaud du renderer (les WS de marché du front restent directs).** Le front parle directement aux WS publics des exchanges (mode mono-utilisateur assumé) et reste **100 % fonctionnel SANS daemon** (feature-detect `/health` + repli localStorage/proxy Vite). Déviation assumée vs roadmap E1 : les proxys Vite restent en dev (dev sans daemon), le daemon est le chemin de PROD + services additionnels.
 - **Chart** : **KLineChart** figé (pas de lightweight-charts, pas d'abstraction `IChartRenderer` « swap de moteur »). L'overlay orderflow se synchronise sur le viewport de KLineChart. Multi-chart 2×2 : un store par slot ; les overlays doivent être scellés au slot (voir plan 2026-08-24, Lot 3).
-- **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**215 indicateurs** depuis le 2026-09-26, cf. « Classement, impression de stablecoins et dessins (26 septembre 2026) » ; 214 au 2026-09-23). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
+- **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**218 indicateurs** depuis le 2026-10-01, cf. « Indicateurs d'analyse (demande du 1 octobre 2026) » ; 215 au 2026-09-26). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
 - **Données dérivées (OI/funding/L-S/liquidations)** : **ACHETER** via un `IDerivedDataProvider` (Coinalyze **câblé**, M6 atteint) — NE PAS construire d'AggregationEngine multi-exchange. Trois couches de liquidations distinctes et étiquetées : heatmap *exécutée*, niveaux **EST.** (modèle levier), niveaux **HL réels** (Hyperliquid, non exhaustif). Depuis le 2026-09-21, la heatmap exécutée reçoit aussi une venue `hyperliquid` **PARTIELLE** (fills des makers suivis, couverture mesurée affichée — cf. « Corrections et extension demandées le 21 septembre 2026 »). Depuis le 2026-09-22, la couche HL réels est aussi une **heatmap temps × prix des instantanés** collectés par le daemon (opt-in, couverture mesurée en % de l'OI — cf. « Revue et extension du 22 septembre 2026 »).
 - **Trading** : **PAS d'exécution d'ordres** — aucune clé de trading. Le paper trading (`PAPER`) est une simulation locale (hors gate G100/K8). Ne rien implémenter qui touche à des clés de trading réelles.
 - **Sources** : **9 identifiants** (`EXCHANGE_IDS` dans `@axiom/types`) — Binance, Bybit, OKX, Hyperliquid, Coinbase, Kraken, Twelve Data, MEXC, synthetic. Ne pas en ajouter sans nécessité démontrée (non-objectif avant G100).
@@ -79,7 +79,7 @@ d'historique (demande du 26 septembre 2026) »). Voir la
 - Ne pas créer de backend **réseau/multi-tenant**, de docker-compose, de schéma DB serveur (le daemon localhost mono-process de la Phase 2 est la SEULE exception, cf. Décisions verrouillées).
 - **Avant le verdict G100** : pas de nouvelle fenêtre, pas de nouveau fournisseur sans remplacement direct d'une source défaillante (exceptions ACTÉES : fournisseurs de capitalisation CMC/CCData, fournisseurs statistiques publics OCDE/Eurostat/ONS le 2026-09-06, et CryptoQuant BASIC le 2026-09-16 sur décision explicite du propriétaire — **sans source défaillante remplacée**, l'exception est nommée comme telle — cf. Décisions verrouillées), pas de migration React/Vite/Zustand/KLineChart majeure (plan 2026-08-24, §12).
 - Ne pas « améliorer » `@axiom/types` ni les configs racine.
-- Ne pas étendre le catalogue d'indicateurs sans nécessité démontrée (le contrat est à 215, pas « plus de 7 » — l'ancien jalon M2 est historique, cf. ci-dessus).
+- Ne pas étendre le catalogue d'indicateurs sans nécessité démontrée (le contrat est à 218, pas « plus de 7 » — l'ancien jalon M2 est historique, cf. ci-dessus).
 
 ### Garde-fous reportés de la roadmap (docs/research/03, §Anti-recommandations)
 Les anti-recommandations #2 (Docker/Redis/TimescaleDB), #3 (proxifier les WS via le daemon) et #6 (abstraction de moteur de chart) sont déjà couvertes ci-dessus et dans les Décisions verrouillées. Les 6 restantes, à respecter tout autant :
@@ -1328,3 +1328,38 @@ Chaque lot est revu indépendamment. Les validations intégrées et la publicati
 sont centralisées par l'orchestrateur ; les clés serveur et le lien public
 conservent les règles du lot précédent. Plan :
 [`docs/superpowers/plans/2026-09-30-corrections-revue.md`](docs/superpowers/plans/2026-09-30-corrections-revue.md).
+
+## Indicateurs d'analyse (demande du 1 octobre 2026)
+
+Le propriétaire demande de nouveaux indicateurs/fonctions et précise vouloir
+couvrir les trois usages : polyvalent, intraday et swing. Cette demande autorise
+trois définitions supplémentaires dans le catalogue existant, soit 218 au terme
+du lot : `narrowRange`, `returnAutocorrelation` et `rollingDrawdown`. Aucun nouvel
+écran, fournisseur, secret, ordre réel, package runtime ou changement de types.
+
+- Calculs purs et causaux sur les bougies confirmées ; historique insuffisant ou
+  invalide = valeur absente expliquée, jamais zéro inventé. Les périodes sont
+  des nombres de bougies/rendements, pas des jours supposés.
+- NR compare l'amplitude courante aux précédentes dans la fenêtre, égalités
+  incluses. Inside Bar exige deux bornes strictement intérieures. Les sorties
+  décrivent une compression, sans direction d'achat/vente.
+- L'autocorrélation est l'ACF de retard 1 du NIST, avec une moyenne commune sur
+  la fenêtre de rendements logarithmiques ; ce n'est pas Pearson sur deux listes
+  tronquées. Une variance indéterminable ou une cadence irrégulière invalide la
+  fenêtre. Les fermetures de marché peuvent donc rendre cette mesure absente.
+- Le repli est signé depuis le maximum des clôtures de la fenêtre ; la hausse
+  nécessaire pour retrouver ce niveau est distincte. Le départ d'un ancien pic
+  de la fenêtre ne constitue pas une récupération réalisée.
+- Trois configurations facultatives ajoutent chacune une EMA et un nouvel
+  indicateur. L'ajout préserve les instances et jeux personnels, évite les
+  doublons exacts et respecte la capacité mesurée du graphe. Son annulation ne
+  retire que les instances qu'il vient d'ajouter.
+- Les alertes de ces trois définitions exigent une valeur finie au dernier index
+  évalué ; un croisement exige les deux derniers index. Une valeur historique
+  avant un trou ou une variance indéterminable ne devient pas la valeur courante.
+  Cette garde vise ces nouveaux identifiants, en conditions simples et composites.
+
+Le moteur d'exécution, les stratégies et les formules des indicateurs existants
+restent hors de ce lot. Revue mathématique indépendante, contrôles de causalité,
+parcours navigateur et plafonds de build inchangés avant publication. Usage et
+validation : [`docs/indicateurs-analyse-2026-10-01.md`](docs/indicateurs-analyse-2026-10-01.md).

@@ -168,13 +168,13 @@ describe("resumerCot", () => {
     const { lignes } = resumerCot(records);
     const or = lignes.find((l) => l.nom === OR);
     expect(or?.serie).toEqual([
-      { t: Date.parse("2026-06-16T00:00:00.000"), net: 211127 - 30907, oi: 339330 },
-      { t: Date.parse("2026-06-23T00:00:00.000"), net: 217028 - 35689, oi: 352167 },
+      { t: Date.parse("2026-06-16T00:00:00.000"), net: 211127 - 30907, oi: 339330, longs: 211127, shorts: 30907 },
+      { t: Date.parse("2026-06-23T00:00:00.000"), net: 217028 - 35689, oi: 352167, longs: 217028, shorts: 35689 },
     ]);
     const btc = lignes.find((l) => l.nom === BTC);
     expect(btc?.serie).toEqual([
-      { t: Date.parse("2026-06-16T00:00:00.000"), net: 17727 - 14252, oi: 21000 },
-      { t: Date.parse("2026-06-23T00:00:00.000"), net: 16348 - 12824, oi: 20554 },
+      { t: Date.parse("2026-06-16T00:00:00.000"), net: 17727 - 14252, oi: 21000, longs: 17727, shorts: 14252 },
+      { t: Date.parse("2026-06-23T00:00:00.000"), net: 16348 - 12824, oi: 20554, longs: 16348, shorts: 12824 },
     ]);
   });
 
@@ -199,7 +199,7 @@ describe("resumerCot", () => {
     const { lignes } = resumerCot(avecTrous);
     const btc = lignes.find((l) => l.nom === BTC);
     expect(btc?.serie).toHaveLength(2);
-    expect(btc?.serie[0]).toEqual({ t: Date.parse("2026-06-09T00:00:00.000"), net: 60, oi: 5000 });
+    expect(btc?.serie[0]).toEqual({ t: Date.parse("2026-06-09T00:00:00.000"), net: 60, oi: 5000, longs: 100, shorts: 40 });
     expect(btc?.serie[1]?.t).toBe(Date.parse("2026-06-23T00:00:00.000"));
     expect(btc?.serie[1]?.net).toBe(90);
     expect(btc?.serie[1]?.oi).toBeNaN();
@@ -584,4 +584,29 @@ describe("WATCHLIST_COT / CATEGORIES_COT (cohérence de curation)", () => {
     const familles = new Set(CATEGORIES_COT.map((c) => c.id));
     for (const i of WATCHLIST_COT) expect(familles.has(i.categorie)).toBe(true);
   });
+});
+
+
+describe("conservation des stocks source par paire", () => {
+  for (const dataset of ["legacy", "disaggregated", "tff"] as const) {
+    for (const categorie of ["fonds", "commerciaux"] as const) {
+      it(`${dataset} / ${categorie} conserve la bonne paire et ignore l'autre`, () => {
+        const champs = DATASETS_COT[dataset].champs;
+        const paire = categorie === "fonds" ? champs.net1 : champs.net2;
+        const rec = {
+          market_and_exchange_names: "instrument", report_date_as_yyyy_mm_dd: "2026-06-23",
+          [champs.net1[0]]: 100, [champs.net1[1]]: 40,
+          [champs.net2[0]]: 30, [champs.net2[1]]: 70,
+        };
+        const pt = pointCotDataset(dataset, categorie, rec);
+        expect(pt?.longs).toBe(rec[paire[0]]);
+        expect(pt?.shorts).toBe(rec[paire[1]]);
+        expect(pt?.net).toBe(Number(rec[paire[0]]) - Number(rec[paire[1]]));
+        for (const invalide of [-1, Infinity, "", undefined]) {
+          expect(pointCotDataset(dataset, categorie, { ...rec, [paire[0]]: invalide })).toBeNull();
+          expect(pointCotDataset(dataset, categorie, { ...rec, [paire[1]]: invalide })).toBeNull();
+        }
+      });
+    }
+  }
 });

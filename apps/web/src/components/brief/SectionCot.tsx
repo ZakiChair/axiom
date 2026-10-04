@@ -1,11 +1,11 @@
 /**
- * Section BRIEF — COT (semaine) : cache legacy SEUL, 3 instruments au |Δ hebdo net|
- * max. Le garde de présence (cache vide → absente) reste dans l'orchestrateur, qui
+ * Section BRIEF — COT : cache legacy SEUL, 3 instruments au |Δ net entre rapports|
+ * max, mouvements longs/shorts séparés. Le garde de présence reste dans l'orchestrateur, qui
  * ne monte cette section qu'avec un `cot` non nul.
  */
-import { formatDateCourte, formatEntier } from "../../lib/format";
 import { NoteSource } from "../ui";
-import { couleurVariation, TitreBloc, type CotChart } from "./commun";
+import { TitreBloc, type CotChart } from "./commun";
+import { NetCot, PeriodeCot, PositionsCot } from "../cot/PositionsCot";
 
 interface Props {
   cot: CotChart;
@@ -14,24 +14,21 @@ interface Props {
 export function SectionCot({ cot }: Props) {
   return (
     <section className="space-y-2">
-      <TitreBloc>COT · semaine</TitreBloc>
-      <div className="space-y-1">
-        {cot.lignes.map(({ ligne, delta }) => (
-          <div
-            key={ligne.nom}
-            className="flex items-baseline justify-between gap-2 text-[11px] tabular-nums"
-          >
-            <span className="min-w-0 flex-1 truncate text-text">{ligne.libelle}</span>
-            <span style={{ color: couleurVariation(delta) }}>
-              Δ {delta >= 0 ? "+" : ""}
-              {formatEntier(delta)}
-            </span>
-          </div>
+      <TitreBloc>COT · positions non-commerciales</TitreBloc>
+      <div className="space-y-3">
+        {cot.lignes.map(({ ligne }) => (
+          <article key={ligne.nom} className="space-y-1" aria-label={ligne.libelle}>
+            <h4 className="text-[11px] font-medium text-text">{ligne.libelle}</h4>
+            <PeriodeCot ligne={ligne} />
+            <PositionsCot ligne={ligne} />
+            <NetCot ligne={ligne} />
+          </article>
         ))}
       </div>
       <NoteSource>
-        Rapport COT CFTC (legacy, net non-commercial) · Δ 1 semaine ·{" "}
-        {cot.dateRapport !== null ? formatDateCourte(cot.dateRapport) : "date n/d"}.
+        CFTC legacy · longs = acheteurs, shorts = vendeurs. Ajouts / réductions nets entre
+        les rapports datés, pas des ouvertures / clôtures brutes : elles peuvent se compenser.
+        Net = longs − shorts, sans prévision de prix.
       </NoteSource>
     </section>
   );

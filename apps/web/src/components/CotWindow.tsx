@@ -5,9 +5,9 @@
  * (CFTC). Un SÉLECTEUR de catégorie de positionnement en tête (Spéculatif / Fonds / Commerciaux)
  * route chaque instrument d'une watchlist curée (majors FX, indices actions, or/argent, pétrole,
  * BTC/ETH CME) vers son dataset — legacy, Disaggregated ou TFF (cf. store/cot.ts). Pour chaque
- * instrument couvert : sparkline 52 sem du net, badge COT Index (position du net dans son
- * amplitude 3 ans), barre divergente net/OI sur échelle fixe ±50 % (vert = net long, rouge = net
- * short) et VARIATION HEBDO (flèche + delta). Regroupé par famille pour une lecture au coup d'œil.
+ * instrument couvert : stocks longs/shorts et ajouts/réductions nets distincts, dates réelles,
+ * puis net signé, sparkline 52 rapports, COT Index min–max et barre Net/OI sur échelle ±50 %.
+ * Aucun changement de stock n'est présenté comme nombre brut d'ouvertures ou de clôtures.
  *
  * L'état de données vit dans `cotStore` (fetch lazy + cache 12 h PAR dataset). La fenêtre est de la
  * présentation PURE : `charger()` à l'ouverture, `setCategorie` au clic du sélecteur, `rafraichir()`
@@ -22,7 +22,6 @@ import type { Commande } from "../commands/registry";
 import {
   CATEGORIES_COT,
   cotIndex,
-  deltaSemaines,
   netSurOi,
   type CategoriePositionnement,
   type CotCategorie,
@@ -31,7 +30,8 @@ import {
 } from "../data/cot";
 import { cotStore } from "../store/cot";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
-import { formatDateComplete } from "../lib/format";
+import { formatDateComplete, formatEntier } from "../lib/format";
+import { GuidePositionsCot, NetCot, PeriodeCot, PositionsCot } from "./cot/PositionsCot";
 import { BoutonRafraichir, Chargement, EnTeteFenetre, ErreurBloc, NoteSource, Segmente } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
@@ -52,32 +52,10 @@ export const cotUiStore = createStore<CotUiState>(() => ({
 
 mirrorOpenState("cot", cotUiStore);
 
-// ─────────────────────────── Format utilitaires ───────────────────────────
-
-/** Formate un entier de position de façon compacte (181339 → « 181K », 3524 → « 3.5K »).
- * Helper LOCAL conservé : décimales adaptées aux lots (0/1) plus lisibles que les 2 déc.
- * du `formatCompact` partagé ; casse du suffixe alignée sur le standard (K majuscule). */
-function formatCompact(v: number): string {
-  const abs = Math.abs(v);
-  if (!Number.isFinite(v)) return "—";
-  if (abs >= 1000) {
-    const k = abs / 1000;
-    return `${k >= 10 ? k.toFixed(0) : k.toFixed(1)}K`;
-  }
-  return abs.toFixed(0);
-}
-
-/** Formate une valeur signée (+/−) compacte pour le net et le delta. */
-function formatSigned(v: number): string {
-  if (!Number.isFinite(v)) return "—";
-  const signe = v > 0 ? "+" : v < 0 ? "−" : "";
-  return `${signe}${formatCompact(v)}`;
-}
-
 // ─────────────────────────── Ligne d'instrument ───────────────────────────
 
 /**
- * Sparkline SVG inline (~90×16) du net spéculatif sur les 52 dernières semaines : trait fin
+ * Sparkline SVG inline (~90×16) du net de la catégorie sur les 52 derniers rapports : trait fin
  * `text-dim` (via `currentColor`), zéro matérialisé par un pointillé discret, dernier point
  * marqué d'un cercle teinté selon le signe. Pas d'axe ni d'interaction — c'est une tendance.
  */
@@ -164,49 +142,28 @@ function BarreNet({ netSurOi: nsoi }: { netSurOi: number | null }) {
   );
 }
 
-/** Une ligne d'instrument : libellé + OI, sparkline, badge COT Index, barre net/OI, net signé
- * + variation hebdo (delta 4 sem + net et OI exacts au survol via `title` natif). */
+/** Stocks et mouvements au premier plan ; net et repères historiques en contexte. */
 function Ligne({ ligne }: { ligne: LigneCot }) {
-  const netCouleur = ligne.net > 0 ? "text-up" : ligne.net < 0 ? "text-down" : "text-text";
-  const deltaCouleur =
-    ligne.delta === null ? "text-text-dim" : ligne.delta > 0 ? "text-up" : ligne.delta < 0 ? "text-down" : "text-text-dim";
-  const fleche = ligne.delta === null ? "" : ligne.delta > 0 ? "↑" : ligne.delta < 0 ? "↓" : "→";
-
   const idx = cotIndex(ligne.serie);
   const nsoi = netSurOi(ligne.net, ligne.openInterest);
-  const delta4 = deltaSemaines(ligne.serie, 4);
-
-  // Infobulle native : delta 4 sem + net et OI exacts (le résumé visuel reste compact).
-  const titre = [
-    `Δ4sem : ${delta4 === null ? "—" : formatSigned(delta4)}`,
-    `net ${ligne.net.toLocaleString("fr-FR")}`,
-    Number.isFinite(ligne.openInterest) ? `OI ${ligne.openInterest.toLocaleString("fr-FR")}` : null,
-  ]
-    .filter((s) => s !== null)
-    .join(" · ");
-
   return (
-    <div className="space-y-1 px-3 py-2" title={titre}>
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <span className="text-xs text-text">{ligne.libelle}</span>
-          {Number.isFinite(ligne.openInterest) && (
-            <span className="ml-2 text-[10px] tabular-nums text-text-dim">
-              OI {formatCompact(ligne.openInterest)}
-            </span>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-2 tabular-nums">
-          <SparklineNet serie={ligne.serie} />
-          <BadgeCotIndex valeur={idx} />
-          <span className={`text-sm font-medium ${netCouleur}`}>{formatSigned(ligne.net)}</span>
-          <span className={`w-14 text-right text-[11px] ${deltaCouleur}`}>
-            {ligne.delta === null ? "—" : `${fleche} ${formatSigned(ligne.delta)}`}
-          </span>
-        </div>
+    <article className="space-y-2 border-b border-border/50 px-3 py-2 last:border-b-0" aria-label={ligne.libelle}>
+      <div>
+        <h3 className="text-xs font-semibold text-text">{ligne.libelle}</h3>
+        <PeriodeCot ligne={ligne} />
       </div>
+      <PositionsCot ligne={ligne} />
+      <NetCot ligne={ligne} />
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[10px] text-text-dim">
+        <span className="flex items-center gap-2">Net · 52 rapports <SparklineNet serie={ligne.serie} /></span>
+        <span className="flex items-center gap-1">COT Index <BadgeCotIndex valeur={idx} /> / 100</span>
+      </div>
+      <p className="text-[10px] tabular-nums text-text-dim">
+        OI · tout le marché : {formatEntier(ligne.openInterest)} contrats ouverts
+        {nsoi === null ? " · Net/OI indisponible" : ` · Net/OI ${nsoi > 0 ? "+" : ""}${nsoi.toFixed(1)} %`}
+      </p>
       <BarreNet netSurOi={nsoi} />
-    </div>
+    </article>
   );
 }
 
@@ -215,7 +172,7 @@ function Ligne({ ligne }: { ligne: LigneCot }) {
 /**
  * Une entrée par catégorie de positionnement (`legacy`/`fonds`/`commerciaux`) : segment du
  * sélecteur (label + title natif), libellé SÉMANTIQUE du net affiché (« spéculatif » n'est vrai
- * QUE pour legacy — Producer/Asset Manager sont des hedgers) et dataset(s) source cité(s) dans la
+ * QUE pour legacy — Producer/Asset Manager sont des catégories distinctes) et dataset(s) source cité(s) dans la
  * NoteSource. L'ordre est celui du sélecteur.
  */
 const CATEGORIES_POSITIONNEMENT: readonly {
@@ -285,7 +242,7 @@ export function CotWindow() {
         titre="CFTC"
         sousTitre={
           <>
-            {meta.semantique} · {formatDateComplete(resume.dateRapport ?? 0)}
+            {meta.semantique} · dernier disponible : {formatDateComplete(resume.dateRapport ?? 0)}
             {enCours ? " · maj…" : ""}
           </>
         }
@@ -308,7 +265,13 @@ export function CotWindow() {
         }
       />
 
-      <div className="flex-1 overflow-y-auto">
+      <div
+        role="region"
+        aria-label="Rapports COT"
+        tabIndex={0}
+        className="min-w-0 flex-1 overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+      >
+        <GuidePositionsCot />
         {/* Signal « indisponible » : jamais tiré de la longueur (une ligne par instrument, stubs
             inclus), mais de enCours/erreur/aucune-ligne-couverte. Ordre : enCours d'abord (pas de
             faux « non couvert » pendant un chargement), puis erreur, puis vide. */}
@@ -358,10 +321,11 @@ export function CotWindow() {
 
             <div className="px-3 py-3">
               <NoteSource>
-                {meta.semantique} = longs − shorts. Barre = net rapporté à l'open interest (échelle
-                ±50 %) ; flèche = variation vs semaine précédente. COT Index = position du net dans
-                son amplitude 3 ans (0 = extrême short, 100 = extrême long). Source {meta.source},
-                publication hebdomadaire.
+                {meta.semantique} = longs − shorts. OI = contrats ouverts de tout le marché,
+                pas la somme longs + shorts de cette catégorie. Barre Net/OI : échelle ±50 %.
+                COT Index : position du net dans son amplitude min–max des 156 derniers rapports
+                (≈ 3 ans), pas un percentile ; 0 = minimum du net, 100 = maximum, 50 si constant.
+                Indisponible avec moins de 26 rapports. Source {meta.source}, publication hebdomadaire.
               </NoteSource>
             </div>
           </>

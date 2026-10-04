@@ -8,11 +8,9 @@
  * BTC/ETH CME) — filtrage server-side par `market_and_exchange_names in(...)`, tri par
  * date décroissante, limite couvrant plusieurs semaines.
  *
- * Métrique headline : POSITION NETTE SPÉCULATIVE (« non-commercial ») =
- * `noncomm_positions_long_all` − `noncomm_positions_short_all`. Le signal utile étant
- * « ce qui a changé cette semaine », on calcule aussi la VARIATION HEBDO en diffant les
- * DEUX derniers rapports par instrument (net_dernier − net_précédent) — cohérent avec les
- * champs `change_in_*` officiels du CFTC, mais recalculé côté client pour rester robuste.
+ * Les stocks longs/shorts sont conservés pour la catégorie choisie, avec net = longs − shorts.
+ * Les différences entre les deux derniers rapports sont des changements NETS de stocks,
+ * jamais des nombres bruts d'ouvertures ou de clôtures. L'intervalle réel peut dépasser 7 jours.
  *
  * Ce module est PUR : parsing, synthèse et construction des requêtes Socrata (testé dans
  * cot.test.ts). L'orchestration (fetch + cache par dataset + santé) vit désormais dans
@@ -37,9 +35,12 @@ export interface InstrumentCot {
 /** Un point brut normalisé (une ligne de rapport pour un instrument, une semaine). */
 export interface PointBrutCot {
   nom: string;
+  /** Stocks de la catégorie ; optionnels pour les anciens consommateurs net/OI seuls. */
+  longs?: number;
+  shorts?: number;
   /** Date du rapport (ms epoch). */
   dateRapport: number;
-  /** Position nette spéculative = longs − shorts (non-commercial). */
+  /** Position nette de la catégorie = longs − shorts. */
   net: number;
   /** Open interest total du contrat (contexte / échelle). */
   openInterest: number;
@@ -50,22 +51,28 @@ export interface PointBrutCot {
  * de Task 2 — COT Index, deltas — et aux sparklines de Task 3). `t` = date de rapport en ms.
  */
 export interface PointCot {
+  /** Stocks observés, jamais reconstruits depuis net/OI. */
+  longs?: number;
+  shorts?: number;
   /** Date du rapport (ms epoch). */
   t: number;
-  /** Position nette spéculative = longs − shorts (non-commercial). */
+  /** Position nette de la catégorie = longs − shorts. */
   net: number;
   /** Open interest total du contrat (NaN si absent). */
   oi: number;
 }
 
-/** Ligne de synthèse d'un instrument : dernier net + variation hebdo + série 3 ans. */
+/** Ligne de synthèse d'un instrument : derniers stocks/net + variation + série 3 ans. */
 export interface LigneCot {
   nom: string;
+  /** Contrats encore ouverts de chaque côté, pour la catégorie sélectionnée. */
+  longs?: number;
+  shorts?: number;
   libelle: string;
   categorie: CotCategorie;
-  /** Position nette spéculative du dernier rapport. */
+  /** Position nette de la catégorie au dernier rapport. */
   net: number;
-  /** Variation hebdo du net (dernier − précédent), null si une seule semaine dispo. */
+  /** Variation du net entre rapports (dernier − précédent), null sans comparaison. */
   delta: number | null;
   /** Open interest du dernier rapport. */
   openInterest: number;
@@ -244,10 +251,12 @@ export function pointCot(rec: unknown): PointBrutCot | null {
   if (!Number.isFinite(dateRapport)) return null;
   const longs = nombreCot(r?.noncomm_positions_long_all);
   const shorts = nombreCot(r?.noncomm_positions_short_all);
-  if (!Number.isFinite(longs) || !Number.isFinite(shorts)) return null;
+  if (!Number.isFinite(longs) || !Number.isFinite(shorts) || longs < 0 || shorts < 0) return null;
   const oi = nombreCot(r?.open_interest_all);
   return {
     nom,
+    longs,
+    shorts,
     dateRapport,
     net: longs - shorts,
     openInterest: Number.isFinite(oi) ? oi : NaN,
@@ -280,10 +289,12 @@ export function pointCotDataset(
       : DATASETS_COT[dataset].champs.net1;
   const longs = nombreCot(r?.[champLong]);
   const shorts = nombreCot(r?.[champShort]);
-  if (!Number.isFinite(longs) || !Number.isFinite(shorts)) return null;
+  if (!Number.isFinite(longs) || !Number.isFinite(shorts) || longs < 0 || shorts < 0) return null;
   const oi = nombreCot(r?.open_interest_all);
   return {
     nom,
+    longs,
+    shorts,
     dateRapport,
     net: longs - shorts,
     openInterest: Number.isFinite(oi) ? oi : NaN,
@@ -320,11 +331,15 @@ export function resumerCot(
     // Tri chrono CROISSANT : la série (et ses consommateurs Task 2/3) l'attend ASC ; le dernier
     // rapport est donc en fin de tableau.
     pts.sort((a, b) => a.dateRapport - b.dateRapport);
-    const serie: PointCot[] = pts.map((p) => ({ t: p.dateRapport, net: p.net, oi: p.openInterest }));
+    const serie: PointCot[] = pts.map((p) => ({
+      t: p.dateRapport, net: p.net, oi: p.openInterest, longs: p.longs, shorts: p.shorts,
+    }));
     const dernier = pts[pts.length - 1]!;
     const precedent = pts[pts.length - 2];
     lignes.push({
       nom: inst.nom,
+      longs: dernier.longs,
+      shorts: dernier.shorts,
       libelle: inst.libelle,
       categorie: inst.categorie,
       net: dernier.net,

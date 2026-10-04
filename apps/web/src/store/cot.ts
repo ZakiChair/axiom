@@ -1,7 +1,7 @@
 /**
  * Store COT — catégories de positionnement (fetch lazy par dataset + cache v2).
  *
- * Étend la fenêtre « Rapport COT » (data/cot.ts, INCHANGÉ) d'un SÉLECTEUR de catégorie de
+ * Alimente la fenêtre « Rapport COT » et son SÉLECTEUR de catégorie de
  * positionnement — `legacy` (agrégat non-commercial historique), `fonds` (spéculateurs fins :
  * Managed Money en matières premières, Leveraged Funds en financiers) et `commerciaux`
  * (contrepartie : Producer/Merchant, Asset Manager). La catégorie route CHAQUE instrument vers
@@ -132,11 +132,15 @@ export function assemblerCategorie(
 
     // Tri chrono CROISSANT (même contrat que `resumerCot`) : dernier rapport en fin de tableau.
     pts.sort((a, b) => a.dateRapport - b.dateRapport);
-    const serie: PointCot[] = pts.map((p) => ({ t: p.dateRapport, net: p.net, oi: p.openInterest }));
+    const serie: PointCot[] = pts.map((p) => ({
+      t: p.dateRapport, net: p.net, oi: p.openInterest, longs: p.longs, shorts: p.shorts,
+    }));
     const dernier = pts[pts.length - 1]!;
     const precedent = pts[pts.length - 2];
     lignes.push({
       nom: inst.nom,
+      longs: dernier.longs,
+      shorts: dernier.shorts,
       libelle: inst.libelle,
       categorie: inst.categorie,
       net: dernier.net,

@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   assemblerCategorie,
   datasetsRequis,
+  lireResumeLegacyCache,
   type LigneCotCategorie,
 } from "./cot";
 import { resumerCot, type DatasetCot, type InstrumentCot } from "../data/cot";
@@ -241,5 +242,43 @@ describe("assemblerCategorie", () => {
     expect(or.serie.map((p) => p.t)).toEqual([Date.parse(D1), Date.parse(D2)]);
     expect(or.net).toBe(200 - 50); // dernier chrono
     expect(or.delta).toBe(200 - 50 - (100 - 30));
+  });
+});
+
+
+describe("stocks et mouvements par catégorie, sans nouveau réseau", () => {
+  const watchlist: InstrumentCot[] = [
+    { nom: OR, libelle: "Or", categorie: "metal" },
+    { nom: EUR, libelle: "Euro", categorie: "fx" },
+  ];
+  const records = {
+    disaggregated: [recDisagg(OR, D1, 100, 40, 30, 70), recDisagg(OR, D2, 120, 50, 20, 90)],
+    tff: [recTff(EUR, D1, 200, 80, 60, 140), recTff(EUR, D2, 180, 60, 90, 160)],
+  };
+  it.each([
+    ["fonds", [[120, 50, 100, 40], [180, 60, 200, 80]]],
+    ["commerciaux", [[20, 90, 30, 70], [90, 160, 60, 140]]],
+  ] as const)("%s conserve stocks et historique depuis son dataset", (categorie, attendu) => {
+    assemblerCategorie(records, categorie, watchlist).lignes.forEach((ligne, i) => {
+      const [longs, shorts, avantLongs, avantShorts] = attendu[i]!;
+      expect([ligne.longs, ligne.shorts]).toEqual([longs, shorts]);
+      expect([ligne.serie[0]?.longs, ligne.serie[0]?.shorts]).toEqual([avantLongs, avantShorts]);
+      expect(ligne.net).toBe(longs - shorts);
+      expect(ligne.delta).toBe((longs - avantLongs) - (shorts - avantShorts));
+    });
+  });
+  it("relit le cache v2 BRUT historique avec ses stocks déjà présents", () => {
+    const fetch = vi.fn();
+    const brut = [recLegacy(OR, D1, 100, 40, 30, 70), recLegacy(OR, D2, 120, 50, 20, 90)];
+    const getItem = vi.fn(() => JSON.stringify({ ts: 1, records: brut }));
+    vi.stubGlobal("localStorage", { getItem });
+    vi.stubGlobal("fetch", fetch);
+    try {
+      const ligne = lireResumeLegacyCache()?.lignes.find((l) => l.nom === OR);
+      expect([ligne?.longs, ligne?.shorts]).toEqual([120, 50]);
+      expect(ligne?.serie[0]?.longs).toBe(100);
+      expect(getItem).toHaveBeenCalledWith("axiom:cot:cache:v2:legacy");
+      expect(fetch).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
   });
 });

@@ -306,7 +306,7 @@ const HEADER_CREDENTIAL: Partial<Record<ProxyRouteId, readonly [string, string]>
 function serverPathAllowed(route: ProxyRouteId, path: string, query: URLSearchParams): boolean {
   switch (route) {
     case "fredapi": return ["fred/series/observations", "fred/release/dates", "fred/releases/dates"].includes(path);
-    case "coinalyzeapi": return /^v1\/(?:open-interest|funding-rate|predicted-funding-rate|open-interest-history|funding-rate-history|long-short-ratio-history|liquidation-history)$/.test(path);
+    case "coinalyzeapi": return /^v1\/(?:open-interest|funding-rate|predicted-funding-rate|open-interest-history|funding-rate-history|long-short-ratio-history|liquidation-history|future-markets)$/.test(path);
     case "tdapi": return path === "time_series" || path === "quote";
     case "sosoapi": return ["openapi/v2/etf/currentEtfDataMetrics", "openapi/v1/etfs/summary-history"].includes(path);
     case "ethscanapi": return path === "v2/api" && query.get("chainid") === "1" &&

@@ -3,8 +3,26 @@
  * `openInterestFutures`, sélection du dernier jour non vide, parts et Δ vs J-7.
  */
 import { describe, it, expect } from "vitest";
-import { construireModeleOiExchange, joindreSpreadParTimestamp } from "./derivativesWindow.util";
+import {
+  construireModeleOiExchange,
+  joindreSpreadParTimestamp,
+  libelleMarchePerp,
+  texteAprFunding,
+  texteProchainReglement,
+} from "./derivativesWindow.util";
 import type { JourOiFutures } from "../data/onchain/bgeometrics";
+import type { MarchePerp, PlacePerp } from "../data/marchesPerp";
+
+/** Fabrique un marché perp minimal pour les libellés. */
+function marche(place: PlacePerp, symboleSurPlace: string, multiplicateur: number): MarchePerp {
+  return {
+    place,
+    symbole: `${symboleSurPlace}.X`,
+    symboleSurPlace,
+    multiplicateur,
+    aLongShort: true,
+  };
+}
 
 /** Fabrique un jour à partir d'une ventilation brute. */
 function jour(d: string, parExchange: Record<string, number>): JourOiFutures {
@@ -116,5 +134,52 @@ describe("joindreSpreadParTimestamp", () => {
     expect(joint).toHaveLength(1);
     expect(joint[0]!.time).toBe(30);
     expect(joint[0]!.spread).toBeCloseTo(60, 10); // 40 − (−20)
+  });
+});
+
+// ───────── Perp multi-places (demande du 5 octobre 2026) ─────────
+describe("libelleMarchePerp", () => {
+  it("place + symbole sur place, multiplicateur affiché seulement si ≠ 1", () => {
+    expect(libelleMarchePerp(marche("binance", "PUMPUSDT", 1))).toBe("Binance · PUMPUSDT");
+    expect(libelleMarchePerp(marche("bybit", "PUMPFUNUSDT", 1))).toBe("Bybit · PUMPFUNUSDT");
+    expect(libelleMarchePerp(marche("binance", "1000PEPEUSDT", 1000))).toBe(
+      "Binance · 1000PEPEUSDT · contrat ×1000",
+    );
+  });
+});
+
+describe("texteAprFunding", () => {
+  it("annualise à la cadence réelle : 8 h, 4 h et 1 h", () => {
+    expect(texteAprFunding(0.0001, 8)).toBe("APR (règlement 8 h) +10.95%");
+    expect(texteAprFunding(0.0001, 4)).toBe("APR (règlement 4 h) +21.90%");
+    expect(texteAprFunding(0.0000125, 1)).toBe("APR (règlement 1 h) +10.95%");
+  });
+
+  it("couvre la lecture en cours (undefined) et la cadence inconnue (null)", () => {
+    expect(texteAprFunding(0.0001, undefined)).toBe("APR : lecture de la cadence…");
+    expect(texteAprFunding(0.0001, null)).toBe("APR : cadence de règlement inconnue");
+  });
+});
+
+describe("texteProchainReglement", () => {
+  const troisH = Date.UTC(2026, 6, 2, 3, 0, 0);
+
+  it("cadence connue divisant 24 → « prochain règlement (~h) délai · heure »", () => {
+    expect(texteProchainReglement(troisH, 4)).toMatch(/^prochain règlement \(~4 h\) dans /);
+    expect(texteProchainReglement(troisH, 8)).toMatch(/^prochain règlement \(~8 h\) dans /);
+    expect(texteProchainReglement(troisH, 1)).toMatch(/^prochain règlement \(~1 h\) dans /);
+  });
+
+  it("lecture en cours (undefined) → « lecture de la cadence… »", () => {
+    expect(texteProchainReglement(troisH, undefined)).toBe(
+      "prochain règlement : lecture de la cadence…",
+    );
+  });
+
+  it("cadence inconnue ou ne divisant pas 24 → « cadence inconnue »", () => {
+    expect(texteProchainReglement(troisH, null)).toBe("prochain règlement : cadence inconnue");
+    expect(texteProchainReglement(troisH, 5)).toBe("prochain règlement : cadence inconnue");
+    expect(texteProchainReglement(troisH, 0)).toBe("prochain règlement : cadence inconnue");
+    expect(texteProchainReglement(troisH, 2.5)).toBe("prochain règlement : cadence inconnue");
   });
 });

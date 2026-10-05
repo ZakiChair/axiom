@@ -5,13 +5,19 @@
  * reste interactif pendant qu'on surveille OI/funding. Ouverture via le bouton de la
  * Toolbar ou le mnémonique DES (toggle). Le polling reste conditionné à l'ouverture.
  *
- * Affiche, pour le symbole courant (mappé sur le perpétuel Binance Coinalyze) :
- * Open Interest, Funding rate, Long/Short ratio et les liquidations récentes.
- * Source : provider Coinalyze (tier gratuit). Rafraîchissement périodique
- * uniquement quand la fenêtre est ouverte (~1 min, conforme au débit 40 req/min).
+ * Affiche, pour l'ACTIF du symbole courant, le perpétuel découvert dans le
+ * catalogue Coinalyze `future-markets` parmi les quatre places couvertes
+ * (Binance, Bybit, OKX, Hyperliquid — demande du 5 octobre 2026) : Open Interest,
+ * Funding rate, Long/Short ratio et les liquidations récentes. La place spot du
+ * graphe ne conditionne plus la donnée ; un sélecteur permet de changer de place
+ * quand l'actif en a plusieurs. Sans clé ou catalogue injoignable : repli sur le
+ * perpétuel Binance supposé (`<ACTIF>USDT_PERP.A`). Source : provider Coinalyze
+ * (tier gratuit). Rafraîchissement périodique uniquement quand la fenêtre est
+ * ouverte (~1 min, conforme au débit 40 req/min).
  *
- * Sans clé API : aucun appel, aucune erreur bloquante — la fenêtre invite à
- * saisir une clé dans les Réglages (stockée localement, jamais loggée).
+ * Sans clé API : aucun appel Coinalyze hors catalogue (le repli suppose le perp
+ * Binance), aucune erreur bloquante — la fenêtre invite à saisir une clé dans les
+ * Réglages (stockée localement, jamais loggée).
  * Hors clé et hors exchange : OI BTC par exchange (BGeometrics) et OI perps DEX quotidien
  * tous actifs (DefiLlama), deux sections repliables chargées au premier dépliage ; flux
  * takers toutes places (CryptoQuant, clé personnelle), section repliable chargée au MONTAGE
@@ -38,9 +44,17 @@ import {
   fetchLongShortRatioHistory,
   fetchPredictedFundingRate,
   groupLiquidationBuckets,
-  toCoinalyzeSymbol,
   type LiquidationBucket,
 } from "../data/coinalyze";
+import {
+  actifPerpDe,
+  LIBELLE_PLACE_PERP,
+  marchePerpRetenu,
+  resoudreMarchesPerp,
+  type PlacePerp,
+  type ResolutionPerp,
+} from "../data/marchesPerp";
+import { fetchIntervalleFundingH } from "../data/fundingCrossExchange";
 import {
   fetchGlobalLongShortAccountRatio,
   fetchOpenInterestHist,
@@ -55,22 +69,26 @@ import {
   formatDelai,
   formatFunding,
   formatHeure,
-  formatPct,
   formatPourcentage,
   formatUsd,
   formatUsdSigne,
   VALEUR_ABSENTE,
 } from "../lib/format";
 import { metaSource } from "../lib/fiabilite";
-import { annualiserFunding } from "../data/fundingCrossExchange";
 import { histFunding, histOiUsd } from "../data/referentiels";
 import { referentiel, type Referentiel } from "../lib/referentiel";
 import { getBgeometricsKey } from "../store/onchain";
 import { fetchOiFuturesParExchange, type JourOiFutures } from "../data/onchain/bgeometrics";
-import { construireModeleOiExchange, joindreSpreadParTimestamp } from "./derivativesWindow.util";
+import {
+  construireModeleOiExchange,
+  joindreSpreadParTimestamp,
+  libelleMarchePerp,
+  texteAprFunding,
+  texteProchainReglement,
+} from "./derivativesWindow.util";
 import { SectionOiPerpsDex } from "./OiPerpsDexSection";
 import { SectionFluxTakers } from "./FluxTakersSection";
-import { BadgeFiabilite, BarreProgression, EnTeteFenetre, ErreurBloc, Fraicheur, TuileStat, RefBadge, SansCle, Vide } from "./ui";
+import { BadgeFiabilite, BarreProgression, EnTeteFenetre, ErreurBloc, Fraicheur, TuileStat, RefBadge, SansCle, Select, Vide } from "./ui";
 
 /** Période d'agrégation du long/short ratio et fenêtre des liquidations affichées. */
 const LS_PERIOD = "5min";
@@ -223,6 +241,10 @@ export function DerivativesWindow() {
   const toggleOiPane = useStore(derivativesChartStore, (s) => s.toggleOi);
   const toggleFundingPane = useStore(derivativesChartStore, (s) => s.toggleFunding);
 
+  // Choix de place perp par actif (session-only, cf. store/derivatives-ui).
+  const placesPerp = useStore(derivativesUiStore, (s) => s.placesPerp);
+  const choisirPlacePerp = useStore(derivativesUiStore, (s) => s.choisirPlacePerp);
+
   const [oi, setOi] = useState<OpenInterest | undefined>();
   const [funding, setFunding] = useState<FundingRate | undefined>();
   const [predicted, setPredicted] = useState<FundingRate | undefined>();
@@ -241,34 +263,113 @@ export function DerivativesWindow() {
   // Référentiel de l'OI : un OI nu ne dit pas si le positionnement est tendu —
   // 12 Md$ est un plancher sur un marché, un sommet sur un autre. Même cache 1 h.
   const [refOi, setRefOi] = useState<Referentiel | null>(null);
+
+  // ── Résolution du perp par ACTIF (demande du 5 octobre 2026) ──────────────────
+  // L'actif dérive du symbole affiché (null pour TradFi/synthétique). La place
+  // prioritaire est Hyperliquid uniquement quand l'instrument CHARTÉ est lui-même
+  // un perp Hyperliquid (pas quand le symbole vient d'un groupe lié).
+  const actif = useMemo(() => actifPerpDe(symbol), [symbol]);
+  const prioritaire: PlacePerp | null =
+    symbolGroupe === undefined && exchange === "hyperliquid" ? "hyperliquid" : null;
+
+  // Résolution (catalogue Coinalyze `future-markets`, cache 12 h côté data) :
+  // re-déclenchée à l'ouverture, au changement de symbole et à l'arrivée d'une clé.
+  // En repli « catalogue-indisponible », nouvelle tentative toutes les 60 s (la mémo
+  // d'échec de la couche data borne déjà la cadence réelle des appels).
+  const [resolution, setResolution] = useState<ResolutionPerp | null>(null);
+  useEffect(() => {
+    if (!open) {
+      setResolution(null);
+      return;
+    }
+    let ignore = false;
+    setResolution(null);
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const lancer = () => {
+      void resoudreMarchesPerp(symbol).then((r) => {
+        if (ignore) return;
+        setResolution(r);
+        const indispo = r.etat === "repli" && r.cause === "catalogue-indisponible";
+        if (indispo && timer === null) {
+          timer = setInterval(lancer, 60_000);
+        } else if (!indispo && timer !== null) {
+          clearInterval(timer);
+          timer = null;
+        }
+      });
+    };
+    lancer();
+    return () => {
+      ignore = true;
+      if (timer !== null) clearInterval(timer);
+    };
+  }, [open, symbol, hasKey]);
+
+  const marches =
+    resolution !== null && resolution.etat !== "inexploitable" ? resolution.marches : [];
+  const marche = marchePerpRetenu(
+    marches,
+    actif !== null ? placesPerp[actif] : undefined,
+    prioritaire,
+  );
+
+  // Cadence réelle de règlement du funding (par place, mémo 1 h côté data) :
+  // `undefined` = lecture en cours, `null` = inconnue. Sert à l'APR et à
+  // l'estimation du prochain règlement.
+  const [intervalleH, setIntervalleH] = useState<number | null | undefined>(undefined);
+  const marchePlace = marche?.place;
+  const marcheSymboleSurPlace = marche?.symboleSurPlace;
+  useEffect(() => {
+    setIntervalleH(undefined);
+    if (!open || !hasKey || marchePlace === undefined || marcheSymboleSurPlace === undefined) {
+      return;
+    }
+    let ignore = false;
+    void fetchIntervalleFundingH(marchePlace, marcheSymboleSurPlace).then((h) => {
+      if (!ignore) setIntervalleH(h);
+    });
+    return () => {
+      ignore = true;
+    };
+  }, [open, hasKey, marchePlace, marcheSymboleSurPlace]);
+
+  // Référentiels OI/funding : séries Binance USDⓈ-M, donc affichés UNIQUEMENT pour
+  // un marché Binance (son `symboleSurPlace` est le symbole fapi). Jamais pour les
+  // autres places. Reset au changement de marché (id Coinalyze), pas à chaque tick.
+  const symboleReferentiel = marche?.place === "binance" ? marche.symboleSurPlace : null;
+  const marcheSymbole = marche?.symbole;
   useEffect(() => {
     setRefFunding(null);
     setRefOi(null);
-  }, [symbol]);
+  }, [marcheSymbole]);
   useEffect(() => {
     let vivant = true;
     const oiUsd = oi?.oiUsd;
-    if (oiUsd === undefined || !Number.isFinite(oiUsd)) return undefined;
-    void histOiUsd(symbol).then((serie) => {
+    if (symboleReferentiel === null || oiUsd === undefined || !Number.isFinite(oiUsd)) {
+      return undefined;
+    }
+    void histOiUsd(symboleReferentiel).then((serie) => {
       if (!vivant || serie === null) return;
       setRefOi(referentiel(serie, oiUsd, Date.now()));
     });
     return () => {
       vivant = false;
     };
-  }, [symbol, oi?.oiUsd]);
+  }, [symboleReferentiel, oi?.oiUsd]);
   useEffect(() => {
     let vivant = true;
     const rate = funding?.rate;
-    if (rate === undefined || !Number.isFinite(rate)) return undefined;
-    void histFunding(symbol).then((serie) => {
+    if (symboleReferentiel === null || rate === undefined || !Number.isFinite(rate)) {
+      return undefined;
+    }
+    void histFunding(symboleReferentiel).then((serie) => {
       if (!vivant || serie === null) return;
       setRefFunding(referentiel(serie, rate, Date.now()));
     });
     return () => {
       vivant = false;
     };
-  }, [symbol, funding?.rate]);
+  }, [symboleReferentiel, funding?.rate]);
   // Horodatage du dernier cycle de rafraîchissement Coinalyze : « — » tant qu'aucune
   // donnée n'est arrivée (cohérent avec Options/TermStructure), « maj ~1 min » ensuite.
   const [majTs, setMajTs] = useState<number | null>(null);
@@ -288,71 +389,86 @@ export function DerivativesWindow() {
   const [oiExCharge, setOiExCharge] = useState(false);
   const [oiExLoading, setOiExLoading] = useState(false);
 
-  // Coinalyze mappe le symbole sur un perpétuel : pertinent uniquement pour Binance (M6).
-  const isBinance = exchange === "binance";
-  const coinalyzeSymbol = isBinance ? toCoinalyzeSymbol(symbol) : "—";
-
   // Panneau NON MODAL : pas de capture de focus ni d'Échap global (le graphe reste
   // pilotable au clavier). Fermeture via ✕, le bouton de la Toolbar ou le mnémonique DES.
 
   useEffect(() => {
-    // Fenêtre fermée, hors Binance ou sans clé : aucun appel Coinalyze.
-    if (!open || !hasKey || !isBinance) {
-      setOi(undefined);
-      setFunding(undefined);
-      setPredicted(undefined);
-      setLs(undefined);
-      setLsSpark([]);
-      setLiqs([]);
-      setOiSpark([]);
-      setFundingSpark([]);
-      setError(null);
-      setLoading(false);
-      setMajTs(null);
+    // Reset complet à CHAQUE exécution : un changement de place ne doit jamais
+    // afficher d'anciennes valeurs sous le nouveau libellé.
+    setOi(undefined);
+    setFunding(undefined);
+    setPredicted(undefined);
+    setLs(undefined);
+    setLsSpark([]);
+    setLiqs([]);
+    setOiSpark([]);
+    setFundingSpark([]);
+    setError(null);
+    setLoading(false);
+    setMajTs(null);
+
+    // Fenêtre fermée, sans clé ou sans marché résolu : aucun appel Coinalyze.
+    if (!open || !hasKey || marche === null) {
       return;
     }
 
-    // Garde LOCALE à cet effet : empêche un setState après fermeture/changement de symbole/clé.
+    const symbole = marche.symbole; // id Coinalyze, casse conservée
+    const aLongShort = marche.aLongShort;
+    // Garde LOCALE à cet effet : empêche un setState après fermeture/changement de marché/clé.
     let ignore = false;
 
     const load = async () => {
       setLoading(true);
-      const results = await Promise.allSettled([
-        coinalyzeProvider.fetchOpenInterest(symbol),
-        coinalyzeProvider.fetchFundingRate(symbol),
-        coinalyzeProvider.fetchLongShortRatio(symbol, LS_PERIOD),
-        coinalyzeProvider.fetchLiquidations(symbol, Date.now() - LIQ_WINDOW_MS),
-        coinalyzeProvider.fetchOpenInterestHistory(symbol, LS_PERIOD, Date.now() - SPARK_WINDOW_MS),
-        coinalyzeProvider.fetchFundingRateHistory(symbol, LS_PERIOD, Date.now() - SPARK_WINDOW_MS),
-        fetchPredictedFundingRate(symbol),
-        fetchLongShortRatioHistory(symbol, LS_PERIOD, Date.now() - SPARK_WINDOW_MS),
-      ]);
+      // Mêmes 8 appels qu'avant, sur l'id Coinalyze du marché retenu — sauf les
+      // deux appels long/short, sautés quand Coinalyze n'en publie pas (OKX, HL).
+      const taches: Array<Promise<unknown>> = [
+        coinalyzeProvider.fetchOpenInterest(symbole),
+        coinalyzeProvider.fetchFundingRate(symbole),
+        coinalyzeProvider.fetchLiquidations(symbole, Date.now() - LIQ_WINDOW_MS),
+        coinalyzeProvider.fetchOpenInterestHistory(symbole, LS_PERIOD, Date.now() - SPARK_WINDOW_MS),
+        coinalyzeProvider.fetchFundingRateHistory(symbole, LS_PERIOD, Date.now() - SPARK_WINDOW_MS),
+        fetchPredictedFundingRate(symbole),
+      ];
+      if (aLongShort) {
+        taches.push(
+          coinalyzeProvider.fetchLongShortRatio(symbole, LS_PERIOD),
+          fetchLongShortRatioHistory(symbole, LS_PERIOD, Date.now() - SPARK_WINDOW_MS),
+        );
+      }
+      const results = await Promise.allSettled(taches);
       if (ignore) return;
 
-      const [oiR, fR, lsR, liqR, oiHistR, fundingHistR, predR, lsHistR] = results;
+      const [oiR, fR, liqR, oiHistR, fundingHistR, predR, lsR, lsHistR] = results;
       let authError = false;
-      const noteError = (r: PromiseSettledResult<unknown>) => {
-        if (r.status === "rejected" && r.reason instanceof CoinalyzeError && r.reason.status === 401) {
+      const noteError = (r: PromiseSettledResult<unknown> | undefined) => {
+        if (r?.status === "rejected" && r.reason instanceof CoinalyzeError && r.reason.status === 401) {
           authError = true;
         }
       };
       results.forEach(noteError);
 
-      setOi(oiR.status === "fulfilled" ? oiR.value : undefined);
-      setFunding(fR.status === "fulfilled" ? fR.value : undefined);
-      setLs(lsR.status === "fulfilled" ? lsR.value : undefined);
-      setLiqs(liqR.status === "fulfilled" ? liqR.value : []);
+      setOi(oiR?.status === "fulfilled" ? (oiR.value as OpenInterest) : undefined);
+      setFunding(fR?.status === "fulfilled" ? (fR.value as FundingRate) : undefined);
+      setLs(lsR?.status === "fulfilled" ? (lsR.value as LongShortRatio) : undefined);
+      setLiqs(liqR?.status === "fulfilled" ? (liqR.value as Liquidation[]) : []);
       setOiSpark(
-        oiHistR.status === "fulfilled" ? oiHistR.value.map((p) => p.oiUsd).filter(Number.isFinite) : []
+        oiHistR?.status === "fulfilled"
+          ? (oiHistR.value as OpenInterest[]).map((p) => p.oiUsd).filter(Number.isFinite)
+          : []
       );
       setFundingSpark(
-        fundingHistR.status === "fulfilled" ? fundingHistR.value.map((p) => p.rate).filter(Number.isFinite) : []
+        fundingHistR?.status === "fulfilled"
+          ? (fundingHistR.value as FundingRate[]).map((p) => p.rate).filter(Number.isFinite)
+          : []
       );
-      setPredicted(predR.status === "fulfilled" ? predR.value : undefined);
+      setPredicted(predR?.status === "fulfilled" ? (predR.value as FundingRate) : undefined);
       setLsSpark(
-        lsHistR.status === "fulfilled" ? lsHistR.value.map((p) => p.ratio).filter(Number.isFinite) : []
+        lsHistR?.status === "fulfilled"
+          ? (lsHistR.value as LongShortRatio[]).map((p) => p.ratio).filter(Number.isFinite)
+          : []
       );
 
+      // « Indisponibles » et le contrôle 401 ne portent que sur les appels émis.
       const allFailed = results.every((r) => r.status === "rejected");
       if (authError) setError("Clé Coinalyze refusée (401). Vérifiez la clé.");
       else if (allFailed) setError("Données dérivées indisponibles pour le moment.");
@@ -369,12 +485,18 @@ export function DerivativesWindow() {
       ignore = true;
       clearInterval(timer);
     };
-  }, [open, symbol, hasKey, isBinance]);
+    // marche?.symbole / marche?.aLongShort : la référence `marche` est re-dérivée à
+    // chaque render ; les dépendances expriment le marché RÉELLEMENT chargé.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, hasKey, marcheSymbole, marche?.aLongShort]);
 
-  // Sentiment perpétuel Binance (fapi /futures/data) — effet SÉPARÉ, SANS clé Coinalyze :
-  // reste alimenté même si l'utilisateur n'a pas de clé (dégradation indépendante).
+  // Sentiment perpétuel Binance (fapi /futures/data) — effet SÉPARÉ, SANS clé
+  // Coinalyze : affiché dès qu'un perp Binance EXISTE pour l'actif (catalogue ou
+  // repli), même si la place affichée est ailleurs (demande du 5 octobre 2026).
+  const symboleSentiment =
+    marches.find((m) => m.place === "binance")?.symboleSurPlace ?? null;
   useEffect(() => {
-    if (!open || !isBinance) {
+    if (!open || symboleSentiment === null) {
       setGlobalLs([]);
       setTopLs([]);
       setTaker([]);
@@ -384,10 +506,10 @@ export function DerivativesWindow() {
     let ignore = false;
     const load = async () => {
       const [gR, tR, tkR, oiR] = await Promise.allSettled([
-        fetchGlobalLongShortAccountRatio(symbol, BIN_PERIOD, BIN_LIMIT),
-        fetchTopLongShortPositionRatio(symbol, BIN_PERIOD, BIN_LIMIT),
-        fetchTakerLongShortRatio(symbol, BIN_PERIOD, BIN_LIMIT),
-        fetchOpenInterestHist(symbol, BIN_PERIOD, BIN_LIMIT),
+        fetchGlobalLongShortAccountRatio(symboleSentiment, BIN_PERIOD, BIN_LIMIT),
+        fetchTopLongShortPositionRatio(symboleSentiment, BIN_PERIOD, BIN_LIMIT),
+        fetchTakerLongShortRatio(symboleSentiment, BIN_PERIOD, BIN_LIMIT),
+        fetchOpenInterestHist(symboleSentiment, BIN_PERIOD, BIN_LIMIT),
       ]);
       if (ignore) return;
       setGlobalLs(gR.status === "fulfilled" ? gR.value : []);
@@ -401,7 +523,7 @@ export function DerivativesWindow() {
       ignore = true;
       clearInterval(timer);
     };
-  }, [open, symbol, isBinance]);
+  }, [open, symboleSentiment]);
 
   // Chargement LAZY de l'OI par exchange : au tout premier dépliage seulement (cache 24 h
   // côté data → dépliages suivants gratuits). `oiExCharge` verrouille contre tout re-fetch.
@@ -459,6 +581,19 @@ export function DerivativesWindow() {
     openSettings();
   };
 
+  // Sous-titre : premier cas qui matche (actif inexploitable → état de la recherche
+  // → place retenue).
+  const sousTitre =
+    actif === null
+      ? "Aucun actif crypto"
+      : !hasKey
+        ? `${actif} · clé Coinalyze requise`
+        : resolution === null
+          ? "Recherche des perpétuels…"
+          : marche === null
+            ? "Aucun perpétuel trouvé"
+            : `${LIBELLE_PLACE_PERP[marche.place]} · ${marche.symboleSurPlace} · Coinalyze`;
+
   return (
     // Panneau dockable à droite, NON MODAL : aucun overlay plein écran ne capture les
     // clics. Fermé, il est translaté hors écran et rendu inerte (pointer-events-none)
@@ -468,7 +603,7 @@ export function DerivativesWindow() {
       <EnTeteFenetre
         mnemo="DES"
         titre="Produits dérivés"
-        sousTitre={isBinance ? `${coinalyzeSymbol} · Coinalyze` : "Coinalyze · Binance uniquement"}
+        sousTitre={sousTitre}
         actions={
           <div className="flex flex-col items-end gap-1">
             <label htmlFor="derivatives-symbol-groupe" className="text-[10px] text-text-dim">
@@ -506,20 +641,54 @@ export function DerivativesWindow() {
       />
 
         <div className="flex-1 overflow-y-auto px-4 py-3">
-          {!isBinance ? (
+          {actif === null ? (
             <Vide>
-              Binance uniquement — Open Interest, funding, long/short et liquidations ne sont disponibles que
-              pour la source Binance.
+              Pas de produit dérivé crypto pour cet instrument (aucun actif sous-jacent exploitable).
             </Vide>
           ) : !hasKey ? (
             <SansCle
               message="Ajoutez une clé Coinalyze pour afficher Open Interest, funding, long/short et liquidations."
               onOuvrirReglages={openSettingsFromWindow}
             />
+          ) : resolution === null ? (
+            <Vide>Recherche des perpétuels {actif} sur Binance, Bybit, OKX et Hyperliquid…</Vide>
+          ) : marche === null ? (
+            <Vide>
+              Aucun perpétuel {actif} sur Binance, Bybit, OKX ni Hyperliquid (catalogue Coinalyze).
+            </Vide>
           ) : (
             <div className="space-y-3">
+              {/* Rang de place : sélecteur quand l'actif a plusieurs perp, sinon
+                  libellé statique. Le choix est par ACTIF (session-only). */}
+              <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-dim">
+                {marches.length >= 2 ? (
+                  <Select
+                    aria-label="Place du perpétuel"
+                    value={marche.place}
+                    onChange={(e) => choisirPlacePerp(actif, e.target.value as PlacePerp)}
+                  >
+                    {marches.map((m) => (
+                      <option key={m.place} value={m.place}>
+                        {libelleMarchePerp(m)}
+                      </option>
+                    ))}
+                  </Select>
+                ) : (
+                  <span>{libelleMarchePerp(marche)}</span>
+                )}
+                <span>
+                  Actif {actif} · {marches.length} place{marches.length > 1 ? "s" : ""} trouvée
+                  {marches.length > 1 ? "s" : ""}
+                </span>
+              </div>
+              {resolution.etat === "repli" && resolution.cause === "catalogue-indisponible" && (
+                <p className="px-1 text-[10px] text-text-dim">
+                  Catalogue Coinalyze indisponible : perp Binance {marche.symboleSurPlace} supposé.
+                </p>
+              )}
+
               <div className="flex items-center justify-between rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-dim">
-                <span>{coinalyzeSymbol}</span>
+                <span>{marche.symbole}</span>
                 <Fraicheur loading={loading} majTs={majTs} cadence="1 min" />
               </div>
 
@@ -534,12 +703,17 @@ export function DerivativesWindow() {
                   extra={oiSpark.length >= 2 && <Sparkline values={oiSpark} color="var(--serie-5)" />}
                   badge={<BadgeFiabilite meta={metaSource("coinalyze:oi")} />}
                 />
-                {oi !== undefined && Number.isFinite(oi.oiUsd) && (
-                  <div className="flex items-center gap-2 px-3 text-[11px] tabular-nums text-text-dim">
-                    <span>vs historique</span>
-                    <RefBadge referentiel={refOi} sens="hausse-chaud" />
-                  </div>
-                )}
+                {/* Référentiels OI/funding : séries Binance USDⓈ-M — affichés
+                    UNIQUEMENT pour un marché Binance (jamais « en construction »
+                    sur les autres places, cf. revue du 5 octobre 2026). */}
+                {marche.place === "binance" &&
+                  oi !== undefined &&
+                  Number.isFinite(oi.oiUsd) && (
+                    <div className="flex items-center gap-2 px-3 text-[11px] tabular-nums text-text-dim">
+                      <span>vs historique</span>
+                      <RefBadge referentiel={refOi} sens="hausse-chaud" />
+                    </div>
+                  )}
                 <TuileStat
                   disposition="inline"
                   label="Funding"
@@ -554,8 +728,10 @@ export function DerivativesWindow() {
                 />
                 {funding !== undefined && Number.isFinite(funding.rate) && (
                   <div className="flex items-center gap-2 px-3 text-[11px] tabular-nums text-text-dim">
-                    <span>APR (base 8 h) {formatPct(annualiserFunding(funding.rate, 8), 2)}</span>
-                    <RefBadge referentiel={refFunding} sens="hausse-chaud" />
+                    <span>{texteAprFunding(funding.rate, intervalleH)}</span>
+                    {marche.place === "binance" && (
+                      <RefBadge referentiel={refFunding} sens="hausse-chaud" />
+                    )}
                   </div>
                 )}
                 {predicted && Number.isFinite(predicted.rate) && (
@@ -574,8 +750,7 @@ export function DerivativesWindow() {
                       </span>
                     </div>
                     <div className="mt-0.5 text-right text-[10px] text-text-dim">
-                      prochain règlement (~8 h) {formatDelai(predicted.nextFundingTime, Date.now())} ·{" "}
-                      {formatHeure(predicted.nextFundingTime)}
+                      {texteProchainReglement(Date.now(), intervalleH)}
                     </div>
                   </div>
                 )}
@@ -591,6 +766,13 @@ export function DerivativesWindow() {
                   extra={lsSpark.length >= 2 && <Sparkline values={lsSpark} color="var(--serie-2)" />}
                   badge={<BadgeFiabilite meta={metaSource("coinalyze:ls")} />}
                 />
+                {/* OKX et Hyperliquid n'ont pas de ratio long/short chez Coinalyze :
+                    absence explicite plutôt qu'un « — » muet. */}
+                {!marche.aLongShort && (
+                  <div className="px-3 text-[11px] text-text-dim">
+                    Ratio long/short non publié par Coinalyze pour {LIBELLE_PLACE_PERP[marche.place]}.
+                  </div>
+                )}
               </div>
 
               {/* Bascules d'affichage des sous-panes OI / funding SUR le graphe (données
@@ -630,7 +812,9 @@ export function DerivativesWindow() {
                 <div className="max-h-60 overflow-y-auto">
                   {recentLiqs.length === 0 ? (
                     <div className="px-3 py-2">
-                      <Vide>Aucune sur la dernière heure.</Vide>
+                      <Vide>
+                        Aucune liquidation remontée par Coinalyze sur la dernière heure.
+                      </Vide>
                     </div>
                   ) : (
                     recentLiqs.map((l, i) => (
@@ -658,11 +842,14 @@ export function DerivativesWindow() {
           )}
 
           {/* Sentiment perpétuel Binance — indépendant de la clé Coinalyze (fapi public).
-              Affiché dès que la source est Binance ET qu'au moins un flux répond. */}
-          {isBinance && hasBinanceSentiment && (
+              Affiché dès qu'un perp Binance EXISTE pour l'actif (le repli suppose
+              `<ACTIF>USDT`) ET qu'au moins un flux répond. */}
+          {symboleSentiment !== null && hasBinanceSentiment && (
             <section className="mt-3 space-y-2">
               <div className="flex items-center justify-between px-1 text-text-dim">
-                <span className="text-[10px] uppercase tracking-wide">Sentiment perp · Binance</span>
+                <span className="text-[10px] uppercase tracking-wide">
+                  Sentiment perp · Binance · {symboleSentiment}
+                </span>
                 <span className="text-[10px]">sans clé · {BIN_PERIOD}</span>
               </div>
               <TuileStat

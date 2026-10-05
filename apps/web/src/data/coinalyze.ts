@@ -145,7 +145,8 @@ async function request<T>(path: string, params: Record<string, string>): Promise
 
   const search = new URLSearchParams(params);
   if (apiKey !== null) search.set("api_key", apiKey);
-  const url = `${BASE_URL}${path}?${search.toString()}`;
+  const qs = search.toString();
+  const url = qs.length > 0 ? `${BASE_URL}${path}?${qs}` : `${BASE_URL}${path}`;
   const res = await fetch(url);
   if (!res.ok) throw new CoinalyzeError(res.status, res.statusText);
   return (await res.json()) as T;
@@ -157,11 +158,14 @@ async function request<T>(path: string, params: Record<string, string>): Promise
  * Mappe un symbole Binance (spot, ex. « BTCUSDT ») vers l'identifiant Coinalyze
  * du perpétuel Binance USDⓈ-M correspondant : suffixe `_PERP.A` (`.A` = Binance).
  * Si l'entrée est déjà un identifiant Coinalyze (contient un `.`), on la renvoie
- * inchangée. Un perp explicite (`BTC-PERP`) utilise la référence dérivée Binance USDT.
+ * en CONSERVANT LA CASSE : l'API est sensible à la casse (`kPEPE.H` ≠ `KPEPE.H`,
+ * vérifié en réel le 5 octobre 2026). Un perp explicite (`BTC-PERP`) utilise la
+ * référence dérivée Binance USDT.
  */
 export function toCoinalyzeSymbol(binanceSymbol: string): string {
-  const s = binanceSymbol.trim().toUpperCase();
-  if (s.includes(".")) return s;
+  const brut = binanceSymbol.trim();
+  if (brut.includes(".")) return brut;
+  const s = brut.toUpperCase();
   const base = s.endsWith("-PERP") ? basePerp(s) : null;
   return `${base === null ? s : `${base}USDT`}_PERP.A`;
 }
@@ -460,13 +464,13 @@ export const coinalyzeProvider: IDerivedDataProvider = {
 /**
  * Heure du prochain RÈGLEMENT de funding, en ms epoch. Coinalyze
  * (predicted-funding-rate) ne l'expose pas → on calcule la prochaine frontière de
- * 8 h UTC (00:00 / 08:00 / 16:00), cadence standard des perpétuels Binance USDⓈ-M.
- * PURE & testée. ⚠️ Hypothèse 8 h : quelques perps règlent en 4 h/1 h — affiché
- * comme estimation « prochain règlement (~8 h) » côté UI.
+ * `intervalH` heures depuis l'epoch (8 h par défaut = 00/08/16 UTC, cadence standard
+ * des perpétuels Binance USDⓈ-M). PURE & testée. Le paramètre `intervalH` sert aux
+ * cadences réelles dérivées par venue (4 h chez Binance, 1 h chez Hyperliquid…).
  */
-export function prochainReglementFunding(nowMs: number): number {
-  const HUIT_H = 8 * 60 * 60 * 1000; // les multiples de 8 h depuis l'epoch tombent sur 00/08/16 UTC.
-  return (Math.floor(nowMs / HUIT_H) + 1) * HUIT_H;
+export function prochainReglementFunding(nowMs: number, intervalH = 8): number {
+  const pas = intervalH * 60 * 60 * 1000;
+  return (Math.floor(nowMs / pas) + 1) * pas;
 }
 
 /**
@@ -642,4 +646,20 @@ export function groupLiquidationBuckets(liqs: Liquidation[]): LiquidationBucket[
     else bucket.shortUsd += usd;
   }
   return [...byTime.values()].sort((a, b) => a.time - b.time);
+}
+
+// ─────────────────────────── Catalogue des marchés à terme (demande du 5 octobre 2026) ───────────────────────────
+
+/**
+ * Catalogue Coinalyze `GET /v1/future-markets` : la liste COMPLÈTE des marchés à
+ * terme suivis (~1,6 Mo, ~5 500 lignes, UN seul appel de quota). Sert à la découverte
+ * des perpétuels par actif sur les quatre places supportées (cf. `data/marchesPerp.ts`,
+ * qui valide les champs). Lève `CoinalyzeError` si le corps n'est pas un tableau.
+ */
+export async function fetchFutureMarkets(): Promise<unknown[]> {
+  const body = await request<unknown>("future-markets", {});
+  if (!Array.isArray(body)) {
+    throw new CoinalyzeError(502, "future-markets : corps inattendu (pas un tableau)");
+  }
+  return body;
 }

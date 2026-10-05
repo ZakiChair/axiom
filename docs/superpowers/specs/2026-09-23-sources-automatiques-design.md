@@ -95,7 +95,8 @@ d'historique ». HYPEUSDT partait sur Binance, qui ne le cote que depuis le
   derrière le graphe et les favoris ; une nouvelle frappe ou la fermeture
   abandonne les sondes pas encore parties.
 - **Limites.** Hors Binance, le split taker est perdu (CVD, indicateurs
-  acheteur/vendeur, DOM, DES). La place retenue peut changer avec l'unité de temps
+  acheteur/vendeur, DOM ; DES jusqu'au 5 octobre 2026, qui cherche désormais le
+  perpétuel par actif). La place retenue peut changer avec l'unité de temps
   (HYPEUSD, API réelles : OKX en 1d, Coinbase en 1h) et les dessins sont indexés
   par place. Coinbase, sondé sur 4 pages, laisse Binance départager BTCEUR,
   BTCUSDC et ETHBTC en 4h, 6h et 1d. OKX reste limité à 1 440 bougies par son

@@ -81,6 +81,15 @@ describe("clés serveur Vercel", () => {
     }
   });
 
+  test("la clé serveur Coinalyze couvre le catalogue future-markets (demande du 5 octobre 2026)", () => {
+    const p = planProxyRequest("https://axiom.test/coinalyzeapi/v1/future-markets", "GET", new Headers(), env);
+    expect(p.target.pathname).toBe("/v1/future-markets");
+    expect(p.target.searchParams.get("api_key")).toBe("secret-coinalyze");
+    expect(p.cacheControl).toBe("private, no-store");
+    // Les autres chemins restent refusés (politique inchangée).
+    expect(() => planProxyRequest("https://axiom.test/coinalyzeapi/v1/autre", "GET", new Headers(), env)).toThrow(ProxyPolicyError);
+  });
+
   test("les clés serveur refusent les chemins arbitraires des fournisseurs existants", () => {
     for (const path of ["fredapi/autre", "coinalyzeapi/v1/autre", "tdapi/api_usage", "sosoapi/autre", "bgapi/v1/autre", "ccdataapi/autre", "ethscanapi/v2/api?chainid=1&module=proxy&action=eth_sendRawTransaction"]) {
       expect(() => planProxyRequest(`https://axiom.test/${path}`, "GET", new Headers(), env)).toThrow(ProxyPolicyError);

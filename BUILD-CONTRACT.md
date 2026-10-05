@@ -917,9 +917,10 @@ celui du 24/09.
      350 ms (55 à la revue finale), qui touchent chaque fois 9 paires jamais
      choisies ; 6 sondes à 150 ms.
 9. **Limites assumées.**
-   - Le split taker Binance est perdu (CVD, indicateurs acheteur/vendeur, DOM,
-     DES) sur les actifs dont Binance n'est pas la place la plus profonde :
-     HYPEUSDT sur Bybit affiche le CVD UNUSABLE.
+   - Le split taker Binance est perdu (CVD, indicateurs acheteur/vendeur, DOM ;
+     DES jusqu'au 5 octobre 2026, cf. « Produits dérivés multi-places ») sur les
+     actifs dont Binance n'est pas la place la plus profonde : HYPEUSDT sur Bybit
+     affiche le CVD UNUSABLE.
    - La place retenue peut changer avec l'unité de temps (HYPEUSD : OKX en 1d,
      Coinbase en 1h). Les dessins sont indexés par `slot:place:symbole`.
    - Coinbase est sondé sur 4 pages : sa borne (environ 3,8 ans) reste « au moins
@@ -1367,3 +1368,54 @@ Le moteur d'exécution, les stratégies et les formules des indicateurs existant
 restent hors de ce lot. Revue mathématique indépendante, contrôles de causalité,
 parcours navigateur et plafonds de build inchangés avant publication. Usage et
 validation : [`docs/indicateurs-analyse-2026-10-01.md`](docs/indicateurs-analyse-2026-10-01.md).
+
+## Produits dérivés multi-places (demande du 5 octobre 2026)
+
+Le propriétaire demande que les produits dérivés d'un actif soient recherchés
+parmi toutes les sources. PUMP, charté au comptant sur Bybit (place la plus
+profonde depuis le 26 septembre), affichait « Binance uniquement » dans DES alors
+que Binance, Bybit, OKX et Hyperliquid listent un perpétuel PUMP. Choix du
+propriétaire : les quatre places perp d'AXIOM, Binance d'abord, avec sélecteur.
+**39 fenêtres, 218 indicateurs, 9 identifiants de marché, aucune dépendance,
+aucun hôte ni fournisseur, `@axiom/types` inchangé ; une règle de proxy élargie.**
+
+1. **Découverte par actif** (`data/marchesPerp.ts`). DES ne dépend plus de la place
+   au comptant du graphe. L'actif (base) est cherché dans le catalogue Coinalyze
+   `/v1/future-markets` : un appel d'environ 1,6 Mo, cache mémoire 12 h, échec
+   mémorisé 60 s, requêtes simultanées partagées. Les codes `A`, `6`, `3` et `H`
+   désignent Binance, Bybit, OKX et Hyperliquid. Le `base_asset` normalisé couvre les
+   alias (PUMP = `PUMPFUNUSDT` chez Bybit) et les contrats fractionnés (`1000PEPE`,
+   `kPEPE` chez Hyperliquid, libellés « contrat ×1000 »). Un marché par place :
+   marge stable, multiplicateur 1, puis USDT > USDC > USD. Les identifiants Coinalyze
+   gardent leur casse (`kPEPE.H` ; `KPEPE.H` ne renvoie rien).
+2. **Place affichée.** Binance, puis Bybit, OKX et Hyperliquid ; un perp Hyperliquid
+   charté met sa place en tête. Le sélecteur « Place du perpétuel » retient le choix
+   par actif pour la session, sans persistance ; les sous-panes OI/funding du graphe
+   suivent le même marché. Aucun agrégat multi-places : une place à la fois, avec
+   place, contrat et identifiant Coinalyze affichés.
+3. **Absences explicites.** Sans clé, DES suppose le perp Binance sans appeler le
+   catalogue. Catalogue injoignable : même repli, signalé, avec un nouvel essai
+   toutes les 60 s. Aucun perp sur les quatre places, ou instrument TradFi ou
+   synthétique : message dédié. Le ratio long/short n'est demandé que si Coinalyze
+   le publie (ni OKX ni Hyperliquid). Une liste de liquidations vide signifie
+   « aucune remontée », pas un zéro affirmé. Les référentiels « vs historique »
+   (séries Binance USDⓈ-M) ne s'affichent que pour Binance. Le sentiment Binance
+   sans clé apparaît dès qu'un perp Binance existe pour l'actif.
+4. **Funding annualisé à la cadence réelle.** L'APR et le prochain règlement
+   utilisent l'intervalle de la place : `fundingInfo` Binance (8 h par défaut),
+   `instruments-info` Bybit, `funding-rate` OKX, 1 h pour Hyperliquid. L'hypothèse
+   « base 8 h » était fausse d'un facteur 2 pour les perps à 4 h et de 8 pour
+   Hyperliquid. Cadence inconnue : l'APR n'est pas calculé.
+5. **Proxy.** `api/_policy.ts` autorise `v1/future-markets` pour la clé serveur
+   Coinalyze ; les autres chemins restent refusés (test `vercelServerCredentials`).
+
+Validation : `pnpm check` réussi (web 416 fichiers / 5 883 tests, indicateurs 1 570,
+alertes 139, backtest 143, daemon) ; `pnpm check:e2e` 165/165, dont le nouveau
+parcours `des-multi-places`. Budget d'entrée (Node 24.13, zlib 1.3.1) : HEAD
+1 201 449 / 358 787 → **1 203 659 / 359 368** octets bruts/gzip (+2 210 / +581),
+plafonds 1 220 000 / 360 000 inchangés ; le graphe charge le module de découverte
+à la demande. Contrôle sur API réelles, PUMPUSDT en 1d (« Auto · Bybit ») : DES
+affiche le perp Binance PUMPUSDT (OI 143,9 M$, APR au règlement de 4 h), puis OKX,
+Bybit et Hyperliquid au sélecteur, avec un seul appel au catalogue. Limites : quatre
+places seulement ; les indicateurs du graphe (OI, funding, L/S) restent adossés au
+perp Binance du symbole ; marge gzip réduite à 632 octets.

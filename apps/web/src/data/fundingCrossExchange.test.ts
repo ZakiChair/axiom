@@ -7,6 +7,7 @@ import {
   annualiserFunding,
   etatMatrice,
   fetchFundingMatrix,
+  fetchIntervalleFundingH,
   fundingSpreadApr,
   parseBinanceFunding,
   parseBinanceFundingIntervalH,
@@ -180,5 +181,66 @@ describe("etatMatrice", () => {
 
   it("au moins une venue → matrice exploitable, même partielle", () => {
     expect(etatMatrice([v], 3)).toBe("ok");
+  });
+});
+
+// ─────────────────────────── fetchIntervalleFundingH (demande du 5 octobre 2026) ───────────────────────────
+
+describe("fetchIntervalleFundingH — cadence réelle par place", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("binance : fundingInfo liste le perp → sa cadence ; absent → 8 h standard", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify([{ symbol: "PUMPUSDT", fundingIntervalHours: 4 }])),
+    ));
+    await expect(fetchIntervalleFundingH("binance", "PUMPUSDT")).resolves.toBe(4);
+  });
+
+  it("binance : perp absent de fundingInfo → 8 h", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify([]))));
+    await expect(fetchIntervalleFundingH("binance", "BTCUSDT")).resolves.toBe(8);
+  });
+
+  it("binance : échec HTTP → null", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 500 })));
+    await expect(fetchIntervalleFundingH("binance", "SOLUSDT")).resolves.toBeNull();
+  });
+
+  it("bybit : fundingInterval 240 min → 4 h", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      expect(String(url)).toContain("category=linear&symbol=PUMPFUNUSDT");
+      return new Response(JSON.stringify({ result: { list: [{ fundingInterval: 240 }] } }));
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    await expect(fetchIntervalleFundingH("bybit", "PUMPFUNUSDT")).resolves.toBe(4);
+  });
+
+  it("okx : fundingTime/nextFundingTime à 4 h d'écart → 4 h", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      expect(String(url)).toContain("instId=PUMP-USDT-SWAP");
+      return new Response(
+        JSON.stringify({ data: [{ fundingTime: "1700000000000", nextFundingTime: "1700014400000" }] }),
+      );
+    }));
+    await expect(fetchIntervalleFundingH("okx", "PUMP-USDT-SWAP")).resolves.toBe(4);
+  });
+
+  it("hyperliquid → 1 h, AUCUNE requête", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    await expect(fetchIntervalleFundingH("hyperliquid", "PUMP")).resolves.toBe(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("un succès est mémorisé 1 h : pas de seconde requête", async () => {
+    const fetchSpy = vi.fn(async () =>
+      new Response(JSON.stringify({ result: { list: [{ fundingInterval: 480 }] } })),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    await expect(fetchIntervalleFundingH("bybit", "BTCUSDT")).resolves.toBe(8);
+    await expect(fetchIntervalleFundingH("bybit", "BTCUSDT")).resolves.toBe(8);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 });

@@ -14,6 +14,7 @@
  */
 import { extUrl } from "./extapi";
 import { basePerp } from "./symbol";
+import type { PlacePerp } from "./marchesPerp";
 
 /** Un funding de venue, normalisé. */
 export interface FundingVenue {
@@ -225,4 +226,62 @@ export function fundingSpreadApr(venues: FundingVenue[]): number | null {
   if (venues.length < 2) return null;
   const aprs = venues.map((v) => v.apr);
   return Math.max(...aprs) - Math.min(...aprs);
+}
+
+// ─────────────────────────── Cadence de règlement par marché (fenêtre DES) ───────────────────────────
+// Depuis la découverte multi-places (demande du 5 octobre 2026), DES affiche la
+// cadence RÉELLE du perp retenu (« APR (règlement 4 h) ») plutôt que l'hypothèse
+// 8 h : Hyperliquid règle à l'heure, nombre de perps Binance en 4 h.
+
+/** Succès mémorisés 1 h par `place:symbole` ; les échecs et `null` ne sont pas cachés. */
+const MEMO_INTERVALLE_MS = 60 * 60 * 1000;
+const memoIntervalle = new Map<string, { h: number; at: number }>();
+
+/**
+ * Intervalle de règlement (heures) du perpétuel `symboleSurPlace` sur `place` :
+ *  - hyperliquid → 1 h, AUCUNE requête (cadence fixe du protocole) ;
+ *  - binance → `fapi/v1/fundingInfo` (ne liste QUE les perps hors 8 h) → 8 par défaut ;
+ *  - bybit → `v5/market/instruments-info` (`fundingInterval`, minutes) ;
+ *  - okx → `v5/public/funding-rate` (fundingTime → nextFundingTime).
+ * `null` = cadence inconnue (requête en échec ou champ absent hors Binance).
+ */
+export async function fetchIntervalleFundingH(
+  place: PlacePerp,
+  symboleSurPlace: string,
+): Promise<number | null> {
+  const cle = `${place}:${symboleSurPlace}`;
+  const hit = memoIntervalle.get(cle);
+  if (hit !== undefined && Date.now() - hit.at < MEMO_INTERVALLE_MS) return hit.h;
+
+  let h: number | null = null;
+  try {
+    switch (place) {
+      case "hyperliquid":
+        h = HL_INTERVAL_H;
+        break;
+      case "binance": {
+        const info = await jsonDirect(extUrl("fapi.binance.com", "fapi/v1/fundingInfo"));
+        h = parseBinanceFundingIntervalH(info, symboleSurPlace) ?? CEX_INTERVAL_H;
+        break;
+      }
+      case "bybit": {
+        const info = await jsonDirect(
+          `https://api.bybit.com/v5/market/instruments-info?category=linear&symbol=${encodeURIComponent(symboleSurPlace)}`,
+        );
+        h = parseBybitFundingIntervalH(info);
+        break;
+      }
+      case "okx": {
+        const info = await jsonDirect(
+          `https://www.okx.com/api/v5/public/funding-rate?instId=${encodeURIComponent(symboleSurPlace)}`,
+        );
+        h = parseOkxFundingIntervalH(info);
+        break;
+      }
+    }
+  } catch {
+    h = null; // panne réseau/HTTP : cadence inconnue, non mémorisée.
+  }
+  if (h !== null) memoIntervalle.set(cle, { h, at: Date.now() });
+  return h;
 }

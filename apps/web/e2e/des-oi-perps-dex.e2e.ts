@@ -104,12 +104,15 @@ test("DES : OI perps DEX chargé au premier dépliage, indépendant de la branch
   await page.waitForTimeout(300);
   expect(urls).toHaveLength(1);
 
-  // Source hors Binance : la branche Coinalyze bascule, la section reste en place et dépliée.
+  // Source hors Binance : depuis le 5 octobre 2026, DES découvre le perp par ACTIF
+  // dans le catalogue Coinalyze. Ici le catalogue est bouchonné (503) → repli sur le
+  // perp Binance supposé, jamais « Binance uniquement » ; la section reste dépliée.
   await page.evaluate(async () => {
     const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{ marketStore: { getState: () => { setMarket: (m: { exchange: "bybit"; symbol: string; timeframe: "1m" }) => void } } }>;
     (await importer()).marketStore.getState().setMarket({ exchange: "bybit", symbol: "BTCUSDT", timeframe: "1m" });
   });
-  await expect(des).toContainText("Binance uniquement");
+  await expect(des).toContainText("Catalogue Coinalyze indisponible");
+  await expect(des).not.toContainText("Binance uniquement");
   await expect(des).toContainText("59.4 %");
   expect(urls).toHaveLength(1);
 

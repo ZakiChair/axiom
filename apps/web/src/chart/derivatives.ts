@@ -10,10 +10,15 @@
  *    interval 1 h, fenêtre glissante ~30 j) → FORWARD-FILL sur les timestamps de
  *    bougie (dernière valeur connue ≤ open time). Escalier en intraday, échantillon
  *    de tendance sur les TF longs.
- *  - Contrôleur AUTONOME : il s'abonne lui-même au store de toggles ET au store marché
+ *  - Contrôleur AUTONOME : il s'abonne lui-même au store de toggles, au store marché
  *    (garde O(1) : ne reconstruit que si le NOMBRE de bougies ou la dernière bougie
- *    change — pas à chaque tick intra-bougie). Ainsi le câblage dans Chart.tsx se
- *    limite à construire + disposer (contrainte « 5 lignes max »).
+ *    change — pas à chaque tick intra-bougie) ET au store UI des dérivés (le choix
+ *    de place perp dans DES recharge les séries). Ainsi le câblage dans Chart.tsx
+ *    se limite à construire + disposer (contrainte « 5 lignes max »).
+ *  - Le marché suivi est celui de la fenêtre DES : perpétuel résolu par ACTIF
+ *    dans le catalogue Coinalyze (`data/marchesPerp.ts`, demande du 5 octobre
+ *    2026) — pas seulement Binance. Marché Binance → OI avec repli Binance sans
+ *    clé (`histOiUsdAvecRepli`) ; autres places → OI Coinalyze seul.
  *  - Recréé à chaque changement symbole/TF/source par le Chart (symbole capturé à la
  *    construction, comme RevenueController). Dégradation propre : sans données
  *    (actif sans perp, source en panne) → aucun pane.
@@ -24,7 +29,12 @@ import type { FundingRate } from "@axiom/types";
 import type { MarketStore } from "../store/market";
 import type { PointSerie } from "../lib/referentiel";
 import { derivativesChartStore, type DerivativesChartState } from "../store/derivatives-chart";
+import { derivativesUiStore } from "../store/derivatives-ui";
 import { coinalyzeProvider } from "../data/coinalyze";
+// `data/marchesPerp` est chargé à la demande (await import dans resoudreMarche) :
+// le catalogue de découverte perp n'est utile qu'au premier pane activé — garder
+// le chunk initial sous le budget gzip.
+import type { MarchePerp } from "../data/marchesPerp";
 import { histOiUsdAvecRepli } from "../data/referentiels";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 
@@ -48,11 +58,13 @@ const DERIV_INTERVAL = "1hour";
 const DERIV_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
- * Mémo module-scope PAR SYMBOLE (TTL 60 s) : plusieurs slots de grille sur le MÊME
- * symbole (ex. 2× BTCUSDT) ne déclenchent qu'UN seul fetch Coinalyze — protège le
- * quota 40 req/min (`coinalyzeProvider` n'a lui-même aucun cache, cf. data/coinalyze.ts,
- * uniquement un throttle de débit partagé). Nécessaire depuis que `DerivativesChartController`
- * est instancié sur TOUS les slots (plus seulement le maître).
+ * Mémo module-scope PAR ID COINALYZE DE MARCHÉ (TTL 60 s) : plusieurs slots de
+ * grille sur le MÊME symbole (ex. 2× BTCUSDT) ne déclenchent qu'UN seul fetch
+ * Coinalyze — protège le quota 40 req/min (`coinalyzeProvider` n'a lui-même aucun
+ * cache, cf. data/coinalyze.ts, uniquement un throttle de débit partagé).
+ * Nécessaire depuis que `DerivativesChartController` est instancié sur TOUS les
+ * slots (plus seulement le maître). La clé est `marche.symbole` (ex.
+ * « PUMPFUNUSDT.6 ») : un changement de place change de clé → nouveau fetch.
  */
 const DERIV_CACHE_TTL_MS = 60_000;
 
@@ -74,6 +86,12 @@ function memoized<T>(cache: Map<string, CacheEntry<T>>, key: string, fetcher: ()
   cache.set(key, { promise, fetchedAt: now });
   promise.catch(() => cache.delete(key));
   return promise;
+}
+
+/** Vide les mémos de séries — réservé aux tests. */
+export function _viderCachesPanesDerives(): void {
+  oiHistoryCache.clear();
+  fundingHistoryCache.clear();
 }
 
 interface CandleTime {
@@ -179,10 +197,18 @@ export class DerivativesChartController {
   private readonly market: MarketStore;
   private readonly unsubStore: () => void;
   private readonly unsubMarket: () => void;
+  private readonly unsubPlaces: () => void;
 
   private state: DerivativesChartState;
   private disposed = false;
   private lastCandleSig = "";
+  /**
+   * Génération du marché suivi : incrémentée à chaque changement de place perp
+   * effective. Un fetch résolu APRÈS une bascule est ignoré (série périmée).
+   */
+  private generation = 0;
+  /** Id Coinalyze du marché dont proviennent les séries courantes (null = aucun). */
+  private symboleCharge: string | null = null;
 
   private oiSeries: DerivPoint[] | null = null;
   private oiFetched = false;
@@ -200,9 +226,13 @@ export class DerivativesChartController {
     this.market = market;
     ensureRegistered();
     this.state = derivativesChartStore.getState();
-    // Auto-pilotage : toggles + changements de bougies (garde O(1)) sans câblage Chart.tsx.
+    // Auto-pilotage : toggles + changements de bougies (garde O(1)) + choix de
+    // place perp dans DES, sans câblage Chart.tsx.
     this.unsubStore = derivativesChartStore.subscribe((s) => this.onToggle(s));
     this.unsubMarket = this.market.subscribe(() => this.onMarketChange());
+    this.unsubPlaces = derivativesUiStore.subscribe((s, prev) => {
+      if (s.placesPerp !== prev.placesPerp) void this.onPlacesChange();
+    });
     this.onToggle(this.state);
   }
 
@@ -210,6 +240,7 @@ export class DerivativesChartController {
     this.disposed = true;
     this.unsubStore();
     this.unsubMarket();
+    this.unsubPlaces();
     this.removePane(OI_NAME, this.oiPaneId);
     this.oiPaneId = null;
     this.removePane(FUNDING_NAME, this.fundingPaneId);
@@ -217,6 +248,44 @@ export class DerivativesChartController {
   }
 
   // --- interne ---------------------------------------------------------------
+
+  /**
+   * Marché perp suivi : résolution par actif (catalogue Coinalyze), choix de place
+   * de l'utilisateur honoré s'il existe encore, Hyperliquid en tête uniquement si
+   * l'instrument charté est un perp Hyperliquid. `null` = aucun marché pour l'actif.
+   */
+  private async resoudreMarche(): Promise<MarchePerp | null> {
+    const { resoudreMarchesPerp, marchePerpRetenu } = await import("../data/marchesPerp");
+    const r = await resoudreMarchesPerp(this.symbol);
+    if (r.etat === "inexploitable") return null;
+    const choix = derivativesUiStore.getState().placesPerp[r.actif];
+    const prioritaire =
+      this.market.getState().exchange === "hyperliquid" ? "hyperliquid" : null;
+    const retenu = marchePerpRetenu(r.marches, choix, prioritaire);
+    return retenu;
+  }
+
+  /**
+   * Changement de place dans DES : si le marché retenu a changé d'id Coinalyze,
+   * les séries et drapeaux sont abandonnés puis les panes actifs rechargés.
+   * Invalide aussi tout fetch encore en vol (génération).
+   */
+  private async onPlacesChange(): Promise<void> {
+    if (this.disposed) return;
+    const gen = ++this.generation;
+    const m = await this.resoudreMarche();
+    if (this.disposed || gen !== this.generation) return;
+    const symbole = m?.symbole ?? null;
+    if (symbole === this.symboleCharge) return;
+    this.symboleCharge = symbole;
+    this.oiSeries = null;
+    this.oiFetched = false;
+    this.fundingSeries = null;
+    this.fundingFetched = false;
+    if (this.state.oi && !this.oiFetching) void this.loadOi();
+    if (this.state.funding && !this.fundingFetching) void this.loadFunding();
+    this.rebuild();
+  }
 
   private onToggle(s: DerivativesChartState): void {
     if (this.disposed) return;
@@ -238,18 +307,42 @@ export class DerivativesChartController {
 
   private async loadOi(): Promise<void> {
     this.oiFetching = true;
+    const gen = this.generation;
     try {
-      // Coinalyze en primaire, repli Binance openInterestHist (gratuit, sans clé) si
-      // indisponible/à vide — cf. `histOiUsdAvecRepli` (data/referentiels.ts).
-      const hist = await memoized(oiHistoryCache, this.symbol, () =>
-        histOiUsdAvecRepli(this.symbol, DERIV_INTERVAL, Date.now() - DERIV_LOOKBACK_MS)
-      );
-      if (this.disposed) return;
-      const series = hist.map((p) => ({ time: p.t, value: p.v }));
-      this.oiSeries = series.length > 0 ? series : null;
-      this.oiFetched = true;
+      const m = await this.resoudreMarche();
+      if (this.disposed || gen !== this.generation) {
+        // Chargement périmé (bascule de place pendant la résolution) : on laisse
+        // `oiFetched` à false pour que la relance ci-dessous refasse le fetch.
+      } else {
+        this.symboleCharge = m?.symbole ?? null;
+        if (m === null) {
+          this.oiSeries = null;
+          this.oiFetched = true;
+        } else {
+          // Marché Binance : Coinalyze en primaire, repli Binance openInterestHist
+          // (gratuit, sans clé) — cf. `histOiUsdAvecRepli` (data/referentiels.ts).
+          // Autres places : Coinalyze seul, sans repli Binance (la série Binance du
+          // MÊME actif existe peut-être, mais ce n'est pas le marché affiché).
+          const hist = await memoized(oiHistoryCache, m.symbole, () =>
+            m.place === "binance"
+              ? histOiUsdAvecRepli(m.symboleSurPlace, DERIV_INTERVAL, Date.now() - DERIV_LOOKBACK_MS)
+              : coinalyzeProvider
+                  .fetchOpenInterestHistory(m.symbole, DERIV_INTERVAL, Date.now() - DERIV_LOOKBACK_MS)
+                  .then((pts) =>
+                    pts
+                      .map((p) => ({ t: p.time, v: p.oiUsd }))
+                      .filter((p) => Number.isFinite(p.t) && Number.isFinite(p.v)),
+                  ),
+          );
+          if (!this.disposed && gen === this.generation) {
+            const series = hist.map((p) => ({ time: p.t, value: p.v }));
+            this.oiSeries = series.length > 0 ? series : null;
+            this.oiFetched = true;
+          }
+        }
+      }
     } catch (err) {
-      if (!this.disposed) {
+      if (!this.disposed && gen === this.generation) {
         console.error(`[AXIOM] Échec du fetch OI (sous-pane) ${this.symbol}`, err);
         this.oiSeries = null;
         this.oiFetched = true;
@@ -257,24 +350,44 @@ export class DerivativesChartController {
     } finally {
       this.oiFetching = false;
     }
-    if (!this.disposed && this.state.oi) this.rebuild();
+    if (this.disposed) return;
+    if (this.state.oi && !this.oiFetched) {
+      // Une bascule de place a invalidé ce chargement pendant le fetch : relancer
+      // sur le nouveau marché plutôt que de laisser le pane vide.
+      void this.loadOi();
+    } else if (this.state.oi) {
+      this.rebuild();
+    }
   }
 
   private async loadFunding(): Promise<void> {
     this.fundingFetching = true;
+    const gen = this.generation;
     try {
-      const hist = await memoized(fundingHistoryCache, this.symbol, () =>
-        coinalyzeProvider.fetchFundingRateHistory(this.symbol, DERIV_INTERVAL, Date.now() - DERIV_LOOKBACK_MS)
-      );
-      if (this.disposed) return;
-      // rate est une fraction (normalisée à la source) → ×100 pour l'affichage en %.
-      const series = hist
-        .map((p) => ({ time: p.time, value: p.rate * 100 }))
-        .filter((p) => Number.isFinite(p.value));
-      this.fundingSeries = series.length > 0 ? series : null;
-      this.fundingFetched = true;
+      const m = await this.resoudreMarche();
+      if (this.disposed || gen !== this.generation) {
+        // Périmé : fundingFetched reste false → relance ci-dessous.
+      } else {
+        this.symboleCharge = m?.symbole ?? null;
+        if (m === null) {
+          this.fundingSeries = null;
+          this.fundingFetched = true;
+        } else {
+          const hist = await memoized(fundingHistoryCache, m.symbole, () =>
+            coinalyzeProvider.fetchFundingRateHistory(m.symbole, DERIV_INTERVAL, Date.now() - DERIV_LOOKBACK_MS)
+          );
+          if (!this.disposed && gen === this.generation) {
+            // rate est une fraction (normalisée à la source) → ×100 pour l'affichage en %.
+            const series = hist
+              .map((p) => ({ time: p.time, value: p.rate * 100 }))
+              .filter((p) => Number.isFinite(p.value));
+            this.fundingSeries = series.length > 0 ? series : null;
+            this.fundingFetched = true;
+          }
+        }
+      }
     } catch (err) {
-      if (!this.disposed) {
+      if (!this.disposed && gen === this.generation) {
         console.error(`[AXIOM] Échec du fetch funding (sous-pane) ${this.symbol}`, err);
         this.fundingSeries = null;
         this.fundingFetched = true;
@@ -282,7 +395,12 @@ export class DerivativesChartController {
     } finally {
       this.fundingFetching = false;
     }
-    if (!this.disposed && this.state.funding) this.rebuild();
+    if (this.disposed) return;
+    if (this.state.funding && !this.fundingFetched) {
+      void this.loadFunding();
+    } else if (this.state.funding) {
+      this.rebuild();
+    }
   }
 
   private rebuild(): void {

@@ -1,11 +1,13 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import type { Liquidation } from "@axiom/types";
 import {
   chunkCoinalyzeSymbols,
+  fetchFutureMarkets,
   filtrerFrontieres8h,
   normalizeInterval,
   prochainReglementFunding,
   groupLiquidationBuckets,
+  setCoinalyzeApiKey,
   toCoinalyzeSymbol,
 } from "./coinalyze";
 
@@ -23,6 +25,13 @@ describe("prochainReglementFunding", () => {
   it("sur une frontière exacte, renvoie la frontière SUIVANTE (le règlement vient d'avoir lieu)", () => {
     expect(prochainReglementFunding(0)).toBe(HUIT_H);
     expect(prochainReglementFunding(HUIT_H)).toBe(2 * HUIT_H);
+  });
+
+  it("honore une cadence différente (1 h Hyperliquid, 4 h Binance PUMP)", () => {
+    const troisH = Date.UTC(2026, 6, 2, 3, 0, 0);
+    expect(prochainReglementFunding(troisH, 1)).toBe(Date.UTC(2026, 6, 2, 4, 0, 0));
+    expect(prochainReglementFunding(troisH, 4)).toBe(Date.UTC(2026, 6, 2, 4, 0, 0));
+    expect(prochainReglementFunding(Date.UTC(2026, 6, 2, 4, 0, 0), 4)).toBe(Date.UTC(2026, 6, 2, 8, 0, 0));
   });
 });
 
@@ -152,5 +161,53 @@ describe("fetchLiquidationHistory — intervalle optionnel", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+// ───────── Demande du 5 octobre 2026 : casse des ids Coinalyze & catalogue ─────────
+describe("toCoinalyzeSymbol — casse conservée pour les identifiants Coinalyze", () => {
+  it("un id avec point est renvoyé SANS uppercaser (kPEPE.H ≠ KPEPE.H côté API)", () => {
+    expect(toCoinalyzeSymbol("kPEPE.H")).toBe("kPEPE.H");
+    expect(toCoinalyzeSymbol("PUMPFUNUSDT.6")).toBe("PUMPFUNUSDT.6");
+    expect(toCoinalyzeSymbol("  kPEPE.H  ")).toBe("kPEPE.H"); // blancs rognés, casse intacte
+    expect(toCoinalyzeSymbol("BTCUSDT_PERP.6")).toBe("BTCUSDT_PERP.6");
+  });
+});
+
+describe("fetchFutureMarkets", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    setCoinalyzeApiKey(null);
+  });
+
+  it("appelle /coinalyzeapi/v1/future-markets SANS « ? » terminal", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      urls.push(String(url));
+      return new Response(JSON.stringify([{ symbol: "BTCUSDT_PERP.A" }]));
+    }));
+    const lignes = await fetchFutureMarkets();
+    expect(lignes).toEqual([{ symbol: "BTCUSDT_PERP.A" }]);
+    expect(urls[0]).toBe("/coinalyzeapi/v1/future-markets");
+    expect(urls[0]).not.toContain("?");
+  });
+
+  it("ajoute api_key uniquement quand une clé personnelle est posée", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      urls.push(String(url));
+      return new Response(JSON.stringify([]));
+    }));
+    setCoinalyzeApiKey("cle-test-e2e");
+    await fetchFutureMarkets();
+    expect(new URL(urls[0] ?? "", "https://axiom.test").searchParams.get("api_key")).toBe("cle-test-e2e");
+    setCoinalyzeApiKey(null);
+    await fetchFutureMarkets();
+    expect(urls[1]).toBe("/coinalyzeapi/v1/future-markets");
+  });
+
+  it("lève CoinalyzeError si le corps n'est pas un tableau", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ erreur: "x" }))));
+    await expect(fetchFutureMarkets()).rejects.toThrow("future-markets");
   });
 });

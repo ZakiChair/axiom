@@ -1,0 +1,392 @@
+import type {
+  Anomaly,
+  AnomalyEvidence,
+  AnomalySeverity,
+  Contract,
+  PacteState,
+  Transaction,
+} from "./model";
+import {
+  isBoundedAmount,
+  isBusinessIsoDate,
+  isNoticeDays,
+  isPositiveAmount,
+  isoDateMs as safeIsoDateMs,
+  shiftIsoDate,
+} from "./limits";
+import { localDateKey } from "./format";
+import { matchContract, normalizeMerchant } from "./normalize";
+
+const DAY_MS = 24 * 60 * 60 * 1_000;
+const DUPLICATE_WINDOW_DAYS = 7;
+const MONEY_UNIT_SCALE = 10_000;
+const BASIS_POINT_SCALE = 10_000n;
+const PRICE_TOLERANCE_BASIS_POINTS = 200n;
+const DEADLINE_WINDOW_DAYS = 30;
+const REFUND_MATCH_WINDOW_DAYS = 90;
+
+type MatchedTransaction = {
+  transaction: Transaction;
+  contract: Contract;
+};
+
+function isoDateMs(value: string): number {
+  return safeIsoDateMs(value) ?? Number.NaN;
+}
+
+function todayMs(now: Date): number {
+  return isoDateMs(localDateKey(now));
+}
+
+function moneyUnits(amount: number): bigint | undefined {
+  if (!isBoundedAmount(amount)) return undefined;
+  return BigInt(Math.round(amount * MONEY_UNIT_SCALE));
+}
+
+function exceedsPriceTolerance(amount: number, reference: number): boolean {
+  const amountUnits = moneyUnits(amount);
+  const referenceUnits = moneyUnits(reference);
+  if (amountUnits === undefined || referenceUnits === undefined) return false;
+
+  return (
+    (amountUnits - referenceUnits) * BASIS_POINT_SCALE >
+    referenceUnits * PRICE_TOLERANCE_BASIS_POINTS
+  );
+}
+
+function isWithinPriceTolerance(amount: number, reference: number): boolean {
+  const amountUnits = moneyUnits(amount);
+  const referenceUnits = moneyUnits(reference);
+  if (amountUnits === undefined || referenceUnits === undefined) return false;
+  const difference = amountUnits - referenceUnits;
+  const absoluteDifference = difference < 0n ? -difference : difference;
+
+  return (
+    absoluteDifference * BASIS_POINT_SCALE <=
+    referenceUnits * PRICE_TOLERANCE_BASIS_POINTS
+  );
+}
+
+function formatAmount(amount: number, currency: Contract["currency"]): string {
+  return new Intl.NumberFormat("fr-CH", {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 2,
+  }).format(amount);
+}
+
+function formatDate(value: string): string {
+  return new Intl.DateTimeFormat("fr-CH", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${value}T00:00:00.000Z`));
+}
+
+function transactionEvidence(transaction: Transaction): AnomalyEvidence {
+  return {
+    id: transaction.id,
+    date: transaction.date,
+    label: transaction.label,
+    amount: transaction.amount,
+    currency: transaction.currency,
+  };
+}
+
+function matchedTransactions(state: PacteState): MatchedTransaction[] {
+  const usableContracts = state.contracts.filter((contract) => (
+    isPositiveAmount(contract.amount) &&
+    isNoticeDays(contract.noticeDays) &&
+    isBusinessIsoDate(contract.startDate) &&
+    (contract.nextRenewalDate === undefined || isBusinessIsoDate(contract.nextRenewalDate)) &&
+    (contract.terminatedAt === undefined || isBusinessIsoDate(contract.terminatedAt)) &&
+    (contract.expectedRefund === undefined || (
+      isPositiveAmount(contract.expectedRefund.amount) &&
+      isBusinessIsoDate(contract.expectedRefund.dueDate)
+    ))
+  ));
+  const contractsById = new Map(usableContracts.map((contract) => [contract.id, contract]));
+
+  return state.transactions.filter((transaction) => (
+    isBoundedAmount(transaction.amount) &&
+    transaction.amount !== 0 &&
+    isBusinessIsoDate(transaction.date)
+  )).flatMap((transaction) => {
+    const explicitContract = transaction.contractId
+      ? contractsById.get(transaction.contractId)
+      : undefined;
+    const matchedId = explicitContract ? undefined : matchContract(transaction, usableContracts);
+    const contract = explicitContract ?? (matchedId ? contractsById.get(matchedId) : undefined);
+
+    return contract ? [{ transaction, contract }] : [];
+  });
+}
+
+function duplicateAnomalies(matched: MatchedTransaction[]): Anomaly[] {
+  const debits = matched
+    .filter(({ transaction }) => transaction.amount > 0)
+    .sort(
+      (left, right) =>
+        left.transaction.date.localeCompare(right.transaction.date) ||
+        left.transaction.id.localeCompare(right.transaction.id),
+    );
+  const anomalies: Anomaly[] = [];
+
+  for (let leftIndex = 0; leftIndex < debits.length; leftIndex += 1) {
+    const left = debits[leftIndex];
+    if (!left) continue;
+
+    for (let rightIndex = leftIndex + 1; rightIndex < debits.length; rightIndex += 1) {
+      const right = debits[rightIndex];
+      if (!right) continue;
+
+      const elapsedDays =
+        (isoDateMs(right.transaction.date) - isoDateMs(left.transaction.date)) / DAY_MS;
+      if (elapsedDays >= DUPLICATE_WINDOW_DAYS) break;
+
+      const sameProvider =
+        normalizeMerchant(left.contract.provider) === normalizeMerchant(right.contract.provider);
+      const sameAmount =
+        moneyUnits(left.transaction.amount) === moneyUnits(right.transaction.amount) &&
+        left.transaction.currency === right.transaction.currency;
+      if (!sameProvider || !sameAmount) continue;
+
+      const transactionIds = [left.transaction.id, right.transaction.id].sort();
+      const contractId =
+        left.contract.id === right.contract.id ? left.contract.id : undefined;
+
+      anomalies.push({
+        id: `anomaly:duplicate:${transactionIds.join(":")}`,
+        kind: "duplicate",
+        severity: "critical",
+        confidence: "high",
+        title: `Double débit possible — ${left.contract.provider}`,
+        explanation: `Deux débits de ${formatAmount(left.transaction.amount, left.transaction.currency)} ont été relevés à moins de sept jours d’intervalle.`,
+        amount: left.transaction.amount,
+        currency: left.transaction.currency,
+        contractId,
+        transactionIds,
+        evidence: [left.transaction, right.transaction]
+          .sort(
+            (first, second) =>
+              first.date.localeCompare(second.date) || first.id.localeCompare(second.id),
+          )
+          .map(transactionEvidence),
+      });
+    }
+  }
+
+  return anomalies;
+}
+
+function priceIncreaseAnomalies(matched: MatchedTransaction[]): Anomaly[] {
+  return matched.flatMap(({ transaction, contract }) => {
+    if (
+      transaction.amount <= 0 ||
+      transaction.currency !== contract.currency ||
+      !exceedsPriceTolerance(transaction.amount, contract.amount)
+    ) {
+      return [];
+    }
+
+    const transactionUnits = moneyUnits(transaction.amount)!;
+    const contractUnits = moneyUnits(contract.amount)!;
+    const recoverableAmount = Number(transactionUnits - contractUnits) / MONEY_UNIT_SCALE;
+
+    return [{
+      id: `anomaly:price-increase:${contract.id}:${transaction.id}`,
+      kind: "price-increase",
+      severity: "important",
+      confidence: "high",
+      title: `Hausse de prix — ${contract.provider}`,
+      explanation: `Le débit du ${formatDate(transaction.date)} dépasse le prix contractuel de ${formatAmount(recoverableAmount, contract.currency)}.`,
+      amount: recoverableAmount,
+      currency: transaction.currency,
+      contractId: contract.id,
+      transactionIds: [transaction.id],
+      evidence: [transactionEvidence(transaction)],
+    } satisfies Anomaly];
+  });
+}
+
+function postTerminationAnomalies(matched: MatchedTransaction[]): Anomaly[] {
+  return matched.flatMap(({ transaction, contract }) => {
+    if (
+      transaction.amount <= 0 ||
+      contract.status !== "terminated" ||
+      !contract.terminatedAt ||
+      transaction.date <= contract.terminatedAt
+    ) {
+      return [];
+    }
+
+    return [{
+      id: `anomaly:post-termination:${contract.id}:${transaction.id}`,
+      kind: "post-termination",
+      severity: "critical",
+      confidence: "high",
+      title: `Débit après résiliation — ${contract.provider}`,
+      explanation: `Un débit de ${formatAmount(transaction.amount, transaction.currency)} a été relevé le ${formatDate(transaction.date)}, après la résiliation du ${formatDate(contract.terminatedAt)}.`,
+      amount: transaction.amount,
+      currency: transaction.currency,
+      contractId: contract.id,
+      transactionIds: [transaction.id],
+      evidence: [transactionEvidence(transaction)],
+    } satisfies Anomaly];
+  });
+}
+
+function missingRefundAnomalies(
+  state: PacteState,
+  matched: MatchedTransaction[],
+  now: Date,
+): Anomaly[] {
+  const nowDateMs = todayMs(now);
+
+  return state.contracts.flatMap((contract) => {
+    const expectedRefund = contract.expectedRefund;
+    const dueDateMs = expectedRefund ? isoDateMs(expectedRefund.dueDate) : Number.NaN;
+    if (
+      !expectedRefund ||
+      !isPositiveAmount(expectedRefund.amount) ||
+      !Number.isFinite(dueDateMs) ||
+      dueDateMs > nowDateMs
+    ) return [];
+    const windowStart = dueDateMs - REFUND_MATCH_WINDOW_DAYS * DAY_MS;
+    const windowEnd = dueDateMs + REFUND_MATCH_WINDOW_DAYS * DAY_MS;
+
+    const matchingCredit = matched.some(({ transaction, contract: matchedContract }) => {
+      if (
+        matchedContract.id !== contract.id ||
+        transaction.amount >= 0 ||
+        transaction.currency !== contract.currency ||
+        transaction.date < contract.startDate ||
+        isoDateMs(transaction.date) < windowStart ||
+        isoDateMs(transaction.date) > windowEnd ||
+        isoDateMs(transaction.date) > nowDateMs
+      ) {
+        return false;
+      }
+
+      return isWithinPriceTolerance(Math.abs(transaction.amount), expectedRefund.amount);
+    });
+    if (matchingCredit) return [];
+
+    const evidence: AnomalyEvidence = {
+      id: `expected-refund:${contract.id}:${expectedRefund.dueDate}`,
+      date: expectedRefund.dueDate,
+      label: `Remboursement attendu de ${contract.provider}`,
+      amount: -expectedRefund.amount,
+      currency: contract.currency,
+    };
+
+    return [{
+      id: `anomaly:missing-refund:${contract.id}:${expectedRefund.dueDate}:${expectedRefund.amount}`,
+      kind: "missing-refund",
+      severity: "important",
+      confidence: "high",
+      title: `Remboursement manquant — ${contract.provider}`,
+      explanation: `Le remboursement de ${formatAmount(expectedRefund.amount, contract.currency)} attendu au ${formatDate(expectedRefund.dueDate)} n’a pas de crédit correspondant.`,
+      amount: expectedRefund.amount,
+      currency: contract.currency,
+      contractId: contract.id,
+      transactionIds: [],
+      evidence: [evidence],
+    } satisfies Anomaly];
+  });
+}
+
+function deadlineAnomalies(state: PacteState, now: Date): Anomaly[] {
+  const from = todayMs(now);
+  const until = from + DEADLINE_WINDOW_DAYS * DAY_MS;
+
+  return state.contracts.flatMap((contract) => {
+    if (contract.status !== "active" || !contract.nextRenewalDate) return [];
+
+    if (!isNoticeDays(contract.noticeDays)) return [];
+    const deadline = shiftIsoDate(contract.nextRenewalDate, -contract.noticeDays);
+    if (!deadline) return [];
+    const deadlineMs = isoDateMs(deadline);
+    if (deadlineMs < from || deadlineMs > until) return [];
+
+    const evidence: AnomalyEvidence = {
+      id: `notice-deadline:${contract.id}:${deadline}`,
+      date: deadline,
+      label: `Préavis pour ${contract.provider}`,
+      amount: 0,
+      currency: contract.currency,
+    };
+
+    return [{
+      id: `anomaly:deadline:${contract.id}:${deadline}`,
+      kind: "deadline",
+      severity: "vigilance",
+      confidence: "high",
+      title: `Échéance proche — ${contract.provider}`,
+      explanation: `Le préavis doit être exercé au plus tard le ${formatDate(deadline)} pour le renouvellement du ${formatDate(contract.nextRenewalDate)}.`,
+      amount: 0,
+      currency: contract.currency,
+      contractId: contract.id,
+      transactionIds: [],
+      evidence: [evidence],
+    } satisfies Anomaly];
+  });
+}
+
+const SEVERITY_ORDER: Record<AnomalySeverity, number> = {
+  critical: 0,
+  important: 1,
+  vigilance: 2,
+};
+
+function anomalyDate(anomaly: Anomaly): string {
+  return anomaly.evidence.reduce(
+    (latest, evidence) => (evidence.date > latest ? evidence.date : latest),
+    "",
+  );
+}
+
+export function analyseState(state: PacteState, now: Date): Anomaly[] {
+  const matched = matchedTransactions(state);
+  const dismissedIds = new Set(state.dismissedAnomalyIds);
+
+  return [
+    ...duplicateAnomalies(matched),
+    ...priceIncreaseAnomalies(matched),
+    ...postTerminationAnomalies(matched),
+    ...missingRefundAnomalies(state, matched, now),
+    ...deadlineAnomalies(state, now),
+  ]
+    .filter((anomaly) => !dismissedIds.has(anomaly.id))
+    .sort(
+      (left, right) =>
+        SEVERITY_ORDER[left.severity] - SEVERITY_ORDER[right.severity] ||
+        right.amount - left.amount ||
+        anomalyDate(right).localeCompare(anomalyDate(left)) ||
+        left.id.localeCompare(right.id),
+    );
+}
+
+const SCORE_PENALTY: Record<AnomalySeverity, number> = {
+  critical: 18,
+  important: 12,
+  vigilance: 7,
+};
+
+export function computeControlScore(
+  state: PacteState,
+  anomalies: Anomaly[],
+  now: Date,
+): number {
+  const anomalyPenalty = anomalies.reduce(
+    (total, anomaly) => total + SCORE_PENALTY[anomaly.severity],
+    0,
+  );
+  const incompleteContractPenalty = state.contracts.filter(
+    (contract) => contract.status === "active" && !contract.nextRenewalDate,
+  ).length * 5;
+
+  void now;
+  return Math.max(0, Math.min(100, 100 - anomalyPenalty - incompleteContractPenalty));
+}

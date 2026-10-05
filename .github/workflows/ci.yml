@@ -60,9 +60,17 @@ jobs:
         run: pnpm --filter @axiom/web test
         timeout-minutes: 8 # observé ~87 s sur runner
 
+      - name: tests PACTE (vitest)
+        run: pnpm --filter @pacte/web test
+        timeout-minutes: 3
+
       - name: build web et budget JS initial
         run: pnpm --filter @axiom/web build
         timeout-minutes: 5 # observé ~2,3 s en local
+
+      - name: build PACTE
+        run: pnpm --filter @pacte/web build
+        timeout-minutes: 3
 
       # Playwright, en DERNIER : c'est l'étape la plus chère à préparer (téléchargement
       # du navigateur), donc tout ce qui peut échouer moins cher a déjà échoué.
@@ -87,6 +95,16 @@ jobs:
         env:
           AXIOM_E2E_PORT: 5239
         timeout-minutes: 9 # observé 312 s (24/09 matin) puis > 360 s le soir (139 tests)
+
+      # PACTE après AXIOM : les dépendances système de Chromium sont déjà installées
+      # par l'étape AXIOM ; ce téléchargement ne sert que si la révision diffère.
+      - name: navigateur playwright PACTE (chromium)
+        run: pnpm --filter @pacte/web exec playwright install chromium
+        timeout-minutes: 5
+
+      - name: tests PACTE (playwright)
+        run: pnpm --filter @pacte/web test:e2e
+        timeout-minutes: 5
 
       - name: diagnostics playwright bureau en cas d'échec
         if: failure()

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="PACTE">
+  <rect width="64" height="64" rx="12" fill="#17242d" />
+  <path
+    d="M16 13h17c10 0 16 5.5 16 14.5S43 42 33 42H25v10h-9V13Zm9 8v13h7.5c4.8 0 7.5-2.2 7.5-6.5S37.3 21 32.5 21H25Z"
+    fill="#fffdf7"
+  />
+  <path d="M53 13v39" stroke="#d6533c" stroke-width="4" />
+</svg>

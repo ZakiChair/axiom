@@ -49,6 +49,7 @@ import {
 import {
   actifPerpDe,
   LIBELLE_PLACE_PERP,
+  marcheComplement,
   marchePerpRetenu,
   resoudreMarchesPerp,
   type PlacePerp,
@@ -313,6 +314,13 @@ export function DerivativesWindow() {
     prioritaire,
   );
 
+  // Compléments : la place affichée peut ne pas publier une métrique chez
+  // Coinalyze (L/S absent chez OKX et HL ; liquidations jamais couvertes chez
+  // HL). On lit alors la métrique chez la première place qui la publie, avec
+  // provenance explicite à l'écran (retour du propriétaire le 5 octobre 2026).
+  const marcheLs = marche !== null ? marcheComplement(marches, marche, "aLongShort") : null;
+  const marcheLiq = marche !== null ? marcheComplement(marches, marche, "aLiquidations") : null;
+
   // Cadence réelle de règlement du funding (par place, mémo 1 h côté data) :
   // `undefined` = lecture en cours, `null` = inconnue. Sert à l'APR et à
   // l'estimation du prochain règlement.
@@ -413,63 +421,73 @@ export function DerivativesWindow() {
     }
 
     const symbole = marche.symbole; // id Coinalyze, casse conservée
-    const aLongShort = marche.aLongShort;
+    // Symboles des métriques éventuellement empruntées à une autre place
+    // (provenance affichée dans les tuiles concernées).
+    const symboleLs = marcheLs?.symbole ?? null;
+    const symboleLiq = marcheLiq?.symbole ?? null;
     // Garde LOCALE à cet effet : empêche un setState après fermeture/changement de marché/clé.
     let ignore = false;
 
     const load = async () => {
       setLoading(true);
-      // Mêmes 8 appels qu'avant, sur l'id Coinalyze du marché retenu — sauf les
-      // deux appels long/short, sautés quand Coinalyze n'en publie pas (OKX, HL).
-      const taches: Array<Promise<unknown>> = [
+      // Mêmes 8 appels qu'avant, sur l'id Coinalyze du marché retenu — les deux
+      // appels long/short et les liquidations peuvent viser le marché
+      // COMPLÉMENTAIRE quand la place affichée ne publie pas la métrique. Tuple
+      // à positions FIXES : un appel sauté est remplacé par `Promise.resolve(null)`
+      // pour ne jamais décaler le destructuring (revue du 5 octobre 2026).
+      const [oiR, fR, liqR, oiHistR, fundingHistR, predR, lsR, lsHistR] = await Promise.allSettled([
         coinalyzeProvider.fetchOpenInterest(symbole),
         coinalyzeProvider.fetchFundingRate(symbole),
-        coinalyzeProvider.fetchLiquidations(symbole, Date.now() - LIQ_WINDOW_MS),
+        symboleLiq !== null
+          ? coinalyzeProvider.fetchLiquidations(symboleLiq, Date.now() - LIQ_WINDOW_MS)
+          : Promise.resolve(null),
         coinalyzeProvider.fetchOpenInterestHistory(symbole, LS_PERIOD, Date.now() - SPARK_WINDOW_MS),
         coinalyzeProvider.fetchFundingRateHistory(symbole, LS_PERIOD, Date.now() - SPARK_WINDOW_MS),
         fetchPredictedFundingRate(symbole),
-      ];
-      if (aLongShort) {
-        taches.push(
-          coinalyzeProvider.fetchLongShortRatio(symbole, LS_PERIOD),
-          fetchLongShortRatioHistory(symbole, LS_PERIOD, Date.now() - SPARK_WINDOW_MS),
-        );
-      }
-      const results = await Promise.allSettled(taches);
+        symboleLs !== null
+          ? coinalyzeProvider.fetchLongShortRatio(symboleLs, LS_PERIOD)
+          : Promise.resolve(null),
+        symboleLs !== null
+          ? fetchLongShortRatioHistory(symboleLs, LS_PERIOD, Date.now() - SPARK_WINDOW_MS)
+          : Promise.resolve(null),
+      ] as const);
       if (ignore) return;
 
-      const [oiR, fR, liqR, oiHistR, fundingHistR, predR, lsR, lsHistR] = results;
+      // « Indisponibles » et le contrôle 401 ne portent que sur les appels ÉMIS.
+      const emis = [
+        oiR, fR, oiHistR, fundingHistR, predR,
+        ...(symboleLiq !== null ? [liqR] : []),
+        ...(symboleLs !== null ? [lsR, lsHistR] : []),
+      ];
       let authError = false;
-      const noteError = (r: PromiseSettledResult<unknown> | undefined) => {
-        if (r?.status === "rejected" && r.reason instanceof CoinalyzeError && r.reason.status === 401) {
+      for (const r of emis) {
+        if (r.status === "rejected" && r.reason instanceof CoinalyzeError && r.reason.status === 401) {
           authError = true;
         }
-      };
-      results.forEach(noteError);
+      }
 
-      setOi(oiR?.status === "fulfilled" ? (oiR.value as OpenInterest) : undefined);
-      setFunding(fR?.status === "fulfilled" ? (fR.value as FundingRate) : undefined);
-      setLs(lsR?.status === "fulfilled" ? (lsR.value as LongShortRatio) : undefined);
-      setLiqs(liqR?.status === "fulfilled" ? (liqR.value as Liquidation[]) : []);
+      setOi(oiR.status === "fulfilled" ? oiR.value : undefined);
+      setFunding(fR.status === "fulfilled" ? fR.value : undefined);
+      setLs(lsR.status === "fulfilled" && lsR.value !== null ? lsR.value : undefined);
+      setLiqs(liqR.status === "fulfilled" && liqR.value !== null ? liqR.value : []);
       setOiSpark(
-        oiHistR?.status === "fulfilled"
-          ? (oiHistR.value as OpenInterest[]).map((p) => p.oiUsd).filter(Number.isFinite)
+        oiHistR.status === "fulfilled"
+          ? oiHistR.value.map((p) => p.oiUsd).filter(Number.isFinite)
           : []
       );
       setFundingSpark(
-        fundingHistR?.status === "fulfilled"
-          ? (fundingHistR.value as FundingRate[]).map((p) => p.rate).filter(Number.isFinite)
+        fundingHistR.status === "fulfilled"
+          ? fundingHistR.value.map((p) => p.rate).filter(Number.isFinite)
           : []
       );
-      setPredicted(predR?.status === "fulfilled" ? (predR.value as FundingRate) : undefined);
+      setPredicted(predR.status === "fulfilled" ? predR.value : undefined);
       setLsSpark(
-        lsHistR?.status === "fulfilled"
-          ? (lsHistR.value as LongShortRatio[]).map((p) => p.ratio).filter(Number.isFinite)
+        lsHistR.status === "fulfilled" && lsHistR.value !== null
+          ? lsHistR.value.map((p) => p.ratio).filter(Number.isFinite)
           : []
       );
 
-      // « Indisponibles » et le contrôle 401 ne portent que sur les appels émis.
-      const allFailed = results.every((r) => r.status === "rejected");
+      const allFailed = emis.every((r) => r.status === "rejected");
       if (authError) setError("Clé Coinalyze refusée (401). Vérifiez la clé.");
       else if (allFailed) setError("Données dérivées indisponibles pour le moment.");
       else setError(null);
@@ -485,10 +503,11 @@ export function DerivativesWindow() {
       ignore = true;
       clearInterval(timer);
     };
-    // marche?.symbole / marche?.aLongShort : la référence `marche` est re-dérivée à
-    // chaque render ; les dépendances expriment le marché RÉELLEMENT chargé.
+    // marche?.symbole / marcheLs?.symbole / marcheLiq?.symbole : les références
+    // `marche`/`marcheLs`/`marcheLiq` sont re-dérivées à chaque render ; les
+    // dépendances expriment les symboles Coinalyze RÉELLEMENT chargés.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, hasKey, marcheSymbole, marche?.aLongShort]);
+  }, [open, hasKey, marcheSymbole, marcheLs?.symbole, marcheLiq?.symbole]);
 
   // Sentiment perpétuel Binance (fapi /futures/data) — effet SÉPARÉ, SANS clé
   // Coinalyze : affiché dès qu'un perp Binance EXISTE pour l'actif (catalogue ou
@@ -754,9 +773,16 @@ export function DerivativesWindow() {
                     </div>
                   </div>
                 )}
+                {/* Ratio L/S : si la place affichée n'en publie pas chez
+                    Coinalyze (OKX, HL), on lit la place complémentaire et on le
+                    dit (« · Binance » + note de provenance). */}
                 <TuileStat
                   disposition="inline"
-                  label="Long / Short agrégé"
+                  label={
+                    marcheLs !== null && marcheLs !== marche
+                      ? `Long / Short agrégé · ${LIBELLE_PLACE_PERP[marcheLs.place]}`
+                      : "Long / Short agrégé"
+                  }
                   valeur={
                     ls && Number.isFinite(ls.ratio)
                       ? `${ls.ratio.toFixed(2)} · L ${ls.longAccount.toFixed(1)}% / S ${ls.shortAccount.toFixed(1)}%`
@@ -766,9 +792,13 @@ export function DerivativesWindow() {
                   extra={lsSpark.length >= 2 && <Sparkline values={lsSpark} color="var(--serie-2)" />}
                   badge={<BadgeFiabilite meta={metaSource("coinalyze:ls")} />}
                 />
-                {/* OKX et Hyperliquid n'ont pas de ratio long/short chez Coinalyze :
-                    absence explicite plutôt qu'un « — » muet. */}
-                {!marche.aLongShort && (
+                {marcheLs !== null && marcheLs !== marche && (
+                  <div className="px-3 text-[11px] text-text-dim">
+                    Ratio non publié par Coinalyze pour {LIBELLE_PLACE_PERP[marche.place]} : valeur de{" "}
+                    {LIBELLE_PLACE_PERP[marcheLs.place]}.
+                  </div>
+                )}
+                {marcheLs === null && (
                   <div className="px-3 text-[11px] text-text-dim">
                     Ratio long/short non publié par Coinalyze pour {LIBELLE_PLACE_PERP[marche.place]}.
                   </div>
@@ -796,10 +826,18 @@ export function DerivativesWindow() {
               <section className="rounded-md border border-border bg-bg">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
                   <span className="text-[10px] uppercase tracking-wide text-text-dim">
-                    Liquidations récentes
+                    {marcheLiq !== null && marcheLiq !== marche
+                      ? `Liquidations récentes · ${LIBELLE_PLACE_PERP[marcheLiq.place]}`
+                      : "Liquidations récentes"}
                   </span>
                   <BadgeFiabilite meta={metaSource("coinalyze:liq")} />
                 </div>
+                {marcheLiq !== null && marcheLiq !== marche && (
+                  <div className="border-b border-border px-3 py-2 text-[11px] text-text-dim">
+                    Coinalyze ne couvre pas les liquidations {LIBELLE_PLACE_PERP[marche.place]} : liquidations{" "}
+                    {LIBELLE_PLACE_PERP[marcheLiq.place]}.
+                  </div>
+                )}
                 {liqBuckets.length > 0 && (
                   <div className="border-b border-border px-3 py-2">
                     <div className="mb-1 flex items-baseline justify-between text-[11px]">
@@ -810,7 +848,13 @@ export function DerivativesWindow() {
                   </div>
                 )}
                 <div className="max-h-60 overflow-y-auto">
-                  {recentLiqs.length === 0 ? (
+                  {marcheLiq === null ? (
+                    <div className="px-3 py-2">
+                      <Vide>
+                        Liquidations non couvertes par Coinalyze pour {LIBELLE_PLACE_PERP[marche.place]}.
+                      </Vide>
+                    </div>
+                  ) : recentLiqs.length === 0 ? (
                     <div className="px-3 py-2">
                       <Vide>
                         Aucune liquidation remontée par Coinalyze sur la dernière heure.

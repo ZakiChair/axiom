@@ -1396,9 +1396,12 @@ aucun hôte ni fournisseur, `@axiom/types` inchangé ; une règle de proxy élar
 3. **Absences explicites.** Sans clé, DES suppose le perp Binance sans appeler le
    catalogue. Catalogue injoignable : même repli, signalé, avec un nouvel essai
    toutes les 60 s. Aucun perp sur les quatre places, ou instrument TradFi ou
-   synthétique : message dédié. Le ratio long/short n'est demandé que si Coinalyze
-   le publie (ni OKX ni Hyperliquid). Une liste de liquidations vide signifie
-   « aucune remontée », pas un zéro affirmé. Les référentiels « vs historique »
+   synthétique : message dédié. Quand la place affichée ne publie pas une métrique
+   chez Coinalyze (ratio long/short : ni OKX ni Hyperliquid ; liquidations : jamais
+   Hyperliquid), DES la lit chez la première place qui la publie (Binance, Bybit,
+   OKX) et l'étiquette (« Long / Short agrégé · Binance ») ; sans aucune place,
+   l'absence est affichée. Une liste de liquidations vide signifie « aucune
+   remontée », pas un zéro affirmé. Les référentiels « vs historique »
    (séries Binance USDⓈ-M) ne s'affichent que pour Binance. Le sentiment Binance
    sans clé apparaît dès qu'un perp Binance existe pour l'actif.
 4. **Funding annualisé à la cadence réelle.** L'APR et le prochain règlement
@@ -1419,3 +1422,9 @@ affiche le perp Binance PUMPUSDT (OI 143,9 M$, APR au règlement de 4 h), puis O
 Bybit et Hyperliquid au sélecteur, avec un seul appel au catalogue. Limites : quatre
 places seulement ; les indicateurs du graphe (OI, funding, L/S) restent adossés au
 perp Binance du symbole ; marge gzip réduite à 632 octets.
+
+Complément du même jour : sur PUMP-PERP (graphe Hyperliquid), DES n'affichait ni
+ratio long/short ni liquidations. Les métriques manquantes viennent désormais d'une
+autre place, étiquetée ; les résultats Coinalyze sont lus à positions fixes, un
+appel sauté ne décale plus les séries. `pnpm check` réussi (web 5 887 tests),
+parcours DES 12/12, dont un actif coté seulement sur Hyperliquid.

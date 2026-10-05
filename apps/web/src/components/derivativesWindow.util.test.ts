@@ -21,6 +21,7 @@ function marche(place: PlacePerp, symboleSurPlace: string, multiplicateur: numbe
     symboleSurPlace,
     multiplicateur,
     aLongShort: true,
+    aLiquidations: place !== "hyperliquid",
   };
 }
 

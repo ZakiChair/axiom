@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   _reinitialiserCatalogueMarchesPerp,
   actifPerpDe,
+  marcheComplement,
   marchePerpRetenu,
   marchesPerpPourActif,
   ordonnerMarchesPerp,
@@ -91,6 +92,8 @@ describe("marchesPerpPourActif", () => {
       "PUMP",
     ]);
     expect(marches.map((m) => m.aLongShort)).toEqual([true, true, false, false]);
+    // Liquidations : Coinalyze ne publie JAMAIS de série Hyperliquid.
+    expect(marches.map((m) => m.aLiquidations)).toEqual([true, true, true, false]);
     // PUMPBTC, Kraken, Coinbase, Gate et le spot non perp sont exclus.
     expect(marches.some((m) => m.symbole.includes("PUMPBTC"))).toBe(false);
   });
@@ -152,6 +155,35 @@ describe("ordonnerMarchesPerp / marchePerpRetenu", () => {
   });
 });
 
+describe("marcheComplement — métrique empruntée à une autre place", () => {
+  const marches = marchesPerpPourActif(CATALOGUE, "PUMP");
+  const parPlace = (p: string) => marches.find((m) => m.place === p) as MarchePerp;
+
+  it("la place affichée publie la métrique → elle-même", () => {
+    expect(marcheComplement(marches, parPlace("binance"), "aLongShort")?.symbole).toBe("PUMPUSDT_PERP.A");
+    expect(marcheComplement(marches, parPlace("bybit"), "aLiquidations")?.symbole).toBe("PUMPFUNUSDT.6");
+  });
+
+  it("OKX affiché → L/S de Binance (premier de l'ordre PLACES_PERP)", () => {
+    expect(marcheComplement(marches, parPlace("okx"), "aLongShort")?.symbole).toBe("PUMPUSDT_PERP.A");
+    // OKX a des liquidations → pas de complément.
+    expect(marcheComplement(marches, parPlace("okx"), "aLiquidations")?.symbole).toBe("PUMPUSDT_PERP.3");
+  });
+
+  it("Hyperliquid affiché → L/S ET liquidations de Binance", () => {
+    expect(marcheComplement(marches, parPlace("hyperliquid"), "aLongShort")?.symbole).toBe("PUMPUSDT_PERP.A");
+    expect(marcheComplement(marches, parPlace("hyperliquid"), "aLiquidations")?.symbole).toBe("PUMPUSDT_PERP.A");
+  });
+
+  it("Binance absent → L/S de Bybit ; aucune place couvrante → null", () => {
+    const sansBinance = marches.filter((m) => m.place !== "binance");
+    expect(marcheComplement(sansBinance, parPlace("okx"), "aLongShort")?.symbole).toBe("PUMPFUNUSDT.6");
+    const hlSeul = marches.filter((m) => m.place === "hyperliquid");
+    expect(marcheComplement(hlSeul, parPlace("hyperliquid"), "aLiquidations")).toBeNull();
+    expect(marcheComplement([], parPlace("hyperliquid"), "aLongShort")).toBeNull();
+  });
+});
+
 describe("actifPerpDe", () => {
   it("extrait la base perp des formats courants", () => {
     expect(actifPerpDe("PUMPUSDT")).toBe("PUMP");
@@ -198,6 +230,7 @@ describe("resoudreMarchesPerp", () => {
           symboleSurPlace: "PUMPUSDT",
           multiplicateur: 1,
           aLongShort: true,
+          aLiquidations: true,
         },
       ],
     });

@@ -54,6 +54,12 @@ export interface MarchePerp {
   multiplicateur: number;
   /** true si Coinalyze publie un ratio long/short pour ce marché. */
   aLongShort: boolean;
+  /**
+   * true si Coinalyze publie des liquidations pour ce marché. Hyperliquid est
+   * exclu : Coinalyze ne remonte JAMAIS de série de liquidations pour cette
+   * place (vérifié en réel le 5/10/2026 — BTC.H et PUMP.H vides sur 48 h).
+   */
+  aLiquidations: boolean;
 }
 
 /** Résultat de la résolution du perpétuel d'un symbole de graphe. */
@@ -201,6 +207,7 @@ function marchesDepuisLignes(lignes: readonly LignePerp[], actif: string): March
       symboleSurPlace: top.ligne.symboleSurPlace,
       multiplicateur: top.multiplicateur,
       aLongShort: top.ligne.aLongShort,
+      aLiquidations: place !== "hyperliquid",
     });
   }
   return marches;
@@ -242,6 +249,21 @@ export function marchePerpRetenu(
     if (prefere !== undefined) return prefere;
   }
   return ordonnerMarchesPerp(marches, prioritaire)[0] ?? null;
+}
+
+/**
+ * Marché qui fournit la métrique : le marché affiché s'il la publie, sinon le
+ * premier de `marches` (ordre PLACES_PERP) qui la publie ; `null` si aucun.
+ * Sert au complément L/S et liquidations quand la place affichée n'y a pas
+ * droit (demande du 5 octobre 2026, complétée le jour même). PURE.
+ */
+export function marcheComplement(
+  marches: readonly MarchePerp[],
+  marche: MarchePerp,
+  critere: "aLongShort" | "aLiquidations",
+): MarchePerp | null {
+  if (marche[critere]) return marche;
+  return [...marches].sort(triPlaces).find((m) => m[critere]) ?? null;
 }
 
 // ---------- Catalogue en mémoire (1 appel, TTL 12 h, repli borné) ----------
@@ -306,6 +328,7 @@ export async function resoudreMarchesPerp(symbol: string): Promise<ResolutionPer
         symboleSurPlace: `${actif}USDT`,
         multiplicateur: 1,
         aLongShort: true,
+        aLiquidations: true,
       },
     ],
     cause: "sans-cle",

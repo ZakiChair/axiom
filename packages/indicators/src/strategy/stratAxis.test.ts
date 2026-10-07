@@ -51,7 +51,7 @@ function resume(candlesEntree: Candle[], params: Record<string, number> = {}): s
 const sens = (a: number, b: number): number => Math.sign(a - b) + 0;
 
 describe("stratAxis — contrat", () => {
-  it("strategy/overlay enregistrée, huit inputs bornés, une sortie prix, réservée au 4h après son test, sans spec de fabrique", () => {
+  it("strategy/overlay enregistrée, huit inputs bornés, une sortie prix, toute unité de temps, sans spec de fabrique", () => {
     expect(getIndicator("stratAxis")).toBe(stratAxis);
     expect(stratAxis.name).toBe("AXIS");
     expect(stratAxis.category).toBe("strategy");
@@ -67,13 +67,16 @@ describe("stratAxis — contrat", () => {
       ["seuilAdx", 20, 5, 60],
     ]);
     expect(stratAxis.outputs.map((o) => o.key)).toEqual(["prixSignal"]);
-    // 1h et 2h n'ont montré aucun avantage, même sur les données d'exploration ;
-    // le test du 7 octobre 2026 ne couvre que le 4h : la def est réservée à cette unité.
-    expect(stratAxis.minTimeframe).toBe("4h");
-    expect(TIMEFRAME_REQUIS.stratAxis).toBe("4h");
+    // Aucune unité requise : le propriétaire demande (7 octobre 2026) qu'AXIS
+    // fonctionne sur toute unité de temps. Le test sur données jamais vues ne
+    // couvre que le 4h ; l'infobulle RESERVE rappelle ce périmètre.
+    expect(stratAxis.minTimeframe).toBeUndefined();
+    expect(TIMEFRAME_REQUIS.stratAxis).toBeUndefined();
     expect(supportsIndicatorTimeframe("stratAxis", "4h")).toBe(true);
-    expect(supportsIndicatorTimeframe("stratAxis", "1d")).toBe(false);
-    expect(supportsIndicatorTimeframe("stratAxis", "1h")).toBe(false);
+    expect(supportsIndicatorTimeframe("stratAxis", "1m")).toBe(true);
+    expect(supportsIndicatorTimeframe("stratAxis", "1d")).toBe(true);
+    expect(supportsIndicatorTimeframe("stratAxis", "1w")).toBe(true);
+    expect(supportsIndicatorTimeframe("stratAxis", "1M")).toBe(true);
     // Verdict FAVORABLE du test sur données jamais vues (scripts/axis/rapport-v2-2026-10-07.md).
     expect(stratAxis.validation).toBeUndefined();
     // Hors fabrique defStrategie : ni trades ni PnL, et scripts/valider-strategies l'ignore.

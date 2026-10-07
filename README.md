@@ -159,7 +159,7 @@ Les snapshots, LIQHL, les alertes baleines et les notifications onglet fermé n�
 
 ### AXIS — confluence de signaux
 
-**Stratégies → ＋ AXIS** (graphique en **4h** uniquement) marque sur le prix les
+**Stratégies → ＋ AXIS** (toute unité de temps) marque sur le prix les
 **achats** (▲) et les **ventes** (▼). À la clôture, six votes (EMA 20/50,
 Supertrend, DMI filtré par l'ADX, MACD, RSI contre 50 et CMF) forment un score
 de −6 à +6 : achat à score ≥ +5 avec clôture au-dessus de l'EMA 200, vente à
@@ -168,7 +168,8 @@ n'est jamais lue ; le survol détaille le score, chaque vote et la performance
 depuis l'achat. Lecture indicative absente de BT, **testée le 7 octobre 2026
 sur données jamais vues** (BTC/ETH/XRP/SOL, 4h, 2017-2024, protocole figé avant
 calcul) : verdict FAVORABLE, mais pas mieux qu'une EMA 200 seule en PnL total
-sur 3 actifs sur 4 — mesure passée, jamais une promesse.
+sur 3 actifs sur 4 — mesure passée, jamais une promesse. Seule l'unité 4h est
+couverte par ce test ; sur les autres, l'infobulle le rappelle.
 [Méthode, réglages, limites et backtest](docs/axis-2026-10-07.md).
 
 ### Historique des décisions et nouveaux indicateurs

@@ -63,7 +63,7 @@ d'historique (demande du 26 septembre 2026) »). Voir la
 
 ## État actuel (2026-09-04)
 - **Chart** live multi-exchange (spot + perp), multi-grille 1/2h/2v/2×2, orderflow/CVD/footprint, volume profile, fibo, dessins.
-- **219 indicateurs** TS purs dans `@axiom/indicators` (dont 31 stratégies ; AXIS, ajoutée le 2026-10-07, est la première **testée favorable** sur données jamais vues — v1 recalée le matin même, v2 validée le soir, réservée au 4h, `scripts/axis/`) ; **4 golden tests** pandas-ta (ADX, SuperTrend, Ichimoku, PSAR) — le reste est couvert par tests unitaires/structurels.
+- **219 indicateurs** TS purs dans `@axiom/indicators` (dont 31 stratégies ; AXIS, ajoutée le 2026-10-07, est la première **testée favorable** sur données jamais vues — v1 recalée le matin même, v2 validée le soir, `scripts/axis/`) ; **4 golden tests** pandas-ta (ADX, SuperTrend, Ichimoku, PSAR) — le reste est couvert par tests unitaires/structurels.
 - **39 fenêtres** à mnémonique (`WINDOW_REGISTRY`) — dont WHALES (mouvements baleines on-chain + positions top comptes Hyperliquid), ajoutée le 2026-08-25 sur décision utilisateur, et BPL (Bitcoin Power Law), ajoutée le 2026-09-01 avec les séries TOTAL/TOTAL2/TOTAL3 chartables (chantier CAP/BPL) : **écarts ASSUMÉS** au gel « aucune nouvelle fenêtre avant le verdict G100 » (§ ci-dessous).
 - **Daemon** `axiomd` : proxy+cache SQLite, KV/snapshots, candles, alertes (macOS + Telegram), replay dumps Binance, couches GDELT/UCDP, LIQHL Hyperliquid paresseux, collecteur whales (blocs confirmés blockchain.info + Etherscan stables, table `whale_moves`, rétention 30 j). Bind `127.0.0.1:8787`, whitelist `/extapi`, garde Host/Origin/DNS-rebinding.
 - **Vercel** : front + proxy serverless sans secret partagé, whitelist/MIME/DNS durcis ; depuis le 2026-09-25, fonction `api/hlpool.ts` sans secret (pool réduit LIQHL, CDN 6 h). Les clés personnelles restent dans le navigateur. **Exception ACTÉE le 2026-09-14** (demande utilisateur, test communautaire) : une seule variable serveur, `BGEOMETRICS_API_KEY`, portée par `api/proxy.ts` vers bitcoin-data.com quand le client n'envoie aucune clé — clé gratuite et révocable, plafonds de l'offre gratuite (10 req/heure et 15 req/jour) partagés par les visiteurs, jamais exposée au navigateur ; toute autre clé reste personnelle (test structurel `apps/daemon/src/vercelProxy.test.ts`). Toute fonction strictement locale est marquée `UNUSABLE`, toute fenêtre partielle `PARTIAL` ; jamais de pane muet. La clé CryptoQuant (2026-09-16) relève de cette règle : personnelle, saisie dans les Réglages, repli `.env` pour le proxy Vite et le daemon `127.0.0.1` uniquement, JAMAIS de variable serveur sur Vercel (le test structurel continue d'exiger exactement une lecture d'environnement).
@@ -1449,7 +1449,10 @@ dépendance, ordre réel ni changement de `@axiom/types`.
   condition d'achat a d'abord été fausse une fois) ; la dernière bougie n'est
   jamais lue (anti-repaint, convention de `defStrategie`). Sortie `prixSignal`
   (prix d'achat tenu pendant la position) à l'échelle prix ; 120 marqueurs et
-  10 étiquettes au plus.
+  10 étiquettes au plus. Calcul indépendant de l'unité de temps : AXIS est
+  utilisable sur **toute unité** (demande du propriétaire du 2026-10-07,
+  après une première journée réservée au 4h) ; le test ne couvre que le 4h
+  et l'infobulle le rappelle.
 - Statut : la v1 (épisodes ±4, sortie au retour du score à 0, long et short) a
   été **recalée** par la campagne du 2026-10-07
   (`scripts/axis/rapport-2026-10-07.md`, verdict DÉFAVORABLE). La v2, choisie
@@ -1459,12 +1462,11 @@ dépendance, ordre réel ni changement de `@axiom/types`.
   revue indépendante du protocole, exécution unique) : verdict **FAVORABLE**,
   21 blocs sur 21, timing p = 0,0005. Comparaison pré-déclarée sans effet sur
   le verdict : pas mieux qu'une EMA 200 seule en PnL net total sur 3 actifs
-  sur 4. Suites du manifeste appliquées : champ `validation` retiré ;
-  restriction à l'unité **4h**, la seule testée (`TIMEFRAME_REQUIS.stratAxis`,
-  en sus de `minTimeframe`) ; chaque infobulle porte la réserve honnête choisie
-  par le runner (« test réussi…, pas mieux qu'une EMA 200 seule sur 3/4
-  actifs — mesure passée, pas une promesse »). Absente de BT et de
-  `scripts/valider-strategies.ts` (réservé à `defStrategie`).
+  sur 4. Suites du manifeste appliquées : champ `validation` retiré ; chaque
+  infobulle porte la réserve honnête choisie par le runner (« test réussi…,
+  pas mieux qu'une EMA 200 seule sur 3/4 actifs — mesure passée, pas une
+  promesse »). Absente de BT et de `scripts/valider-strategies.ts` (réservé à
+  `defStrategie`).
 - Chargement initial : AXIS coûte ~800 octets gzip. La commande EQS de la
   palette passe de `store/screener.ts` à `commands/windowPanels.ts` (bascule
   identique), sur le modèle de BT et SIG ; `store/screener` rejoint les modules
@@ -1473,9 +1475,9 @@ dépendance, ordre réel ni changement de `@axiom/types`.
 Validation : `pnpm -r typecheck` réussi ; vitest indicateurs 950 tests (dont 23
 pour AXIS ; mutations du calcul détectées), alertes 122, backtest 129, pacte
 120, web 416 fichiers / 5 887 tests ; daemon 780 tests (Bun 1.4.2).
-Budget d'entrée (Node 24.21, zlib 1.3.2.1) : **1 203 616 / 359 846** octets
-bruts/gzip après la suite du verdict (infobulle allongée, statut retiré,
-restriction 4h), plafonds 1 220 000 / 360 000 inchangés, marge gzip réduite à
-**154 octets**. Usage, limites et test :
+Budget d'entrée (Node 24.21, zlib 1.3.2.1) : **1 203 583 / 359 834** octets
+bruts/gzip après la suite du verdict (infobulle allongée, statut retiré) et
+l'ouverture à toute unité, plafonds 1 220 000 / 360 000 inchangés, marge gzip
+réduite à **166 octets**. Usage, limites et test :
 [`docs/axis-2026-10-07.md`](docs/axis-2026-10-07.md) et
 [`scripts/axis/rapport-v2-2026-10-07.md`](scripts/axis/rapport-v2-2026-10-07.md).

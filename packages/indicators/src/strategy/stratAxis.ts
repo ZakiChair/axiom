@@ -29,7 +29,9 @@
  *    (potentiellement en formation), qui reporte la position précédente.
  * Sortie `prixSignal` à l'échelle prix (jamais le score : l'auto-scale du pane
  * prix inclut les figures) : close de la bougie d'achat, tenu pendant la
- * position. `minTimeframe` 4h.
+ * position. Le calcul est indépendant de l'unité de temps ; sur les grandes
+ * unités, l'EMA de tendance (défaut 200) n'est définie qu'après autant de
+ * bougies d'historique, sans quoi aucun achat ne peut être signalé.
  *
  * Pourquoi cette lecture : la v1 (▲/▼ à la naissance d'épisodes ±4, sortie au
  * retour du score à 0, long et short) a été recalée par le backtest du
@@ -44,8 +46,10 @@
  * timing au-delà de la simple exposition (p = 0,0005). Comparaison
  * pré-déclarée, sans effet sur le verdict : pas mieux qu'une EMA 200 seule
  * en PnL total sur 3 actifs sur 4 (meilleure expectancy par trade partout,
- * exposition moindre). Unité 4h seule (TIMEFRAME_REQUIS) : aucune autre
- * unité n'a été testée. Mesure passée, jamais une promesse.
+ * exposition moindre). D'abord réservée au 4h (seule unité testée), AXIS est
+ * utilisable sur toute unité depuis la demande du propriétaire du 7 octobre
+ * 2026 : le test ne couvre que le 4h, l'infobulle le rappelle. Mesure passée,
+ * jamais une promesse.
  */
 
 import type { Candle, IndicatorDef, LabelAnnotation, MarqueurAnnotation } from "@axiom/types";
@@ -161,7 +165,6 @@ export const stratAxis: IndicatorDef = {
   name: "AXIS",
   category: "strategy",
   pane: "overlay",
-  minTimeframe: "4h",
   inputs: [
     { key: "seuil", name: "Achat si score ≥", type: "number", default: 5, min: 1, max: 6 },
     { key: "seuilVente", name: "Vente si score ≤ −", type: "number", default: 4, min: 1, max: 6 },

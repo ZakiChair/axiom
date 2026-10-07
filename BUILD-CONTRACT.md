@@ -1436,7 +1436,8 @@ qui combine plusieurs signaux d'achat et de vente et marque sur le prix les
 achats et les ventes. Cette demande autorise une définition
 supplémentaire, `stratAxis` (catégorie `strategy`, pane prix), soit **219
 indicateurs** dont 31 stratégies. Aucun nouvel écran, fournisseur, secret,
-dépendance, ordre réel ni changement de `@axiom/types`.
+dépendance ni ordre réel. Un seul changement de `@axiom/types`, le soir du
+même jour : `IndicatorDef.auxFacultatives` (voir la couche flux).
 
 - Six votes (+1, −1 ou 0) à la clôture, tous issus de cœurs existants : EMA 20/50,
   direction du Supertrend 10 × 3, +DI contre −DI seulement si l'ADX 14 atteint le
@@ -1467,17 +1468,47 @@ dépendance, ordre réel ni changement de `@axiom/types`.
   pas mieux qu'une EMA 200 seule sur 3/4 actifs — mesure passée, pas une
   promesse »). Absente de BT et de `scripts/valider-strategies.ts` (réservé à
   `defStrategie`).
-- Chargement initial : AXIS coûte ~800 octets gzip. La commande EQS de la
-  palette passe de `store/screener.ts` à `commands/windowPanels.ts` (bascule
-  identique), sur le modèle de BT et SIG ; `store/screener` rejoint les modules
-  différés de `chargementInitial.test.ts`.
+- **Couche flux** (demande du propriétaire du 2026-10-07, le soir : volume
+  exécuté et intérêt ouvert pour repérer les gros mouvements). Trois lectures
+  par bougie, chacune absente quand sa donnée manque : volume relatif (volume /
+  SMA 20 du volume), delta taker ((acheteur − vendeur) / volume, champs taker des
+  bougies Binance), ΔOI (variation % sur 6 bougies de la série aux `oi`). Par
+  défaut, elle ne déplace aucun ▲/▼ (cœur testé intact) : elle **qualifie** les
+  signaux (« fort » : deux confirmations sur trois lectures, toutes sinon,
+  jamais avec un delta à contre-sens ; étiquettes « Achat fort » / « Vente
+  forte »), pose des marqueurs **gros mouvement** (couleur `--accent`, volume
+  ≥ 3 × la moyenne, sens du delta sinon du corps, hors bougies de signal et
+  dernière bougie, 60 au plus) et offre un filtre optionnel « N'acheter que sur
+  flux fort » (désactivé par défaut ; activé, l'infobulle remplace la réserve
+  du test par « filtre flux actif : signaux hors du test…, non mesurés »).
+  Six réglages de plus (14 inputs). **Non mesurée** : chaque infobulle porte
+  « couche flux non mesurée ». Pure comme le reste du moteur : aucun fetch.
+- **Séries auxiliaires facultatives** : `IndicatorDef.auxFacultatives` (nouveau
+  champ de `@axiom/types`) déclare des séries lues si l'appelant les fournit,
+  jamais exigées — un def ne les déclare que si sa sortie reste complète sans
+  elles. Elles ne rendent jamais le def inutilisable (l'OI d'AXIS en `aux`
+  l'aurait réservé aux perps USDT et écarté des alertes). Côté web,
+  `lib/indicatorUsability.ts` (`auxFacultativesServies`) ne demande que les
+  séries que le contexte peut servir, avec les mêmes règles par série que pour
+  `aux` (`raisonAuxIndisponible`), et `chart/indicators.ts` les demande à part :
+  seules les séries requises décident du statut (pending/UNUSABLE), les
+  facultatives enrichissent le calcul quand elles arrivent (`onAuxReady`).
+  Alertes, screener et backtest calculent sans aux : lectures « n.d. ».
+- Chargement initial : AXIS coûte ~800 octets gzip, la couche flux ~1 200 de
+  plus. Sur le modèle de BT et SIG, les commandes EQS, WHALE et MARKS vivent
+  dans `commands/windowPanels.ts` (EQS : bascule identique ; WHALE et MARKS :
+  `import()` du contrôleur au premier usage, qui démarre à l'import comme
+  avant) ; les marqueurs éco sont chargés avec EcoWindow, seule à les activer.
+  `store/screener`, `chart/whaleBubbles`, `chart/tradeMarkers` et
+  `chart/ecoMarkers` rejoignent les modules différés de
+  `chargementInitial.test.ts`.
 
-Validation : `pnpm -r typecheck` réussi ; vitest indicateurs 950 tests (dont 23
+Validation : `pnpm -r typecheck` réussi ; vitest indicateurs 968 tests (dont 41
 pour AXIS ; mutations du calcul détectées), alertes 122, backtest 129, pacte
-120, web 416 fichiers / 5 887 tests ; daemon 780 tests (Bun 1.4.2).
-Budget d'entrée (Node 24.21, zlib 1.3.2.1) : **1 203 583 / 359 834** octets
-bruts/gzip après la suite du verdict (infobulle allongée, statut retiré) et
-l'ouverture à toute unité, plafonds 1 220 000 / 360 000 inchangés, marge gzip
-réduite à **166 octets**. Usage, limites et test :
+120, web 416 fichiers / 5 893 tests ; daemon 780 tests (Bun 1.4.2).
+Budget d'entrée (Node 24.21, zlib 1.3.2.1) : **1 198 184 / 358 154** octets
+bruts/gzip après la couche flux et les trois modules différés, plafonds
+1 220 000 / 360 000 inchangés, marge gzip **1 846 octets** (166 avant).
+Usage, limites et test :
 [`docs/axis-2026-10-07.md`](docs/axis-2026-10-07.md) et
 [`scripts/axis/rapport-v2-2026-10-07.md`](scripts/axis/rapport-v2-2026-10-07.md).

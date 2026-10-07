@@ -33,6 +33,25 @@
  * unités, l'EMA de tendance (défaut 200) n'est définie qu'après autant de
  * bougies d'historique, sans quoi aucun achat ne peut être signalé.
  *
+ * Couche FLUX (demande du propriétaire du 7 octobre 2026, le soir : volume
+ * exécuté et intérêt ouvert pour repérer les gros mouvements). Trois lectures
+ * par bougie, chacune absente quand sa donnée manque :
+ *   - volume relatif : volume / SMA(volume, rvolPeriode) ;
+ *   - delta taker : (volume acheteur − vendeur) / volume, champs taker des
+ *     bougies (Binance ; absents ailleurs) ;
+ *   - ΔOI : variation % de l'intérêt ouvert sur `oiBougies` bougies (série aux
+ *     `oi`, FACULTATIVE : perp USDT, ~20-90 jours d'historique selon la source).
+ * Par défaut, elle ne change PAS les ▲/▼ (cœur testé intact) ; elle les
+ * QUALIFIE — « fort » quand les lectures disponibles confirment : volume ≥
+ * seuilRvol × moyen, delta dans le sens du signal (≥ 10 % du volume), |ΔOI| ≥
+ * seuilOi ; deux confirmations sur trois lectures, toutes sinon, jamais avec un
+ * delta à contre-sens — et pose des marqueurs « gros mouvement » (couleur
+ * --accent) sur les bougies à volume ≥ seuilGros × moyen, dans le sens du delta
+ * taker (sinon du corps de la bougie), hors bougies de signal et hors dernière
+ * bougie. Le filtre optionnel `filtreFlux` n'achète que sur flux fort : ce
+ * réglage sort du test ci-dessous, l'infobulle le dit. La couche flux n'est
+ * pas mesurée : ses lectures sont affichées, jamais promises.
+ *
  * Pourquoi cette lecture : la v1 (▲/▼ à la naissance d'épisodes ±4, sortie au
  * retour du score à 0, long et short) a été recalée par le backtest du
  * 7 octobre 2026 — flèches sans pouvoir prédictif, frais dominants en 1h,
@@ -48,12 +67,12 @@
  * en PnL total sur 3 actifs sur 4 (meilleure expectancy par trade partout,
  * exposition moindre). D'abord réservée au 4h (seule unité testée), AXIS est
  * utilisable sur toute unité depuis la demande du propriétaire du 7 octobre
- * 2026 : le test ne couvre que le 4h, l'infobulle le rappelle. Mesure passée,
- * jamais une promesse.
+ * 2026 : le test ne couvre que le 4h, ni la couche flux, l'infobulle le
+ * rappelle. Mesure passée, jamais une promesse.
  */
 
 import type { Candle, IndicatorDef, LabelAnnotation, MarqueurAnnotation } from "@axiom/types";
-import { closeOf, ema } from "../utils";
+import { closeOf, ema, sma, volOf } from "../utils";
 import { MAX_LABELS_SORTIE } from "../utils-fabrique-strategie";
 import { rsiOf } from "../momentum/rsi";
 import { adxOf } from "../trend/adx";
@@ -63,6 +82,10 @@ import { cmfOf } from "../volume/cmf";
 
 /** Cap de signaux annotés (les plus récents) — borne le coût du rendu. */
 export const MAX_SIGNAUX_AXIS = 120;
+/** Cap de marqueurs « gros mouvement » (les plus récents). */
+export const MAX_GROS_AXIS = 60;
+/** Part du volume que le delta taker doit atteindre pour donner un sens. */
+export const SEUIL_DELTA_AXIS = 0.1;
 
 const signe = (a: number, b: number): number => (a > b ? 1 : a < b ? -1 : 0);
 
@@ -155,16 +178,88 @@ export function positionsAxis(
   });
 }
 
+/** Lectures de flux d'une bougie ; une lecture sans donnée reste absente. */
+export interface FluxBougie {
+  /** Volume / moyenne mobile du volume. */
+  rvol?: number;
+  /** (Volume acheteur − vendeur) / volume, ∈ [−1, 1]. */
+  delta?: number;
+  /** Variation % de l'intérêt ouvert sur `oiBougies` bougies. */
+  dOi?: number;
+}
+
+/** Lectures de flux par bougie (volume relatif, delta taker, ΔOI). PURE. */
+export function fluxAxis(
+  candles: Candle[],
+  oi: Array<number | undefined> | undefined,
+  rvolPeriode: number,
+  oiBougies: number
+): FluxBougie[] {
+  const moyen = sma(volOf(candles), rvolPeriode);
+  const recul = Math.max(1, Math.round(oiBougies));
+  return candles.map((c, i) => {
+    const f: FluxBougie = {};
+    const m = moyen[i];
+    if (m !== undefined && m > 0 && Number.isFinite(c.volume)) f.rvol = c.volume / m;
+    if (c.buyVolume !== undefined && c.sellVolume !== undefined && c.volume > 0) {
+      const d = (c.buyVolume - c.sellVolume) / c.volume;
+      if (Number.isFinite(d)) f.delta = d;
+    }
+    const o = oi?.[i];
+    const o0 = oi?.[i - recul];
+    if (o !== undefined && o0 !== undefined && o0 > 0 && Number.isFinite(o)) f.dOi = (o / o0 - 1) * 100;
+    return f;
+  });
+}
+
+/** Force du flux dans un sens (+1 achat, −1 vente) : lectures disponibles, confirmations, delta à contre-sens. PURE. */
+export function forceFlux(
+  f: FluxBougie,
+  sens: number,
+  seuilRvol: number,
+  seuilOi: number
+): { dispo: number; confirme: number; contre: boolean; fort: boolean } {
+  const lectures = [
+    f.rvol === undefined ? undefined : f.rvol >= seuilRvol,
+    f.delta === undefined ? undefined : sens * f.delta >= SEUIL_DELTA_AXIS,
+    f.dOi === undefined ? undefined : Math.abs(f.dOi) >= seuilOi,
+  ];
+  const dispo = lectures.filter((l) => l !== undefined).length;
+  const confirme = lectures.filter((l) => l === true).length;
+  const contre = f.delta !== undefined && sens * f.delta <= -SEUIL_DELTA_AXIS;
+  return { dispo, confirme, contre, fort: dispo > 0 && !contre && confirme >= Math.min(2, dispo) };
+}
+
+/** Sens d'un gros mouvement : delta taker s'il est marqué, sinon corps de la bougie (0 = indécis). */
+export const sensGros = (f: FluxBougie, c: Candle): number =>
+  f.delta !== undefined && Math.abs(f.delta) >= SEUIL_DELTA_AXIS ? Math.sign(f.delta) : signe(c.close, c.open);
+
+const pct = (v: number, decimales: number): string => `${v > 0 ? "+" : ""}${v.toFixed(decimales)} %`;
+
+/** Texte des lectures de flux pour une infobulle. */
+function texteFlux(f: FluxBougie, oiBougies: number): string {
+  return [
+    f.rvol === undefined ? "volume n.d." : `volume ×${f.rvol.toFixed(1)}`,
+    f.delta === undefined ? "delta taker n.d." : `delta taker ${pct(f.delta * 100, 0)}`,
+    f.dOi === undefined ? "OI n.d." : `OI ${pct(f.dOi, 1)} sur ${oiBougies} b.`,
+  ].join(", ");
+}
+
 const fleche = (v: number): string => (v > 0 ? "▲" : v < 0 ? "▼" : "–");
 // Formulation choisie par le runner de campagne (manifeste v2, suites.infobulleSiFavorable).
 const RESERVE =
   "test réussi sur données jamais vues (crypto 4h, 2017-2024), pas mieux qu'une EMA 200 seule sur 3/4 actifs — mesure passée, pas une promesse";
+const RESERVE_FILTRE = "filtre flux actif : signaux hors du test du 7 octobre 2026, non mesurés — jamais une promesse";
+const NON_MESURE = "couche flux non mesurée";
 
 export const stratAxis: IndicatorDef = {
   id: "stratAxis",
   name: "AXIS",
   category: "strategy",
   pane: "overlay",
+  // Facultative : sans OI (symbole hors perp USDT, fetch en échec), la couche flux lit
+  // volume et delta seuls ; les signaux du cœur ne dépendent de rien d'auxiliaire.
+  auxFacultatives: ["oi"],
   inputs: [
     { key: "seuil", name: "Achat si score ≥", type: "number", default: 5, min: 1, max: 6 },
     { key: "seuilVente", name: "Vente si score ≤ −", type: "number", default: 4, min: 1, max: 6 },
@@ -174,17 +269,29 @@ export const stratAxis: IndicatorDef = {
     { key: "stPeriode", name: "Période Supertrend", type: "number", default: 10, min: 1 },
     { key: "stMult", name: "Multiplicateur Supertrend", type: "number", default: 3, min: 0.5 },
     { key: "seuilAdx", name: "Seuil ADX", type: "number", default: 20, min: 5, max: 60 },
+    { key: "rvolPeriode", name: "Volume moyen sur (bougies)", type: "number", default: 20, min: 2, max: 500 },
+    { key: "seuilRvol", name: "Flux fort si volume ≥ × moyen", type: "number", default: 1.5, min: 1, max: 20 },
+    { key: "seuilGros", name: "Gros mouvement si volume ≥ × moyen", type: "number", default: 3, min: 1, max: 50 },
+    { key: "oiBougies", name: "Variation d'OI sur (bougies)", type: "number", default: 6, min: 1, max: 200 },
+    { key: "seuilOi", name: "OI significatif si |Δ| ≥ (%)", type: "number", default: 2, min: 0.1, max: 100 },
+    { key: "filtreFlux", name: "N'acheter que sur flux fort", type: "boolean", default: false },
   ],
   outputs: [{ key: "prixSignal", name: "Prix d'achat", style: "line" }],
-  calc(candles, params) {
+  calc(candles, params, ctx) {
     const n = candles.length;
     const votes = votesAxis(candles, params);
     const score = votes.map((v) => v?.reduce((a, b) => a + b, 0));
     const closes = closeOf(candles);
     const tendance = ema(closes, Number(params.emaTendance ?? 200));
+    const seuilRvol = Number(params.seuilRvol ?? 1.5);
+    const seuilOi = Number(params.seuilOi ?? 2);
+    const oiBougies = Number(params.oiBougies ?? 6);
+    const flux = fluxAxis(candles, ctx.aux?.oi, Number(params.rvolPeriode ?? 20), oiBougies);
+    const force = (i: number, sens: number) => forceFlux(flux[i] ?? {}, sens, seuilRvol, seuilOi);
+    const filtre = params.filtreFlux === true;
     const pos = positionsAxis(
       score,
-      tendance.map((t, i) => (t === undefined ? undefined : (closes[i] ?? t) > t)),
+      tendance.map((t, i) => (t === undefined ? undefined : (closes[i] ?? t) > t && (!filtre || force(i, 1).fort))),
       Number(params.seuil ?? 5),
       Number(params.seuilVente ?? 4),
       n - 2
@@ -200,6 +307,7 @@ export const stratAxis: IndicatorDef = {
     }
 
     const noms = [`EMA ${params.emaRapide}/${params.emaLente}`, "Supertrend", "DMI", "MACD", "RSI", "CMF"];
+    const reserve = filtre ? RESERVE_FILTRE : RESERVE;
     const marqueurs: MarqueurAnnotation[] = [];
     const labels: LabelAnnotation[] = [];
     // Seuls les signaux les plus récents portent une étiquette (même règle que defStrategie).
@@ -212,8 +320,11 @@ export const stratAxis: IndicatorDef = {
       const achat = pos[idx] === 1;
       const couleur = achat ? "--up" : "--down";
       const valeur = achat ? b.low : b.high;
-      const pct = prixAchat === undefined ? 0 : (b.close / prixAchat - 1) * 100;
-      const resultat = `${pct > 0 ? "+" : ""}${pct.toFixed(2)} %`;
+      const pctSignal = prixAchat === undefined ? 0 : (b.close / prixAchat - 1) * 100;
+      const resultat = pct(pctSignal, 2);
+      const fo = force(idx, achat ? 1 : -1);
+      const qualite = fo.dispo === 0 ? "indisponible" : fo.fort ? "fort" : fo.contre ? "à contre-sens" : "ordinaire";
+      const fort = fo.fort ? (achat ? " fort" : " forte") : "";
       marqueurs.push({
         idx,
         valeur,
@@ -221,21 +332,49 @@ export const stratAxis: IndicatorDef = {
         couleur,
         cible: "prix",
         info:
-          `AXIS ${achat ? "achat" : "vente"} — score ${achat ? "+" : ""}${s}/6 : ` +
+          `AXIS ${achat ? "achat" : "vente"}${fort} — score ${achat ? "+" : ""}${s}/6 : ` +
           `${noms.map((nom, w) => `${nom} ${fleche(v[w] ?? 0)}`).join(", ")} ; ` +
-          `${achat ? `close au-dessus de l'EMA ${params.emaTendance}` : `${resultat} depuis l'achat (hors frais)`} — ${RESERVE}`,
+          `${achat ? `close au-dessus de l'EMA ${params.emaTendance}` : `${resultat} depuis l'achat (hors frais)`} ; ` +
+          `flux ${qualite} (${texteFlux(flux[idx] ?? {}, oiBougies)} ; ${NON_MESURE}) — ${reserve}`,
       });
       if (k >= recents.length - MAX_LABELS_SORTIE) {
         labels.push({
           idx,
           valeur,
-          texte: achat ? "Achat" : `Vente ${resultat}`,
+          texte: achat ? `Achat${fort}` : `Vente${fort} ${resultat}`,
           couleur,
           cible: "prix",
           position: achat ? "dessous" : "dessus",
         });
       }
     });
+
+    // Gros mouvements : volume ≥ seuilGros × moyen, hors bougies de signal (déjà
+    // qualifiées) et hors dernière bougie (volume en formation).
+    const seuilGros = Number(params.seuilGros ?? 3);
+    const bougiesSignal = new Set(signaux);
+    const gros: number[] = [];
+    for (let i = 0; i < n - 1; i++) {
+      const f = flux[i];
+      const c = candles[i];
+      if (f?.rvol === undefined || c === undefined || f.rvol < seuilGros || bougiesSignal.has(i)) continue;
+      if (sensGros(f, c) !== 0) gros.push(i);
+    }
+    for (const idx of gros.slice(-MAX_GROS_AXIS)) {
+      const f = flux[idx] ?? {};
+      const c = candles[idx] as Candle;
+      const sens = sensGros(f, c);
+      marqueurs.push({
+        idx,
+        valeur: sens > 0 ? c.low : c.high,
+        forme: sens > 0 ? "triangleHaut" : "triangleBas",
+        couleur: "--accent",
+        cible: "prix",
+        info:
+          `AXIS gros ${sens > 0 ? "achat" : "vente"} — ${texteFlux(f, oiBougies)} ; sens du ` +
+          `${f.delta !== undefined && Math.abs(f.delta) >= SEUIL_DELTA_AXIS ? "delta taker" : "corps de la bougie"} — ${NON_MESURE}`,
+      });
+    }
 
     return marqueurs.length > 0
       ? { series: { prixSignal }, annotations: { marqueurs, labels } }

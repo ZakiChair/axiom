@@ -30,13 +30,7 @@ import { commandes as onchainCommands } from "./store/onchain";
 import { commandes as portfolioCommands } from "./store/portfolio";
 import { commandes as notesCommands } from "./store/notes";
 import { commandes as derivChartCommands } from "./store/derivatives-chart";
-// Marqueurs de trades/notes SUR le chart : l'import démarre aussi le contrôleur
-// (effet de bord d'import).
-import { commandes as marksCommands } from "./chart/tradeMarkers";
 import { commandes as liqMarksCommands } from "./chart/liquidationMarkers";
-// Bulles de prints baleines SUR le chart : l'import démarre aussi le contrôleur
-// (effet de bord d'import).
-import { commandes as whaleCommands } from "./chart/whaleBubbles";
 // Heatmap de liquidité du carnet (BOOK) : l'import démarre aussi l'accumulation
 // (effet de bord d'import).
 import { commandes as depthHeatCommands } from "./chart/depthHeat";
@@ -48,15 +42,20 @@ import { commandes as liqEstCommands } from "./chart/liquidationEstimates";
 // Niveaux de liquidation RÉELS Hyperliquid (top adresses, via le daemon) — l'import démarre le
 // singleton de rafraîchissement (effet de bord) ; 3e couche indépendante du même contrôleur.
 import { commandes as hlLiqCommands } from "./data/hyperliquidLiq";
-// Contrôleur marqueurs éco (effet de bord) — indépendant du lazy-load de EcoWindow.
-import "./chart/ecoMarkers";
 import { commandes as domCommands } from "./store/dom-ui";
 import { commandes as replayCommands } from "./store/replay";
 import { chartLayoutStore, type ChartLayoutMode } from "./store/chart-layout";
 import { commandes as globeCommands } from "./store/globe-ui";
 import { commandesOnboarding, onboardingStore } from "./store/onboarding";
 import { commandesPlaybooks } from "./data/playbooks";
-import { commandesBacktest, commandesScreener, commandesSignaux, windowPanelCommands } from "./commands/windowPanels";
+import {
+  commandesBacktest,
+  commandesScreener,
+  commandesSignaux,
+  commandesTradeMarkers,
+  commandesWhaleBubbles,
+  windowPanelCommands,
+} from "./commands/windowPanels";
 import { enregistrerCommandes, paletteStore, type Commande } from "./commands/registry";
 import { useRaccourcisGlobaux, fullscreenStore } from "./commands/hotkeys";
 import { demarrerAlertes } from "./alerts/runtime";
@@ -111,13 +110,15 @@ enregistrerCommandes([
   ...commandesScreener,
   // Vue Signaux d'EQS (SIG : scan de setups), sans charger store/signaux (cf. commands/windowPanels.ts).
   ...commandesSignaux,
-  // Sous-panes OI/funding SUR le chart + marqueurs trades/notes.
+  // Sous-panes OI/funding SUR le chart + marqueurs trades/notes (MARKS : contrôleur chargé
+  // au premier usage, cf. commands/windowPanels.ts ; marqueurs éco : chargés avec EcoWindow).
   ...derivChartCommands,
-  ...marksCommands,
+  ...commandesTradeMarkers,
   ...liqMarksCommands,
   ...liqEstCommands,
   ...hlLiqCommands,
-  ...whaleCommands,
+  // WHALE : bulles de prints, contrôleur chargé au premier usage (cf. commands/windowPanels.ts).
+  ...commandesWhaleBubbles,
   ...depthHeatCommands,
   ...commandesNiveauxOverlays,
   // Fenêtres Phase 4 (DOM/BT/REPLAY) + grille multi-chart.

@@ -19,6 +19,13 @@
  *     EMA 59570,63) → silence, premier achat à 53 après les scores 0 de 50..52 ;
  *   i=255 : +4 mais close 53057,24 < EMA 50 53098,32 → achat retardé à 256
  *     (avec l'EMA 20, au-dessous du close, il a lieu dès 255).
+ *
+ * Couche flux sur la fixture (OHLCV sans volumes taker, sans OI) : volume
+ * relatif défini à partir de i=19 (SMA 20), maximum ×2,21 à i=109 — aucune
+ * bougie n'atteint ×3, donc aucun « gros mouvement » aux défauts ; aux signaux
+ * 60/88/107/139/280 : ×1,39, ×1,07, ×0,61, ×1,28, ×0,91. Delta taker et OI
+ * s'injectent (champs `buyVolume`/`sellVolume`, série aux `oi`) sans toucher
+ * aux cœurs, qui ne lisent que l'OHLCV : les signaux restent AU LITTÉRAL.
  */
 import { describe, expect, it } from "vitest";
 import type { Candle } from "@axiom/types";
@@ -33,25 +40,48 @@ import { macdOf } from "../trend/macd";
 import { supertrendOf } from "../trend/supertrend";
 import { cmfOf } from "../volume/cmf";
 import fixtureRaw from "../golden/fixture-ohlcv.json";
-import { MAX_SIGNAUX_AXIS, episodesAxis, positionsAxis, stratAxis, votesAxis } from "./stratAxis";
+import {
+  MAX_GROS_AXIS,
+  MAX_SIGNAUX_AXIS,
+  SEUIL_DELTA_AXIS,
+  episodesAxis,
+  fluxAxis,
+  forceFlux,
+  positionsAxis,
+  sensGros,
+  stratAxis,
+  votesAxis,
+} from "./stratAxis";
 
 const candles = fixtureRaw as Candle[];
 const DEFAUTS = { emaRapide: 20, emaLente: 50, stPeriode: 10, stMult: 3, seuilAdx: 20 };
 const EMA50 = { emaTendance: 50 };
 const RESERVE =
   "test réussi sur données jamais vues (crypto 4h, 2017-2024), pas mieux qu'une EMA 200 seule sur 3/4 actifs — mesure passée, pas une promesse";
+const RESERVE_FILTRE = "filtre flux actif : signaux hors du test du 7 octobre 2026, non mesurés — jamais une promesse";
+const NON_MESURE = "couche flux non mesurée";
+/** Lectures de flux d'une bougie sans volumes taker ni OI : seul le volume relatif parle. */
+const fluxVolume = (qualite: string, rvol: string) =>
+  `flux ${qualite} (volume ×${rvol}, delta taker n.d., OI n.d. ; ${NON_MESURE})`;
 
-/** Signaux d'un résultat sous la forme « 60▲ 88▼ … ». */
-function resume(candlesEntree: Candle[], params: Record<string, number> = {}): string {
+/** Signaux (▲/▼ du cœur, hors marqueurs « gros mouvement ») sous la forme « 60▲ 88▼ … ». */
+function resume(candlesEntree: Candle[], params: Record<string, number | boolean> = {}): string {
   const res = computeIndicator(stratAxis, candlesEntree, params);
-  return (res.annotations?.marqueurs ?? []).map((m) => `${m.idx}${m.forme === "triangleHaut" ? "▲" : "▼"}`).join(" ");
+  return (res.annotations?.marqueurs ?? [])
+    .filter((m) => m.couleur !== "--accent")
+    .map((m) => `${m.idx}${m.forme === "triangleHaut" ? "▲" : "▼"}`)
+    .join(" ");
 }
+
+/** Marqueurs « gros mouvement » (couleur --accent) d'un résultat. */
+const grosDe = (res: ReturnType<typeof computeIndicator>) =>
+  (res.annotations?.marqueurs ?? []).filter((m) => m.couleur === "--accent");
 
 /** Sens strict a vs b, sans −0 (toEqual distingue 0 et −0). */
 const sens = (a: number, b: number): number => Math.sign(a - b) + 0;
 
 describe("stratAxis — contrat", () => {
-  it("strategy/overlay enregistrée, huit inputs bornés, une sortie prix, toute unité de temps, sans spec de fabrique", () => {
+  it("strategy/overlay enregistrée, quatorze inputs bornés, une sortie prix, toute unité de temps, sans spec de fabrique", () => {
     expect(getIndicator("stratAxis")).toBe(stratAxis);
     expect(stratAxis.name).toBe("AXIS");
     expect(stratAxis.category).toBe("strategy");
@@ -65,8 +95,19 @@ describe("stratAxis — contrat", () => {
       ["stPeriode", 10, 1, undefined],
       ["stMult", 3, 0.5, undefined],
       ["seuilAdx", 20, 5, 60],
+      ["rvolPeriode", 20, 2, 500],
+      ["seuilRvol", 1.5, 1, 20],
+      ["seuilGros", 3, 1, 50],
+      ["oiBougies", 6, 1, 200],
+      ["seuilOi", 2, 0.1, 100],
+      ["filtreFlux", false, undefined, undefined],
     ]);
+    expect(stratAxis.inputs.find((i) => i.key === "filtreFlux")?.type).toBe("boolean");
     expect(stratAxis.outputs.map((o) => o.key)).toEqual(["prixSignal"]);
+    // L'OI enrichit la couche flux sans jamais conditionner AXIS : facultative, jamais requise
+    // (une série `aux` rendrait AXIS inutilisable hors perp USDT et l'écarterait des alertes).
+    expect(stratAxis.auxFacultatives).toEqual(["oi"]);
+    expect(stratAxis.aux).toBeUndefined();
     // Aucune unité requise : le propriétaire demande (7 octobre 2026) qu'AXIS
     // fonctionne sur toute unité de temps. Le test sur données jamais vues ne
     // couvre que le 4h ; l'infobulle RESERVE rappelle ce périmètre.
@@ -189,17 +230,19 @@ describe("stratAxis — calc sur la fixture dorée", () => {
   it("EMA de tendance 50 : cinq signaux AU LITTÉRAL (▲ au plus bas, ▼ au plus haut, résultat hors frais)", () => {
     const votes = "EMA 20/50 ▲, Supertrend ▲, DMI ▲, MACD ▲, RSI ▲, CMF ▲";
     const baisse = "EMA 20/50 ▲, Supertrend ▼, DMI ▼, MACD ▼, RSI ▼, CMF ▼";
+    // Fixture sans volumes taker ni OI : la couche flux ne lit que le volume relatif,
+    // toujours sous ×1,5 aux bougies de signal → « ordinaire », aucun « gros mouvement ».
     expect(res.annotations?.marqueurs).toEqual([
       { idx: 60, valeur: 60296.88, forme: "triangleHaut", couleur: "--up", cible: "prix",
-        info: `AXIS achat — score +6/6 : ${votes} ; close au-dessus de l'EMA 50 — ${RESERVE}` },
+        info: `AXIS achat — score +6/6 : ${votes} ; close au-dessus de l'EMA 50 ; ${fluxVolume("ordinaire", "1.4")} — ${RESERVE}` },
       { idx: 88, valeur: 61283.85, forme: "triangleBas", couleur: "--down", cible: "prix",
-        info: `AXIS vente — score -4/6 : ${baisse} ; -0.50 % depuis l'achat (hors frais) — ${RESERVE}` },
+        info: `AXIS vente — score -4/6 : ${baisse} ; -0.50 % depuis l'achat (hors frais) ; ${fluxVolume("ordinaire", "1.1")} — ${RESERVE}` },
       { idx: 107, valeur: 61068.78, forme: "triangleHaut", couleur: "--up", cible: "prix",
-        info: `AXIS achat — score +6/6 : ${votes} ; close au-dessus de l'EMA 50 — ${RESERVE}` },
+        info: `AXIS achat — score +6/6 : ${votes} ; close au-dessus de l'EMA 50 ; ${fluxVolume("ordinaire", "0.6")} — ${RESERVE}` },
       { idx: 139, valeur: 61009.07, forme: "triangleBas", couleur: "--down", cible: "prix",
-        info: `AXIS vente — score -4/6 : ${baisse} ; -1.86 % depuis l'achat (hors frais) — ${RESERVE}` },
+        info: `AXIS vente — score -4/6 : ${baisse} ; -1.86 % depuis l'achat (hors frais) ; ${fluxVolume("ordinaire", "1.3")} — ${RESERVE}` },
       { idx: 280, valeur: 53948.6, forme: "triangleHaut", couleur: "--up", cible: "prix",
-        info: `AXIS achat — score +6/6 : ${votes} ; close au-dessus de l'EMA 50 — ${RESERVE}` },
+        info: `AXIS achat — score +6/6 : ${votes} ; close au-dessus de l'EMA 50 ; ${fluxVolume("ordinaire", "0.9")} — ${RESERVE}` },
     ]);
     for (const m of res.annotations?.marqueurs ?? []) {
       const b = candles[m.idx]!;
@@ -297,7 +340,224 @@ describe("stratAxis — plafonds d'annotation", () => {
     for (let i = 1; i < n; i++) if (pos[i - 1] !== undefined && pos[i] !== pos[i - 1]) tous.push(i);
     expect(tous.length).toBe(192);
     const res = computeIndicator(stratAxis, sinus, {});
+    // Volume 10..14 : ×1,17 au plus, aucun « gros mouvement » parmi les marqueurs.
     expect(res.annotations?.marqueurs?.map((m) => m.idx)).toEqual(tous.slice(-MAX_SIGNAUX_AXIS));
     expect(res.annotations?.labels?.map((l) => l.idx)).toEqual(tous.slice(-MAX_LABELS_SORTIE));
+  });
+});
+
+describe("fluxAxis", () => {
+  const plate: Candle[] = Array.from({ length: 25 }, (_v, i) => ({
+    time: i * 3_600_000, open: 10, high: 11, low: 9, close: 10.5, volume: 10,
+  }));
+
+  it("volume relatif = volume / SMA(volume) à partir de la fenêtre ; delta et OI absents sans donnée", () => {
+    const flux = fluxAxis(plate, undefined, 20, 6);
+    expect(flux.slice(0, 19).every((f) => f.rvol === undefined)).toBe(true);
+    expect(flux[19]).toEqual({ rvol: 1 });
+    expect(flux[24]).toEqual({ rvol: 1 });
+    const pic = plate.map((c, i) => (i === 22 ? { ...c, volume: 30 } : c));
+    expect(fluxAxis(pic, undefined, 20, 6)[22]?.rvol).toBeCloseTo(30 / 11, 12); // SMA 20 = (19×10 + 30)/20
+  });
+
+  it("delta taker = (acheteur − vendeur) / volume, absent sans champs taker ou à volume nul", () => {
+    const taker = plate.map((c, i) =>
+      i === 22 ? { ...c, volume: 30, buyVolume: 20, sellVolume: 10 } : i === 23 ? { ...c, volume: 0, buyVolume: 0, sellVolume: 0 } : c
+    );
+    const flux = fluxAxis(taker, undefined, 20, 6);
+    expect(flux[22]?.delta).toBeCloseTo(1 / 3, 12);
+    expect(flux[21]?.delta).toBeUndefined();
+    expect(flux[23]).toEqual({ rvol: 0 });
+  });
+
+  it("ΔOI = variation % sur `oiBougies` bougies ; absent sans point de départ, à OI nul ou sans série", () => {
+    const oi: Array<number | undefined> = new Array(25).fill(100);
+    oi[22] = 110;
+    oi[3] = 0;
+    const flux = fluxAxis(plate, oi, 20, 6);
+    expect(flux[22]?.dOi).toBeCloseTo(10, 12); // 110 / oi[16] = 100
+    expect(flux[5]?.dOi).toBeUndefined(); // oi[-1]
+    expect(flux[6]?.dOi).toBe(0);
+    expect(flux[9]?.dOi).toBeUndefined(); // oi[3] = 0
+    oi[20] = undefined;
+    expect(fluxAxis(plate, oi, 20, 6)[20]?.dOi).toBeUndefined();
+    expect(fluxAxis(plate, undefined, 20, 6).every((f) => f.dOi === undefined)).toBe(true);
+    // Recul arrondi, jamais nul : oiBougies 0,4 → 1 bougie.
+    expect(fluxAxis(plate, oi, 20, 0.4)[22]?.dOi).toBeCloseTo(10, 12);
+  });
+
+  it("volume nul partout (forex) : aucune lecture", () => {
+    expect(fluxAxis(plate.map((c) => ({ ...c, volume: 0 })), undefined, 20, 6).every((f) => f.rvol === undefined)).toBe(true);
+  });
+});
+
+describe("forceFlux et sensGros", () => {
+  const force = (f: Parameters<typeof forceFlux>[0], sens: number) => forceFlux(f, sens, 1.5, 2);
+
+  it("sans lecture : indisponible, jamais fort", () => {
+    expect(force({}, 1)).toEqual({ dispo: 0, confirme: 0, contre: false, fort: false });
+  });
+
+  it("une lecture (volume seul) : forte dès ×seuilRvol", () => {
+    expect(force({ rvol: 1.5 }, 1)).toEqual({ dispo: 1, confirme: 1, contre: false, fort: true });
+    expect(force({ rvol: 1.4 }, -1).fort).toBe(false);
+  });
+
+  it("deux lectures : les deux doivent confirmer ; trois : deux suffisent", () => {
+    expect(force({ rvol: 2, delta: 0.05 }, 1)).toEqual({ dispo: 2, confirme: 1, contre: false, fort: false });
+    expect(force({ rvol: 2, delta: SEUIL_DELTA_AXIS }, 1).fort).toBe(true);
+    expect(force({ rvol: 2, dOi: -2.5 }, -1).fort).toBe(true); // |ΔOI| : shorts ouverts ou longs fermés
+    expect(force({ rvol: 1, delta: 0.3, dOi: 2 }, 1)).toEqual({ dispo: 3, confirme: 2, contre: false, fort: true });
+    expect(force({ rvol: 1, delta: 0.3, dOi: 1.9 }, 1).fort).toBe(false);
+  });
+
+  it("un delta taker à contre-sens interdit « fort », même avec deux confirmations", () => {
+    expect(force({ rvol: 2, delta: -0.3, dOi: 5 }, 1)).toEqual({ dispo: 3, confirme: 2, contre: true, fort: false });
+    expect(force({ rvol: 2, delta: 0.1 }, -1)).toEqual({ dispo: 2, confirme: 1, contre: true, fort: false });
+    expect(force({ rvol: 2, delta: -0.05 }, 1).contre).toBe(false); // sous 10 % du volume : sans sens
+  });
+
+  it("sens d'un gros mouvement : delta taker marqué, sinon corps de la bougie, doji indécis", () => {
+    const baissiere: Candle = { time: 0, open: 11, high: 12, low: 9, close: 10, volume: 1 };
+    const haussiere: Candle = { ...baissiere, open: 10, close: 11 };
+    expect(sensGros({ delta: 0.2 }, baissiere)).toBe(1);
+    expect(sensGros({ delta: -0.1 }, haussiere)).toBe(-1);
+    expect(sensGros({ delta: 0.05 }, baissiere)).toBe(-1);
+    expect(sensGros({}, haussiere)).toBe(1);
+    expect(sensGros({}, { ...baissiere, close: 11 })).toBe(0);
+  });
+});
+
+describe("stratAxis — couche flux dans calc", () => {
+  const votes = "EMA 20/50 ▲, Supertrend ▲, DMI ▲, MACD ▲, RSI ▲, CMF ▲";
+  const baisse = "EMA 20/50 ▲, Supertrend ▼, DMI ▼, MACD ▼, RSI ▼, CMF ▼";
+  const taker = (c: Candle, partAchat: number): Candle =>
+    ({ ...c, buyVolume: c.volume * partAchat, sellVolume: c.volume * (1 - partAchat) });
+  // Volumes taker sur quatre bougies de signal (139 reste sans), OI 100 partout sauf aux
+  // signaux (139 : absent) : les cœurs ne lisent que l'OHLCV, les signaux ne bougent pas.
+  const enrichies = candles.map((c, i) =>
+    i === 60 ? taker(c, 0.75) : i === 88 ? taker(c, 0.35) : i === 107 ? taker(c, 0.4) : i === 280 ? taker(c, 0.525) : c
+  );
+  const oi: Array<number | undefined> = new Array(candles.length).fill(100);
+  oi[60] = 103;
+  oi[88] = 97.5;
+  oi[107] = 110;
+  oi[139] = undefined;
+  oi[280] = 101;
+  const res = computeIndicator(stratAxis, enrichies, EMA50, { oi });
+
+  it("les signaux du cœur sont identiques avec ou sans volumes taker et OI", () => {
+    const nu = computeIndicator(stratAxis, candles, EMA50);
+    expect(res.annotations?.marqueurs?.map((m) => [m.idx, m.forme, m.valeur])).toEqual(
+      nu.annotations?.marqueurs?.map((m) => [m.idx, m.forme, m.valeur])
+    );
+    expect(res.series.prixSignal).toEqual(nu.series.prixSignal);
+  });
+
+  it("qualification : fort (2 lectures sur 3), à contre-sens (delta opposé), ordinaire, lectures absentes dites", () => {
+    expect(res.annotations?.marqueurs?.map((m) => m.info)).toEqual([
+      `AXIS achat fort — score +6/6 : ${votes} ; close au-dessus de l'EMA 50 ; ` +
+        `flux fort (volume ×1.4, delta taker +50 %, OI +3.0 % sur 6 b. ; ${NON_MESURE}) — ${RESERVE}`,
+      `AXIS vente forte — score -4/6 : ${baisse} ; -0.50 % depuis l'achat (hors frais) ; ` +
+        `flux fort (volume ×1.1, delta taker -30 %, OI -2.5 % sur 6 b. ; ${NON_MESURE}) — ${RESERVE}`,
+      `AXIS achat — score +6/6 : ${votes} ; close au-dessus de l'EMA 50 ; ` +
+        `flux à contre-sens (volume ×0.6, delta taker -20 %, OI +10.0 % sur 6 b. ; ${NON_MESURE}) — ${RESERVE}`,
+      `AXIS vente — score -4/6 : ${baisse} ; -1.86 % depuis l'achat (hors frais) ; ${fluxVolume("ordinaire", "1.3")} — ${RESERVE}`,
+      `AXIS achat — score +6/6 : ${votes} ; close au-dessus de l'EMA 50 ; ` +
+        `flux ordinaire (volume ×0.9, delta taker +5 %, OI +1.0 % sur 6 b. ; ${NON_MESURE}) — ${RESERVE}`,
+    ]);
+    expect(res.annotations?.labels?.map((l) => l.texte)).toEqual([
+      "Achat fort", "Vente forte -0.50 %", "Achat", "Vente -1.86 %", "Achat",
+    ]);
+  });
+
+  it("volume nul (forex) : flux indisponible, signaux et étiquettes inchangés", () => {
+    const sansVolume = candles.map((c) => ({ ...c, volume: 0 }));
+    const r = computeIndicator(stratAxis, sansVolume, EMA50);
+    expect(r.annotations?.marqueurs?.[0]?.info).toBe(
+      `AXIS achat — score +5/6 : EMA 20/50 ▲, Supertrend ▲, DMI ▲, MACD ▲, RSI ▲, CMF – ; close au-dessus de l'EMA 50 ; ` +
+        `flux indisponible (volume n.d., delta taker n.d., OI n.d. ; ${NON_MESURE}) — ${RESERVE}`
+    );
+    expect(r.annotations?.labels?.map((l) => l.texte)).toEqual(["Achat", "Vente -1.98 %", "Achat", "Vente -1.87 %", "Achat"]);
+    expect(grosDe(r)).toEqual([]);
+  });
+
+  it("période du volume moyen et seuil réglables : à 60, ×1,39 (SMA 20) ou ×1,49 (SMA 5) devient fort sous le seuil", () => {
+    const r = computeIndicator(stratAxis, candles, { ...EMA50, seuilRvol: 1.3 });
+    expect(r.annotations?.labels?.map((l) => l.texte)).toEqual(["Achat fort", "Vente -0.50 %", "Achat", "Vente -1.86 %", "Achat"]);
+    expect(fluxAxis(candles, undefined, 5, 6)[60]?.rvol).toBeCloseTo(1.4892, 3);
+    const premier = (params: Record<string, number>) =>
+      computeIndicator(stratAxis, candles, { ...EMA50, ...params }).annotations?.labels?.[0]?.texte;
+    expect(premier({ rvolPeriode: 5, seuilRvol: 1.45 })).toBe("Achat fort");
+    expect(premier({ seuilRvol: 1.45 })).toBe("Achat");
+  });
+
+  it("filtre flux : n'achète que sur flux fort, la vente ne change pas, l'infobulle le dit", () => {
+    // Fixture : à 60 ×1,39 < 1,5 → l'achat attend 73 (première confluence forte armée) ;
+    // 107 ×0,61 → 109 ; 280 ×0,91 → 283. Les ventes 88 et 139 tiennent (−4 inchangé).
+    expect(resume(candles, { ...EMA50, filtreFlux: true })).toBe("73▲ 88▼ 109▲ 139▼ 283▲");
+    expect(resume(candles, { ...EMA50, filtreFlux: true, seuilRvol: 1.2 })).toBe("60▲ 88▼ 108▲ 139▼ 283▲");
+    const r = computeIndicator(stratAxis, candles, { ...EMA50, filtreFlux: true });
+    expect(r.annotations?.marqueurs?.[0]?.info).toBe(
+      `AXIS achat fort — score +6/6 : ${votes} ; close au-dessus de l'EMA 50 ; ${fluxVolume("fort", "1.5")} — ${RESERVE_FILTRE}`
+    );
+    expect(r.annotations?.labels?.[0]?.texte).toBe("Achat fort");
+    // Filtre sans donnée de flux (forex) : aucun achat possible, et rien d'inventé.
+    const sansVolume = candles.map((c) => ({ ...c, volume: 0 }));
+    expect(computeIndicator(stratAxis, sansVolume, { ...EMA50, filtreFlux: true }).annotations).toBeUndefined();
+    // Désactivé (défaut) : lecture v2 au littéral.
+    expect(resume(candles, { ...EMA50, filtreFlux: false })).toBe("60▲ 88▼ 107▲ 139▼ 280▲");
+  });
+});
+
+describe("stratAxis — gros mouvements", () => {
+  // Série déclinante (close toujours sous l'EMA 200 : aucun achat, donc aucun signal) ;
+  // un pic de volume ×50 toutes les 5 bougies, corps baissier (open > close).
+  const n = 500;
+  const declin: Candle[] = Array.from({ length: n }, (_v, i) => {
+    const c = 1000 - i * 0.5 + (i % 3) * 0.1;
+    return { time: i * 3_600_000, open: c + 0.2, high: c + 1, low: c - 1, close: c, volume: i % 5 === 0 ? 50 : 1 };
+  });
+
+  it("marque les pics ≥ seuilGros × volume moyen, au plus MAX_GROS_AXIS récents, jamais la dernière bougie", () => {
+    const res = computeIndicator(stratAxis, declin, {});
+    const gros = grosDe(res);
+    expect(res.annotations?.marqueurs?.length).toBe(gros.length);
+    expect(res.annotations?.labels).toEqual([]);
+    expect(fluxAxis(declin, undefined, 20, 6)[300]?.rvol).toBeCloseTo(50 / 10.8, 12); // SMA 20 = (4×50 + 16)/20
+    // Pics de 20 à 495 (le volume relatif n'existe qu'à partir de 19) : 96, les 60 derniers gardés.
+    expect(gros.map((m) => m.idx)).toEqual(Array.from({ length: MAX_GROS_AXIS }, (_v, k) => 200 + 5 * k));
+    expect(gros[0]).toEqual({
+      idx: 200, valeur: declin[200]!.high, forme: "triangleBas", couleur: "--accent", cible: "prix",
+      info: `AXIS gros vente — volume ×4.6, delta taker n.d., OI n.d. ; sens du corps de la bougie — ${NON_MESURE}`,
+    });
+  });
+
+  it("delta taker marqué : sens et point d'ancrage suivent le delta, pas le corps", () => {
+    const avecTaker = declin.map((c, i) => (i === 300 ? { ...c, buyVolume: 40, sellVolume: 10 } : c));
+    const gros = grosDe(computeIndicator(stratAxis, avecTaker, {}));
+    expect(gros.find((m) => m.idx === 300)).toEqual({
+      idx: 300, valeur: declin[300]!.low, forme: "triangleHaut", couleur: "--accent", cible: "prix",
+      info: `AXIS gros achat — volume ×4.6, delta taker +60 %, OI n.d. ; sens du delta taker — ${NON_MESURE}`,
+    });
+  });
+
+  it("doji sans delta : indécis, pas de marqueur ; dernière bougie : exclue ; seuil réglable", () => {
+    const doji = declin.map((c, i) => (i === 300 ? { ...c, open: c.close } : c));
+    expect(grosDe(computeIndicator(stratAxis, doji, {})).some((m) => m.idx === 300)).toBe(false);
+    const finPic = declin.map((c, i) => (i === n - 1 ? { ...c, volume: 50 } : c));
+    expect(grosDe(computeIndicator(stratAxis, finPic, {})).some((m) => m.idx === n - 1)).toBe(false);
+    expect(grosDe(computeIndicator(stratAxis, declin, { seuilGros: 5 }))).toEqual([]);
+  });
+
+  it("fixture dorée : aucun pic ≥ ×3 ; à ×2 seul i=109 (×2,21) ; une bougie de signal n'est jamais doublée", () => {
+    expect(grosDe(computeIndicator(stratAxis, candles, EMA50))).toEqual([]);
+    expect(grosDe(computeIndicator(stratAxis, candles, { ...EMA50, seuilGros: 2 })).map((m) => m.idx)).toEqual([109]);
+    // seuilGros 1,5 : 60 (×1,39) reste sous le seuil ; 73 et 283 sont des pics, aussi signaux avec le filtre flux.
+    const avecFiltre = computeIndicator(stratAxis, candles, { ...EMA50, seuilGros: 1.5, filtreFlux: true });
+    const idxGros = grosDe(avecFiltre).map((m) => m.idx);
+    expect(idxGros).not.toContain(73);
+    expect(idxGros).not.toContain(283);
+    expect(grosDe(computeIndicator(stratAxis, candles, { ...EMA50, seuilGros: 1.5 })).map((m) => m.idx)).toContain(73);
   });
 });

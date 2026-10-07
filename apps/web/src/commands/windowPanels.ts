@@ -720,6 +720,52 @@ export const commandesScreener: Commande[] = [
 ];
 
 /**
+ * MARKS — commande rapatriée de `chart/tradeMarkers.ts` : le contrôleur (overlay KLineChart
+ * des trades et notes, démarré à l'import) ne sert qu'une fois les marqueurs activés et
+ * reste hors du chargement initial (garde-fou : chargementInitial.test.ts), comme les
+ * marqueurs éco (chart/ecoMarkers, chargés avec EcoWindow qui seule les active). Le premier
+ * appel charge le module puis bascule, les suivants ne font que basculer.
+ */
+export const commandesTradeMarkers: Commande[] = [
+  {
+    id: "action:marks",
+    mnemonique: "MARKS",
+    libelle: "Trades & notes (chart) — activer / désactiver",
+    categorie: "action",
+    motsCles: ["marks", "trades", "notes", "portefeuille", "positions", "pnl", "annotations", "chart"],
+    apercu: "Épingle les entrées/sorties et notes ancrées sur le graphe",
+    action: () => {
+      void import("../chart/tradeMarkers")
+        .then(({ tradeMarksStore }) => tradeMarksStore.getState().basculer())
+        .catch((erreur: unknown) => console.warn("[AXIOM] MARKS : marqueurs non chargés", erreur));
+    },
+  },
+];
+
+/**
+ * WHALE — commande rapatriée de `chart/whaleBubbles.ts` : son contrôleur (overlay
+ * KLineChart, flux aggTrades spot + perp, ≈ 5 Ko gzip) ne sert qu'une fois les bulles
+ * activées et reste hors du chargement initial (garde-fou : chargementInitial.test.ts).
+ * Le module démarre son contrôleur à l'import ; le premier appel le charge puis bascule,
+ * les suivants ne font que basculer (module déjà évalué).
+ */
+export const commandesWhaleBubbles: Commande[] = [
+  {
+    id: "action:whale-bubbles",
+    mnemonique: "WHALE",
+    libelle: "Bulles de prints baleines — activer / désactiver",
+    categorie: "action",
+    motsCles: ["whale", "baleines", "prints", "bulles", "trades", "notionnel", "agressif"],
+    apercu: "Épingle les gros trades agressifs sur le chart, en bulles proportionnelles au notionnel",
+    action: () => {
+      void import("../chart/whaleBubbles")
+        .then(({ whaleBubblesStore }) => whaleBubblesStore.getState().basculer())
+        .catch((erreur: unknown) => console.warn("[AXIOM] WHALE : bulles de prints non chargées", erreur));
+    },
+  },
+];
+
+/**
  * SIG — commande rapatriée de `store/signaux.ts` : ce store (avec `data/signaux` et
  * `data/validationSignaux`, ≈ 3,8 Ko gzip) ne sert qu'à ScreenerWindow (React.lazy) et reste
  * hors du chargement initial (garde-fou : chargementInitial.test.ts). L'action charge le

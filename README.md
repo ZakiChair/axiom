@@ -169,7 +169,14 @@ depuis l'achat. Lecture indicative absente de BT, **testée le 7 octobre 2026
 sur données jamais vues** (BTC/ETH/XRP/SOL, 4h, 2017-2024, protocole figé avant
 calcul) : verdict FAVORABLE, mais pas mieux qu'une EMA 200 seule en PnL total
 sur 3 actifs sur 4 — mesure passée, jamais une promesse. Seule l'unité 4h est
-couverte par ce test ; sur les autres, l'infobulle le rappelle.
+couverte par ce test ; sur les autres, l'infobulle le rappelle. La **couche
+flux** (volume relatif, delta taker Binance, variation d'intérêt ouvert sur les
+perps USDT) qualifie chaque signal (« Achat fort » quand les lectures
+disponibles confirment, « à contre-sens » quand le delta s'y oppose) et marque
+d'un triangle d'accent les **gros mouvements** (volume ≥ 3 × la moyenne, sens
+du delta ou du corps) ; un réglage optionnel n'achète que sur flux fort. Les
+lectures absentes sont dites « n.d. » ; la couche flux n'est pas mesurée et ne
+déplace aucun signal par défaut.
 [Méthode, réglages, limites et backtest](docs/axis-2026-10-07.md).
 
 ### Historique des décisions et nouveaux indicateurs

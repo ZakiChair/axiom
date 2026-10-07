@@ -29,7 +29,7 @@
  */
 import { registerIndicator, IndicatorSeries } from "klinecharts";
 import type { Chart, IndicatorFigure, IndicatorTooltipData, TooltipLegend } from "klinecharts";
-import type { Candle, ExchangeId, IndicatorDef, IndicatorResult, Timeframe } from "@axiom/types";
+import type { AuxSeriesId, Candle, ExchangeId, IndicatorDef, IndicatorResult, Timeframe } from "@axiom/types";
 import { computeIndicator, getIndicator, resolveParams } from "@axiom/indicators";
 import { couleurDeclaree, lireTokenCanvas, serieCanvas } from "../lib/canvasTokens";
 import { hauteursCorrigees, paneMax } from "./paneBudget";
@@ -37,7 +37,7 @@ import { chartCapaciteStore } from "../store/chartCapacite";
 import { dessinerAnnotationsPane } from "./annotationsPane";
 import { AnnotationsPrix, masquerTooltipAnnotation } from "./annotationsPrix";
 import { auxProvider } from "./auxProvider";
-import { raisonUnusableIndicateur, VOLUME_REEL } from "../lib/indicatorUsability";
+import { auxFacultativesServies, raisonUnusableIndicateur, VOLUME_REEL } from "../lib/indicatorUsability";
 import {
   computeKey,
   formatInstanceLabel,
@@ -420,13 +420,14 @@ export class ChartIndicators {
   }
 
   /**
-   * Calcul d'UNE instance, aux-AWARE (Task 14) : si `def.aux` est vide, délègue au
-   * calcul mémoïsé `compute` (inchangé, non aux-aware). Sinon, résout le statut via
-   * `auxProvider.getAligned` (Task 12) — `onReady` re-déclenche UNIQUEMENT le
-   * recalcul de CETTE instance (`onAuxReady`), jamais un re-sync/re-création de
-   * pane. Pas de memoïsation ici (les 6 defs dérivés sont bon marché à recalculer ;
+   * Calcul d'UNE instance, aux-AWARE (Task 14) : si `def.aux` et `def.auxFacultatives`
+   * sont vides, délègue au calcul mémoïsé `compute` (inchangé, non aux-aware). Sinon,
+   * résout le statut via `auxProvider.getAligned` (Task 12) — `onReady` re-déclenche
+   * UNIQUEMENT le recalcul de CETTE instance (`onAuxReady`), jamais un re-sync/re-création
+   * de pane. Pas de memoïsation ici (les 6 defs dérivés sont bon marché à recalculer ;
    * l'objet `aux` renvoyé par `getAligned` est réaligné à CHAQUE appel — le mettre
-   * en clé de cache viderait le cache à chaque passage).
+   * en clé de cache viderait le cache à chaque passage). Les séries facultatives sont
+   * demandées à part : seules les requises décident du statut (pending/UNUSABLE).
    *
    * Renvoie aussi le SUFFIXE de statut à ajouter au libellé du pane — même canal
    * que le nom normal (`shortName`, cf. `formatInstanceLabel`) : "" (ready/aux
@@ -474,7 +475,13 @@ export class ChartIndicators {
         statut: { etat: "vide" as const, raison: raisonSansValeur(def, inst.params, candles.length) },
       };
     };
-    if (!def.aux || def.aux.length === 0) {
+    const requises = def.aux ?? [];
+    // Séries facultatives : seules celles que le contexte peut servir sont demandées
+    // (`auxFacultativesServies`) ; les autres manquent simplement dans `ctx.aux`.
+    const facultatives = this.timeframe === null
+      ? []
+      : auxFacultativesServies(def, { exchange, symbol: this.symbol, timeframe: this.timeframe });
+    if (requises.length === 0 && facultatives.length === 0) {
       return verifier(this.compute(def, inst.params, candles), "");
     }
     if (this.timeframe === null) {
@@ -483,16 +490,24 @@ export class ChartIndicators {
       return verifier(computeIndicator(def, candles, inst.params), "");
     }
     const candleTimes = candles.map((c) => c.time);
-    const status = auxProvider.getAligned(
-      { exchange, symbol: this.symbol, timeframe: this.timeframe, ids: def.aux, candleTimes },
-      () => this.onAuxReady(inst.instanceId)
-    );
+    const symbol = this.symbol;
+    const timeframe = this.timeframe;
+    const aligner = (ids: AuxSeriesId[]) =>
+      auxProvider.getAligned({ exchange, symbol, timeframe, ids, candleTimes }, () => this.onAuxReady(inst.instanceId));
+    // Demande séparée pour les facultatives : leur attente ou leur échec ne change
+    // jamais le verdict du def, complet sans elles — il s'enrichit si elles arrivent.
+    const bonus = facultatives.length > 0 ? aligner(facultatives) : undefined;
+    const auxBonus = bonus?.status === "ready" ? bonus.aux : undefined;
+    if (requises.length === 0) {
+      return verifier(computeIndicator(def, candles, inst.params, auxBonus), "");
+    }
+    const status = aligner(requises);
     if (status.status === "ready") {
-      const result = computeIndicator(def, candles, inst.params, status.aux);
+      const result = computeIndicator(def, candles, inst.params, { ...auxBonus, ...status.aux });
       return verifier(result, " (UNUSABLE)");
     }
     // `pending`/`error` : aux absent -> le def dégrade en séries all-undefined (garde Task 13).
-    const result = computeIndicator(def, candles, inst.params);
+    const result = computeIndicator(def, candles, inst.params, auxBonus);
     if (status.status === "pending") {
       const statut = sortieFinie(def, result)
         ? null

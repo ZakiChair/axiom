@@ -12,7 +12,7 @@
 import { describe, it, expect, vi } from "vitest";
 
 // Le thème : forme minimale (THEMES + getState().setTheme) + `subscribe` inerte —
-// chart/tradeMarkers s'abonne au thème à l'import (contrôleur démarré par effet de bord).
+// chart/depthHeat s'abonne au thème à l'import (contrôleur démarré par effet de bord).
 vi.mock("../store/theme", () => ({
   THEMES: ["dark", "bloomberg", "matrix", "cute", "aurora"] as const,
   themeStore: {
@@ -21,18 +21,15 @@ vi.mock("../store/theme", () => ({
   },
 }));
 // Le pont de dessin : stubs inertes (aucune de ces actions n'est exécutée ici).
-// `getActiveChart` : lu par les contrôleurs de chart/tradeMarkers et chart/whaleBubbles
-// démarrés à l'import — null = aucun chart actif.
 vi.mock("../chart/drawing", () => ({
   exportChartImage: () => {},
   clearAllOverlays: () => {},
   getActiveChart: () => null,
 }));
-// klinecharts (build UMD exigeant `window`) : stubs pour importer les modules chart —
-// tradeMarkers et whaleBubbles appellent registerOverlay ; les contrôleurs de heatmap
-// importent ActionType/DomPosition (lus uniquement dans des méthodes jamais exécutées ici).
+// klinecharts (build UMD exigeant `window`) : stubs pour importer les modules chart — les
+// contrôleurs de heatmap importent ActionType/DomPosition (lus uniquement dans des méthodes
+// jamais exécutées ici).
 vi.mock("klinecharts", () => ({
-  registerOverlay: () => {},
   ActionType: {},
   DomPosition: {},
 }));
@@ -58,7 +55,7 @@ import { toastsStore, retirerToast } from "../store/toasts";
 // que App.tsx (ou Toolbar.tsx) greffe par side-effect d'import. On importe donc les
 // tableaux BRUTS pour asserter l'unicité globale AVANT le dédoublonnage par id
 // d'`enregistrerCommandes` (qui masquerait justement une collision d'ids).
-// L'import de tradeMarkers / liquidation* démarre leurs contrôleurs (effet de bord) :
+// L'import de liquidation* / depthHeat démarre leurs contrôleurs (effet de bord) :
 // inertes ici grâce aux mocks theme / drawing / klinecharts ci-dessus.
 import { ecoCommands } from "../store/eco";
 import { commandes as newsCommandes } from "../store/news";
@@ -66,18 +63,23 @@ import { commandes as onchainCommandes } from "../store/onchain";
 import { commandes as portfolioCommandes } from "../store/portfolio";
 import { commandes as notesCommandes } from "../store/notes";
 import { commandes as derivChartCommandes } from "../store/derivatives-chart";
-import { commandes as marksCommandes } from "../chart/tradeMarkers";
 import { commandes as liqMarksCommandes } from "../chart/liquidationMarkers";
 import { commandes as liqEstCommandes } from "../chart/liquidationEstimates";
 import { commandes as hlLiqCommandes } from "../data/hyperliquidLiq";
-import { commandes as whaleCommandes } from "../chart/whaleBubbles";
 import { commandes as depthHeatCommandes } from "../chart/depthHeat";
 import { commandesNiveauxOverlays } from "../chart/niveauxOverlays";
 import { commandes as domCommandes } from "../store/dom-ui";
 import { commandes as replayCommandes } from "../store/replay";
 import { commandes as globeCommandes } from "../store/globe-ui";
 import { commandes as tickerCommandes } from "../store/tickerBand";
-import { commandesBacktest, commandesScreener, commandesSignaux, windowPanelCommands } from "./windowPanels";
+import {
+  commandesBacktest,
+  commandesScreener,
+  commandesSignaux,
+  commandesTradeMarkers,
+  commandesWhaleBubbles,
+  windowPanelCommands,
+} from "./windowPanels";
 import { commandesOnboarding } from "../store/onboarding";
 import { commandesPlaybooks } from "../data/playbooks";
 
@@ -93,11 +95,11 @@ const SOURCES_GREFFEES: Record<string, readonly Commande[]> = {
   "store/notes": notesCommandes,
   "commands/windowPanels (EQS)": commandesScreener,
   "store/derivatives-chart": derivChartCommandes,
-  "chart/tradeMarkers": marksCommandes,
+  "commands/windowPanels (MARKS)": commandesTradeMarkers,
   "chart/liquidationMarkers": liqMarksCommandes, // LIQMARK + LIQMODE (déplacée de liquidationHeat)
   "chart/liquidationEstimates": liqEstCommandes,
   "data/hyperliquidLiq": hlLiqCommandes,
-  "chart/whaleBubbles": whaleCommandes,
+  "commands/windowPanels (WHALE)": commandesWhaleBubbles,
   "chart/depthHeat": depthHeatCommandes,
   "chart/niveauxOverlays": commandesNiveauxOverlays,
   "store/dom-ui": domCommandes,

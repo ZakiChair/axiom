@@ -31,6 +31,9 @@ const MODULES_DIFFERES: Record<string, string> = {
   "store/screener": "store du screener — chargé à la demande (fenêtres EQS, SQZ, BRIEF ; store SIG) ; EQS bascule par commands/windowPanels",
   "store/macroRatesView": "vue macro — import() par la commande MACRO (commands/registry), chargée avec MacroRatesWindow",
   "data/macro/catalogueMacro": "catalogue macro — chart/macro importe fred et stablecoins sans passer par le baril data/macro",
+  "chart/whaleBubbles": "bulles de prints baleines — import() par la commande WHALE (commands/windowPanels), contrôleur démarré au premier usage",
+  "chart/tradeMarkers": "marqueurs trades & notes — import() par la commande MARKS (commands/windowPanels), aussi chargé avec EcoWindow et BacktestWindow",
+  "chart/ecoMarkers": "marqueurs éco — chargés avec EcoWindow (React.lazy), seule à les activer",
 };
 
 /** `import type { A } from "x"`, `import type * as M from "x"`, `export type { A } from "x"`, multi-lignes compris. */

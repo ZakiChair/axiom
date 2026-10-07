@@ -11,7 +11,7 @@ vi.mock("../data/daemon", async (importOriginal) => {
 
 import { daemonSupporte } from "../data/daemon";
 import { coinalyzeKeyStore } from "../store/coinalyze";
-import { raisonUnusableIndicateur, type ContexteIndicateur } from "./indicatorUsability";
+import { auxFacultativesServies, raisonUnusableIndicateur, type ContexteIndicateur } from "./indicatorUsability";
 
 const daemonSupporteMock = vi.mocked(daemonSupporte);
 
@@ -293,6 +293,33 @@ describe("raisonUnusableIndicateur", () => {
     for (const indicateur of INDICATORS) {
       expect(() => raisonUnusableIndicateur(indicateur, binanceBtc), indicateur.id).not.toThrow();
     }
+  });
+});
+
+describe("séries auxiliaires facultatives (auxFacultatives)", () => {
+  const axis = def("stratAxis");
+
+  it("AXIS déclare l'OI facultatif : utilisable partout, l'OI n'est servi que sur un perp USDT", () => {
+    expect(axis.auxFacultatives).toEqual(["oi"]);
+    expect(raisonUnusableIndicateur(axis, binanceBtc)).toBeNull();
+    expect(auxFacultativesServies(axis, binanceBtc)).toEqual(["oi"]);
+    const kraken: ContexteIndicateur = { exchange: "kraken", symbol: "BTC/USD", timeframe: "1d" };
+    expect(raisonUnusableIndicateur(axis, kraken)).toBeNull();
+    expect(auxFacultativesServies(axis, kraken)).toEqual([]);
+    const action: ContexteIndicateur = { exchange: "twelvedata", symbol: "AAPL", timeframe: "1d" };
+    expect(raisonUnusableIndicateur(axis, action)).toBeNull();
+    expect(auxFacultativesServies(axis, action)).toEqual([]);
+  });
+
+  it("applique par série les mêmes règles que pour les séries requises", () => {
+    const fictif: IndicatorDef = { ...axis, auxFacultatives: ["mark", "refCloseStrict", "fundingHistBinance", "nupl"] };
+    expect(auxFacultativesServies(fictif, binanceBtc)).toEqual(["mark", "refCloseStrict", "fundingHistBinance", "nupl"]);
+    expect(auxFacultativesServies(fictif, { ...binanceBtc, timeframe: "3M" })).toEqual(["fundingHistBinance", "nupl"]);
+    expect(auxFacultativesServies(fictif, { exchange: "kraken", symbol: "BTC/USD", timeframe: "1d" })).toEqual(["refCloseStrict", "nupl"]);
+  });
+
+  it("un def sans série facultative n'en demande aucune", () => {
+    expect(auxFacultativesServies(def("openInterest"), binanceBtc)).toEqual([]);
   });
 });
 

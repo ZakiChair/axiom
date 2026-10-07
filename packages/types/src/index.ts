@@ -372,6 +372,14 @@ export interface IndicatorDef {
   /** Séries auxiliaires requises par ce def (ex. ["oi", "funding"]) — déclaratif, résolu par l'appelant. */
   aux?: AuxSeriesId[];
   /**
+   * Séries auxiliaires FACULTATIVES : lues dans `ctx.aux` quand l'appelant les fournit,
+   * jamais exigées. Un def ne les déclare que si sa sortie reste complète sans elles
+   * (elles enrichissent, il n'en dépend pas) : leur absence, leur échec ou un contexte
+   * qui ne peut pas les servir (symbole, intervalle) ne rendent jamais le def
+   * inutilisable, à l'inverse de `aux`.
+   */
+  auxFacultatives?: AuxSeriesId[];
+  /**
    * Précision d'affichage (décimales) de l'axe/légende du pane, quand elle diffère de la
    * valeur par défaut de KLineChart (4). Ex. 2 pour un oscillateur borné 0-100 (RSI) afin
    * d'éviter « 66.0000 ». Non fixée => précision par défaut du moteur de graphe (audit #9).

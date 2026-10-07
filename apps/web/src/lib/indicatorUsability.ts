@@ -1,4 +1,4 @@
-import type { ExchangeId, IndicatorDef, Timeframe } from "@axiom/types";
+import type { AuxSeriesId, ExchangeId, IndicatorDef, Timeframe } from "@axiom/types";
 import { TIMEFRAME_REQUIS } from "@axiom/indicators";
 import { tfAtLeast } from "../chart/tfOrder";
 import { coinalyzeKeyStore } from "../store/coinalyze";
@@ -111,6 +111,32 @@ function symboleUsdtCompatible(exchange: ExchangeId, symbol: string): boolean {
   return exchange !== "twelvedata" && exchange !== "synthetic" && /^[A-Z0-9]+USDT$/.test(symbol.trim().toUpperCase());
 }
 
+/** Raison pour laquelle UNE série auxiliaire ne peut pas être servie dans ce contexte (null = servie). */
+function raisonAuxIndisponible(id: AuxSeriesId, { exchange, symbol, timeframe }: ContexteIndicateur): string | null {
+  if (id === "mark" && ["3M", "6M", "12M"].includes(timeframe)) {
+    return "Mark perp indisponible pour cet intervalle";
+  }
+  if (id === "refCloseStrict" && !REF_STRICT_TIMEFRAMES.has(timeframe)) {
+    return "Référence exacte : intervalle non couvert";
+  }
+  if (AUX_PERP.has(id) && !symboleUsdtCompatible(exchange, symbol)) {
+    return "Nécessite un symbole crypto USDT compatible";
+  }
+  if (AUX_FUNDING_HIST.has(id) && normaliserIdentiteFunding(exchange, symbol) === null) {
+    return "Nécessite un symbole de funding compatible (USDT ou perp Hyperliquid)";
+  }
+  return null;
+}
+
+/**
+ * Séries FACULTATIVES d'un def que le contexte peut servir (mêmes règles que pour les
+ * séries requises) : les autres ne sont pas demandées — ni fetch voué à l'échec, ni
+ * def inutilisable, le def calcule sans elles.
+ */
+export function auxFacultativesServies(def: IndicatorDef, ctx: ContexteIndicateur): AuxSeriesId[] {
+  return (def.auxFacultatives ?? []).filter((id) => raisonAuxIndisponible(id, ctx) === null);
+}
+
 export function raisonUnusableIndicateur(
   def: IndicatorDef,
   { exchange, symbol, timeframe }: ContexteIndicateur,
@@ -136,11 +162,9 @@ export function raisonUnusableIndicateur(
   if (requis !== undefined && timeframe !== requis) {
     return def.id === "rvolSeasonal" ? "RVOL saisonnier : nécessite l’intervalle 1h (références en UTC)" : `Nécessite l’intervalle ${requis}`;
   }
-  if (def.aux?.includes("mark") && ["3M", "6M", "12M"].includes(timeframe)) {
-    return "Mark perp indisponible pour cet intervalle";
-  }
-  if (def.aux?.includes("refCloseStrict") && !REF_STRICT_TIMEFRAMES.has(timeframe)) {
-    return "Référence exacte : intervalle non couvert";
+  for (const id of def.aux ?? []) {
+    const raisonAux = raisonAuxIndisponible(id, { exchange, symbol, timeframe });
+    if (raisonAux !== null) return raisonAux;
   }
   const actif = actifDe(symbol);
   if (ONCHAIN_BTC.has(def.id) && actif !== "BTC") {
@@ -148,12 +172,6 @@ export function raisonUnusableIndicateur(
   }
   if (def.id === "quarterlyBasis" && actif !== "BTC" && actif !== "ETH") {
     return "Basis trimestriel disponible uniquement pour BTC et ETH";
-  }
-  if (def.aux?.some((id) => AUX_PERP.has(id)) && !symboleUsdtCompatible(exchange, symbol)) {
-    return "Nécessite un symbole crypto USDT compatible";
-  }
-  if (def.aux?.some((id) => AUX_FUNDING_HIST.has(id)) && normaliserIdentiteFunding(exchange, symbol) === null) {
-    return "Nécessite un symbole de funding compatible (USDT ou perp Hyperliquid)";
   }
   // Flux liquidations Coinalyze : `hasKey` reflète déjà le repli `.env` du proxy
   // local (même prédicat que `rawFetch("oi")` dans chart/auxProvider.ts).

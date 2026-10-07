@@ -10,7 +10,8 @@
  *
  * Def réelle utilisée : `openInterest` (packages/indicators/src/derivatives),
  * `aux: ["oi"]`, `pane: "separate"`, aucun input (donc `shortName` de base =
- * "Open Interest", sans paramètres affichés).
+ * "Open Interest", sans paramètres affichés). Pour les séries FACULTATIVES
+ * (`auxFacultatives`, jamais requises) : `stratAxis`, `auxFacultatives: ["oi"]`.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Chart } from "klinecharts";
@@ -212,5 +213,57 @@ describe("ChartIndicators — pont aux-aware (Task 14)", () => {
     expect(paneId).toBe("axiom_oi-1"); // deuxième arg de overrideIndicator (cf. IndicatorConfigStub)
     expect(chart.createIndicator).not.toHaveBeenCalled(); // jamais de re-création de pane
     expect(chart.removeIndicator).not.toHaveBeenCalled();
+  });
+});
+
+describe("ChartIndicators — séries auxiliaires facultatives (auxFacultatives)", () => {
+  const axis: ActiveIndicator = { instanceId: "axis-1", defId: "stratAxis", params: { emaTendance: 50 }, couleurIdx: 0 };
+  // Sinusoïde de période 60 : AXIS (EMA de tendance 50) y alterne achats et ventes.
+  const sinus: Candle[] = Array.from({ length: 400 }, (_v, i) => {
+    const c = 100 + 10 * Math.sin((2 * Math.PI * i) / 60) + (i % 7) * 0.05;
+    return { time: i * 3_600_000, open: c - 0.2, high: c + 1, low: c - 1, close: c, volume: 10 + (i % 5) };
+  });
+  const infos = (config: IndicatorConfigStub) => (config.extendData?.annotations?.marqueurs ?? []).map((m) => m.info ?? "");
+
+  it("pending ou error : ni suffixe ni statut, le def calcule sans la série (lecture « OI n.d. »)", () => {
+    for (const status of [{ status: "pending" }, { status: "error", message: "source injoignable" }] as AuxStatus[]) {
+      const spy = vi.spyOn(auxProvider, "getAligned").mockReturnValue(status);
+      const { indicators, chart } = makeIndicators();
+      indicators.setMarket("BTCUSDT", "1h");
+      indicators.sync([axis], sinus, "binance");
+      expect(spy.mock.calls[0]![0].ids).toEqual(["oi"]);
+      const [config] = chart.createIndicator.mock.calls[0]!;
+      expect(config.shortName).toBe("AXIS (50)");
+      expect(statutIndicateur(chart as unknown as Chart, "axis-1")).toBeNull();
+      const lus = infos(config);
+      expect(lus.length).toBeGreaterThan(0);
+      expect(lus.every((info) => info.includes("OI n.d."))).toBe(true);
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("ready : la série facultative atteint le calcul (lecture « OI +x % »), toujours sans suffixe", () => {
+    const oi = sinus.map((_c, i) => 100 + i);
+    vi.spyOn(auxProvider, "getAligned").mockReturnValue({ status: "ready", aux: { oi } });
+    const { indicators, chart } = makeIndicators();
+    indicators.setMarket("BTCUSDT", "1h");
+    indicators.sync([axis], sinus, "binance");
+    const [config] = chart.createIndicator.mock.calls[0]!;
+    expect(config.shortName).toBe("AXIS (50)");
+    const lus = infos(config);
+    expect(lus.length).toBeGreaterThan(0);
+    expect(lus.every((info) => /OI \+\d+\.\d % sur 6 b\./.test(info))).toBe(true);
+  });
+
+  it("contexte qui ne peut pas servir la série (symbole hors perp USDT) : aucun fetch, def complet et utilisable", () => {
+    const spy = vi.spyOn(auxProvider, "getAligned");
+    const { indicators, chart } = makeIndicators();
+    indicators.setMarket("BTC/USD", "1h");
+    indicators.sync([axis], sinus, "kraken");
+    expect(spy).not.toHaveBeenCalled();
+    const [config] = chart.createIndicator.mock.calls[0]!;
+    expect(config.shortName).toBe("AXIS (50)");
+    expect(statutIndicateur(chart as unknown as Chart, "axis-1")).toBeNull();
+    expect(infos(config).every((info) => info.includes("OI n.d."))).toBe(true);
   });
 });

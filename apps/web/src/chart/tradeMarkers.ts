@@ -34,7 +34,6 @@ import { registerOverlay } from "klinecharts";
 import type { OverlayCreate, OverlayFigure } from "klinecharts";
 import type { ExchangeId } from "@axiom/types";
 // Import de TYPE seul (élidé au runtime) : la palette est câblée par l'intégrateur.
-import type { Commande } from "../commands/registry";
 import { createStore } from "zustand/vanilla";
 import { getActiveChart } from "./drawing";
 import { marketStore } from "../store/market";
@@ -438,20 +437,8 @@ export function demarrerTradeMarkers(): void {
   });
 }
 
-// ─────────────────────────── Commande de palette (enregistrée par l'intégrateur) ───────────────────────────
-
-/** Commande à greffer dans la palette (via `enregistrerCommandes`), cf. derivatives-chart. */
-export const commandes: Commande[] = [
-  {
-    id: "action:marks",
-    mnemonique: "MARKS",
-    libelle: "Trades & notes (chart) — activer / désactiver",
-    categorie: "action",
-    motsCles: ["marks", "trades", "notes", "portefeuille", "positions", "pnl", "annotations", "chart"],
-    apercu: "Épingle les entrées/sorties et notes ancrées sur le graphe",
-    action: () => tradeMarksStore.getState().basculer(),
-  },
-];
-
-// Auto-démarrage à l'import (l'intégrateur importe `commandes` → déclenche cet effet).
+// Auto-démarrage à l'import. Le module est chargé par `import()` depuis la commande MARKS
+// (commands/windowPanels.ts) au premier usage, ou avec les chunks paresseux qui le
+// réutilisent (ecoMarkers via EcoWindow, btMarkers via BacktestWindow) : hors du chemin
+// de chargement initial (garde-fou : chargementInitial.test.ts).
 demarrerTradeMarkers();

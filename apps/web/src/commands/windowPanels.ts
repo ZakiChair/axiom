@@ -7,9 +7,9 @@
  * sans tirer le graphe de dépendances chart/canvas au démarrage.
  *
  * Les fenêtres dont le store est déjà dans `store/*.ts` (ECO, NEWS, DOM…) gardent
- * leurs commandes exportées depuis ces modules — sauf BT (`commandesBacktest`) et SIG
- * (`commandesSignaux`), en fin de fichier, dont le store ne sert qu'une fois la fenêtre
- * montée.
+ * leurs commandes exportées depuis ces modules — sauf BT (`commandesBacktest`), EQS
+ * (`commandesScreener`) et SIG (`commandesSignaux`), en fin de fichier, dont le store ne
+ * sert qu'une fois la fenêtre montée.
  */
 import type { Commande } from "./registry";
 import { cryptoquantUiStore, ENTREES_CQ, type CibleCq } from "../store/cryptoquantUi";
@@ -684,6 +684,38 @@ export const commandesBacktest: Commande[] = [
     motsCles: ["backtest", "bt", "strategie", "test", "equity", "backtesting", "regles"],
     apercu: "Ouvre / ferme le backtest de stratégie",
     action: basculer("backtest"),
+  },
+];
+
+/**
+ * EQS — commande rapatriée de `store/screener.ts` : ce store n'est tiré que par des modules
+ * chargés à la demande (fenêtres EQS, SQZ et BRIEF, store SIG) et reste hors du chargement
+ * initial (garde-fou : chargementInitial.test.ts). La bascule est exactement celle de
+ * `screenerStore.toggle()` ; l'état `open` du store se recale à son chargement
+ * (`mirrorOpenState`). Tableau à part pour garder sa place dans la palette (App.tsx).
+ */
+export const commandesScreener: Commande[] = [
+  {
+    id: "panneau:screener",
+    mnemonique: "EQS",
+    libelle: "Screener d'actifs",
+    categorie: "panneau",
+    motsCles: [
+      "screener",
+      "eqs",
+      "scan",
+      "filtre",
+      "rsi",
+      "funding",
+      "volume",
+      "survendu",
+      "crowded",
+      "squeeze",
+      "oi",
+      "positionnement",
+    ],
+    apercu: "Ouvre / ferme le screener d'actifs",
+    action: basculer("screener"),
   },
 ];
 

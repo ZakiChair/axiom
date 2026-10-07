@@ -8,7 +8,7 @@
  * 39ᵉ fenêtre serait donc muette au ⌘K sans que rien ne le signale.
  *
  * Ce fichier ferme le trou : toute fenêtre du registre DOIT être ouvrable par une commande,
- * soit de `windowPanelCommands` (ou de `commandesBacktest` / `commandesSignaux`, même module), soit — liste explicite
+ * soit de `windowPanelCommands` (ou de `commandesBacktest` / `commandesScreener` / `commandesSignaux`, même module), soit — liste explicite
  * ci-dessous — d'un autre module.
  *
  * Méthode : les ids couverts sont obtenus en EXÉCUTANT chaque action contre un
@@ -54,7 +54,7 @@ vi.mock("../store/windowManager", async (importOriginal) => {
 });
 
 import { WINDOW_REGISTRY } from "../store/windowManager";
-import { commandesBacktest, windowPanelCommands } from "./windowPanels";
+import { commandesBacktest, commandesScreener, windowPanelCommands } from "./windowPanels";
 
 /**
  * Fenêtres dont la commande ⌘K vit AILLEURS que dans `windowPanels.ts` (leur store métier
@@ -74,7 +74,6 @@ const FENETRES_COMMANDEES_AILLEURS: Record<string, string> = {
   onchain: "store/onchain.ts — panneau:onchain (CHAIN), via toggleOnchain()",
   portfolio: "store/portfolio.ts — panneau:portfolio (PORT), via togglePortfolio()",
   notes: "store/notes.ts — panneau:notes (NOTE), via toggleNotes()",
-  screener: "store/screener.ts — panneau:screener (EQS), via toggle()",
   dom: "store/dom-ui.ts — panneau:dom (DOM), via toggleDom()",
   replay: "store/replay.ts — panneau:replay (REPLAY), toggleWindow direct",
   globe: "store/globe-ui.ts — panneau:globe (GLOBE), via toggleGlobe()",
@@ -82,8 +81,8 @@ const FENETRES_COMMANDEES_AILLEURS: Record<string, string> = {
 
 describe("couverture ⌘K du registre de fenêtres", () => {
   // Une seule exécution des actions, partagée par les cas ci-dessous.
-  // BT vit à part dans le même module (place conservée dans la palette, cf. App.tsx).
-  for (const cmd of [...windowPanelCommands, ...commandesBacktest]) cmd.action();
+  // BT et EQS vivent à part dans le même module (place conservée dans la palette, cf. App.tsx).
+  for (const cmd of [...windowPanelCommands, ...commandesBacktest, ...commandesScreener]) cmd.action();
   const idsCouverts = new Set(fenetresBasculees);
   const idsRegistre = new Set<string>(WINDOW_REGISTRY.map((w) => w.id));
 

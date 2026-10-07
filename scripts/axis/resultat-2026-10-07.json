@@ -1,0 +1,2926 @@
+{
+  "schema": "axiom-axis-backtest-result-v1",
+  "manifesteSha256": "a516571bace590b838c2811d831daaba1ff772122ed7ecda63743c585f63bf0f",
+  "calculeLeUtc": "2026-10-07T10:47:20.974Z",
+  "runtime": {
+    "bun": "1.3.11",
+    "node": "24.3.0"
+  },
+  "code": {
+    "runnerSha256": "043a498e70cdf0353c3b446ec2c3de7c5279d808815e4875fb51748db796cddd",
+    "observeSha256": {
+      "packages/indicators/src/strategy/stratAxis.ts": "88a7f6eac76597d8750834b5d105c699129604e0733f0f96979a764f1afc8be8",
+      "packages/indicators/src/volume/cmf.ts": "7e4a05cc6463cc94572be7f4c250ad81d71917f15962478ee8679339ff3f88a5",
+      "packages/backtest/src/engine.ts": "4b1baadc37494b10537818259bc94e0c7b334794d272b3efbc295b2af8011d9d",
+      "packages/indicators/src/utils-fabrique-strategie.ts": "d43cff07ce064260ef4895ac20d156a689821d9d6893e66743d692bfdb526605",
+      "packages/backtest/src/statsRejeu.ts": "165ebfc357c5ef330de58c295244d788e43c55abdbb1a16f2651c2ef16d6e8dd"
+    },
+    "identiqueAuFigeage": true
+  },
+  "verdict": "DEFAVORABLE",
+  "blocs": [
+    {
+      "critere": "C1",
+      "cle": "BTCUSDT 1h global",
+      "statut": "echec",
+      "detail": "668 trades, expectancy -0.017 %"
+    },
+    {
+      "critere": "C1",
+      "cle": "BTCUSDT 1h M1",
+      "statut": "echec",
+      "detail": "332 trades, expectancy -0.015 %"
+    },
+    {
+      "critere": "C1",
+      "cle": "BTCUSDT 1h M2",
+      "statut": "echec",
+      "detail": "336 trades, expectancy -0.019 %"
+    },
+    {
+      "critere": "C2",
+      "cle": "BTCUSDT 1h",
+      "statut": "echec",
+      "detail": "669 trades, expectancy nette -1.5666 USDT"
+    },
+    {
+      "critere": "C3",
+      "cle": "BTCUSDT 1h x1-central",
+      "statut": "echec",
+      "detail": "64 trades (dont 64 fermés), expectancy nette -0.0303 USDT"
+    },
+    {
+      "critere": "C3",
+      "cle": "BTCUSDT 1h x3",
+      "statut": "echec",
+      "detail": "64 trades (dont 64 fermés), expectancy nette -2.8363 USDT"
+    },
+    {
+      "critere": "C1",
+      "cle": "BTCUSDT 4h global",
+      "statut": "tenu",
+      "detail": "156 trades, expectancy 0.264 %"
+    },
+    {
+      "critere": "C1",
+      "cle": "BTCUSDT 4h M1",
+      "statut": "tenu",
+      "detail": "77 trades, expectancy 0.449 %"
+    },
+    {
+      "critere": "C1",
+      "cle": "BTCUSDT 4h M2",
+      "statut": "tenu",
+      "detail": "79 trades, expectancy 0.084 %"
+    },
+    {
+      "critere": "C2",
+      "cle": "BTCUSDT 4h",
+      "statut": "tenu",
+      "detail": "157 trades, expectancy nette 1.2530 USDT"
+    },
+    {
+      "critere": "C3",
+      "cle": "BTCUSDT 4h x1-central",
+      "statut": "insuffisant",
+      "detail": "11 trades (dont 10 fermés), expectancy nette 14.3710 USDT"
+    },
+    {
+      "critere": "C3",
+      "cle": "BTCUSDT 4h x3",
+      "statut": "insuffisant",
+      "detail": "11 trades (dont 10 fermés), expectancy nette 11.5331 USDT"
+    },
+    {
+      "critere": "C1",
+      "cle": "ETHUSDT 1h global",
+      "statut": "tenu",
+      "detail": "665 trades, expectancy 0.003 %"
+    },
+    {
+      "critere": "C1",
+      "cle": "ETHUSDT 1h M1",
+      "statut": "echec",
+      "detail": "345 trades, expectancy -0.119 %"
+    },
+    {
+      "critere": "C1",
+      "cle": "ETHUSDT 1h M2",
+      "statut": "tenu",
+      "detail": "320 trades, expectancy 0.135 %"
+    },
+    {
+      "critere": "C2",
+      "cle": "ETHUSDT 1h",
+      "statut": "echec",
+      "detail": "666 trades, expectancy nette -1.3546 USDT"
+    },
+    {
+      "critere": "C3",
+      "cle": "ETHUSDT 1h x1-central",
+      "statut": "echec",
+      "detail": "76 trades (dont 75 fermés), expectancy nette -2.6980 USDT"
+    },
+    {
+      "critere": "C3",
+      "cle": "ETHUSDT 1h x3",
+      "statut": "echec",
+      "detail": "76 trades (dont 75 fermés), expectancy nette -5.5049 USDT"
+    },
+    {
+      "critere": "C1",
+      "cle": "ETHUSDT 4h global",
+      "statut": "tenu",
+      "detail": "164 trades, expectancy 0.124 %"
+    },
+    {
+      "critere": "C1",
+      "cle": "ETHUSDT 4h M1",
+      "statut": "tenu",
+      "detail": "82 trades, expectancy 0.259 %"
+    },
+    {
+      "critere": "C1",
+      "cle": "ETHUSDT 4h M2",
+      "statut": "echec",
+      "detail": "82 trades, expectancy -0.012 %"
+    },
+    {
+      "critere": "C2",
+      "cle": "ETHUSDT 4h",
+      "statut": "echec",
+      "detail": "165 trades, expectancy nette -0.1563 USDT"
+    },
+    {
+      "critere": "C3",
+      "cle": "ETHUSDT 4h x1-central",
+      "statut": "insuffisant",
+      "detail": "18 trades (dont 17 fermés), expectancy nette -2.6356 USDT"
+    },
+    {
+      "critere": "C3",
+      "cle": "ETHUSDT 4h x3",
+      "statut": "insuffisant",
+      "detail": "18 trades (dont 17 fermés), expectancy nette -5.4580 USDT"
+    }
+  ],
+  "cellules": [
+    {
+      "id": "BTCUSDT 1h",
+      "w1": {
+        "statut": "disponible",
+        "resultat": {
+          "acquisition": {
+            "endpoint": "https://data-api.binance.vision/api/v3/klines",
+            "acquisLeUtc": "2026-10-07T10:47:15.990Z",
+            "modeCalcul": "reseau",
+            "nombre": 18180,
+            "premierOpen": "2024-07-01T00:00:00.000Z",
+            "dernierClose": "2026-07-28T12:00:00.000Z",
+            "trous": 0,
+            "sha256Ohlcv": "6e52c33545bcc21ce6482e060d2cedcf8be1efd55852bb7d0811e44ef9417c0f"
+          },
+          "achatConservationPct": 1.0800833046448535,
+          "rejeu": {
+            "seuil-4": {
+              "global": {
+                "nbTrades": 668,
+                "winRate": 30.988023952095805,
+                "expectancy": -0.01745981890061408,
+                "pnlComposePct": -22.775335972785783,
+                "maxDrawdownPct": -50.17118731573538,
+                "dureeMoyenne": 19.729041916167663
+              },
+              "m1": {
+                "nbTrades": 332,
+                "winRate": 32.22891566265061,
+                "expectancy": -0.015413181979304507,
+                "pnlComposePct": -12.397840120606563,
+                "maxDrawdownPct": -47.30075289654757,
+                "dureeMoyenne": 19.71385542168675
+              },
+              "m2": {
+                "nbTrades": 336,
+                "winRate": 29.761904761904763,
+                "expectancy": -0.019482091096669922,
+                "pnlComposePct": -11.846164371365408,
+                "maxDrawdownPct": -24.14960120687832,
+                "dureeMoyenne": 19.74404761904762
+              },
+              "longs": {
+                "nbTrades": 338,
+                "winRate": 31.360946745562128,
+                "expectancy": 0.0024659870181862518,
+                "pnlComposePct": -5.344206563605769,
+                "maxDrawdownPct": -34.85240006859341,
+                "dureeMoyenne": 20.071005917159763
+              },
+              "shorts": {
+                "nbTrades": 330,
+                "winRate": 30.606060606060602,
+                "expectancy": -0.037868674659870136,
+                "pnlComposePct": -18.41528001230406,
+                "maxDrawdownPct": -41.73133569874083,
+                "dureeMoyenne": 19.37878787878788
+              }
+            },
+            "seuil-3": {
+              "global": {
+                "nbTrades": 802,
+                "winRate": 29.42643391521197,
+                "expectancy": 0.024874688220520233,
+                "pnlComposePct": 4.473034952591526,
+                "maxDrawdownPct": -42.352105754129276,
+                "dureeMoyenne": 18.173316708229425
+              },
+              "m1": {
+                "nbTrades": 394,
+                "winRate": 30.96446700507614,
+                "expectancy": 0.04520592587964988,
+                "pnlComposePct": 9.48749661488204,
+                "maxDrawdownPct": -42.352105754129276,
+                "dureeMoyenne": 18.33248730964467
+              },
+              "m2": {
+                "nbTrades": 408,
+                "winRate": 27.941176470588236,
+                "expectancy": 0.0052410910693019295,
+                "pnlComposePct": -4.579940008975214,
+                "maxDrawdownPct": -23.367647766318235,
+                "dureeMoyenne": 18.019607843137255
+              },
+              "longs": {
+                "nbTrades": 401,
+                "winRate": 31.421446384039903,
+                "expectancy": 0.06398874262767251,
+                "pnlComposePct": 20.332279309690126,
+                "maxDrawdownPct": -24.363389022911313,
+                "dureeMoyenne": 18.788029925187033
+              },
+              "shorts": {
+                "nbTrades": 401,
+                "winRate": 27.431421446384043,
+                "expectancy": -0.014239366186631984,
+                "pnlComposePct": -13.179542885814366,
+                "maxDrawdownPct": -36.8834411435442,
+                "dureeMoyenne": 17.55860349127182
+              }
+            },
+            "seuil-5": {
+              "global": {
+                "nbTrades": 496,
+                "winRate": 35.08064516129033,
+                "expectancy": 0.03163599640139647,
+                "pnlComposePct": 4.193325531255221,
+                "maxDrawdownPct": -38.85824054234634,
+                "dureeMoyenne": 22.129032258064516
+              },
+              "m1": {
+                "nbTrades": 253,
+                "winRate": 34.78260869565217,
+                "expectancy": 0.02223278127631481,
+                "pnlComposePct": -0.7612850625197787,
+                "maxDrawdownPct": -38.85824054234634,
+                "dureeMoyenne": 21.90909090909091
+              },
+              "m2": {
+                "nbTrades": 243,
+                "winRate": 35.390946502057616,
+                "expectancy": 0.04142617511187249,
+                "pnlComposePct": 4.992618653815106,
+                "maxDrawdownPct": -21.546216555105012,
+                "dureeMoyenne": 22.358024691358025
+              },
+              "longs": {
+                "nbTrades": 256,
+                "winRate": 36.328125,
+                "expectancy": 0.053391026651135695,
+                "pnlComposePct": 8.824630573010527,
+                "maxDrawdownPct": -25.72193751347508,
+                "dureeMoyenne": 22.49609375
+              },
+              "shorts": {
+                "nbTrades": 240,
+                "winRate": 33.75,
+                "expectancy": 0.00843063080167461,
+                "pnlComposePct": -4.2557507591522,
+                "maxDrawdownPct": -41.530265015312466,
+                "dureeMoyenne": 21.7375
+              }
+            }
+          },
+          "executions": [
+            {
+              "cout": "x1-central",
+              "seuil": 4,
+              "reunies": {
+                "trades": 669,
+                "fermes": 668,
+                "longs": 338,
+                "shorts": 331,
+                "finDonnees": 1,
+                "expectancyNette": -1.5665642107709763,
+                "expectancyPct": -0.1566564210770976,
+                "pnlTotal": -1048.031457005783,
+                "pnlTotalPct": -10.48031457005783,
+                "winRatePct": 27.95216741405082,
+                "profitFactor": 0.800307037479347,
+                "ddRealiseMaxPct": 12.754048886228642,
+                "dureeMoyenneBarres": 19.717488789237667,
+                "fraisTotal": 669.0624923152134
+              },
+              "longue": {
+                "trades": 338,
+                "fermes": 338,
+                "longs": 338,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": -1.3755286125683692,
+                "expectancyPct": -0.13755286125683688,
+                "pnlTotal": -464.9286710481088,
+                "pnlTotalPct": -4.649286710481088,
+                "winRatePct": 28.698224852071007,
+                "profitFactor": 0.8170569760326176,
+                "ddRealiseMaxPct": 7.59556274149075,
+                "dureeMoyenneBarres": 20.071005917159763,
+                "fraisTotal": 337.93650391643416
+              },
+              "courte": {
+                "trades": 331,
+                "fermes": 330,
+                "longs": 0,
+                "shorts": 331,
+                "finDonnees": 1,
+                "expectancyNette": -1.7616398367301367,
+                "expectancyPct": -0.17616398367301347,
+                "pnlTotal": -583.1027859576752,
+                "pnlTotalPct": -5.831027859576753,
+                "winRatePct": 27.19033232628399,
+                "profitFactor": 0.7845808720189256,
+                "ddRealiseMaxPct": 7.567356898150461,
+                "dureeMoyenneBarres": 19.356495468277945,
+                "fraisTotal": 331.1259883987792
+              }
+            },
+            {
+              "cout": "x2",
+              "seuil": 4,
+              "reunies": {
+                "trades": 669,
+                "fermes": 668,
+                "longs": 338,
+                "shorts": 331,
+                "finDonnees": 1,
+                "expectancyNette": -2.9667277290371157,
+                "expectancyPct": -0.29667277290371136,
+                "pnlTotal": -1984.7408507258303,
+                "pnlTotalPct": -19.847408507258304,
+                "winRatePct": 26.606875934230196,
+                "profitFactor": 0.665355548853734,
+                "ddRealiseMaxPct": 20.494224258265533,
+                "dureeMoyenneBarres": 19.717488789237667,
+                "fraisTotal": 1338.1223897477043
+              },
+              "longue": {
+                "trades": 338,
+                "fermes": 338,
+                "longs": 338,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": -2.774710775976454,
+                "expectancyPct": -0.27747107759764555,
+                "pnlTotal": -937.8522422800414,
+                "pnlTotalPct": -9.378522422800414,
+                "winRatePct": 28.106508875739642,
+                "profitFactor": 0.6741729632935063,
+                "ddRealiseMaxPct": 11.307957129987646,
+                "dureeMoyenneBarres": 20.071005917159763,
+                "fraisTotal": 675.7378856433627
+              },
+              "courte": {
+                "trades": 331,
+                "fermes": 330,
+                "longs": 0,
+                "shorts": 331,
+                "finDonnees": 1,
+                "expectancyNette": -3.1628054635824423,
+                "expectancyPct": -0.3162805463582438,
+                "pnlTotal": -1046.8886084457883,
+                "pnlTotalPct": -10.468886084457884,
+                "winRatePct": 25.075528700906347,
+                "profitFactor": 0.657041164866214,
+                "ddRealiseMaxPct": 11.20043391516668,
+                "dureeMoyenneBarres": 19.356495468277945,
+                "fraisTotal": 662.3845041043415
+              }
+            },
+            {
+              "cout": "x3",
+              "seuil": 4,
+              "reunies": {
+                "trades": 669,
+                "fermes": 668,
+                "longs": 338,
+                "shorts": 331,
+                "finDonnees": 1,
+                "expectancyNette": -4.366886153115828,
+                "expectancyPct": -0.4366886153115829,
+                "pnlTotal": -2921.446836434489,
+                "pnlTotalPct": -29.214468364344885,
+                "winRatePct": 25.411061285500747,
+                "profitFactor": 0.5589690771473943,
+                "ddRealiseMaxPct": 29.251784137791958,
+                "dureeMoyenneBarres": 19.717488789237667,
+                "fraisTotal": 2007.1798528862935
+              },
+              "longue": {
+                "trades": 338,
+                "fermes": 338,
+                "longs": 338,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": -4.173333597281916,
+                "expectancyPct": -0.4173333597281914,
+                "pnlTotal": -1410.5867558812874,
+                "pnlTotalPct": -14.105867558812873,
+                "winRatePct": 26.923076923076923,
+                "profitFactor": 0.561892953462698,
+                "ddRealiseMaxPct": 15.10436444297125,
+                "dureeMoyenneBarres": 20.071005917159763,
+                "fraisTotal": 1013.4042262054868
+              },
+              "courte": {
+                "trades": 331,
+                "fermes": 330,
+                "longs": 0,
+                "shorts": 331,
+                "finDonnees": 1,
+                "expectancyNette": -4.5645319654175305,
+                "expectancyPct": -0.45645319654175265,
+                "pnlTotal": -1510.8600805532026,
+                "pnlTotalPct": -15.108600805532028,
+                "winRatePct": 23.867069486404834,
+                "profitFactor": 0.5562038049407324,
+                "ddRealiseMaxPct": 15.65895238140861,
+                "dureeMoyenneBarres": 19.356495468277945,
+                "fraisTotal": 993.7756266808086
+              }
+            },
+            {
+              "cout": "x1-central",
+              "seuil": 3,
+              "reunies": {
+                "trades": 803,
+                "fermes": 802,
+                "longs": 401,
+                "shorts": 402,
+                "finDonnees": 1,
+                "expectancyNette": -1.145408403953316,
+                "expectancyPct": -0.11454084039533174,
+                "pnlTotal": -919.7629483745127,
+                "pnlTotalPct": -9.197629483745127,
+                "winRatePct": 27.397260273972602,
+                "profitFactor": 0.8406638212451958,
+                "ddRealiseMaxPct": 12.823056819308535,
+                "dureeMoyenneBarres": 18.16562889165629,
+                "fraisTotal": 803.1542273981484
+              },
+              "longue": {
+                "trades": 401,
+                "fermes": 401,
+                "longs": 401,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": -0.7609100345589408,
+                "expectancyPct": -0.07609100345589413,
+                "pnlTotal": -305.1249238581353,
+                "pnlTotalPct": -3.0512492385813528,
+                "winRatePct": 28.92768079800499,
+                "profitFactor": 0.8892084939856542,
+                "ddRealiseMaxPct": 6.847854023052107,
+                "dureeMoyenneBarres": 18.788029925187033,
+                "fraisTotal": 401.04796151883005
+              },
+              "courte": {
+                "trades": 402,
+                "fermes": 401,
+                "longs": 0,
+                "shorts": 402,
+                "finDonnees": 1,
+                "expectancyNette": -1.528950309742232,
+                "expectancyPct": -0.15289503097422313,
+                "pnlTotal": -614.6380245163772,
+                "pnlTotalPct": -6.146380245163772,
+                "winRatePct": 25.870646766169152,
+                "profitFactor": 0.7963710447947198,
+                "ddRealiseMaxPct": 7.29072249173508,
+                "dureeMoyenneBarres": 17.544776119402986,
+                "fraisTotal": 402.1062658793186
+              }
+            },
+            {
+              "cout": "x1-central",
+              "seuil": 5,
+              "reunies": {
+                "trades": 497,
+                "fermes": 496,
+                "longs": 256,
+                "shorts": 241,
+                "finDonnees": 1,
+                "expectancyNette": -1.0749439672966874,
+                "expectancyPct": -0.1074943967296686,
+                "pnlTotal": -534.2471517464536,
+                "pnlTotalPct": -5.342471517464536,
+                "winRatePct": 32.59557344064387,
+                "profitFactor": 0.8666305840954458,
+                "ddRealiseMaxPct": 8.39958503183245,
+                "dureeMoyenneBarres": 22.106639839034205,
+                "fraisTotal": 497.0526808635016
+              },
+              "longue": {
+                "trades": 256,
+                "fermes": 256,
+                "longs": 256,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": -0.8669273974744619,
+                "expectancyPct": -0.08669273974744618,
+                "pnlTotal": -221.93341375346225,
+                "pnlTotalPct": -2.2193341375346223,
+                "winRatePct": 33.59375,
+                "profitFactor": 0.8865405103112456,
+                "ddRealiseMaxPct": 4.769772870875298,
+                "dureeMoyenneBarres": 22.49609375,
+                "fraisTotal": 256.0170418140305
+              },
+              "courte": {
+                "trades": 241,
+                "fermes": 240,
+                "longs": 0,
+                "shorts": 241,
+                "finDonnees": 1,
+                "expectancyNette": -1.2959076265269323,
+                "expectancyPct": -0.12959076265269312,
+                "pnlTotal": -312.3137379929907,
+                "pnlTotalPct": -3.123137379929907,
+                "winRatePct": 31.535269709543567,
+                "profitFactor": 0.8476303525976672,
+                "ddRealiseMaxPct": 7.038102847582859,
+                "dureeMoyenneBarres": 21.692946058091287,
+                "fraisTotal": 241.0356390494717
+              }
+            }
+          ],
+          "empreinteChronologieX1": "d8e3de95bc0c47c8da42c495b51612d2195686d4d680f3644ac37e52e248c783"
+        }
+      },
+      "w2": {
+        "statut": "disponible",
+        "resultat": {
+          "acquisition": {
+            "endpoint": "https://data-api.binance.vision/api/v3/klines",
+            "acquisLeUtc": "2026-10-07T10:47:16.566Z",
+            "modeCalcul": "reseau",
+            "nombre": 1880,
+            "premierOpen": "2026-07-20T16:00:00.000Z",
+            "dernierClose": "2026-10-07T00:00:00.000Z",
+            "trous": 0,
+            "sha256Ohlcv": "3077403436fafc85910673cfd921cb1a6773d9f337696d91a867c9a7457e6760"
+          },
+          "achatConservationPct": 33.84953453805834,
+          "executions": [
+            {
+              "cout": "x1-central",
+              "seuil": 4,
+              "reunies": {
+                "trades": 64,
+                "fermes": 64,
+                "longs": 34,
+                "shorts": 30,
+                "finDonnees": 0,
+                "expectancyNette": -0.030253229954520844,
+                "expectancyPct": -0.0030253229954521066,
+                "pnlTotal": -1.936206717089334,
+                "pnlTotalPct": -0.01936206717089334,
+                "winRatePct": 28.125,
+                "profitFactor": 0.9951099119745297,
+                "ddRealiseMaxPct": 1.4878394824992827,
+                "dureeMoyenneBarres": 16.875,
+                "fraisTotal": 64.10871320808621
+              },
+              "longue": {
+                "trades": 34,
+                "fermes": 34,
+                "longs": 34,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": 3.1096929882667657,
+                "expectancyPct": 0.3109692988266765,
+                "pnlTotal": 105.72956160107003,
+                "pnlTotalPct": 1.0572956160107003,
+                "winRatePct": 29.411764705882355,
+                "profitFactor": 1.4594439004774504,
+                "ddRealiseMaxPct": 0.8071910828709203,
+                "dureeMoyenneBarres": 18.058823529411764,
+                "fraisTotal": 34.06989973066585
+              },
+              "courte": {
+                "trades": 30,
+                "fermes": 30,
+                "longs": 0,
+                "shorts": 30,
+                "finDonnees": 0,
+                "expectancyNette": -3.5888589439386442,
+                "expectancyPct": -0.35888589439386454,
+                "pnlTotal": -107.66576831815932,
+                "pnlTotalPct": -1.0766576831815933,
+                "winRatePct": 26.666666666666668,
+                "profitFactor": 0.35070734342892695,
+                "ddRealiseMaxPct": 1.087241963378693,
+                "dureeMoyenneBarres": 15.533333333333333,
+                "fraisTotal": 30.038813477420373
+              }
+            },
+            {
+              "cout": "x2",
+              "seuil": 4,
+              "reunies": {
+                "trades": 64,
+                "fermes": 64,
+                "longs": 34,
+                "shorts": 30,
+                "finDonnees": 0,
+                "expectancyNette": -1.4332804510689239,
+                "expectancyPct": -0.14332804510689234,
+                "pnlTotal": -91.72994886841113,
+                "pnlTotalPct": -0.9172994886841113,
+                "winRatePct": 25,
+                "profitFactor": 0.8009169217824963,
+                "ddRealiseMaxPct": 1.8377046632028018,
+                "dureeMoyenneBarres": 16.875,
+                "fraisTotal": 128.21580668437002
+              },
+              "longue": {
+                "trades": 34,
+                "fermes": 34,
+                "longs": 34,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": 1.7064742594677675,
+                "expectancyPct": 0.1706474259467768,
+                "pnlTotal": 58.0201248219041,
+                "pnlTotalPct": 0.580201248219041,
+                "winRatePct": 29.411764705882355,
+                "profitFactor": 1.2201667893543806,
+                "ddRealiseMaxPct": 0.9465066448257604,
+                "dureeMoyenneBarres": 18.058823529411764,
+                "fraisTotal": 68.12614627109299
+              },
+              "courte": {
+                "trades": 30,
+                "fermes": 30,
+                "longs": 0,
+                "shorts": 30,
+                "finDonnees": 0,
+                "expectancyNette": -4.9916691230105075,
+                "expectancyPct": -0.49916691230105065,
+                "pnlTotal": -149.75007369031522,
+                "pnlTotalPct": -1.4975007369031523,
+                "winRatePct": 20,
+                "profitFactor": 0.24074960850099544,
+                "ddRealiseMaxPct": 1.4975007369031523,
+                "dureeMoyenneBarres": 15.533333333333333,
+                "fraisTotal": 60.089660413277045
+              }
+            },
+            {
+              "cout": "x3",
+              "seuil": 4,
+              "reunies": {
+                "trades": 64,
+                "fermes": 64,
+                "longs": 34,
+                "shorts": 30,
+                "finDonnees": 0,
+                "expectancyNette": -2.8362725776748747,
+                "expectancyPct": -0.2836272577674874,
+                "pnlTotal": -181.52144497119198,
+                "pnlTotalPct": -1.8152144497119198,
+                "winRatePct": 21.875,
+                "profitFactor": 0.6568188225525052,
+                "ddRealiseMaxPct": 2.18759864908397,
+                "dureeMoyenneBarres": 16.875,
+                "fraisTotal": 192.3212958402631
+              },
+              "longue": {
+                "trades": 34,
+                "fermes": 34,
+                "longs": 34,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": 0.3038173837431411,
+                "expectancyPct": 0.03038173837431418,
+                "pnlTotal": 10.329791047266797,
+                "pnlTotalPct": 0.10329791047266797,
+                "winRatePct": 26.47058823529412,
+                "profitFactor": 1.0346741773309034,
+                "ddRealiseMaxPct": 1.085766647455407,
+                "dureeMoyenneBarres": 18.058823529411764,
+                "fraisTotal": 102.16874780828331
+              },
+              "courte": {
+                "trades": 30,
+                "fermes": 30,
+                "longs": 0,
+                "shorts": 30,
+                "finDonnees": 0,
+                "expectancyNette": -6.395041200615292,
+                "expectancyPct": -0.639504120061529,
+                "pnlTotal": -191.85123601845876,
+                "pnlTotalPct": -1.9185123601845877,
+                "winRatePct": 16.666666666666664,
+                "profitFactor": 0.1695738493063104,
+                "ddRealiseMaxPct": 1.9185123601845877,
+                "dureeMoyenneBarres": 15.533333333333333,
+                "fraisTotal": 90.15254803197969
+              }
+            },
+            {
+              "cout": "x1-central",
+              "seuil": 3,
+              "reunies": {
+                "trades": 83,
+                "fermes": 83,
+                "longs": 41,
+                "shorts": 42,
+                "finDonnees": 0,
+                "expectancyNette": -0.12816289839676842,
+                "expectancyPct": -0.012816289839676902,
+                "pnlTotal": -10.63752056693178,
+                "pnlTotalPct": -0.1063752056693178,
+                "winRatePct": 24.096385542168676,
+                "profitFactor": 0.9765138862102002,
+                "ddRealiseMaxPct": 1.4286972642555855,
+                "dureeMoyenneBarres": 15.542168674698795,
+                "fraisTotal": 83.15498194108316
+              },
+              "longue": {
+                "trades": 41,
+                "fermes": 41,
+                "longs": 41,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": 3.6620744252280613,
+                "expectancyPct": 0.3662074425228061,
+                "pnlTotal": 150.1450514343505,
+                "pnlTotalPct": 1.501450514343505,
+                "winRatePct": 29.268292682926827,
+                "profitFactor": 1.6640516479810255,
+                "ddRealiseMaxPct": 0.6700293718799034,
+                "dureeMoyenneBarres": 17.414634146341463,
+                "fraisTotal": 41.095620335885116
+              },
+              "courte": {
+                "trades": 42,
+                "fermes": 42,
+                "longs": 0,
+                "shorts": 42,
+                "finDonnees": 0,
+                "expectancyNette": -3.8281564762210083,
+                "expectancyPct": -0.38281564762210074,
+                "pnlTotal": -160.78257200128235,
+                "pnlTotalPct": -1.6078257200128236,
+                "winRatePct": 19.047619047619047,
+                "profitFactor": 0.2911559179447443,
+                "ddRealiseMaxPct": 1.6078257200128236,
+                "dureeMoyenneBarres": 13.714285714285714,
+                "fraisTotal": 42.05936160519804
+              }
+            },
+            {
+              "cout": "x1-central",
+              "seuil": 5,
+              "reunies": {
+                "trades": 44,
+                "fermes": 44,
+                "longs": 26,
+                "shorts": 18,
+                "finDonnees": 0,
+                "expectancyNette": 1.8067700338374484,
+                "expectancyPct": 0.18067700338374493,
+                "pnlTotal": 79.49788148884772,
+                "pnlTotalPct": 0.7949788148884772,
+                "winRatePct": 36.36363636363637,
+                "profitFactor": 1.3182845161848478,
+                "ddRealiseMaxPct": 0.8997604261702489,
+                "dureeMoyenneBarres": 19.90909090909091,
+                "fraisTotal": 44.09824789527494
+              },
+              "longue": {
+                "trades": 26,
+                "fermes": 26,
+                "longs": 26,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": 5.152536037963129,
+                "expectancyPct": 0.5152536037963128,
+                "pnlTotal": 133.96593698704135,
+                "pnlTotalPct": 1.3396593698704136,
+                "winRatePct": 38.46153846153847,
+                "profitFactor": 1.77734983101,
+                "ddRealiseMaxPct": 0.6105952197110316,
+                "dureeMoyenneBarres": 20.26923076923077,
+                "fraisTotal": 26.080022979983514
+              },
+              "courte": {
+                "trades": 18,
+                "fermes": 18,
+                "longs": 0,
+                "shorts": 18,
+                "finDonnees": 0,
+                "expectancyNette": -3.026003083232977,
+                "expectancyPct": -0.30260030832329765,
+                "pnlTotal": -54.468055498193586,
+                "pnlTotalPct": -0.5446805549819358,
+                "winRatePct": 33.33333333333333,
+                "profitFactor": 0.2965794061585058,
+                "ddRealiseMaxPct": 0.6501472003232485,
+                "dureeMoyenneBarres": 19.38888888888889,
+                "fraisTotal": 18.018224915291448
+              }
+            }
+          ],
+          "empreinteChronologieX1": "63aae4c1d9cec6c84fee4afa6618a778a3aca14e19a3752bd8354cd02ccbe21c"
+        }
+      }
+    },
+    {
+      "id": "BTCUSDT 4h",
+      "w1": {
+        "statut": "disponible",
+        "resultat": {
+          "acquisition": {
+            "endpoint": "https://data-api.binance.vision/api/v3/klines",
+            "acquisLeUtc": "2026-10-07T10:47:17.183Z",
+            "modeCalcul": "reseau",
+            "nombre": 4545,
+            "premierOpen": "2024-07-01T00:00:00.000Z",
+            "dernierClose": "2026-07-28T12:00:00.000Z",
+            "trous": 0,
+            "sha256Ohlcv": "59b0b7d1eb7acf35d9b96c0c0cbf3f09e0111d8c37651ebb15391d8bcb08e19e"
+          },
+          "achatConservationPct": 1.0800833046448535,
+          "rejeu": {
+            "seuil-4": {
+              "global": {
+                "nbTrades": 156,
+                "winRate": 37.82051282051282,
+                "expectancy": 0.2639434691401266,
+                "pnlComposePct": 30.945155725978978,
+                "maxDrawdownPct": -32.284113385457836,
+                "dureeMoyenne": 20.794871794871796
+              },
+              "m1": {
+                "nbTrades": 77,
+                "winRate": 37.66233766233766,
+                "expectancy": 0.4489609790264918,
+                "pnlComposePct": 29.537170161890792,
+                "maxDrawdownPct": -32.284113385457836,
+                "dureeMoyenne": 21.61038961038961
+              },
+              "m2": {
+                "nbTrades": 79,
+                "winRate": 37.9746835443038,
+                "expectancy": 0.08360994684582122,
+                "pnlComposePct": 1.0869355585956697,
+                "maxDrawdownPct": -22.983600184992937,
+                "dureeMoyenne": 20
+              },
+              "longs": {
+                "nbTrades": 79,
+                "winRate": 39.24050632911392,
+                "expectancy": 0.29425977481586585,
+                "pnlComposePct": 17.081968028634286,
+                "maxDrawdownPct": -28.405272456026616,
+                "dureeMoyenne": 22.658227848101266
+              },
+              "shorts": {
+                "nbTrades": 77,
+                "winRate": 36.36363636363637,
+                "expectancy": 0.23283972695332872,
+                "pnlComposePct": 11.840583081037948,
+                "maxDrawdownPct": -21.794248250481036,
+                "dureeMoyenne": 18.883116883116884
+              }
+            },
+            "seuil-3": {
+              "global": {
+                "nbTrades": 195,
+                "winRate": 34.35897435897436,
+                "expectancy": 0.18494913945083336,
+                "pnlComposePct": 23.281544912229734,
+                "maxDrawdownPct": -37.280643380071524,
+                "dureeMoyenne": 18.466666666666665
+              },
+              "m1": {
+                "nbTrades": 90,
+                "winRate": 35.55555555555556,
+                "expectancy": 0.36253591575335076,
+                "pnlComposePct": 26.91194711220215,
+                "maxDrawdownPct": -31.370129855795238,
+                "dureeMoyenne": 20.011111111111113
+              },
+              "m2": {
+                "nbTrades": 105,
+                "winRate": 33.33333333333333,
+                "expectancy": 0.03273190262010395,
+                "pnlComposePct": -2.860567726348695,
+                "maxDrawdownPct": -21.446421904721248,
+                "dureeMoyenne": 17.142857142857142
+              },
+              "longs": {
+                "nbTrades": 99,
+                "winRate": 35.35353535353536,
+                "expectancy": 0.2112860275400149,
+                "pnlComposePct": 13.922787619329501,
+                "maxDrawdownPct": -29.8790727154146,
+                "dureeMoyenne": 19.616161616161616
+              },
+              "shorts": {
+                "nbTrades": 96,
+                "winRate": 33.33333333333333,
+                "expectancy": 0.15778922360886444,
+                "pnlComposePct": 8.215000254534033,
+                "maxDrawdownPct": -24.46572342304853,
+                "dureeMoyenne": 17.28125
+              }
+            },
+            "seuil-5": {
+              "global": {
+                "nbTrades": 115,
+                "winRate": 37.391304347826086,
+                "expectancy": 0.4396612312830439,
+                "pnlComposePct": 46.07228349880077,
+                "maxDrawdownPct": -22.63240215361784,
+                "dureeMoyenne": 23.434782608695652
+              },
+              "m1": {
+                "nbTrades": 59,
+                "winRate": 32.20338983050847,
+                "expectancy": 0.5960380066466262,
+                "pnlComposePct": 31.51725905767906,
+                "maxDrawdownPct": -22.63240215361784,
+                "dureeMoyenne": 23.338983050847457
+              },
+              "m2": {
+                "nbTrades": 56,
+                "winRate": 42.857142857142854,
+                "expectancy": 0.2749071286678409,
+                "pnlComposePct": 11.067007133062656,
+                "maxDrawdownPct": -19.83644653851796,
+                "dureeMoyenne": 23.535714285714285
+              },
+              "longs": {
+                "nbTrades": 59,
+                "winRate": 47.45762711864407,
+                "expectancy": 0.943973220681788,
+                "pnlComposePct": 63.40778060014656,
+                "maxDrawdownPct": -13.325771266286385,
+                "dureeMoyenne": 26.152542372881356
+              },
+              "shorts": {
+                "nbTrades": 56,
+                "winRate": 26.785714285714285,
+                "expectancy": -0.09166747183349042,
+                "pnlComposePct": -10.60873419715862,
+                "maxDrawdownPct": -32.382918952565745,
+                "dureeMoyenne": 20.571428571428573
+              }
+            }
+          },
+          "executions": [
+            {
+              "cout": "x1-central",
+              "seuil": 4,
+              "reunies": {
+                "trades": 157,
+                "fermes": 156,
+                "longs": 79,
+                "shorts": 78,
+                "finDonnees": 1,
+                "expectancyNette": 1.2529554368522027,
+                "expectancyPct": 0.1252955436852203,
+                "pnlTotal": 196.7140035857958,
+                "pnlTotalPct": 1.967140035857958,
+                "winRatePct": 36.94267515923567,
+                "profitFactor": 1.0899544721296592,
+                "ddRealiseMaxPct": 4.271200231215992,
+                "dureeMoyenneBarres": 20.67515923566879,
+                "fraisTotal": 157.0239204560216
+              },
+              "longue": {
+                "trades": 79,
+                "fermes": 79,
+                "longs": 79,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": 1.540367383967939,
+                "expectancyPct": 0.15403673839679366,
+                "pnlTotal": 121.68902333346719,
+                "pnlTotalPct": 1.2168902333346718,
+                "winRatePct": 39.24050632911392,
+                "profitFactor": 1.1094546088382433,
+                "ddRealiseMaxPct": 3.8905833368677825,
+                "dureeMoyenneBarres": 22.658227848101266,
+                "fraisTotal": 79.10039470902127
+              },
+              "courte": {
+                "trades": 78,
+                "fermes": 77,
+                "longs": 0,
+                "shorts": 78,
+                "finDonnees": 1,
+                "expectancyNette": 0.9618587211837042,
+                "expectancyPct": 0.09618587211837039,
+                "pnlTotal": 75.02498025232893,
+                "pnlTotalPct": 0.7502498025232893,
+                "winRatePct": 34.61538461538461,
+                "profitFactor": 1.0697880021466968,
+                "ddRealiseMaxPct": 2.719591540852308,
+                "dureeMoyenneBarres": 18.666666666666668,
+                "fraisTotal": 77.9235257470003
+              }
+            },
+            {
+              "cout": "x2",
+              "seuil": 4,
+              "reunies": {
+                "trades": 157,
+                "fermes": 156,
+                "longs": 79,
+                "shorts": 78,
+                "finDonnees": 1,
+                "expectancyNette": -0.1473147996361383,
+                "expectancyPct": -0.01473147996361365,
+                "pnlTotal": -23.128423542873712,
+                "pnlTotalPct": -0.2312842354287371,
+                "winRatePct": 36.30573248407643,
+                "profitFactor": 0.9900557058305701,
+                "ddRealiseMaxPct": 5.95345159046029,
+                "dureeMoyenneBarres": 20.67515923566879,
+                "fraisTotal": 314.04731198063837
+              },
+              "longue": {
+                "trades": 79,
+                "fermes": 79,
+                "longs": 79,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": 0.1385610013103451,
+                "expectancyPct": 0.01385610013103443,
+                "pnlTotal": 10.946319103517263,
+                "pnlTotalPct": 0.10946319103517263,
+                "winRatePct": 37.9746835443038,
+                "profitFactor": 1.0092890502275584,
+                "ddRealiseMaxPct": 4.699325585010911,
+                "dureeMoyenneBarres": 22.658227848101266,
+                "fraisTotal": 158.1691154345381
+              },
+              "courte": {
+                "trades": 78,
+                "fermes": 77,
+                "longs": 0,
+                "shorts": 78,
+                "finDonnees": 1,
+                "expectancyNette": -0.4368556749537295,
+                "expectancyPct": -0.043685567495372876,
+                "pnlTotal": -34.0747426463909,
+                "pnlTotalPct": -0.34074742646390904,
+                "winRatePct": 34.61538461538461,
+                "profitFactor": 0.9703023208568033,
+                "ddRealiseMaxPct": 3.2678754933350316,
+                "dureeMoyenneBarres": 18.666666666666668,
+                "fraisTotal": 155.87819654610033
+              }
+            },
+            {
+              "cout": "x3",
+              "seuil": 4,
+              "reunies": {
+                "trades": 157,
+                "fermes": 156,
+                "longs": 79,
+                "shorts": 78,
+                "finDonnees": 1,
+                "expectancyNette": -1.5475806556390737,
+                "expectancyPct": -0.15475806556390728,
+                "pnlTotal": -242.97016293533457,
+                "pnlTotalPct": -2.4297016293533455,
+                "winRatePct": 35.03184713375796,
+                "profitFactor": 0.901523950514086,
+                "ddRealiseMaxPct": 7.645715182466936,
+                "dureeMoyenneBarres": 20.67515923566879,
+                "fraisTotal": 471.07021226509477
+              },
+              "longue": {
+                "trades": 79,
+                "fermes": 79,
+                "longs": 79,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": -1.2626844068319318,
+                "expectancyPct": -0.1262684406831933,
+                "pnlTotal": -99.75206813972261,
+                "pnlTotalPct": -0.9975206813972262,
+                "winRatePct": 35.44303797468354,
+                "profitFactor": 0.920040946950713,
+                "ddRealiseMaxPct": 5.507745146170642,
+                "dureeMoyenneBarres": 22.658227848101266,
+                "fraisTotal": 237.2061811695447
+              },
+              "courte": {
+                "trades": 78,
+                "fermes": 77,
+                "longs": 0,
+                "shorts": 78,
+                "finDonnees": 1,
+                "expectancyNette": -1.8361294204565628,
+                "expectancyPct": -0.1836129420456564,
+                "pnlTotal": -143.2180947956119,
+                "pnlTotalPct": -1.4321809479561192,
+                "winRatePct": 34.61538461538461,
+                "profitFactor": 0.8825852812655922,
+                "ddRealiseMaxPct": 3.816379325632154,
+                "dureeMoyenneBarres": 18.666666666666668,
+                "fraisTotal": 233.86403109555016
+              }
+            },
+            {
+              "cout": "x1-central",
+              "seuil": 3,
+              "reunies": {
+                "trades": 196,
+                "fermes": 195,
+                "longs": 99,
+                "shorts": 97,
+                "finDonnees": 1,
+                "expectancyNette": 0.46437930535814875,
+                "expectancyPct": 0.04643793053581498,
+                "pnlTotal": 91.01834385019716,
+                "pnlTotalPct": 0.9101834385019716,
+                "winRatePct": 32.6530612244898,
+                "profitFactor": 1.0360146350225212,
+                "ddRealiseMaxPct": 5.468431564446517,
+                "dureeMoyenneBarres": 18.382653061224488,
+                "fraisTotal": 196.02597225188495
+              },
+              "longue": {
+                "trades": 99,
+                "fermes": 99,
+                "longs": 99,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": 0.7112087144550893,
+                "expectancyPct": 0.0711208714455087,
+                "pnlTotal": 70.40966273105384,
+                "pnlTotalPct": 0.7040966273105383,
+                "winRatePct": 34.34343434343434,
+                "profitFactor": 1.0550688578463663,
+                "ddRealiseMaxPct": 4.326172037389773,
+                "dureeMoyenneBarres": 19.616161616161616,
+                "fraisTotal": 99.08474720496801
+              },
+              "courte": {
+                "trades": 97,
+                "fermes": 96,
+                "longs": 0,
+                "shorts": 97,
+                "finDonnees": 1,
+                "expectancyNette": 0.21246063009426525,
+                "expectancyPct": 0.021246063009426438,
+                "pnlTotal": 20.60868111914373,
+                "pnlTotalPct": 0.20608681119143726,
+                "winRatePct": 30.927835051546392,
+                "profitFactor": 1.0165043078761782,
+                "ddRealiseMaxPct": 3.3244728112458195,
+                "dureeMoyenneBarres": 17.123711340206185,
+                "fraisTotal": 96.941225046917
+              }
+            },
+            {
+              "cout": "x1-central",
+              "seuil": 5,
+              "reunies": {
+                "trades": 116,
+                "fermes": 115,
+                "longs": 59,
+                "shorts": 57,
+                "finDonnees": 1,
+                "expectancyNette": 2.9949727231865344,
+                "expectancyPct": 0.2994972723186534,
+                "pnlTotal": 347.416835889638,
+                "pnlTotalPct": 3.47416835889638,
+                "winRatePct": 37.93103448275862,
+                "profitFactor": 1.2140410991505597,
+                "ddRealiseMaxPct": 2.8760559441333737,
+                "dureeMoyenneBarres": 23.25,
+                "fraisTotal": 116.30126715018108
+              },
+              "longue": {
+                "trades": 59,
+                "fermes": 59,
+                "longs": 59,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": 8.031519298307309,
+                "expectancyPct": 0.8031519298307297,
+                "pnlTotal": 473.85963860013123,
+                "pnlTotalPct": 4.738596386001313,
+                "winRatePct": 47.45762711864407,
+                "profitFactor": 1.6993972282016603,
+                "ddRealiseMaxPct": 1.5056788544640547,
+                "dureeMoyenneBarres": 26.152542372881356,
+                "fraisTotal": 59.26656310085049
+              },
+              "courte": {
+                "trades": 57,
+                "fermes": 56,
+                "longs": 0,
+                "shorts": 57,
+                "finDonnees": 1,
+                "expectancyNette": -2.2182947843946077,
+                "expectancyPct": -0.22182947843946094,
+                "pnlTotal": -126.44280271049264,
+                "pnlTotalPct": -1.2644280271049264,
+                "winRatePct": 28.07017543859649,
+                "profitFactor": 0.8662837942024967,
+                "ddRealiseMaxPct": 4.240591532628631,
+                "dureeMoyenneBarres": 20.24561403508772,
+                "fraisTotal": 57.0347040493306
+              }
+            }
+          ],
+          "empreinteChronologieX1": "0ef6ab4d20d695b3a041ac4ca83a5caefd2e001f99f52f085f14371c95169be4"
+        }
+      },
+      "w2": {
+        "statut": "disponible",
+        "resultat": {
+          "acquisition": {
+            "endpoint": "https://data-api.binance.vision/api/v3/klines",
+            "acquisLeUtc": "2026-10-07T10:47:17.399Z",
+            "modeCalcul": "reseau",
+            "nombre": 620,
+            "premierOpen": "2026-06-25T16:00:00.000Z",
+            "dernierClose": "2026-10-07T00:00:00.000Z",
+            "trous": 0,
+            "sha256Ohlcv": "26d1d4067316efbcd69e9381ea56d75b79b1b84fb6658594086710c3400b2e04"
+          },
+          "achatConservationPct": 33.84953453805834,
+          "executions": [
+            {
+              "cout": "x1-central",
+              "seuil": 4,
+              "reunies": {
+                "trades": 11,
+                "fermes": 10,
+                "longs": 6,
+                "shorts": 5,
+                "finDonnees": 1,
+                "expectancyNette": 14.371004470048847,
+                "expectancyPct": 1.4371004470048843,
+                "pnlTotal": 158.0810491705373,
+                "pnlTotalPct": 1.5808104917053731,
+                "winRatePct": 36.36363636363637,
+                "profitFactor": 2.5531660941478744,
+                "ddRealiseMaxPct": 0.7961820088824962,
+                "dureeMoyenneBarres": 25.454545454545453,
+                "fraisTotal": 11.116198191488499
+              },
+              "longue": {
+                "trades": 6,
+                "fermes": 5,
+                "longs": 6,
+                "shorts": 0,
+                "finDonnees": 1,
+                "expectancyNette": 32.44940279365448,
+                "expectancyPct": 3.2449402793654483,
+                "pnlTotal": 194.69641676192688,
+                "pnlTotalPct": 1.9469641676192688,
+                "winRatePct": 33.33333333333333,
+                "profitFactor": 4.434552476793024,
+                "ddRealiseMaxPct": 0.5295509148245372,
+                "dureeMoyenneBarres": 31.833333333333332,
+                "fraisTotal": 6.100398407584756
+              },
+              "courte": {
+                "trades": 5,
+                "fermes": 5,
+                "longs": 0,
+                "shorts": 5,
+                "finDonnees": 0,
+                "expectancyNette": -7.323073518277918,
+                "expectancyPct": -0.7323073518277917,
+                "pnlTotal": -36.61536759138959,
+                "pnlTotalPct": -0.3661536759138959,
+                "winRatePct": 40,
+                "profitFactor": 0.18799084585886652,
+                "ddRealiseMaxPct": 0.3661536759138959,
+                "dureeMoyenneBarres": 17.8,
+                "fraisTotal": 5.015799783903743
+              }
+            },
+            {
+              "cout": "x2",
+              "seuil": 4,
+              "reunies": {
+                "trades": 11,
+                "fermes": 10,
+                "longs": 6,
+                "shorts": 5,
+                "finDonnees": 1,
+                "expectancyNette": 12.952041109351343,
+                "expectancyPct": 1.2952041109351344,
+                "pnlTotal": 142.4724522028648,
+                "pnlTotalPct": 1.424724522028648,
+                "winRatePct": 36.36363636363637,
+                "profitFactor": 2.276979730885784,
+                "ddRealiseMaxPct": 0.865941209799072,
+                "dureeMoyenneBarres": 25.454545454545453,
+                "fraisTotal": 22.231929602613825
+              },
+              "longue": {
+                "trades": 6,
+                "fermes": 5,
+                "longs": 6,
+                "shorts": 0,
+                "finDonnees": 1,
+                "expectancyNette": 31.019779202906758,
+                "expectancyPct": 3.101977920290676,
+                "pnlTotal": 186.11867521744054,
+                "pnlTotalPct": 1.8611867521744054,
+                "winRatePct": 33.33333333333333,
+                "profitFactor": 3.9904237375934386,
+                "ddRealiseMaxPct": 0.5570827367888654,
+                "dureeMoyenneBarres": 31.833333333333332,
+                "fraisTotal": 12.19831699220965
+              },
+              "courte": {
+                "trades": 5,
+                "fermes": 5,
+                "longs": 0,
+                "shorts": 5,
+                "finDonnees": 0,
+                "expectancyNette": -8.729244602915157,
+                "expectancyPct": -0.8729244602915157,
+                "pnlTotal": -43.64622301457579,
+                "pnlTotalPct": -0.43646223014575786,
+                "winRatePct": 40,
+                "profitFactor": 0.11524878011412981,
+                "ddRealiseMaxPct": 0.43646223014575786,
+                "dureeMoyenneBarres": 17.8,
+                "fraisTotal": 10.033612610404173
+              }
+            },
+            {
+              "cout": "x3",
+              "seuil": 4,
+              "reunies": {
+                "trades": 11,
+                "fermes": 10,
+                "longs": 6,
+                "shorts": 5,
+                "finDonnees": 1,
+                "expectancyNette": 11.533136813993341,
+                "expectancyPct": 1.1533136813993339,
+                "pnlTotal": 126.86450495392675,
+                "pnlTotalPct": 1.2686450495392676,
+                "winRatePct": 27.27272727272727,
+                "profitFactor": 2.0335962814380197,
+                "ddRealiseMaxPct": 0.9357064509352889,
+                "dureeMoyenneBarres": 25.454545454545453,
+                "fraisTotal": 33.347196928928234
+              },
+              "longue": {
+                "trades": 6,
+                "fermes": 5,
+                "longs": 6,
+                "shorts": 0,
+                "finDonnees": 1,
+                "expectancyNette": 29.59073389054923,
+                "expectancyPct": 2.959073389054922,
+                "pnlTotal": 177.5444033432954,
+                "pnlTotalPct": 1.775444033432954,
+                "winRatePct": 33.33333333333333,
+                "profitFactor": 3.6191634685029896,
+                "ddRealiseMaxPct": 0.5846036529695198,
+                "dureeMoyenneBarres": 31.833333333333332,
+                "fraisTotal": 18.293757240876257
+              },
+              "courte": {
+                "trades": 5,
+                "fermes": 5,
+                "longs": 0,
+                "shorts": 5,
+                "finDonnees": 0,
+                "expectancyNette": -10.135979677873726,
+                "expectancyPct": -1.0135979677873725,
+                "pnlTotal": -50.67989838936863,
+                "pnlTotalPct": -0.5067989838936863,
+                "winRatePct": 20,
+                "profitFactor": 0.07777909808217279,
+                "ddRealiseMaxPct": 0.5067989838936863,
+                "dureeMoyenneBarres": 17.8,
+                "fraisTotal": 15.053439688051975
+              }
+            },
+            {
+              "cout": "x1-central",
+              "seuil": 3,
+              "reunies": {
+                "trades": 16,
+                "fermes": 15,
+                "longs": 9,
+                "shorts": 7,
+                "finDonnees": 1,
+                "expectancyNette": 9.992988450879391,
+                "expectancyPct": 0.9992988450879391,
+                "pnlTotal": 159.88781521407026,
+                "pnlTotalPct": 1.5988781521407025,
+                "winRatePct": 43.75,
+                "profitFactor": 2.174402668379075,
+                "ddRealiseMaxPct": 0.9937943616585571,
+                "dureeMoyenneBarres": 20.125,
+                "fraisTotal": 16.095744592403225
+              },
+              "longue": {
+                "trades": 9,
+                "fermes": 8,
+                "longs": 9,
+                "shorts": 0,
+                "finDonnees": 1,
+                "expectancyNette": 19.40494490225661,
+                "expectancyPct": 1.9404944902256611,
+                "pnlTotal": 174.64450412030948,
+                "pnlTotalPct": 1.7464450412030947,
+                "winRatePct": 44.44444444444444,
+                "profitFactor": 2.814637481933889,
+                "ddRealiseMaxPct": 0.7137643780517351,
+                "dureeMoyenneBarres": 23.555555555555557,
+                "fraisTotal": 9.091868186153233
+              },
+              "courte": {
+                "trades": 7,
+                "fermes": 7,
+                "longs": 0,
+                "shorts": 7,
+                "finDonnees": 0,
+                "expectancyNette": -2.1080984151770332,
+                "expectancyPct": -0.21080984151770338,
+                "pnlTotal": -14.756688906239233,
+                "pnlTotalPct": -0.14756688906239235,
+                "winRatePct": 42.857142857142854,
+                "profitFactor": 0.6301753880790292,
+                "ddRealiseMaxPct": 0.39901857341481217,
+                "dureeMoyenneBarres": 15.714285714285714,
+                "fraisTotal": 7.003876406249995
+              }
+            },
+            {
+              "cout": "x1-central",
+              "seuil": 5,
+              "reunies": {
+                "trades": 10,
+                "fermes": 9,
+                "longs": 6,
+                "shorts": 4,
+                "finDonnees": 1,
+                "expectancyNette": 15.563155719882698,
+                "expectancyPct": 1.55631557198827,
+                "pnlTotal": 155.63155719882698,
+                "pnlTotalPct": 1.55631557198827,
+                "winRatePct": 40,
+                "profitFactor": 2.758775457716346,
+                "ddRealiseMaxPct": 0.6632691520375116,
+                "dureeMoyenneBarres": 26.7,
+                "fraisTotal": 10.10896057546934
+              },
+              "longue": {
+                "trades": 6,
+                "fermes": 5,
+                "longs": 6,
+                "shorts": 0,
+                "finDonnees": 1,
+                "expectancyNette": 30.955819823218093,
+                "expectancyPct": 3.0955819823218094,
+                "pnlTotal": 185.73491893930856,
+                "pnlTotalPct": 1.8573491893930854,
+                "winRatePct": 33.33333333333333,
+                "profitFactor": 4.276466698665504,
+                "ddRealiseMaxPct": 0.5295509148245372,
+                "dureeMoyenneBarres": 30.833333333333332,
+                "fraisTotal": 6.095915417178244
+              },
+              "courte": {
+                "trades": 4,
+                "fermes": 4,
+                "longs": 0,
+                "shorts": 4,
+                "finDonnees": 0,
+                "expectancyNette": -7.525840435120392,
+                "expectancyPct": -0.7525840435120392,
+                "pnlTotal": -30.103361740481567,
+                "pnlTotalPct": -0.30103361740481566,
+                "winRatePct": 50,
+                "profitFactor": 0.05338386265012734,
+                "ddRealiseMaxPct": 0.30103361740481566,
+                "dureeMoyenneBarres": 20.5,
+                "fraisTotal": 4.013045158291096
+              }
+            }
+          ],
+          "empreinteChronologieX1": "ed2448287d576d8a545f27220d01f983f1111fe0ab8a4987bbf5bd0483e190da"
+        }
+      }
+    },
+    {
+      "id": "ETHUSDT 1h",
+      "w1": {
+        "statut": "disponible",
+        "resultat": {
+          "acquisition": {
+            "endpoint": "https://data-api.binance.vision/api/v3/klines",
+            "acquisLeUtc": "2026-10-07T10:47:19.554Z",
+            "modeCalcul": "reseau",
+            "nombre": 18180,
+            "premierOpen": "2024-07-01T00:00:00.000Z",
+            "dernierClose": "2026-07-28T12:00:00.000Z",
+            "trous": 0,
+            "sha256Ohlcv": "3b4f94d8f90b4c865bbdaa924881e8a935c1123729357bb53d3bdcfa1f5da53e"
+          },
+          "achatConservationPct": -45.41615282593015,
+          "rejeu": {
+            "seuil-4": {
+              "global": {
+                "nbTrades": 665,
+                "winRate": 30.37593984962406,
+                "expectancy": 0.0031589684009453,
+                "pnlComposePct": -29.267528358232596,
+                "maxDrawdownPct": -57.63966411956485,
+                "dureeMoyenne": 19.264661654135338
+              },
+              "m1": {
+                "nbTrades": 345,
+                "winRate": 26.08695652173913,
+                "expectancy": -0.11907366704885142,
+                "pnlComposePct": -45.78447465636447,
+                "maxDrawdownPct": -57.63966411956485,
+                "dureeMoyenne": 17.759420289855072
+              },
+              "m2": {
+                "nbTrades": 320,
+                "winRate": 35,
+                "expectancy": 0.13494102849525735,
+                "pnlComposePct": 30.465344001450024,
+                "maxDrawdownPct": -25.237524946527927,
+                "dureeMoyenne": 20.8875
+              },
+              "longs": {
+                "nbTrades": 326,
+                "winRate": 30.67484662576687,
+                "expectancy": -0.0768463280044042,
+                "pnlComposePct": -35.46535595407114,
+                "maxDrawdownPct": -51.80849592122284,
+                "dureeMoyenne": 19.386503067484664
+              },
+              "shorts": {
+                "nbTrades": 339,
+                "winRate": 30.08849557522124,
+                "expectancy": 0.0800962150916355,
+                "pnlComposePct": 9.603876626990559,
+                "maxDrawdownPct": -39.13632628272526,
+                "dureeMoyenne": 19.14749262536873
+              }
+            },
+            "seuil-3": {
+              "global": {
+                "nbTrades": 815,
+                "winRate": 29.69325153374233,
+                "expectancy": -0.04028766686408089,
+                "pnlComposePct": -52.398084458350084,
+                "maxDrawdownPct": -70.9551873227204,
+                "dureeMoyenne": 17.397546012269938
+              },
+              "m1": {
+                "nbTrades": 433,
+                "winRate": 26.558891454965355,
+                "expectancy": -0.17950298004044887,
+                "pnlComposePct": -63.61932736069862,
+                "maxDrawdownPct": -70.9551873227204,
+                "dureeMoyenne": 15.921478060046189
+              },
+              "m2": {
+                "nbTrades": 382,
+                "winRate": 33.246073298429316,
+                "expectancy": 0.11751398393531041,
+                "pnlComposePct": 30.843967657228877,
+                "maxDrawdownPct": -32.8758802920886,
+                "dureeMoyenne": 19.07068062827225
+              },
+              "longs": {
+                "nbTrades": 402,
+                "winRate": 30.845771144278604,
+                "expectancy": -0.05008344635222761,
+                "pnlComposePct": -34.06351384349225,
+                "maxDrawdownPct": -55.921510722998704,
+                "dureeMoyenne": 17.529850746268657
+              },
+              "shorts": {
+                "nbTrades": 413,
+                "winRate": 28.57142857142857,
+                "expectancy": -0.030752791914359017,
+                "pnlComposePct": -27.80641141740349,
+                "maxDrawdownPct": -57.8657094174299,
+                "dureeMoyenne": 17.268765133171915
+              }
+            },
+            "seuil-5": {
+              "global": {
+                "nbTrades": 497,
+                "winRate": 30.985915492957744,
+                "expectancy": 0.0465973480460968,
+                "pnlComposePct": -8.102393038276201,
+                "maxDrawdownPct": -51.23890875445092,
+                "dureeMoyenne": 21.249496981891348
+              },
+              "m1": {
+                "nbTrades": 253,
+                "winRate": 27.66798418972332,
+                "expectancy": -0.08327078742531725,
+                "pnlComposePct": -31.92053397188487,
+                "maxDrawdownPct": -51.23890875445092,
+                "dureeMoyenne": 19.85375494071146
+              },
+              "m2": {
+                "nbTrades": 244,
+                "winRate": 34.42622950819672,
+                "expectancy": 0.18125570162916127,
+                "pnlComposePct": 34.9857928141976,
+                "maxDrawdownPct": -30.396695666937084,
+                "dureeMoyenne": 22.69672131147541
+              },
+              "longs": {
+                "nbTrades": 248,
+                "winRate": 29.838709677419356,
+                "expectancy": -0.014087918232535758,
+                "pnlComposePct": -17.666660415772593,
+                "maxDrawdownPct": -38.929415165974696,
+                "dureeMoyenne": 21.120967741935484
+              },
+              "shorts": {
+                "nbTrades": 249,
+                "winRate": 32.1285140562249,
+                "expectancy": 0.10703889839589953,
+                "pnlComposePct": 11.616518200032377,
+                "maxDrawdownPct": -37.96104153945754,
+                "dureeMoyenne": 21.377510040160644
+              }
+            }
+          },
+          "executions": [
+            {
+              "cout": "x1-central",
+              "seuil": 4,
+              "reunies": {
+                "trades": 666,
+                "fermes": 665,
+                "longs": 326,
+                "shorts": 340,
+                "finDonnees": 1,
+                "expectancyNette": -1.3545644305357833,
+                "expectancyPct": -0.13545644305357854,
+                "pnlTotal": -902.1399107368317,
+                "pnlTotalPct": -9.021399107368316,
+                "winRatePct": 27.627627627627625,
+                "profitFactor": 0.875550069697782,
+                "ddRealiseMaxPct": 11.204043438946893,
+                "dureeMoyenneBarres": 19.253753753753752,
+                "fraisTotal": 665.7373380983835
+              },
+              "longue": {
+                "trades": 326,
+                "fermes": 326,
+                "longs": 326,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": -2.1677078415419446,
+                "expectancyPct": -0.21677078415419443,
+                "pnlTotal": -706.672756342674,
+                "pnlTotalPct": -7.06672756342674,
+                "winRatePct": 26.380368098159508,
+                "profitFactor": 0.8079797199945148,
+                "ddRealiseMaxPct": 8.593205500071315,
+                "dureeMoyenneBarres": 19.386503067484664,
+                "fraisTotal": 325.80956840603153
+              },
+              "courte": {
+                "trades": 340,
+                "fermes": 339,
+                "longs": 0,
+                "shorts": 340,
+                "finDonnees": 1,
+                "expectancyNette": -0.5749033952769325,
+                "expectancyPct": -0.05749033952769325,
+                "pnlTotal": -195.46715439415703,
+                "pnlTotalPct": -1.9546715439415705,
+                "winRatePct": 28.823529411764703,
+                "profitFactor": 0.9452291992301365,
+                "ddRealiseMaxPct": 6.337456337748169,
+                "dureeMoyenneBarres": 19.126470588235293,
+                "fraisTotal": 339.9277696923511
+              }
+            },
+            {
+              "cout": "x2",
+              "seuil": 4,
+              "reunies": {
+                "trades": 666,
+                "fermes": 665,
+                "longs": 326,
+                "shorts": 340,
+                "finDonnees": 1,
+                "expectancyNette": -2.7538649218750906,
+                "expectancyPct": -0.2753864921875093,
+                "pnlTotal": -1834.0740379688102,
+                "pnlTotalPct": -18.340740379688103,
+                "winRatePct": 25.375375375375377,
+                "profitFactor": 0.7689154854637144,
+                "ddRealiseMaxPct": 19.061288726065932,
+                "dureeMoyenneBarres": 19.253753753753752,
+                "fraisTotal": 1331.480423996463
+              },
+              "longue": {
+                "trades": 326,
+                "fermes": 326,
+                "longs": 326,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": -3.5661770673198308,
+                "expectancyPct": -0.35661770673198284,
+                "pnlTotal": -1162.5737239462649,
+                "pnlTotalPct": -11.625737239462648,
+                "winRatePct": 24.539877300613497,
+                "profitFactor": 0.7105999715649064,
+                "ddRealiseMaxPct": 12.455733015958433,
+                "dureeMoyenneBarres": 19.386503067484664,
+                "fraisTotal": 651.4889151912449
+              },
+              "courte": {
+                "trades": 340,
+                "fermes": 339,
+                "longs": 0,
+                "shorts": 340,
+                "finDonnees": 1,
+                "expectancyNette": -1.9750009235957318,
+                "expectancyPct": -0.19750009235957297,
+                "pnlTotal": -671.5003140225488,
+                "pnlTotalPct": -6.715003140225488,
+                "winRatePct": 26.176470588235297,
+                "profitFactor": 0.8286824985858608,
+                "ddRealiseMaxPct": 9.02821710010338,
+                "dureeMoyenneBarres": 19.126470588235293,
+                "fraisTotal": 679.9915088052172
+              }
+            },
+            {
+              "cout": "x3",
+              "seuil": 4,
+              "reunies": {
+                "trades": 666,
+                "fermes": 665,
+                "longs": 326,
+                "shorts": 340,
+                "finDonnees": 1,
+                "expectancyNette": -4.153177831417253,
+                "expectancyPct": -0.41531778314172546,
+                "pnlTotal": -2766.0164357238905,
+                "pnlTotalPct": -27.660164357238905,
+                "winRatePct": 23.873873873873876,
+                "profitFactor": 0.6798173564674933,
+                "ddRealiseMaxPct": 28.03070551960521,
+                "dureeMoyenneBarres": 19.253753753753752,
+                "fraisTotal": 1997.22941741099
+              },
+              "longue": {
+                "trades": 326,
+                "fermes": 326,
+                "longs": 326,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": -4.964087394482556,
+                "expectancyPct": -0.4964087394482552,
+                "pnlTotal": -1618.2924906013131,
+                "pnlTotalPct": -16.18292490601313,
+                "winRatePct": 22.699386503067483,
+                "profitFactor": 0.628986640608998,
+                "ddRealiseMaxPct": 16.759971782250517,
+                "dureeMoyenneBarres": 19.386503067484664,
+                "fraisTotal": 977.0381184417611
+              },
+              "courte": {
+                "trades": 340,
+                "fermes": 339,
+                "longs": 0,
+                "shorts": 340,
+                "finDonnees": 1,
+                "expectancyNette": -3.3756586621252267,
+                "expectancyPct": -0.33756586621252277,
+                "pnlTotal": -1147.723945122577,
+                "pnlTotalPct": -11.47723945122577,
+                "winRatePct": 25,
+                "profitFactor": 0.7316554512842521,
+                "ddRealiseMaxPct": 12.519553384916815,
+                "dureeMoyenneBarres": 19.126470588235293,
+                "fraisTotal": 1020.1912989692305
+              }
+            },
+            {
+              "cout": "x1-central",
+              "seuil": 3,
+              "reunies": {
+                "trades": 816,
+                "fermes": 815,
+                "longs": 402,
+                "shorts": 414,
+                "finDonnees": 1,
+                "expectancyNette": -1.7915341480605647,
+                "expectancyPct": -0.17915341480605687,
+                "pnlTotal": -1461.8918648174208,
+                "pnlTotalPct": -14.618918648174208,
+                "winRatePct": 26.715686274509803,
+                "profitFactor": 0.8297691922847403,
+                "ddRealiseMaxPct": 16.374810408866956,
+                "dureeMoyenneBarres": 17.39093137254902,
+                "fraisTotal": 815.9608981768212
+              },
+              "longue": {
+                "trades": 402,
+                "fermes": 402,
+                "longs": 402,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": -1.900214609070523,
+                "expectancyPct": -0.19002146090705235,
+                "pnlTotal": -763.8862728463503,
+                "pnlTotalPct": -7.6388627284635024,
+                "winRatePct": 26.368159203980102,
+                "profitFactor": 0.8195740549868125,
+                "ddRealiseMaxPct": 9.949908956884656,
+                "dureeMoyenneBarres": 17.529850746268657,
+                "fraisTotal": 401.81896634674985
+              },
+              "courte": {
+                "trades": 414,
+                "fermes": 413,
+                "longs": 0,
+                "shorts": 414,
+                "finDonnees": 1,
+                "expectancyNette": -1.6860038453407526,
+                "expectancyPct": -0.16860038453407555,
+                "pnlTotal": -698.0055919710716,
+                "pnlTotalPct": -6.980055919710717,
+                "winRatePct": 27.053140096618357,
+                "profitFactor": 0.8396830640658326,
+                "ddRealiseMaxPct": 11.090540884796976,
+                "dureeMoyenneBarres": 17.256038647342994,
+                "fraisTotal": 414.1419318300709
+              }
+            },
+            {
+              "cout": "x1-central",
+              "seuil": 5,
+              "reunies": {
+                "trades": 498,
+                "fermes": 497,
+                "longs": 248,
+                "shorts": 250,
+                "finDonnees": 1,
+                "expectancyNette": -0.9297393107316606,
+                "expectancyPct": -0.092973931073166,
+                "pnlTotal": -463.01017674436696,
+                "pnlTotalPct": -4.630101767443669,
+                "winRatePct": 29.518072289156628,
+                "profitFactor": 0.9216416486019775,
+                "ddRealiseMaxPct": 8.79838050308681,
+                "dureeMoyenneBarres": 21.220883534136547,
+                "fraisTotal": 497.8483870823802
+              },
+              "longue": {
+                "trades": 248,
+                "fermes": 248,
+                "longs": 248,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": -1.5408335304212906,
+                "expectancyPct": -0.15408335304212895,
+                "pnlTotal": -382.1267155444801,
+                "pnlTotalPct": -3.8212671554448003,
+                "winRatePct": 27.419354838709676,
+                "profitFactor": 0.8700466950100068,
+                "ddRealiseMaxPct": 5.634144094922942,
+                "dureeMoyenneBarres": 21.120967741935484,
+                "fraisTotal": 247.9329030937749
+              },
+              "courte": {
+                "trades": 250,
+                "fermes": 249,
+                "longs": 0,
+                "shorts": 250,
+                "finDonnees": 1,
+                "expectancyNette": -0.3235338447995488,
+                "expectancyPct": -0.032353384479954846,
+                "pnlTotal": -80.8834611998872,
+                "pnlTotalPct": -0.808834611998872,
+                "winRatePct": 31.6,
+                "profitFactor": 0.9727517272390277,
+                "ddRealiseMaxPct": 6.401614842984753,
+                "dureeMoyenneBarres": 21.32,
+                "fraisTotal": 249.91548398860562
+              }
+            }
+          ],
+          "empreinteChronologieX1": "e9f6504ee1b30ceea026d8a87660b6973aaeabff514b7cd804197e62376fb251"
+        }
+      },
+      "w2": {
+        "statut": "disponible",
+        "resultat": {
+          "acquisition": {
+            "endpoint": "https://data-api.binance.vision/api/v3/klines",
+            "acquisLeUtc": "2026-10-07T10:47:20.172Z",
+            "modeCalcul": "reseau",
+            "nombre": 1880,
+            "premierOpen": "2026-07-20T16:00:00.000Z",
+            "dernierClose": "2026-10-07T00:00:00.000Z",
+            "trous": 0,
+            "sha256Ohlcv": "ca1e25d6195fa34f8c5dc87690af5e090f0d832932b9a4e402fde0c4546ae4d0"
+          },
+          "achatConservationPct": 40.33201194452246,
+          "executions": [
+            {
+              "cout": "x1-central",
+              "seuil": 4,
+              "reunies": {
+                "trades": 76,
+                "fermes": 75,
+                "longs": 42,
+                "shorts": 34,
+                "finDonnees": 1,
+                "expectancyNette": -2.697952857082635,
+                "expectancyPct": -0.26979528570826333,
+                "pnlTotal": -205.04441713828027,
+                "pnlTotalPct": -2.0504441713828028,
+                "winRatePct": 14.473684210526317,
+                "profitFactor": 0.6888257525685415,
+                "ddRealiseMaxPct": 2.863534760750168,
+                "dureeMoyenneBarres": 14.25,
+                "fraisTotal": 76.15008639916564
+              },
+              "longue": {
+                "trades": 42,
+                "fermes": 42,
+                "longs": 42,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": 1.0380098614092153,
+                "expectancyPct": 0.10380098614092155,
+                "pnlTotal": 43.596414179187036,
+                "pnlTotalPct": 0.4359641417918704,
+                "winRatePct": 16.666666666666664,
+                "profitFactor": 1.1216611634276086,
+                "ddRealiseMaxPct": 1.6605468804516708,
+                "dureeMoyenneBarres": 15.714285714285714,
+                "fraisTotal": 42.04281961689804
+              },
+              "courte": {
+                "trades": 34,
+                "fermes": 33,
+                "longs": 0,
+                "shorts": 34,
+                "finDonnees": 1,
+                "expectancyNette": -7.312965626984333,
+                "expectancyPct": -0.7312965626984331,
+                "pnlTotal": -248.64083131746733,
+                "pnlTotalPct": -2.4864083131746733,
+                "winRatePct": 11.76470588235294,
+                "profitFactor": 0.1728369878519128,
+                "ddRealiseMaxPct": 2.4864083131746733,
+                "dureeMoyenneBarres": 12.441176470588236,
+                "fraisTotal": 34.1072667822676
+              }
+            },
+            {
+              "cout": "x2",
+              "seuil": 4,
+              "reunies": {
+                "trades": 76,
+                "fermes": 75,
+                "longs": 42,
+                "shorts": 34,
+                "finDonnees": 1,
+                "expectancyNette": -4.101457951210173,
+                "expectancyPct": -0.4101457951210173,
+                "pnlTotal": -311.71080429197315,
+                "pnlTotalPct": -3.1171080429197313,
+                "winRatePct": 13.157894736842104,
+                "profitFactor": 0.584536088884857,
+                "ddRealiseMaxPct": 3.4536893575697314,
+                "dureeMoyenneBarres": 14.25,
+                "fraisTotal": 152.2970304597008
+              },
+              "longue": {
+                "trades": 42,
+                "fermes": 42,
+                "longs": 42,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": -0.3633444144920094,
+                "expectancyPct": -0.036334441449200935,
+                "pnlTotal": -15.260465408664393,
+                "pnlTotalPct": -0.15260465408664395,
+                "winRatePct": 14.285714285714285,
+                "profitFactor": 0.9625435607735451,
+                "ddRealiseMaxPct": 1.8411070506344065,
+                "dureeMoyenneBarres": 15.714285714285714,
+                "fraisTotal": 84.06880834293429
+              },
+              "courte": {
+                "trades": 34,
+                "fermes": 33,
+                "longs": 0,
+                "shorts": 34,
+                "finDonnees": 1,
+                "expectancyNette": -8.719127614214964,
+                "expectancyPct": -0.8719127614214961,
+                "pnlTotal": -296.45033888330875,
+                "pnlTotalPct": -2.9645033888330876,
+                "winRatePct": 11.76470588235294,
+                "profitFactor": 0.1353418828259343,
+                "ddRealiseMaxPct": 2.9645033888330876,
+                "dureeMoyenneBarres": 12.441176470588236,
+                "fraisTotal": 68.22822211676655
+              }
+            },
+            {
+              "cout": "x3",
+              "seuil": 4,
+              "reunies": {
+                "trades": 76,
+                "fermes": 75,
+                "longs": 42,
+                "shorts": 34,
+                "finDonnees": 1,
+                "expectancyNette": -5.504905497451985,
+                "expectancyPct": -0.5504905497451985,
+                "pnlTotal": -418.3728178063509,
+                "pnlTotalPct": -4.183728178063509,
+                "winRatePct": 13.157894736842104,
+                "profitFactor": 0.5034858698531599,
+                "ddRealiseMaxPct": 4.183728178063509,
+                "dureeMoyenneBarres": 14.25,
+                "fraisTotal": 228.4408504921467
+              },
+              "longue": {
+                "trades": 42,
+                "fermes": 42,
+                "longs": 42,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": -1.7641379971139255,
+                "expectancyPct": -0.1764137997113926,
+                "pnlTotal": -74.09379587878487,
+                "pnlTotalPct": -0.7409379587878487,
+                "winRatePct": 14.285714285714285,
+                "profitFactor": 0.8380437238838012,
+                "ddRealiseMaxPct": 2.021595335863017,
+                "dureeMoyenneBarres": 15.714285714285714,
+                "fraisTotal": 126.07797627058774
+              },
+              "courte": {
+                "trades": 34,
+                "fermes": 33,
+                "longs": 0,
+                "shorts": 34,
+                "finDonnees": 1,
+                "expectancyNette": -10.125853586104885,
+                "expectancyPct": -1.0125853586104883,
+                "pnlTotal": -344.2790219275661,
+                "pnlTotalPct": -3.4427902192756608,
+                "winRatePct": 11.76470588235294,
+                "profitFactor": 0.10606499459833392,
+                "ddRealiseMaxPct": 3.4427902192756608,
+                "dureeMoyenneBarres": 12.441176470588236,
+                "fraisTotal": 102.36287422155898
+              }
+            },
+            {
+              "cout": "x1-central",
+              "seuil": 3,
+              "reunies": {
+                "trades": 95,
+                "fermes": 94,
+                "longs": 53,
+                "shorts": 42,
+                "finDonnees": 1,
+                "expectancyNette": -2.0910288284753205,
+                "expectancyPct": -0.20910288284753198,
+                "pnlTotal": -198.64773870515543,
+                "pnlTotalPct": -1.9864773870515544,
+                "winRatePct": 16.842105263157894,
+                "profitFactor": 0.7109057845839417,
+                "ddRealiseMaxPct": 2.441836895196128,
+                "dureeMoyenneBarres": 13.326315789473684,
+                "fraisTotal": 95.16211153793688
+              },
+              "longue": {
+                "trades": 53,
+                "fermes": 53,
+                "longs": 53,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": 1.0813875470022392,
+                "expectancyPct": 0.10813875470022398,
+                "pnlTotal": 57.31353999111868,
+                "pnlTotalPct": 0.5731353999111868,
+                "winRatePct": 18.867924528301888,
+                "profitFactor": 1.1557354521474157,
+                "ddRealiseMaxPct": 1.232934304891073,
+                "dureeMoyenneBarres": 14.09433962264151,
+                "fraisTotal": 53.05518436217666
+              },
+              "courte": {
+                "trades": 42,
+                "fermes": 41,
+                "longs": 0,
+                "shorts": 42,
+                "finDonnees": 1,
+                "expectancyNette": -6.094316159435097,
+                "expectancyPct": -0.6094316159435097,
+                "pnlTotal": -255.96127869627406,
+                "pnlTotalPct": -2.5596127869627407,
+                "winRatePct": 14.285714285714285,
+                "profitFactor": 0.19791483610837815,
+                "ddRealiseMaxPct": 2.5596127869627407,
+                "dureeMoyenneBarres": 12.357142857142858,
+                "fraisTotal": 42.10692717576025
+              }
+            },
+            {
+              "cout": "x1-central",
+              "seuil": 5,
+              "reunies": {
+                "trades": 53,
+                "fermes": 53,
+                "longs": 33,
+                "shorts": 20,
+                "finDonnees": 0,
+                "expectancyNette": -1.2022745448483378,
+                "expectancyPct": -0.12022745448483366,
+                "pnlTotal": -63.72055087696191,
+                "pnlTotalPct": -0.6372055087696191,
+                "winRatePct": 18.867924528301888,
+                "profitFactor": 0.8609688282256283,
+                "ddRealiseMaxPct": 1.944751425252341,
+                "dureeMoyenneBarres": 17.28301886792453,
+                "fraisTotal": 53.09559747911667
+              },
+              "longue": {
+                "trades": 33,
+                "fermes": 33,
+                "longs": 33,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": 1.7345412095925212,
+                "expectancyPct": 0.17345412095925222,
+                "pnlTotal": 57.2398599165532,
+                "pnlTotalPct": 0.572398599165532,
+                "winRatePct": 18.181818181818183,
+                "profitFactor": 1.1917528861018556,
+                "ddRealiseMaxPct": 1.5988882725093418,
+                "dureeMoyenneBarres": 17.636363636363637,
+                "fraisTotal": 33.045142501208886
+              },
+              "courte": {
+                "trades": 20,
+                "fermes": 20,
+                "longs": 0,
+                "shorts": 20,
+                "finDonnees": 0,
+                "expectancyNette": -6.048020539675755,
+                "expectancyPct": -0.6048020539675755,
+                "pnlTotal": -120.9604107935151,
+                "pnlTotalPct": -1.209604107935151,
+                "winRatePct": 20,
+                "profitFactor": 0.2430985262145129,
+                "ddRealiseMaxPct": 1.2410308402405719,
+                "dureeMoyenneBarres": 16.7,
+                "fraisTotal": 20.05045497790781
+              }
+            }
+          ],
+          "empreinteChronologieX1": "16be4b40615fbcb8d4feedb576cc67d4013aaa2197e28ffa66b7beac0bccbc0d"
+        }
+      }
+    },
+    {
+      "id": "ETHUSDT 4h",
+      "w1": {
+        "statut": "disponible",
+        "resultat": {
+          "acquisition": {
+            "endpoint": "https://data-api.binance.vision/api/v3/klines",
+            "acquisLeUtc": "2026-10-07T10:47:20.767Z",
+            "modeCalcul": "reseau",
+            "nombre": 4545,
+            "premierOpen": "2024-07-01T00:00:00.000Z",
+            "dernierClose": "2026-07-28T12:00:00.000Z",
+            "trous": 0,
+            "sha256Ohlcv": "8496bf8f66d54adc360021f6e8b0a26eedd8535081f10d06d7c53256db00ae9e"
+          },
+          "achatConservationPct": -45.41615282593015,
+          "rejeu": {
+            "seuil-4": {
+              "global": {
+                "nbTrades": 164,
+                "winRate": 32.31707317073171,
+                "expectancy": 0.12363592062168084,
+                "pnlComposePct": -14.151493696753704,
+                "maxDrawdownPct": -47.88988179446773,
+                "dureeMoyenne": 19.701219512195124
+              },
+              "m1": {
+                "nbTrades": 82,
+                "winRate": 29.268292682926827,
+                "expectancy": 0.25877574004909715,
+                "pnlComposePct": -1.0300366124954885,
+                "maxDrawdownPct": -47.88988179446773,
+                "dureeMoyenne": 19.804878048780488
+              },
+              "m2": {
+                "nbTrades": 82,
+                "winRate": 35.36585365853659,
+                "expectancy": -0.011503898805735817,
+                "pnlComposePct": -13.258019539607957,
+                "maxDrawdownPct": -36.49402334486668,
+                "dureeMoyenne": 19.597560975609756
+              },
+              "longs": {
+                "nbTrades": 79,
+                "winRate": 29.11392405063291,
+                "expectancy": 0.15996046983216838,
+                "pnlComposePct": -8.443861633358141,
+                "maxDrawdownPct": -36.52736876945059,
+                "dureeMoyenne": 19.873417721518987
+              },
+              "shorts": {
+                "nbTrades": 85,
+                "winRate": 35.294117647058826,
+                "expectancy": 0.08987545723781588,
+                "pnlComposePct": -6.2340244632632995,
+                "maxDrawdownPct": -46.00949395146956,
+                "dureeMoyenne": 19.541176470588237
+              }
+            },
+            "seuil-3": {
+              "global": {
+                "nbTrades": 217,
+                "winRate": 28.57142857142857,
+                "expectancy": 0.09314030475808219,
+                "pnlComposePct": -16.723319845303454,
+                "maxDrawdownPct": -54.01240439781528,
+                "dureeMoyenne": 16.912442396313363
+              },
+              "m1": {
+                "nbTrades": 117,
+                "winRate": 24.786324786324787,
+                "expectancy": 0.05741890569760183,
+                "pnlComposePct": -16.805999326714193,
+                "maxDrawdownPct": -54.01240439781528,
+                "dureeMoyenne": 15.94017094017094
+              },
+              "m2": {
+                "nbTrades": 100,
+                "winRate": 33,
+                "expectancy": 0.13493434165884427,
+                "pnlComposePct": 0.09938154282957967,
+                "maxDrawdownPct": -39.34300655700406,
+                "dureeMoyenne": 18.05
+              },
+              "longs": {
+                "nbTrades": 102,
+                "winRate": 29.411764705882355,
+                "expectancy": 0.33098637577564194,
+                "pnlComposePct": 12.3038887793826,
+                "maxDrawdownPct": -39.475953308635944,
+                "dureeMoyenne": 17.686274509803923
+              },
+              "shorts": {
+                "nbTrades": 115,
+                "winRate": 27.82608695652174,
+                "expectancy": -0.11781881910097065,
+                "pnlComposePct": -25.847020027693922,
+                "maxDrawdownPct": -54.74081335455354,
+                "dureeMoyenne": 16.22608695652174
+              }
+            },
+            "seuil-5": {
+              "global": {
+                "nbTrades": 123,
+                "winRate": 33.33333333333333,
+                "expectancy": 0.27225809865435313,
+                "pnlComposePct": 3.134875806972981,
+                "maxDrawdownPct": -43.10289092173582,
+                "dureeMoyenne": 22.414634146341463
+              },
+              "m1": {
+                "nbTrades": 61,
+                "winRate": 32.78688524590164,
+                "expectancy": 0.6081275954218593,
+                "pnlComposePct": 18.328642025350582,
+                "maxDrawdownPct": -39.21127824653417,
+                "dureeMoyenne": 23.262295081967213
+              },
+              "m2": {
+                "nbTrades": 62,
+                "winRate": 33.87096774193548,
+                "expectancy": -0.05819414816529013,
+                "pnlComposePct": -12.840311490368105,
+                "maxDrawdownPct": -43.102890921735835,
+                "dureeMoyenne": 21.580645161290324
+              },
+              "longs": {
+                "nbTrades": 56,
+                "winRate": 35.714285714285715,
+                "expectancy": 0.8060623487095623,
+                "pnlComposePct": 30.11121525129401,
+                "maxDrawdownPct": -33.780685867327435,
+                "dureeMoyenne": 24.589285714285715
+              },
+              "shorts": {
+                "nbTrades": 67,
+                "winRate": 31.343283582089555,
+                "expectancy": -0.17390664766044858,
+                "pnlComposePct": -20.73329296957188,
+                "maxDrawdownPct": -45.87792045302611,
+                "dureeMoyenne": 20.597014925373134
+              }
+            }
+          },
+          "executions": [
+            {
+              "cout": "x1-central",
+              "seuil": 4,
+              "reunies": {
+                "trades": 165,
+                "fermes": 164,
+                "longs": 79,
+                "shorts": 86,
+                "finDonnees": 1,
+                "expectancyNette": -0.15627385083158102,
+                "expectancyPct": -0.01562738508315806,
+                "pnlTotal": -25.78518538721087,
+                "pnlTotalPct": -0.2578518538721087,
+                "winRatePct": 30.909090909090907,
+                "profitFactor": 0.9928928942185263,
+                "ddRealiseMaxPct": 6.68516656776475,
+                "dureeMoyenneBarres": 19.587878787878786,
+                "fraisTotal": 165.0250947579579
+              },
+              "longue": {
+                "trades": 79,
+                "fermes": 79,
+                "longs": 79,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": 0.19832095299892843,
+                "expectancyPct": 0.01983209529989256,
+                "pnlTotal": 15.667355286915347,
+                "pnlTotalPct": 0.15667355286915347,
+                "winRatePct": 27.848101265822784,
+                "profitFactor": 1.0088137423271086,
+                "ddRealiseMaxPct": 4.6001025681708985,
+                "dureeMoyenneBarres": 19.873417721518987,
+                "fraisTotal": 79.04735735632161
+              },
+              "courte": {
+                "trades": 86,
+                "fermes": 85,
+                "longs": 0,
+                "shorts": 86,
+                "finDonnees": 1,
+                "expectancyNette": -0.4820062869084435,
+                "expectancyPct": -0.04820062869084404,
+                "pnlTotal": -41.45254067412614,
+                "pnlTotalPct": -0.41452540674126137,
+                "winRatePct": 33.72093023255814,
+                "profitFactor": 0.9775990320437742,
+                "ddRealiseMaxPct": 6.3778731280580985,
+                "dureeMoyenneBarres": 19.325581395348838,
+                "fraisTotal": 85.97773740163623
+              }
+            },
+            {
+              "cout": "x2",
+              "seuil": 4,
+              "reunies": {
+                "trades": 165,
+                "fermes": 164,
+                "longs": 79,
+                "shorts": 86,
+                "finDonnees": 1,
+                "expectancyNette": -1.556567698443869,
+                "expectancyPct": -0.15565676984438703,
+                "pnlTotal": -256.8336702432384,
+                "pnlTotalPct": -2.5683367024323838,
+                "winRatePct": 30.303030303030305,
+                "profitFactor": 0.932199059527481,
+                "ddRealiseMaxPct": 7.5111879506478,
+                "dureeMoyenneBarres": 19.587878787878786,
+                "fraisTotal": 330.052947024299
+              },
+              "longue": {
+                "trades": 79,
+                "fermes": 79,
+                "longs": 79,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": -1.20227762798052,
+                "expectancyPct": -0.12022776279805188,
+                "pnlTotal": -94.97993261046109,
+                "pnlTotalPct": -0.9497993261046109,
+                "winRatePct": 27.848101265822784,
+                "profitFactor": 0.9488207651999584,
+                "ddRealiseMaxPct": 4.815307667742415,
+                "dureeMoyenneBarres": 19.873417721518987,
+                "fraisTotal": 158.06308315054005
+              },
+              "courte": {
+                "trades": 86,
+                "fermes": 85,
+                "longs": 0,
+                "shorts": 86,
+                "finDonnees": 1,
+                "expectancyNette": -1.8820202050322934,
+                "expectancyPct": -0.1882020205032295,
+                "pnlTotal": -161.85373763277724,
+                "pnlTotalPct": -1.6185373763277726,
+                "winRatePct": 32.55813953488372,
+                "profitFactor": 0.916234537770283,
+                "ddRealiseMaxPct": 7.055411852946763,
+                "dureeMoyenneBarres": 19.325581395348838,
+                "fraisTotal": 171.98986387375902
+              }
+            },
+            {
+              "cout": "x3",
+              "seuil": 4,
+              "reunies": {
+                "trades": 165,
+                "fermes": 164,
+                "longs": 79,
+                "shorts": 86,
+                "finDonnees": 1,
+                "expectancyNette": -2.9568852792106686,
+                "expectancyPct": -0.29568852792106676,
+                "pnlTotal": -487.8860710697603,
+                "pnlTotalPct": -4.878860710697603,
+                "winRatePct": 28.484848484848484,
+                "profitFactor": 0.8764652232628373,
+                "ddRealiseMaxPct": 8.337252211167048,
+                "dureeMoyenneBarres": 19.587878787878786,
+                "fraisTotal": 495.08359641241026
+              },
+              "longue": {
+                "trades": 79,
+                "fermes": 79,
+                "longs": 79,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": -2.602315985765573,
+                "expectancyPct": -0.26023159857655737,
+                "pnlTotal": -205.5829628754803,
+                "pnlTotalPct": -2.055829628754803,
+                "winRatePct": 25.31645569620253,
+                "profitFactor": 0.8937148289038126,
+                "ddRealiseMaxPct": 5.079118715351217,
+                "dureeMoyenneBarres": 19.873417721518987,
+                "fraisTotal": 237.0471963502121
+              },
+              "courte": {
+                "trades": 86,
+                "fermes": 85,
+                "longs": 0,
+                "shorts": 86,
+                "finDonnees": 1,
+                "expectancyNette": -3.2825942813288376,
+                "expectancyPct": -0.3282594281328836,
+                "pnlTotal": -282.30310819428,
+                "pnlTotalPct": -2.8230310819428004,
+                "winRatePct": 31.3953488372093,
+                "profitFactor": 0.8599078363043255,
+                "ddRealiseMaxPct": 7.733222896838135,
+                "dureeMoyenneBarres": 19.325581395348838,
+                "fraisTotal": 258.0364000621981
+              }
+            },
+            {
+              "cout": "x1-central",
+              "seuil": 3,
+              "reunies": {
+                "trades": 218,
+                "fermes": 217,
+                "longs": 102,
+                "shorts": 116,
+                "finDonnees": 1,
+                "expectancyNette": -0.4635925320226669,
+                "expectancyPct": -0.046359253202266734,
+                "pnlTotal": -101.06317198094139,
+                "pnlTotalPct": -1.010631719809414,
+                "winRatePct": 27.06422018348624,
+                "profitFactor": 0.9761686354776796,
+                "ddRealiseMaxPct": 8.138638213888601,
+                "dureeMoyenneBarres": 16.839449541284402,
+                "fraisTotal": 218.23802374029958
+              },
+              "longue": {
+                "trades": 102,
+                "fermes": 102,
+                "longs": 102,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": 1.906498633297852,
+                "expectancyPct": 0.1906498633297852,
+                "pnlTotal": 194.4628605963809,
+                "pnlTotalPct": 1.944628605963809,
+                "winRatePct": 27.450980392156865,
+                "profitFactor": 1.1032008432677916,
+                "ddRealiseMaxPct": 5.155061130173705,
+                "dureeMoyenneBarres": 17.686274509803923,
+                "fraisTotal": 102.14830558308971
+              },
+              "courte": {
+                "trades": 116,
+                "fermes": 115,
+                "longs": 0,
+                "shorts": 116,
+                "finDonnees": 1,
+                "expectancyNette": -2.547638211873472,
+                "expectancyPct": -0.25476382118734736,
+                "pnlTotal": -295.5260325773228,
+                "pnlTotalPct": -2.9552603257732275,
+                "winRatePct": 26.72413793103448,
+                "profitFactor": 0.87458837530993,
+                "ddRealiseMaxPct": 8.291615562196695,
+                "dureeMoyenneBarres": 16.094827586206897,
+                "fraisTotal": 116.08971815721006
+              }
+            },
+            {
+              "cout": "x1-central",
+              "seuil": 5,
+              "reunies": {
+                "trades": 123,
+                "fermes": 123,
+                "longs": 56,
+                "shorts": 67,
+                "finDonnees": 0,
+                "expectancyNette": 1.3181055289450478,
+                "expectancyPct": 0.13181055289450463,
+                "pnlTotal": 162.1269800602409,
+                "pnlTotalPct": 1.6212698006024089,
+                "winRatePct": 32.52032520325203,
+                "profitFactor": 1.0559049772075964,
+                "ddRealiseMaxPct": 5.746989873659509,
+                "dureeMoyenneBarres": 22.414634146341463,
+                "fraisTotal": 123.28605140636246
+              },
+              "longue": {
+                "trades": 56,
+                "fermes": 56,
+                "longs": 56,
+                "shorts": 0,
+                "finDonnees": 0,
+                "expectancyNette": 6.652563270262276,
+                "expectancyPct": 0.6652563270262281,
+                "pnlTotal": 372.54354313468747,
+                "pnlTotalPct": 3.7254354313468747,
+                "winRatePct": 35.714285714285715,
+                "profitFactor": 1.3003807149373467,
+                "ddRealiseMaxPct": 4.198075752942406,
+                "dureeMoyenneBarres": 24.589285714285715,
+                "fraisTotal": 56.21437896104788
+              },
+              "courte": {
+                "trades": 67,
+                "fermes": 67,
+                "longs": 0,
+                "shorts": 67,
+                "finDonnees": 0,
+                "expectancyNette": -3.1405457175290583,
+                "expectancyPct": -0.3140545717529059,
+                "pnlTotal": -210.4165630744469,
+                "pnlTotalPct": -2.104165630744469,
+                "winRatePct": 29.850746268656714,
+                "profitFactor": 0.8732283453964013,
+                "ddRealiseMaxPct": 6.271203684784439,
+                "dureeMoyenneBarres": 20.597014925373134,
+                "fraisTotal": 67.07167244531456
+              }
+            }
+          ],
+          "empreinteChronologieX1": "5b6fa8ccd45b63f78d1d788ee81a74673a07febdfde8a87d094517f36c9967b7"
+        }
+      },
+      "w2": {
+        "statut": "disponible",
+        "resultat": {
+          "acquisition": {
+            "endpoint": "https://data-api.binance.vision/api/v3/klines",
+            "acquisLeUtc": "2026-10-07T10:47:20.961Z",
+            "modeCalcul": "reseau",
+            "nombre": 620,
+            "premierOpen": "2026-06-25T16:00:00.000Z",
+            "dernierClose": "2026-10-07T00:00:00.000Z",
+            "trous": 0,
+            "sha256Ohlcv": "57c4c6af60cde531559aab975713310e0c67a92651da51bfcdc5330a4664233f"
+          },
+          "achatConservationPct": 40.33201194452246,
+          "executions": [
+            {
+              "cout": "x1-central",
+              "seuil": 4,
+              "reunies": {
+                "trades": 18,
+                "fermes": 17,
+                "longs": 11,
+                "shorts": 7,
+                "finDonnees": 1,
+                "expectancyNette": -2.6356305681516257,
+                "expectancyPct": -0.26356305681516273,
+                "pnlTotal": -47.44135022672926,
+                "pnlTotalPct": -0.4744135022672926,
+                "winRatePct": 11.11111111111111,
+                "profitFactor": 0.8577420585379198,
+                "ddRealiseMaxPct": 2.5526534393940263,
+                "dureeMoyenneBarres": 13.722222222222221,
+                "fraisTotal": 18.1135170068908
+              },
+              "longue": {
+                "trades": 11,
+                "fermes": 10,
+                "longs": 11,
+                "shorts": 0,
+                "finDonnees": 1,
+                "expectancyNette": 7.982151248703386,
+                "expectancyPct": 0.7982151248703385,
+                "pnlTotal": 87.80366373573725,
+                "pnlTotalPct": 0.8780366373573725,
+                "winRatePct": 18.181818181818183,
+                "profitFactor": 1.4429087763397395,
+                "ddRealiseMaxPct": 1.6530745538695686,
+                "dureeMoyenneBarres": 16.454545454545453,
+                "fraisTotal": 11.049426545140438
+              },
+              "courte": {
+                "trades": 7,
+                "fermes": 7,
+                "longs": 0,
+                "shorts": 7,
+                "finDonnees": 0,
+                "expectancyNette": -19.32071628035236,
+                "expectancyPct": -1.9320716280352357,
+                "pnlTotal": -135.24501396246652,
+                "pnlTotalPct": -1.352450139624665,
+                "winRatePct": 0,
+                "profitFactor": 0,
+                "ddRealiseMaxPct": 1.352450139624665,
+                "dureeMoyenneBarres": 9.428571428571429,
+                "fraisTotal": 7.064090461750359
+              }
+            },
+            {
+              "cout": "x2",
+              "seuil": 4,
+              "reunies": {
+                "trades": 18,
+                "fermes": 17,
+                "longs": 11,
+                "shorts": 7,
+                "finDonnees": 1,
+                "expectancyNette": -4.046876513849945,
+                "expectancyPct": -0.4046876513849946,
+                "pnlTotal": -72.84377724929901,
+                "pnlTotalPct": -0.72843777249299,
+                "winRatePct": 11.11111111111111,
+                "profitFactor": 0.795286266584434,
+                "ddRealiseMaxPct": 2.7200005815499346,
+                "dureeMoyenneBarres": 13.722222222222221,
+                "fraisTotal": 36.22544720288731
+              },
+              "longue": {
+                "trades": 11,
+                "fermes": 10,
+                "longs": 11,
+                "shorts": 0,
+                "finDonnees": 1,
+                "expectancyNette": 6.5745474530931975,
+                "expectancyPct": 0.6574547453093197,
+                "pnlTotal": 72.32002198402517,
+                "pnlTotalPct": 0.7232002198402518,
+                "winRatePct": 18.181818181818183,
+                "profitFactor": 1.343288106443385,
+                "ddRealiseMaxPct": 1.7776246450009459,
+                "dureeMoyenneBarres": 16.454545454545453,
+                "fraisTotal": 22.094414436420447
+              },
+              "courte": {
+                "trades": 7,
+                "fermes": 7,
+                "longs": 0,
+                "shorts": 7,
+                "finDonnees": 0,
+                "expectancyNette": -20.737685604760596,
+                "expectancyPct": -2.073768560476059,
+                "pnlTotal": -145.16379923332417,
+                "pnlTotalPct": -1.4516379923332416,
+                "winRatePct": 0,
+                "profitFactor": 0,
+                "ddRealiseMaxPct": 1.4516379923332416,
+                "dureeMoyenneBarres": 9.428571428571429,
+                "fraisTotal": 14.13103276646686
+              }
+            },
+            {
+              "cout": "x3",
+              "seuil": 4,
+              "reunies": {
+                "trades": 18,
+                "fermes": 17,
+                "longs": 11,
+                "shorts": 7,
+                "finDonnees": 1,
+                "expectancyNette": -5.45799938110213,
+                "expectancyPct": -0.545799938110213,
+                "pnlTotal": -98.24398885983835,
+                "pnlTotalPct": -0.9824398885983835,
+                "winRatePct": 11.11111111111111,
+                "profitFactor": 0.7402159566441563,
+                "ddRealiseMaxPct": 2.8873155396157513,
+                "dureeMoyenneBarres": 13.722222222222221,
+                "fraisTotal": 54.33579496171793
+              },
+              "longue": {
+                "trades": 11,
+                "fermes": 10,
+                "longs": 11,
+                "shorts": 0,
+                "finDonnees": 1,
+                "expectancyNette": 5.167508238316599,
+                "expectancyPct": 0.5167508238316604,
+                "pnlTotal": 56.842590621482586,
+                "pnlTotalPct": 0.5684259062148258,
+                "winRatePct": 18.181818181818183,
+                "profitFactor": 1.2547977849467677,
+                "ddRealiseMaxPct": 1.902125251481661,
+                "dureeMoyenneBarres": 16.454545454545453,
+                "fraisTotal": 33.13496633543538
+              },
+              "courte": {
+                "trades": 7,
+                "fermes": 7,
+                "longs": 0,
+                "shorts": 7,
+                "finDonnees": 0,
+                "expectancyNette": -22.155225640188707,
+                "expectancyPct": -2.2155225640188703,
+                "pnlTotal": -155.08657948132094,
+                "pnlTotalPct": -1.5508657948132094,
+                "winRatePct": 0,
+                "profitFactor": 0,
+                "ddRealiseMaxPct": 1.5508657948132094,
+                "dureeMoyenneBarres": 9.428571428571429,
+                "fraisTotal": 21.200828626282558
+              }
+            },
+            {
+              "cout": "x1-central",
+              "seuil": 3,
+              "reunies": {
+                "trades": 31,
+                "fermes": 30,
+                "longs": 16,
+                "shorts": 15,
+                "finDonnees": 1,
+                "expectancyNette": -5.592152209459852,
+                "expectancyPct": -0.559215220945985,
+                "pnlTotal": -173.3567184932554,
+                "pnlTotalPct": -1.733567184932554,
+                "winRatePct": 9.67741935483871,
+                "profitFactor": 0.6423661337246855,
+                "ddRealiseMaxPct": 3.6305068698995866,
+                "dureeMoyenneBarres": 9.516129032258064,
+                "fraisTotal": 31.141645930527496
+              },
+              "longue": {
+                "trades": 16,
+                "fermes": 15,
+                "longs": 16,
+                "shorts": 0,
+                "finDonnees": 1,
+                "expectancyNette": 3.406445315562784,
+                "expectancyPct": 0.3406445315562785,
+                "pnlTotal": 54.503125049004545,
+                "pnlTotalPct": 0.5450312504900454,
+                "winRatePct": 12.5,
+                "profitFactor": 1.2160913593731686,
+                "ddRealiseMaxPct": 1.8836220421885084,
+                "dureeMoyenneBarres": 12.75,
+                "fraisTotal": 16.035269197123064
+              },
+              "courte": {
+                "trades": 15,
+                "fermes": 15,
+                "longs": 0,
+                "shorts": 15,
+                "finDonnees": 0,
+                "expectancyNette": -15.190656236150662,
+                "expectancyPct": -1.5190656236150664,
+                "pnlTotal": -227.85984354225994,
+                "pnlTotalPct": -2.2785984354225994,
+                "winRatePct": 6.666666666666667,
+                "profitFactor": 0.019998913908417813,
+                "ddRealiseMaxPct": 2.2785984354225994,
+                "dureeMoyenneBarres": 6.066666666666666,
+                "fraisTotal": 15.106376733404424
+              }
+            },
+            {
+              "cout": "x1-central",
+              "seuil": 5,
+              "reunies": {
+                "trades": 12,
+                "fermes": 11,
+                "longs": 7,
+                "shorts": 5,
+                "finDonnees": 1,
+                "expectancyNette": 9.809921366013972,
+                "expectancyPct": 0.9809921366013971,
+                "pnlTotal": 117.71905639216767,
+                "pnlTotalPct": 1.1771905639216766,
+                "winRatePct": 16.666666666666664,
+                "profitFactor": 1.6993439854244388,
+                "ddRealiseMaxPct": 0.9298999779852448,
+                "dureeMoyenneBarres": 18.583333333333332,
+                "fraisTotal": 12.13450309335077
+              },
+              "longue": {
+                "trades": 7,
+                "fermes": 6,
+                "longs": 7,
+                "shorts": 0,
+                "finDonnees": 1,
+                "expectancyNette": 27.47573687956892,
+                "expectancyPct": 2.747573687956892,
+                "pnlTotal": 192.33015815698244,
+                "pnlTotalPct": 1.9233015815698244,
+                "winRatePct": 28.57142857142857,
+                "profitFactor": 3.0522499998828327,
+                "ddRealiseMaxPct": 0.6938623689961337,
+                "dureeMoyenneBarres": 23.571428571428573,
+                "fraisTotal": 7.099714936546764
+              },
+              "courte": {
+                "trades": 5,
+                "fermes": 5,
+                "longs": 0,
+                "shorts": 5,
+                "finDonnees": 0,
+                "expectancyNette": -14.922220352962956,
+                "expectancyPct": -1.4922220352962956,
+                "pnlTotal": -74.61110176481478,
+                "pnlTotalPct": -0.7461110176481478,
+                "winRatePct": 0,
+                "profitFactor": 0,
+                "ddRealiseMaxPct": 0.7461110176481478,
+                "dureeMoyenneBarres": 11.6,
+                "fraisTotal": 5.034788156804006
+              }
+            }
+          ],
+          "empreinteChronologieX1": "324468003d070824a6df4bc805f3f2fb4ccd6930d21d39733f9cfafc852dc14a"
+        }
+      }
+    }
+  ],
+  "strategieValideeAutomatiquement": false
+}

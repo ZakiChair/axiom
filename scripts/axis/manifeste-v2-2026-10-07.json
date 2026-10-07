@@ -1,0 +1,156 @@
+{
+  "schema": "axiom-axis-backtest-v2",
+  "figeLeUtc": "2026-10-07T12:54:00Z",
+  "refigeage": "premier figeage candidat à 12:17Z (SHA-256 48eafec2…870c), revu avant toute exécution ; re-figé après la revue (journal-revue-v2) : données plus tolérantes (bougies invalides écartées et comptées comme manquantes, tolérance de fin), comparaison pré-déclarée à l'EMA 200 seule pour la formulation de l'infobulle, point d'entrée du paquet indicateurs figé, libellés des contrôles. Critères C1–C3, cellules, fenêtre et coûts inchangés",
+  "objet": "Test final d'AXIS v2 (stratAxis) sur des données jamais vues, après la demande du propriétaire du 7 octobre 2026 (« améliore AXIS jusqu'à ce que les signaux d'achat/vente soient pertinents »). Protocole, critères et suites fixés avant tout téléchargement de ces données ; exécution unique.",
+  "historique": {
+    "v1": "scripts/axis/manifeste-2026-10-07.json : verdict DÉFAVORABLE (8 blocs en échec sur 24), scripts/axis/rapport-2026-10-07.md",
+    "diagnosticV1": "sur les données déjà vues, les ▲/▼ de la v1 n'ont pas de pouvoir prédictif mesurable (rendements excédentaires proches de 0, |t| < 2) ; en 1h les frais dominent ; la jambe vendeuse perd ; le long seul en 4h est positif",
+    "exploration": "environ 35 lectures du même score mesurées UNIQUEMENT sur BTCUSDT et ETHUSDT du 2024-07-01 au 2026-10-07 : épisodes v1 (long/short, long seul, short seul), flèche à flèche, puis long/plat avec achat armé à score ≥ 4, 5 ou 6, vente à score ≤ 0, −2, −3, −4, −5 ou au retournement du Supertrend, avec ou sans filtre close > EMA 200 ; unités 1h, 4h, 1d natives, puis 2h, 4h (quatre phases), 6h, 8h, 12h et 1d agrégées depuis le 1h ; fill à l'open suivant, coûts 0,07 % par côté, test de décalage circulaire",
+    "choixV2": "centre du plateau stable plutôt que meilleure cellule : achat à score ≥ +5 avec close > EMA 200, vente à score ≤ −4, long/plat, à partir du 4h (17 cellules agrégées positives sur 18, 2h sans avantage). En 4h natif, BTCUSDT 36 trades à +2,11 % net par trade (coûts x1), p 0,013 ; ETHUSDT 33 trades à +2,67 %, p 0,040. Mesures en échantillon après sélection, donc optimistes.",
+    "parametresNonAjustes": "EMA 20/50, Supertrend 10 ×3, ADX 14 ≥ 20, MACD 12/26/9, RSI 14, CMF 20 : inchangés depuis la v1"
+  },
+  "statutIndependance": "les données de test sont antérieures au 2024-07-01 : aucune campagne du dépôt ne les a lues (fenêtres à partir du 2024-07-01 seulement) et l'exploration ne les a pas touchées. Seule requête préalable : la date de la première kline journalière de chaque symbole (faisabilité). Réserve : les grandes phases du marché crypto 2017-2024 sont connues, et le filtre de tendance exploite un fait stylisé répandu ; C3 mesure le timing au-delà de la simple exposition.",
+  "signal": {
+    "indicateur": "stratAxis",
+    "version": "v2",
+    "params": { "seuil": 5, "seuilVente": 4, "emaTendance": 200, "emaRapide": 20, "emaLente": 50, "stPeriode": 10, "stMult": 3, "seuilAdx": 20 },
+    "coeursFixes": "DMI/ADX 14, MACD 12/26/9, RSI 14, CMF 20",
+    "position": "1 quand la sortie prixSignal du chart est définie (achat affiché), 0 sinon : exactement le calcul du chart (votesAxis, positionsAxis, fin = n−2)",
+    "entree": "passage de la position de 0 à 1 (le ▲ « Achat » du chart)",
+    "sortie": "passage de 1 à 0 (le ▼ « Vente » du chart) ; aucune vente à découvert"
+  },
+  "marche": {
+    "type": "spot",
+    "source": "Binance Spot",
+    "endpoint": "https://data-api.binance.vision/api/v3/klines",
+    "remarqueEndpoint": "miroir public des données de marché de Binance (même API /api/v3/klines) ; api.binance.com répond 451 depuis l'environnement de calcul",
+    "funding": "non applicable",
+    "tailleFixeQuote": 1000,
+    "capitalInitialQuote": 10000
+  },
+  "cellules": [
+    { "symbol": "BTCUSDT", "timeframe": "4h", "debutInclus": "2017-09-01T00:00:00Z" },
+    { "symbol": "ETHUSDT", "timeframe": "4h", "debutInclus": "2017-09-01T00:00:00Z" },
+    { "symbol": "XRPUSDT", "timeframe": "4h", "debutInclus": "2018-06-01T00:00:00Z" },
+    { "symbol": "SOLUSDT", "timeframe": "4h", "debutInclus": "2020-09-01T00:00:00Z" }
+  ],
+  "choixCellules": "4h, unité de conception de la v2 et son minimum ; deux actifs de l'exploration et deux actifs jamais utilisés par AXIS. Le 1d (environ 12 trades par actif sur la fenêtre) ne permet pas les critères ; il n'est pas mesuré.",
+  "fenetre": {
+    "id": "jamais-vue",
+    "finExclue": "2024-07-01T00:00:00Z",
+    "debuts": "premier jour du mois suivant la cotation sur Binance Spot (BTCUSDT et ETHUSDT : 2017-08-17 ; XRPUSDT : 2018-05-04 ; SOLUSDT : 2020-08-11)",
+    "warmupBougies": 300,
+    "evaluation": "fills mesurés à partir de l'open de la 301e bougie (debutEvaluationMs) ; décisions à partir de la clôture de la 300e (indice 299) ; une position née pendant le warmup ne produit aucune entrée",
+    "bougies": "ouvertes à partir de debutInclus et clôturées au plus tard à finExclue (dernière attendue : open 2024-06-30T20:00Z)",
+    "retardMaxPremiereBougieH": 24,
+    "avanceMaxDerniereClotureH": 24,
+    "partMaxBougiesManquantes": 0.01,
+    "trous": "bougies manquantes (maintenances Binance) comptées, datées et rapportées ; série utilisée telle que servie, sans bougie reconstituée",
+    "bougiesEcartees": "une bougie servie à OHLCV non fini ou incohérent (open, close ou low ≤ 0 ; volume < 0 ; low > min(open, close) ; high < max(open, close)) ou à closeTime ≠ open + 4 h − 1 ms est écartée, datée avec sa raison et comptée comme manquante",
+    "serieInexploitable": "cellule indisponible si la série est vide, si une bougie sort de la grille 4h, si les temps ne sont pas strictement croissants, si la première bougie ouvre plus de 24 h après debutInclus, si la dernière clôture plus de 24 h avant finExclue, ou si plus de 1 % des bougies attendues manquent (écartées comprises)",
+    "erreursAcquisition": "réponse illisible, erreur réseau, HTTP ou de cache : arrêt du run avant toute mesure (les quatre séries sont acquises et validées avant le premier calcul), cause journalisée, puis relance"
+  },
+  "mesures": {
+    "execution": "runBacktest, une jambe longue : entrée = position croise 0,5 à la hausse ; sortie = position < 0,5 ; décision à la clôture, fill à l'open suivant ; position ouverte liquidée au dernier close (fin-donnees)",
+    "coutsParCotePct": [
+      { "id": "x1-central", "frais": 0.05, "slippage": 0.02 },
+      { "id": "x2", "frais": 0.1, "slippage": 0.04 },
+      { "id": "x3", "frais": 0.15, "slippage": 0.06 }
+    ],
+    "expectancyNette": "moyenne des pnl nets en USDT par trade (taille fixe 1000 USDT), trade fin-données compris",
+    "rejeu": "construireTradesStrategie sur la position (close-à-close, hors frais), trades clos nés à partir de la décision 299 (le trade encore ouvert à la fin n'y entre pas) ; statsTrades sur la fenêtre évaluée et par moitié",
+    "moities": "frontière au milieu des décisions évaluées (indices 299 à n−2) ; un trade est rangé selon sa bougie d'entrée",
+    "timing": {
+      "statistique": "rendement log brut capté : somme, sur les décisions évaluées i, de position × ln(open[i+2]/open[i+1]) (dernière décision : ln(close[n−1]/open[n−1])), soit le rendement brut des fills du moteur sans coûts",
+      "positionEvaluee": "position du moteur : seuls les achats nés à partir de la décision 299",
+      "nul": "décalage circulaire de cette position de k bougies sur la fenêtre évaluée de chaque cellule : même exposition, mêmes durées, synchronisation avec les prix détruite",
+      "commun": "un même k pour les quatre cellules, qui préserve la corrélation entre actifs ; k = floor(Lmin × (fractionMin + (fractionMax − fractionMin) × u)), Lmin = plus courte fenêtre évaluée, u uniforme sur [0, 1[",
+      "tirages": 1999,
+      "graine": 20261007,
+      "generateur": "mulberry32",
+      "fractionMin": 0.1,
+      "fractionMax": 0.9,
+      "pValeur": "(1 + nombre de tirages dont la statistique décalée est ≥ à l'observée) / (tirages + 1), unilatérale"
+    },
+    "coupesCausalite": [0.4, 0.7, 0.9],
+    "controlesBloquants": [
+      "position de campagne (sortie prixSignal via le registre) = recalcul direct depuis les fonctions exportées (votesAxis, EMA de tendance, positionsAxis, fin = n−2) à chaque bougie ; marqueurs du chart (120 au plus) aux bougies et dans le sens des changements de position. Même code que le signal : la logique du score est couverte par les tests unitaires, pas par ce contrôle",
+      "causalité sur les données réelles : la position calculée sur trois préfixes (40 %, 70 %, 90 % de la série) est identique à celle de la série complète jusqu'à l'avant-dernière bougie du préfixe",
+      "coûts x1 : chronologie des décisions du moteur (entrées, sorties par règle, position fin-données) identique aux trades du rejeu nés après le warmup",
+      "chronologie des fills identique à tous les niveaux de coût, et sans coût",
+      "statistique de timing observée = somme des ln(prixSortie/prixEntree) d'une exécution sans frais ni slippage (écart ≤ 1e-9)",
+      "en cas d'écart : arrêt sans verdict ; le message et la trace (fichier horodaté distinct) ne nomment que la cellule et le contrôle, sans aucune valeur mesurée ; diagnostic ensuite sur données déjà vues ou synthétiques"
+    ]
+  },
+  "criteres": {
+    "minTradesClos": 30,
+    "pMax": 0.05,
+    "C1": "par cellule : au moins 30 trades clos par règle ET expectancy nette > 0 aux coûts x1 ET x3 — critère OOS du manifeste 2026-09-09, inchangé (8 blocs)",
+    "C2": "par cellule : rejeu hors frais, au moins un trade et expectancy > 0 sur la fenêtre évaluée ET dans chaque moitié — critère champion du spec v2.3 §3, inchangé (12 blocs)",
+    "C3": "timing, décalage circulaire commun aux quatre cellules : p ≤ 0,05 (1 bloc)",
+    "verdict": {
+      "FAVORABLE": "C1, C2 et C3 tenus",
+      "DEFAVORABLE": "au moins un bloc mesuré en échec : expectancy ≤ 0 avec assez de trades, ou p > 0,05",
+      "NON_CONCLUANT": "aucun échec mesuré, mais un bloc sans trade, une cellule sous 30 trades clos ou une cellule indisponible (C3 alors non calculable)"
+    },
+    "selectionApresResultats": false,
+    "executionUnique": "une seule exécution, par « bun scripts/valider-axis-v2.ts --campagne » (tout autre argument est refusé) ; une interruption technique avant le verdict est journalisée (cause, correctif, revue) avant toute relance ; aucun résultat partiel n'est affiché pendant le calcul",
+    "labelAutomatiqueStrategieValidee": false
+  },
+  "suites": {
+    "FAVORABLE": "stratAxis perd validation « non-valide » et devient réservé à l'unité 4h (TIMEFRAME_REQUIS), seule unité testée ; l'infobulle remplace « lecture indicative, en cours de validation » par la formulation de infobulleSiFavorable choisie par le runner ; la documentation reprend la comparaison à l'EMA 200 seule et le périmètre testé ; merge dans main et déploiement Vercel, autorisés par le propriétaire",
+    "infobulleSiFavorable": {
+      "critere": "par cellule, PnL net total aux coûts x1 (central) d'AXIS contre l'EMA 200 seule, même moteur et mêmes bornes ; l'EMA 200 est « au moins aussi bonne » si son PnL est ≥ à celui d'AXIS. Sans effet sur le verdict",
+      "emaDominee": "test réussi sur données jamais vues (crypto 4h, 2017-2024) — mesure passée, pas une promesse",
+      "emaAuMoinsAussiBien": "test réussi sur données jamais vues (crypto 4h, 2017-2024), pas mieux qu'une EMA 200 seule sur {n}/{total} actifs — mesure passée, pas une promesse"
+    },
+    "DEFAVORABLE": "stratAxis reste « non-valide » ; ces données sont consommées : aucune autre variante n'y sera jugée ; pas de merge ni de déploiement sans décision explicite du propriétaire",
+    "NON_CONCLUANT": "stratAxis reste « non-valide » ; pas de merge ni de déploiement sans décision explicite du propriétaire"
+  },
+  "descriptif": {
+    "regle": "aucun effet sur le verdict, aucune sélection",
+    "couts": "x2",
+    "timingParCellule": "p du décalage circulaire par cellule (k propre à chaque cellule, mêmes tirages u)",
+    "parAnnee": "trades et PnL net x1 par année civile d'entrée",
+    "exposition": "part des décisions évaluées en position",
+    "achatConservation": "variation du prix entre l'open de la première bougie évaluée et le dernier close",
+    "emaReference": 200,
+    "referenceEma": "long/plat sur l'EMA 200 seule (entrée : close croise l'EMA 200 à la hausse ; sortie : close < EMA 200), même moteur, mêmes coûts (x1, x3), mêmes bornes ; exposition et timing (décalage circulaire par cellule et commun, mêmes tirages, statistique reconstruite depuis ses fills sans coût) : dit si la confluence apporte plus que le filtre de tendance. Le test C3 ne les distingue pas : seule cette comparaison renseigne l'apport propre de la confluence"
+  },
+  "repetitionTechnique": {
+    "objet": "option --essai : même code sur les données DÉJÀ VUES (cache de la campagne v1, W1 ∪ W2), pour éprouver le runner et ses contrôles avant l'exécution ; sorties dans /tmp, hors dépôt, sans valeur probante",
+    "cellules": [
+      { "symbol": "BTCUSDT", "timeframe": "4h", "debutInclus": "2024-07-01T00:00:00Z" },
+      { "symbol": "ETHUSDT", "timeframe": "4h", "debutInclus": "2024-07-01T00:00:00Z" }
+    ],
+    "finExclue": "2026-10-07T00:00:00Z"
+  },
+  "versions": {
+    "baseCommit": "0ae8362780da89b60e42b6491684d7f474bd2f7b",
+    "travailNonCommite": "AXIS v2 (stratAxis.ts, cmfOf, registre) présent dans l'arbre de travail, non commité au figeage",
+    "codeAuFigeageSha256": {
+      "packages/indicators/src/strategy/stratAxis.ts": "07a8ff68dbdc930d33e8ea997d9bd62545e21f137db6b0904764d971490b54de",
+      "packages/indicators/src/utils.ts": "693259721a342f3adf0c897b5e279a9f6e9eb81bdb6d134449c3d19723c5266b",
+      "packages/indicators/src/utils-fabrique-strategie.ts": "d43cff07ce064260ef4895ac20d156a689821d9d6893e66743d692bfdb526605",
+      "packages/indicators/src/engine.ts": "a0a8c2c8b767c0e7260e1b4c4b63b00499d8ed4d8d559e618985d40cd8396ece",
+      "packages/indicators/src/momentum/rsi.ts": "5c9b93ec36578152a1dde9ea139064f56ed7a2a997531c300b59d1c6a934ec7a",
+      "packages/indicators/src/trend/adx.ts": "c1704f2e876995c75d54fa572a9f691b944d107cf179fdc024b5ec0629fba6df",
+      "packages/indicators/src/trend/macd.ts": "ad8b1a85f0b344d0c390408cfd18288bfaeea92e66700f9f14b38e61ff39ebfc",
+      "packages/indicators/src/trend/supertrend.ts": "6401a4632aa4647c93c484b2da374c51590dc89acf197ee1e3352a1ff839b469",
+      "packages/indicators/src/volume/cmf.ts": "7e4a05cc6463cc94572be7f4c250ad81d71917f15962478ee8679339ff3f88a5",
+      "packages/indicators/src/trend/ema.ts": "b1546985251fe40c1e20d6869a18bbf9af69f92dcfa99c1480b731ca94b0107a",
+      "packages/indicators/src/registry.ts": "edf081a34bc36cc71c4d1b6aa24c47baaf7025836775665e59b9a7f217e6e507",
+      "packages/indicators/src/index.ts": "434bafab9343da78716366192ed5fe31e01be1fbb49e1d63fbd5f018dfb82cca",
+      "packages/indicators/src/timeframes.ts": "68d734c2d6c2315a021cd1f7068b58ba9a5d7e41779f992a83a1bd99986a9454",
+      "packages/backtest/src/engine.ts": "4b1baadc37494b10537818259bc94e0c7b334794d272b3efbc295b2af8011d9d",
+      "packages/backtest/src/statsRejeu.ts": "165ebfc357c5ef330de58c295244d788e43c55abdbb1a16f2651c2ef16d6e8dd",
+      "packages/backtest/src/types.ts": "572e8128ba2513cbb59b366a624aac7c2f7d24e23fdca4e63202ed54355c5633",
+      "packages/types/src/index.ts": "de843dc9f44d9f65c1a5deac57f5b7a1fb0d5a7ecfb0ef768f6b11f6a0bbe0c8"
+    },
+    "codeFigeNote": "graphe d'import du signal (stratAxis et ses cœurs), du moteur d'indicateurs, du rejeu, du moteur de backtest, des fonctions du registre qu'il appelle et du point d'entrée du paquet ; les autres indicateurs du registre, chargés mais jamais appelés, n'y figurent pas. Le runner n'y figure pas (il épingle le SHA-256 de ce manifeste) : son SHA-256 est consigné dans le journal de revue avant l'exécution et reporté dans le résultat",
+    "revue": "revue indépendante avant exécution : scripts/axis/journal-revue-v2-2026-10-07.md (constats, corrections, re-figeage)",
+    "pnpmLockSha256": "130d4fb62f5223486552e31137f28d4901e098bf7a78325b943f30fc6beac062",
+    "bun": "1.3.11"
+  }
+}

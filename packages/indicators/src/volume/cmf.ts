@@ -14,8 +14,37 @@
  * volumes de la fenêtre vaut 0 (CMF non défini).
  */
 
-import type { IndicatorDef } from "@axiom/types";
+import type { Candle, IndicatorDef } from "@axiom/types";
 import { volOf, rollingSum } from "../utils";
+
+/**
+ * Cœur de calcul du CMF : `undefined` avant la première fenêtre pleine et sur
+ * toute fenêtre dont la somme des volumes vaut 0. PURE.
+ */
+export function cmfOf(candles: Candle[], length: number): Array<number | undefined> {
+  const n = candles.length;
+
+  const mfv: number[] = new Array(n).fill(0);
+  for (let i = 0; i < n; i++) {
+    const c = candles[i];
+    if (c === undefined) continue;
+    const range = c.high - c.low;
+    const clv = range === 0 ? 0 : ((c.close - c.low) - (c.high - c.close)) / range;
+    mfv[i] = clv * c.volume;
+  }
+
+  const sumMfv = rollingSum(mfv, length);
+  const sumVol = rollingSum(volOf(candles), length);
+
+  const out: Array<number | undefined> = new Array(n).fill(undefined);
+  for (let i = 0; i < n; i++) {
+    const m = sumMfv[i];
+    const v = sumVol[i];
+    if (m === undefined || v === undefined || v === 0) continue;
+    out[i] = m / v;
+  }
+  return out;
+}
 
 export const cmf: IndicatorDef = {
   id: "cmf",
@@ -27,28 +56,6 @@ export const cmf: IndicatorDef = {
   ],
   outputs: [{ key: "cmf", name: "CMF", style: "line" }],
   calc(candles, params) {
-    const length = Number(params.length ?? 20);
-    const n = candles.length;
-
-    const mfv: number[] = new Array(n).fill(0);
-    for (let i = 0; i < n; i++) {
-      const c = candles[i];
-      if (c === undefined) continue;
-      const range = c.high - c.low;
-      const clv = range === 0 ? 0 : ((c.close - c.low) - (c.high - c.close)) / range;
-      mfv[i] = clv * c.volume;
-    }
-
-    const sumMfv = rollingSum(mfv, length);
-    const sumVol = rollingSum(volOf(candles), length);
-
-    const out: Array<number | undefined> = new Array(n).fill(undefined);
-    for (let i = 0; i < n; i++) {
-      const m = sumMfv[i];
-      const v = sumVol[i];
-      if (m === undefined || v === undefined || v === 0) continue;
-      out[i] = m / v;
-    }
-    return { series: { cmf: out } };
+    return { series: { cmf: cmfOf(candles, Number(params.length ?? 20)) } };
   },
 };

@@ -19,7 +19,7 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 - **Cible** : terminal pour UN utilisateur (ses propres clés). PAS de multi-tenant, PAS d'auth réseau, PAS de SaaS. Crypto d'abord (spot + perp) ; tradfi/commodités en complément.
 - **Renderer-first** : le premier livrable à valeur est un graphe live à l'écran. **AUCUN backend réseau/multi-tenant (Docker/TimescaleDB/Redis interdits). Un daemon localhost mono-process (`apps/daemon`, Bun + SQLite, port 8787) est autorisé depuis la Phase 2 — proxy/cache/persistance/alertes UNIQUEMENT, jamais sur le chemin chaud du renderer (les WS de marché du front restent directs).** Le front parle directement aux WS publics des exchanges (mode mono-utilisateur assumé) et reste **100 % fonctionnel SANS daemon** (feature-detect `/health` + repli localStorage/proxy Vite). Déviation assumée vs roadmap E1 : les proxys Vite restent en dev (dev sans daemon), le daemon est le chemin de PROD + services additionnels.
 - **Chart** : **KLineChart** figé (pas de lightweight-charts, pas d'abstraction `IChartRenderer` « swap de moteur »). L'overlay orderflow se synchronise sur le viewport de KLineChart. Multi-chart 2×2 : un store par slot ; les overlays doivent être scellés au slot (voir plan 2026-08-24, Lot 3).
-- **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**218 indicateurs** depuis le 2026-10-01, cf. « Indicateurs d'analyse (demande du 1 octobre 2026) » ; 215 au 2026-09-26). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
+- **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**219 indicateurs** depuis le 2026-10-07, cf. « AXIS — confluence de signaux (demande du 7 octobre 2026) » ; 218 au 2026-10-01, 215 au 2026-09-26). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
 - **Données dérivées (OI/funding/L-S/liquidations)** : **ACHETER** via un `IDerivedDataProvider` (Coinalyze **câblé**, M6 atteint) — NE PAS construire d'AggregationEngine multi-exchange. Trois couches de liquidations distinctes et étiquetées : heatmap *exécutée*, niveaux **EST.** (modèle levier), niveaux **HL réels** (Hyperliquid, non exhaustif). Depuis le 2026-09-21, la heatmap exécutée reçoit aussi une venue `hyperliquid` **PARTIELLE** (fills des makers suivis, couverture mesurée affichée — cf. « Corrections et extension demandées le 21 septembre 2026 »). Depuis le 2026-09-22, la couche HL réels est aussi une **heatmap temps × prix des instantanés** collectés par le daemon (opt-in, couverture mesurée en % de l'OI — cf. « Revue et extension du 22 septembre 2026 »).
 - **Trading** : **PAS d'exécution d'ordres** — aucune clé de trading. Le paper trading (`PAPER`) est une simulation locale (hors gate G100/K8). Ne rien implémenter qui touche à des clés de trading réelles.
 - **Sources** : **9 identifiants** (`EXCHANGE_IDS` dans `@axiom/types`) — Binance, Bybit, OKX, Hyperliquid, Coinbase, Kraken, Twelve Data, MEXC, synthetic. Ne pas en ajouter sans nécessité démontrée (non-objectif avant G100).
@@ -63,7 +63,7 @@ d'historique (demande du 26 septembre 2026) »). Voir la
 
 ## État actuel (2026-09-04)
 - **Chart** live multi-exchange (spot + perp), multi-grille 1/2h/2v/2×2, orderflow/CVD/footprint, volume profile, fibo, dessins.
-- **215 indicateurs** TS purs dans `@axiom/indicators` (dont 30 stratégies étiquetées « non validé ») ; **4 golden tests** pandas-ta (ADX, SuperTrend, Ichimoku, PSAR) — le reste est couvert par tests unitaires/structurels.
+- **219 indicateurs** TS purs dans `@axiom/indicators` (dont 31 stratégies ; AXIS, ajoutée le 2026-10-07, est la première **testée favorable** sur données jamais vues — v1 recalée le matin même, v2 validée le soir, réservée au 4h, `scripts/axis/`) ; **4 golden tests** pandas-ta (ADX, SuperTrend, Ichimoku, PSAR) — le reste est couvert par tests unitaires/structurels.
 - **39 fenêtres** à mnémonique (`WINDOW_REGISTRY`) — dont WHALES (mouvements baleines on-chain + positions top comptes Hyperliquid), ajoutée le 2026-08-25 sur décision utilisateur, et BPL (Bitcoin Power Law), ajoutée le 2026-09-01 avec les séries TOTAL/TOTAL2/TOTAL3 chartables (chantier CAP/BPL) : **écarts ASSUMÉS** au gel « aucune nouvelle fenêtre avant le verdict G100 » (§ ci-dessous).
 - **Daemon** `axiomd` : proxy+cache SQLite, KV/snapshots, candles, alertes (macOS + Telegram), replay dumps Binance, couches GDELT/UCDP, LIQHL Hyperliquid paresseux, collecteur whales (blocs confirmés blockchain.info + Etherscan stables, table `whale_moves`, rétention 30 j). Bind `127.0.0.1:8787`, whitelist `/extapi`, garde Host/Origin/DNS-rebinding.
 - **Vercel** : front + proxy serverless sans secret partagé, whitelist/MIME/DNS durcis ; depuis le 2026-09-25, fonction `api/hlpool.ts` sans secret (pool réduit LIQHL, CDN 6 h). Les clés personnelles restent dans le navigateur. **Exception ACTÉE le 2026-09-14** (demande utilisateur, test communautaire) : une seule variable serveur, `BGEOMETRICS_API_KEY`, portée par `api/proxy.ts` vers bitcoin-data.com quand le client n'envoie aucune clé — clé gratuite et révocable, plafonds de l'offre gratuite (10 req/heure et 15 req/jour) partagés par les visiteurs, jamais exposée au navigateur ; toute autre clé reste personnelle (test structurel `apps/daemon/src/vercelProxy.test.ts`). Toute fonction strictement locale est marquée `UNUSABLE`, toute fenêtre partielle `PARTIAL` ; jamais de pane muet. La clé CryptoQuant (2026-09-16) relève de cette règle : personnelle, saisie dans les Réglages, repli `.env` pour le proxy Vite et le daemon `127.0.0.1` uniquement, JAMAIS de variable serveur sur Vercel (le test structurel continue d'exiger exactement une lecture d'environnement).
@@ -72,14 +72,14 @@ d'historique (demande du 26 septembre 2026) »). Voir la
 
 ## Jalons historiques (atteints — ne pas rejouer, ne pas prendre comme périmètre actuel)
 - **M1 — Chart live** (`apps/web`) : Vite+React+TS+Tailwind ; client WS Binance + backfill REST ; rendu KLineChart live ; sélecteur symbole + timeframe ; crosshair. Store marché vanilla. **Atteint.**
-- **M2 — Moteur + 7 indicateurs** (`packages/indicators`) : `IndicatorDef`/`engine.ts` (calcul, helpers SMA/EMA/RMA dans `utils.ts`) ; SMA, EMA, RSI, MACD, Bollinger Bands, Volume, VWAP avec tests vs valeurs de référence (Wilder pour RSI). **Atteint et dépassé** (le catalogue est désormais à 215).
+- **M2 — Moteur + 7 indicateurs** (`packages/indicators`) : `IndicatorDef`/`engine.ts` (calcul, helpers SMA/EMA/RMA dans `utils.ts`) ; SMA, EMA, RSI, MACD, Bollinger Bands, Volume, VWAP avec tests vs valeurs de référence (Wilder pour RSI). **Atteint et dépassé** (le catalogue est désormais à 219).
 - M3 watchlist+persistance locale, M4 spike sync WebGL, M5 CVD+footprint (aggTrade), M6 `IDerivedDataProvider`→Coinalyze : **tous atteints.**
 
 ## Anti-objectifs (NE PAS faire)
 - Ne pas créer de backend **réseau/multi-tenant**, de docker-compose, de schéma DB serveur (le daemon localhost mono-process de la Phase 2 est la SEULE exception, cf. Décisions verrouillées).
 - **Avant le verdict G100** : pas de nouvelle fenêtre, pas de nouveau fournisseur sans remplacement direct d'une source défaillante (exceptions ACTÉES : fournisseurs de capitalisation CMC/CCData, fournisseurs statistiques publics OCDE/Eurostat/ONS le 2026-09-06, et CryptoQuant BASIC le 2026-09-16 sur décision explicite du propriétaire — **sans source défaillante remplacée**, l'exception est nommée comme telle — cf. Décisions verrouillées), pas de migration React/Vite/Zustand/KLineChart majeure (plan 2026-08-24, §12).
 - Ne pas « améliorer » `@axiom/types` ni les configs racine.
-- Ne pas étendre le catalogue d'indicateurs sans nécessité démontrée (le contrat est à 218, pas « plus de 7 » — l'ancien jalon M2 est historique, cf. ci-dessus).
+- Ne pas étendre le catalogue d'indicateurs sans nécessité démontrée (le contrat est à 219, pas « plus de 7 » — l'ancien jalon M2 est historique, cf. ci-dessus).
 
 ### Garde-fous reportés de la roadmap (docs/research/03, §Anti-recommandations)
 Les anti-recommandations #2 (Docker/Redis/TimescaleDB), #3 (proxifier les WS via le daemon) et #6 (abstraction de moteur de chart) sont déjà couvertes ci-dessus et dans les Décisions verrouillées. Les 6 restantes, à respecter tout autant :
@@ -1428,3 +1428,54 @@ ratio long/short ni liquidations. Les métriques manquantes viennent désormais 
 autre place, étiquetée ; les résultats Coinalyze sont lus à positions fixes, un
 appel sauté ne décale plus les séries. `pnpm check` réussi (web 5 887 tests),
 parcours DES 12/12, dont un actif coté seulement sur Hyperliquid.
+
+## AXIS — confluence de signaux (demande du 7 octobre 2026)
+
+Le propriétaire demande, dans l'onglet Stratégies, un indicateur nommé **AXIS**
+qui combine plusieurs signaux d'achat et de vente et marque sur le prix les
+achats et les ventes. Cette demande autorise une définition
+supplémentaire, `stratAxis` (catégorie `strategy`, pane prix), soit **219
+indicateurs** dont 31 stratégies. Aucun nouvel écran, fournisseur, secret,
+dépendance, ordre réel ni changement de `@axiom/types`.
+
+- Six votes (+1, −1 ou 0) à la clôture, tous issus de cœurs existants : EMA 20/50,
+  direction du Supertrend 10 × 3, +DI contre −DI seulement si l'ADX 14 atteint le
+  seuil (20), MACD 12/26/9 contre son signal, RSI 14 contre 50, signe du CMF 20.
+  Le score (−6 à +6) reste absent tant qu'un des cinq premiers cœurs n'est pas
+  amorcé ; un CMF indéfini (volume nul) vote 0 sans bloquer le score. `cmfOf` est
+  extrait de `volume/cmf.ts`, sans changement du CMF.
+- Lecture long/plat, flèches alternées : achat à score ≥ +5 avec clôture
+  au-dessus de l'EMA de tendance (200), vente à score ≤ −4 ; armement (la
+  condition d'achat a d'abord été fausse une fois) ; la dernière bougie n'est
+  jamais lue (anti-repaint, convention de `defStrategie`). Sortie `prixSignal`
+  (prix d'achat tenu pendant la position) à l'échelle prix ; 120 marqueurs et
+  10 étiquettes au plus.
+- Statut : la v1 (épisodes ±4, sortie au retour du score à 0, long et short) a
+  été **recalée** par la campagne du 2026-10-07
+  (`scripts/axis/rapport-2026-10-07.md`, verdict DÉFAVORABLE). La v2, choisie
+  sur les seules données déjà vues parmi ~35 lectures du score, a passé le test
+  final du même jour sur données jamais vues (BTC/ETH/XRP/SOL, 4h, 2017-2024 ;
+  protocole figé avant téléchargement, `scripts/axis/manifeste-v2-2026-10-07.json`,
+  revue indépendante du protocole, exécution unique) : verdict **FAVORABLE**,
+  21 blocs sur 21, timing p = 0,0005. Comparaison pré-déclarée sans effet sur
+  le verdict : pas mieux qu'une EMA 200 seule en PnL net total sur 3 actifs
+  sur 4. Suites du manifeste appliquées : champ `validation` retiré ;
+  restriction à l'unité **4h**, la seule testée (`TIMEFRAME_REQUIS.stratAxis`,
+  en sus de `minTimeframe`) ; chaque infobulle porte la réserve honnête choisie
+  par le runner (« test réussi…, pas mieux qu'une EMA 200 seule sur 3/4
+  actifs — mesure passée, pas une promesse »). Absente de BT et de
+  `scripts/valider-strategies.ts` (réservé à `defStrategie`).
+- Chargement initial : AXIS coûte ~800 octets gzip. La commande EQS de la
+  palette passe de `store/screener.ts` à `commands/windowPanels.ts` (bascule
+  identique), sur le modèle de BT et SIG ; `store/screener` rejoint les modules
+  différés de `chargementInitial.test.ts`.
+
+Validation : `pnpm -r typecheck` réussi ; vitest indicateurs 950 tests (dont 23
+pour AXIS ; mutations du calcul détectées), alertes 122, backtest 129, pacte
+120, web 416 fichiers / 5 887 tests ; daemon 780 tests (Bun 1.4.2).
+Budget d'entrée (Node 24.21, zlib 1.3.2.1) : **1 203 616 / 359 846** octets
+bruts/gzip après la suite du verdict (infobulle allongée, statut retiré,
+restriction 4h), plafonds 1 220 000 / 360 000 inchangés, marge gzip réduite à
+**154 octets**. Usage, limites et test :
+[`docs/axis-2026-10-07.md`](docs/axis-2026-10-07.md) et
+[`scripts/axis/rapport-v2-2026-10-07.md`](scripts/axis/rapport-v2-2026-10-07.md).

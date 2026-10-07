@@ -21,16 +21,15 @@ vi.mock("../store/theme", () => ({
   },
 }));
 // Le pont de dessin : stubs inertes (aucune de ces actions n'est exécutée ici).
-// `getActiveChart`/`setFocusChart` : lus par les contrôleurs de chart/tradeMarkers et
-// lib/navigation (via store/screener) démarrés à l'import — null = aucun chart actif.
+// `getActiveChart` : lu par les contrôleurs de chart/tradeMarkers et chart/whaleBubbles
+// démarrés à l'import — null = aucun chart actif.
 vi.mock("../chart/drawing", () => ({
   exportChartImage: () => {},
   clearAllOverlays: () => {},
   getActiveChart: () => null,
-  setFocusChart: () => {},
 }));
 // klinecharts (build UMD exigeant `window`) : stubs pour importer les modules chart —
-// tradeMarkers et lib/navigation appellent registerOverlay ; les contrôleurs de heatmap
+// tradeMarkers et whaleBubbles appellent registerOverlay ; les contrôleurs de heatmap
 // importent ActionType/DomPosition (lus uniquement dans des méthodes jamais exécutées ici).
 vi.mock("klinecharts", () => ({
   registerOverlay: () => {},
@@ -66,7 +65,6 @@ import { commandes as newsCommandes } from "../store/news";
 import { commandes as onchainCommandes } from "../store/onchain";
 import { commandes as portfolioCommandes } from "../store/portfolio";
 import { commandes as notesCommandes } from "../store/notes";
-import { commandesScreener } from "../store/screener";
 import { commandes as derivChartCommandes } from "../store/derivatives-chart";
 import { commandes as marksCommandes } from "../chart/tradeMarkers";
 import { commandes as liqMarksCommandes } from "../chart/liquidationMarkers";
@@ -79,7 +77,7 @@ import { commandes as domCommandes } from "../store/dom-ui";
 import { commandes as replayCommandes } from "../store/replay";
 import { commandes as globeCommandes } from "../store/globe-ui";
 import { commandes as tickerCommandes } from "../store/tickerBand";
-import { commandesBacktest, commandesSignaux, windowPanelCommands } from "./windowPanels";
+import { commandesBacktest, commandesScreener, commandesSignaux, windowPanelCommands } from "./windowPanels";
 import { commandesOnboarding } from "../store/onboarding";
 import { commandesPlaybooks } from "../data/playbooks";
 
@@ -93,7 +91,7 @@ const SOURCES_GREFFEES: Record<string, readonly Commande[]> = {
   "store/onchain": onchainCommandes,
   "store/portfolio": portfolioCommandes,
   "store/notes": notesCommandes,
-  "store/screener": commandesScreener,
+  "commands/windowPanels (EQS)": commandesScreener,
   "store/derivatives-chart": derivChartCommandes,
   "chart/tradeMarkers": marksCommandes,
   "chart/liquidationMarkers": liqMarksCommandes, // LIQMARK + LIQMODE (déplacée de liquidationHeat)

@@ -29,7 +29,6 @@ import { commandes as tickerCommands } from "./store/tickerBand";
 import { commandes as onchainCommands } from "./store/onchain";
 import { commandes as portfolioCommands } from "./store/portfolio";
 import { commandes as notesCommands } from "./store/notes";
-import { commandesScreener } from "./store/screener";
 import { commandes as derivChartCommands } from "./store/derivatives-chart";
 // Marqueurs de trades/notes SUR le chart : l'import démarre aussi le contrôleur
 // (effet de bord d'import).
@@ -57,7 +56,7 @@ import { chartLayoutStore, type ChartLayoutMode } from "./store/chart-layout";
 import { commandes as globeCommands } from "./store/globe-ui";
 import { commandesOnboarding, onboardingStore } from "./store/onboarding";
 import { commandesPlaybooks } from "./data/playbooks";
-import { commandesBacktest, commandesSignaux, windowPanelCommands } from "./commands/windowPanels";
+import { commandesBacktest, commandesScreener, commandesSignaux, windowPanelCommands } from "./commands/windowPanels";
 import { enregistrerCommandes, paletteStore, type Commande } from "./commands/registry";
 import { useRaccourcisGlobaux, fullscreenStore } from "./commands/hotkeys";
 import { demarrerAlertes } from "./alerts/runtime";
@@ -108,6 +107,7 @@ enregistrerCommandes([
   ...onchainCommands,
   ...portfolioCommands,
   ...notesCommands,
+  // EQS : bascule directe, sans charger store/screener (cf. commands/windowPanels.ts).
   ...commandesScreener,
   // Vue Signaux d'EQS (SIG : scan de setups), sans charger store/signaux (cf. commands/windowPanels.ts).
   ...commandesSignaux,

@@ -1,0 +1,4752 @@
+{
+  "schema": "axiom-axis-backtest-result-v2",
+  "essai": false,
+  "manifesteSha256": "588aea2f961549923f81d60ed58d52569f5a61853ac796111255ebadf169af9e",
+  "calculeLeUtc": "2026-10-07T13:08:43.863Z",
+  "runtime": {
+    "bun": "1.3.11",
+    "node": "24.3.0"
+  },
+  "code": {
+    "runnerSha256": "1e87c2deb120fb38cb497fd37c552b16d2a442dc34d1002ab8451ee62c4bc4aa",
+    "observeSha256": {
+      "packages/indicators/src/strategy/stratAxis.ts": "07a8ff68dbdc930d33e8ea997d9bd62545e21f137db6b0904764d971490b54de",
+      "packages/indicators/src/utils.ts": "693259721a342f3adf0c897b5e279a9f6e9eb81bdb6d134449c3d19723c5266b",
+      "packages/indicators/src/utils-fabrique-strategie.ts": "d43cff07ce064260ef4895ac20d156a689821d9d6893e66743d692bfdb526605",
+      "packages/indicators/src/engine.ts": "a0a8c2c8b767c0e7260e1b4c4b63b00499d8ed4d8d559e618985d40cd8396ece",
+      "packages/indicators/src/momentum/rsi.ts": "5c9b93ec36578152a1dde9ea139064f56ed7a2a997531c300b59d1c6a934ec7a",
+      "packages/indicators/src/trend/adx.ts": "c1704f2e876995c75d54fa572a9f691b944d107cf179fdc024b5ec0629fba6df",
+      "packages/indicators/src/trend/macd.ts": "ad8b1a85f0b344d0c390408cfd18288bfaeea92e66700f9f14b38e61ff39ebfc",
+      "packages/indicators/src/trend/supertrend.ts": "6401a4632aa4647c93c484b2da374c51590dc89acf197ee1e3352a1ff839b469",
+      "packages/indicators/src/volume/cmf.ts": "7e4a05cc6463cc94572be7f4c250ad81d71917f15962478ee8679339ff3f88a5",
+      "packages/indicators/src/trend/ema.ts": "b1546985251fe40c1e20d6869a18bbf9af69f92dcfa99c1480b731ca94b0107a",
+      "packages/indicators/src/registry.ts": "edf081a34bc36cc71c4d1b6aa24c47baaf7025836775665e59b9a7f217e6e507",
+      "packages/indicators/src/index.ts": "434bafab9343da78716366192ed5fe31e01be1fbb49e1d63fbd5f018dfb82cca",
+      "packages/indicators/src/timeframes.ts": "68d734c2d6c2315a021cd1f7068b58ba9a5d7e41779f992a83a1bd99986a9454",
+      "packages/backtest/src/engine.ts": "4b1baadc37494b10537818259bc94e0c7b334794d272b3efbc295b2af8011d9d",
+      "packages/backtest/src/statsRejeu.ts": "165ebfc357c5ef330de58c295244d788e43c55abdbb1a16f2651c2ef16d6e8dd",
+      "packages/backtest/src/types.ts": "572e8128ba2513cbb59b366a624aac7c2f7d24e23fdca4e63202ed54355c5633",
+      "packages/types/src/index.ts": "de843dc9f44d9f65c1a5deac57f5b7a1fb0d5a7ecfb0ef768f6b11f6a0bbe0c8"
+    },
+    "identiqueAuFigeage": true
+  },
+  "avertissements": [],
+  "verdict": "FAVORABLE",
+  "blocs": [
+    {
+      "critere": "C1",
+      "cle": "BTCUSDT 4h x1-central",
+      "statut": "tenu",
+      "detail": "101 trades (dont 101 clos par règle), expectancy nette 41.867 USDT (4.187 %)"
+    },
+    {
+      "critere": "C1",
+      "cle": "BTCUSDT 4h x3",
+      "statut": "tenu",
+      "detail": "101 trades (dont 101 clos par règle), expectancy nette 38.991 USDT (3.899 %)"
+    },
+    {
+      "critere": "C2",
+      "cle": "BTCUSDT 4h fenêtre",
+      "statut": "tenu",
+      "detail": "101 trades, expectancy 4.326 % hors frais"
+    },
+    {
+      "critere": "C2",
+      "cle": "BTCUSDT 4h M1",
+      "statut": "tenu",
+      "detail": "47 trades, expectancy 7.381 % hors frais"
+    },
+    {
+      "critere": "C2",
+      "cle": "BTCUSDT 4h M2",
+      "statut": "tenu",
+      "detail": "54 trades, expectancy 1.668 % hors frais"
+    },
+    {
+      "critere": "C1",
+      "cle": "ETHUSDT 4h x1-central",
+      "statut": "tenu",
+      "detail": "99 trades (dont 99 clos par règle), expectancy nette 46.827 USDT (4.683 %)"
+    },
+    {
+      "critere": "C1",
+      "cle": "ETHUSDT 4h x3",
+      "statut": "tenu",
+      "detail": "99 trades (dont 99 clos par règle), expectancy nette 43.943 USDT (4.394 %)"
+    },
+    {
+      "critere": "C2",
+      "cle": "ETHUSDT 4h fenêtre",
+      "statut": "tenu",
+      "detail": "99 trades, expectancy 4.818 % hors frais"
+    },
+    {
+      "critere": "C2",
+      "cle": "ETHUSDT 4h M1",
+      "statut": "tenu",
+      "detail": "48 trades, expectancy 6.604 % hors frais"
+    },
+    {
+      "critere": "C2",
+      "cle": "ETHUSDT 4h M2",
+      "statut": "tenu",
+      "detail": "51 trades, expectancy 3.137 % hors frais"
+    },
+    {
+      "critere": "C1",
+      "cle": "XRPUSDT 4h x1-central",
+      "statut": "tenu",
+      "detail": "84 trades (dont 84 clos par règle), expectancy nette 24.832 USDT (2.483 %)"
+    },
+    {
+      "critere": "C1",
+      "cle": "XRPUSDT 4h x3",
+      "statut": "tenu",
+      "detail": "84 trades (dont 84 clos par règle), expectancy nette 21.987 USDT (2.199 %)"
+    },
+    {
+      "critere": "C2",
+      "cle": "XRPUSDT 4h fenêtre",
+      "statut": "tenu",
+      "detail": "84 trades, expectancy 2.624 % hors frais"
+    },
+    {
+      "critere": "C2",
+      "cle": "XRPUSDT 4h M1",
+      "statut": "tenu",
+      "detail": "40 trades, expectancy 4.945 % hors frais"
+    },
+    {
+      "critere": "C2",
+      "cle": "XRPUSDT 4h M2",
+      "statut": "tenu",
+      "detail": "44 trades, expectancy 0.514 % hors frais"
+    },
+    {
+      "critere": "C1",
+      "cle": "SOLUSDT 4h x1-central",
+      "statut": "tenu",
+      "detail": "60 trades (dont 59 clos par règle), expectancy nette 129.592 USDT (12.959 %)"
+    },
+    {
+      "critere": "C1",
+      "cle": "SOLUSDT 4h x3",
+      "statut": "tenu",
+      "detail": "60 trades (dont 59 clos par règle), expectancy nette 126.559 USDT (12.656 %)"
+    },
+    {
+      "critere": "C2",
+      "cle": "SOLUSDT 4h fenêtre",
+      "statut": "tenu",
+      "detail": "59 trades, expectancy 13.359 % hors frais"
+    },
+    {
+      "critere": "C2",
+      "cle": "SOLUSDT 4h M1",
+      "statut": "tenu",
+      "detail": "31 trades, expectancy 15.646 % hors frais"
+    },
+    {
+      "critere": "C2",
+      "cle": "SOLUSDT 4h M2",
+      "statut": "tenu",
+      "detail": "28 trades, expectancy 10.827 % hors frais"
+    },
+    {
+      "critere": "C3",
+      "cle": "commun",
+      "statut": "tenu",
+      "detail": "p = 0.0005 (seuil 0.05) ; capté 1204.3 % log contre médiane nulle 322.4 %"
+    }
+  ],
+  "timingCommun": {
+    "capteLog": 12.043297899567698,
+    "p": 0.0005,
+    "medianeNulle": 3.224097311132113,
+    "q95Nulle": 7.390524659357164,
+    "L": 8088
+  },
+  "comparaisonEma": {
+    "critere": "par cellule, PnL net total aux coûts x1 (central) d'AXIS contre l'EMA 200 seule, même moteur et mêmes bornes ; l'EMA 200 est « au moins aussi bonne » si son PnL est ≥ à celui d'AXIS. Sans effet sur le verdict",
+    "cellulesEmaAuMoinsAussiBien": [
+      "BTCUSDT 4h",
+      "ETHUSDT 4h",
+      "SOLUSDT 4h"
+    ],
+    "cellulesComparees": 4,
+    "timingCommunEma": {
+      "capteLog": 12.966396754485167,
+      "p": 0.0005,
+      "medianeNulle": 3.889238466437505,
+      "q95Nulle": 8.519012786237294,
+      "L": 8088
+    },
+    "infobulleSiFavorable": "test réussi sur données jamais vues (crypto 4h, 2017-2024), pas mieux qu'une EMA 200 seule sur 3/4 actifs — mesure passée, pas une promesse"
+  },
+  "cellules": [
+    {
+      "id": "BTCUSDT 4h",
+      "statut": "disponible",
+      "resultat": {
+        "acquisition": {
+          "source": "https://data-api.binance.vision/api/v3/klines",
+          "acquisLeUtc": "2026-10-07T13:08:38.965Z",
+          "modeCalcul": "reseau",
+          "nombre": 14933,
+          "premierOpen": "2017-09-01T00:00:00.000Z",
+          "dernierClose": "2024-07-01T00:00:00.000Z",
+          "manquantes": 37,
+          "plagesManquantes": [
+            {
+              "apres": "2017-09-06T12:00:00.000Z",
+              "reprise": "2017-09-06T20:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2018-01-03T20:00:00.000Z",
+              "reprise": "2018-01-04T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2018-02-07T20:00:00.000Z",
+              "reprise": "2018-02-09T08:00:00.000Z",
+              "bougies": 8
+            },
+            {
+              "apres": "2018-06-25T20:00:00.000Z",
+              "reprise": "2018-06-26T12:00:00.000Z",
+              "bougies": 3
+            },
+            {
+              "apres": "2018-07-03T20:00:00.000Z",
+              "reprise": "2018-07-04T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2018-10-19T00:00:00.000Z",
+              "reprise": "2018-10-19T08:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2018-11-13T20:00:00.000Z",
+              "reprise": "2018-11-14T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2019-03-11T20:00:00.000Z",
+              "reprise": "2019-03-12T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2019-05-14T20:00:00.000Z",
+              "reprise": "2019-05-15T12:00:00.000Z",
+              "bougies": 3
+            },
+            {
+              "apres": "2019-08-14T20:00:00.000Z",
+              "reprise": "2019-08-15T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2019-11-12T20:00:00.000Z",
+              "reprise": "2019-11-13T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2019-11-24T20:00:00.000Z",
+              "reprise": "2019-11-25T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-02-19T04:00:00.000Z",
+              "reprise": "2020-02-19T16:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2020-04-24T20:00:00.000Z",
+              "reprise": "2020-04-25T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-06-27T20:00:00.000Z",
+              "reprise": "2020-06-28T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-12-21T08:00:00.000Z",
+              "reprise": "2020-12-21T16:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-02-10T20:00:00.000Z",
+              "reprise": "2021-02-11T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-04-19T20:00:00.000Z",
+              "reprise": "2021-04-20T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-04-25T00:00:00.000Z",
+              "reprise": "2021-04-25T08:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-08-12T20:00:00.000Z",
+              "reprise": "2021-08-13T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-09-29T00:00:00.000Z",
+              "reprise": "2021-09-29T08:00:00.000Z",
+              "bougies": 1
+            }
+          ],
+          "ecartees": [
+            {
+              "temps": "2017-09-06T16:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-01-04T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-02-08T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-06-26T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-07-04T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-10-19T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-11-14T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-03-12T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-05-15T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-08-15T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-11-13T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-11-25T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-02-19T08:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-04-25T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-06-28T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-12-21T12:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-02-11T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-04-20T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-04-25T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-08-13T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-09-29T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            }
+          ],
+          "sha256Ohlcv": "b04a954445f0f0667ae54f35f266793631915ec4d6b2f723e3d594ee8dfc7080"
+        },
+        "evaluation": {
+          "bougiePremiereDecisionUtc": "2017-10-21T00:00:00.000Z",
+          "premierFillUtc": "2017-10-21T04:00:00.000Z",
+          "finUtc": "2024-07-01T00:00:00.000Z",
+          "decisions": 14633,
+          "milieuUtc": "2021-02-26T16:00:00.000Z"
+        },
+        "achatConservationPct": 927.3617762298651,
+        "rejeu": {
+          "global": {
+            "nbTrades": 101,
+            "winRate": 35.64356435643564,
+            "expectancy": 4.326411363866045,
+            "pnlComposePct": 2352.637019093102,
+            "maxDrawdownPct": -32.14546392243437,
+            "dureeMoyenne": 61.51485148514851
+          },
+          "m1": {
+            "nbTrades": 47,
+            "winRate": 42.5531914893617,
+            "expectancy": 7.380972935684195,
+            "pnlComposePct": 1244.0603523806572,
+            "maxDrawdownPct": -32.14546392243437,
+            "dureeMoyenne": 71.59574468085107
+          },
+          "m2": {
+            "nbTrades": 54,
+            "winRate": 29.629629629629626,
+            "expectancy": 1.6678114772835804,
+            "pnlComposePct": 82.4796791861979,
+            "maxDrawdownPct": -31.522010734223855,
+            "dureeMoyenne": 52.74074074074074
+          }
+        },
+        "executions": [
+          {
+            "cout": "x1-central",
+            "metriques": {
+              "trades": 101,
+              "fermes": 101,
+              "finDonnees": 0,
+              "expectancyNette": 41.8666417134776,
+              "expectancyPct": 4.186664171347756,
+              "pnlTotal": 4228.5308130612375,
+              "pnlTotalPct": 42.28530813061238,
+              "winRatePct": 35.64356435643564,
+              "profitFactor": 2.507505034151407,
+              "ddRealiseMaxPct": 3.831958940913561,
+              "dureeMoyenneBarres": 61.51485148514851,
+              "fraisTotal": 103.165848330696,
+              "meilleurPct": 100.27141597712279,
+              "pirePct": -13.245685000545182
+            }
+          },
+          {
+            "cout": "x2",
+            "metriques": {
+              "trades": 101,
+              "fermes": 101,
+              "finDonnees": 0,
+              "expectancyNette": 40.428542889155125,
+              "expectancyPct": 4.042854288915511,
+              "pnlTotal": 4083.2828318046677,
+              "pnlTotalPct": 40.83282831804668,
+              "winRatePct": 35.64356435643564,
+              "profitFactor": 2.411196894432251,
+              "ddRealiseMaxPct": 3.983318858847515,
+              "dureeMoyenneBarres": 61.51485148514851,
+              "fraisTotal": 206.2895724042088,
+              "meilleurPct": 100.04113268975101,
+              "pirePct": -13.373806289723476
+            }
+          },
+          {
+            "cout": "x3",
+            "metriques": {
+              "trades": 101,
+              "fermes": 101,
+              "finDonnees": 0,
+              "expectancyNette": 38.99102761529688,
+              "expectancyPct": 3.8991027615296896,
+              "pnlTotal": 3938.093789144985,
+              "pnlTotalPct": 39.38093789144985,
+              "winRatePct": 35.64356435643564,
+              "profitFactor": 2.320640629809745,
+              "ddRealiseMaxPct": 4.175889887920285,
+              "dureeMoyenneBarres": 61.51485148514851,
+              "fraisTotal": 309.37119747993734,
+              "meilleurPct": 99.81096154876869,
+              "pirePct": -13.501878983046636
+            }
+          }
+        ],
+        "timing": {
+          "capteLog": 3.2038982460919923,
+          "p": 0.004,
+          "medianeNulle": 0.8704836997678216,
+          "q95Nulle": 2.3021602771166947,
+          "L": 14633,
+          "exposition": 0.4245882594136541
+        },
+        "parAnneeX1": [
+          {
+            "annee": 2017,
+            "trades": 2,
+            "pnlNet": 1148.5475051271362,
+            "expectancyPct": 57.42737525635681
+          },
+          {
+            "annee": 2018,
+            "trades": 13,
+            "pnlNet": -171.38432902430714,
+            "expectancyPct": -1.3183409924946703
+          },
+          {
+            "annee": 2019,
+            "trades": 12,
+            "pnlNet": 725.7420090494543,
+            "expectancyPct": 6.047850075412118
+          },
+          {
+            "annee": 2020,
+            "trades": 17,
+            "pnlNet": 1514.106757525933,
+            "expectancyPct": 8.906510338387841
+          },
+          {
+            "annee": 2021,
+            "trades": 17,
+            "pnlNet": 369.00352946085104,
+            "expectancyPct": 2.170608996828536
+          },
+          {
+            "annee": 2022,
+            "trades": 15,
+            "pnlNet": -347.94527144136237,
+            "expectancyPct": -2.319635142942415
+          },
+          {
+            "annee": 2023,
+            "trades": 16,
+            "pnlNet": 712.4307631468027,
+            "expectancyPct": 4.452692269667517
+          },
+          {
+            "annee": 2024,
+            "trades": 9,
+            "pnlNet": 278.0298492167272,
+            "expectancyPct": 3.0892205468525247
+          }
+        ],
+        "referenceEma": {
+          "executions": [
+            {
+              "cout": "x1-central",
+              "metriques": {
+                "trades": 205,
+                "fermes": 205,
+                "finDonnees": 0,
+                "expectancyNette": 28.74920726090786,
+                "expectancyPct": 2.874920726090787,
+                "pnlTotal": 5893.587488486111,
+                "pnlTotalPct": 58.935874884861114,
+                "winRatePct": 15.609756097560975,
+                "profitFactor": 3.0032670046342775,
+                "ddRealiseMaxPct": 7.026153052468461,
+                "dureeMoyenneBarres": 36.795121951219514,
+                "fraisTotal": 208.05081915381993,
+                "meilleurPct": 187.6995467985203,
+                "pirePct": -10.464252225773857
+              }
+            },
+            {
+              "cout": "x3",
+              "metriques": {
+                "trades": 205,
+                "fermes": 205,
+                "finDonnees": 0,
+                "expectancyNette": 25.8971964170972,
+                "expectancyPct": 2.589719641709717,
+                "pnlTotal": 5308.925265504926,
+                "pnlTotalPct": 53.08925265504926,
+                "winRatePct": 15.609756097560975,
+                "profitFactor": 2.551798838155008,
+                "ddRealiseMaxPct": 8.357644770708896,
+                "dureeMoyenneBarres": 36.795121951219514,
+                "fraisTotal": 623.8992367533878,
+                "meilleurPct": 187.08177590570548,
+                "pirePct": -10.725451063876719
+              }
+            }
+          ],
+          "timing": {
+            "capteLog": 3.7203945915394514,
+            "p": 0.002,
+            "medianeNulle": 1.0603669036411532,
+            "q95Nulle": 2.497649363409444,
+            "L": 14633,
+            "exposition": 0.5154787124991458
+          }
+        },
+        "tradesX1": [
+          {
+            "entree": "2017-10-29T20:00:00.000Z",
+            "sortie": "2017-11-07T00:00:00.000Z",
+            "prixEntree": 6086.217,
+            "prixSortie": 6980.3236560000005,
+            "pnl": 145.83334535590842,
+            "pnlPct": 14.583334535590842,
+            "raison": "regle"
+          },
+          {
+            "entree": "2017-11-15T20:00:00.000Z",
+            "sortie": "2017-12-21T16:00:00.000Z",
+            "prixEntree": 7183.416396,
+            "prixSortie": 14397.12,
+            "pnl": 1002.7141597712279,
+            "pnlPct": 100.27141597712279,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-01-05T12:00:00.000Z",
+            "sortie": "2018-01-10T04:00:00.000Z",
+            "prixEntree": 16093.91814,
+            "prixSortie": 13977.204,
+            "pnl": -132.45685000545183,
+            "pnlPct": -13.245685000545182,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-02-17T04:00:00.000Z",
+            "sortie": "2018-02-22T16:00:00.000Z",
+            "prixEntree": 10461.131808,
+            "prixSortie": 9970.125576,
+            "pnl": -47.91277558597412,
+            "pnlPct": -4.791277558597411,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-02-27T16:00:00.000Z",
+            "sortie": "2018-03-06T12:00:00.000Z",
+            "prixEntree": 10572.114,
+            "prixSortie": 10933.8128,
+            "pnl": 33.19542681813685,
+            "pnlPct": 3.319542681813685,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-04-13T00:00:00.000Z",
+            "sortie": "2018-05-07T04:00:00.000Z",
+            "prixEntree": 7924.574597999999,
+            "prixSortie": 9349.899646,
+            "pnl": 178.7714650620544,
+            "pnlPct": 17.877146506205438,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-07-08T00:00:00.000Z",
+            "sortie": "2018-07-10T20:00:00.000Z",
+            "prixEntree": 6754.830695999999,
+            "prixSortie": 6374.854774,
+            "pnl": -57.22434538054317,
+            "pnlPct": -5.722434538054317,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-07-16T20:00:00.000Z",
+            "sortie": "2018-08-01T12:00:00.000Z",
+            "prixEntree": 6683.286389999999,
+            "prixSortie": 7568.266044,
+            "pnl": 131.35062999791646,
+            "pnlPct": 13.135062999791646,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-08-25T16:00:00.000Z",
+            "sortie": "2018-09-05T12:00:00.000Z",
+            "prixEntree": 6739.337598,
+            "prixSortie": 6989.621796,
+            "pnl": 36.11923497870752,
+            "pnlPct": 3.6119234978707513,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-09-21T08:00:00.000Z",
+            "sortie": "2018-09-25T04:00:00.000Z",
+            "prixEntree": 6649.239582,
+            "prixSortie": 6465.75659,
+            "pnl": -28.58078547815518,
+            "pnlPct": -2.858078547815518,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-09-28T08:00:00.000Z",
+            "sortie": "2018-10-03T04:00:00.000Z",
+            "prixEntree": 6788.067342,
+            "prixSortie": 6462.7072,
+            "pnl": -48.90722388932371,
+            "pnlPct": -4.89072238893237,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-10-08T20:00:00.000Z",
+            "sortie": "2018-10-11T04:00:00.000Z",
+            "prixEntree": 6696.6590639999995,
+            "prixSortie": 6339.251896000001,
+            "pnl": -54.34428123068008,
+            "pnlPct": -5.434428123068007,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-10-16T12:00:00.000Z",
+            "sortie": "2018-10-28T16:00:00.000Z",
+            "prixEntree": 6797.739276,
+            "prixSortie": 6485.712598,
+            "pnl": -46.87858580603204,
+            "pnlPct": -4.687858580603205,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-11-07T04:00:00.000Z",
+            "sortie": "2018-11-09T12:00:00.000Z",
+            "prixEntree": 6581.316,
+            "prixSortie": 6424.524838,
+            "pnl": -24.811767497412298,
+            "pnlPct": -2.48117674974123,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-12-24T08:00:00.000Z",
+            "sortie": "2018-12-25T04:00:00.000Z",
+            "prixEntree": 4160.892012,
+            "prixSortie": 3708.35818,
+            "pnl": -109.70447100754993,
+            "pnlPct": -10.970447100754994,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-01-06T20:00:00.000Z",
+            "sortie": "2019-01-10T16:00:00.000Z",
+            "prixEntree": 4002.2102819999996,
+            "prixSortie": 3726.044642,
+            "pnl": -69.96877918220284,
+            "pnlPct": -6.996877918220283,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-02-09T00:00:00.000Z",
+            "sortie": "2019-02-24T16:00:00.000Z",
+            "prixEntree": 3661.002054,
+            "prixSortie": 3777.5043480000004,
+            "pnl": 30.806604075999882,
+            "pnlPct": 3.0806604075999884,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-03-07T00:00:00.000Z",
+            "sortie": "2019-03-26T04:00:00.000Z",
+            "prixEntree": 3862.612368,
+            "prixSortie": 3935.352772,
+            "pnl": 17.82250323649358,
+            "pnlPct": 1.7822503236493579,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-03-27T16:00:00.000Z",
+            "sortie": "2019-04-27T12:00:00.000Z",
+            "prixEntree": 4022.3043,
+            "prixSortie": 5276.4844920000005,
+            "pnl": 310.6504889756851,
+            "pnlPct": 31.06504889756851,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-05-02T08:00:00.000Z",
+            "sortie": "2019-05-17T16:00:00.000Z",
+            "prixEntree": 5409.1216079999995,
+            "prixSortie": 7094.600796000001,
+            "pnl": 310.4436262469034,
+            "pnlPct": 31.04436262469034,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-05-20T00:00:00.000Z",
+            "sortie": "2019-06-04T08:00:00.000Z",
+            "prixEntree": 8149.569587999999,
+            "prixSortie": 7891.52138,
+            "pnl": -32.64819701346899,
+            "pnlPct": -3.2648197013468985,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-06-13T08:00:00.000Z",
+            "sortie": "2019-07-01T16:00:00.000Z",
+            "prixEntree": 8099.519579999999,
+            "prixSortie": 10388.091966,
+            "pnl": 281.4152812044935,
+            "pnlPct": 28.14152812044935,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-07-04T04:00:00.000Z",
+            "sortie": "2019-07-13T12:00:00.000Z",
+            "prixEntree": 11851.079741999998,
+            "prixSortie": 11299.299688,
+            "pnl": -47.53619551798971,
+            "pnlPct": -4.753619551798971,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-08-01T20:00:00.000Z",
+            "sortie": "2019-08-13T16:00:00.000Z",
+            "prixEntree": 10285.766742,
+            "prixSortie": 10950.549452,
+            "pnl": 63.59900708537762,
+            "pnlPct": 6.359900708537762,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-09-03T08:00:00.000Z",
+            "sortie": "2019-09-09T08:00:00.000Z",
+            "prixEntree": 10370.0736,
+            "prixSortie": 10145.600473999999,
+            "pnl": -22.635419196735576,
+            "pnlPct": -2.2635419196735573,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-10-26T04:00:00.000Z",
+            "sortie": "2019-11-08T16:00:00.000Z",
+            "prixEntree": 9555.960809999999,
+            "prixSortie": 8818.995848,
+            "pnl": -78.08240899734271,
+            "pnlPct": -7.80824089973427,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-12-23T00:00:00.000Z",
+            "sortie": "2020-01-01T04:00:00.000Z",
+            "prixEntree": 7502.210142,
+            "prixSortie": 7223.555,
+            "pnl": -38.124501867759015,
+            "pnlPct": -3.8124501867759006,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-01-04T08:00:00.000Z",
+            "sortie": "2020-01-10T08:00:00.000Z",
+            "prixEntree": 7349.509607999999,
+            "prixSortie": 7751.49939,
+            "pnl": 53.668788604841104,
+            "pnlPct": 5.3668788604841104,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-01-14T04:00:00.000Z",
+            "sortie": "2020-01-20T12:00:00.000Z",
+            "prixEntree": 8463.522366,
+            "prixSortie": 8613.986858,
+            "pnl": 16.76910998169636,
+            "pnlPct": 1.676910998169636,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-01-27T16:00:00.000Z",
+            "sortie": "2020-02-15T16:00:00.000Z",
+            "prixEntree": 8781.435936,
+            "prixSortie": 9981.243352,
+            "pnl": 135.56166497506172,
+            "pnlPct": 13.556166497506172,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-04-03T08:00:00.000Z",
+            "sortie": "2020-04-10T12:00:00.000Z",
+            "prixEntree": 6933.126348,
+            "prixSortie": 6896.860352,
+            "pnl": -6.2282132450184635,
+            "pnlPct": -0.6228213245018462,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-04-17T04:00:00.000Z",
+            "sortie": "2020-04-21T00:00:00.000Z",
+            "prixEntree": 7087.5972360000005,
+            "prixSortie": 6827.6142039999995,
+            "pnl": -37.66306532827947,
+            "pnlPct": -3.7663065328279477,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-04-23T20:00:00.000Z",
+            "sortie": "2020-05-11T04:00:00.000Z",
+            "prixEntree": 7523.5044,
+            "prixSortie": 8694.500752,
+            "pnl": 154.56724520876205,
+            "pnlPct": 15.456724520876206,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-05-14T08:00:00.000Z",
+            "sortie": "2020-05-22T00:00:00.000Z",
+            "prixEntree": 9510.461711999998,
+            "prixSortie": 9065.696498000001,
+            "pnl": -47.742507867108834,
+            "pnlPct": -4.774250786710884,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-05-29T00:00:00.000Z",
+            "sortie": "2020-06-12T00:00:00.000Z",
+            "prixEntree": 9577.785174,
+            "prixSortie": 9277.024223999999,
+            "pnl": -32.38623012145268,
+            "pnlPct": -3.2386230121452675,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-06-23T00:00:00.000Z",
+            "sortie": "2020-06-24T16:00:00.000Z",
+            "prixEntree": 9687.627138,
+            "prixSortie": 9248.120006,
+            "pnl": -46.34519879598618,
+            "pnlPct": -4.634519879598618,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-07-07T00:00:00.000Z",
+            "sortie": "2020-07-15T16:00:00.000Z",
+            "prixEntree": 9344.338494,
+            "prixSortie": 9203.139004,
+            "pnl": -16.1031440423116,
+            "pnlPct": -1.6103144042311601,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-07-21T12:00:00.000Z",
+            "sortie": "2020-08-20T04:00:00.000Z",
+            "prixEntree": 9346.508928,
+            "prixSortie": 11697.450042,
+            "pnl": 250.40570255099652,
+            "pnlPct": 25.040570255099652,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-08-31T16:00:00.000Z",
+            "sortie": "2020-09-03T04:00:00.000Z",
+            "prixEntree": 11744.49843,
+            "prixSortie": 11348.299886,
+            "pnl": -34.717952885621784,
+            "pnlPct": -3.471795288562179,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-09-16T08:00:00.000Z",
+            "sortie": "2020-09-21T16:00:00.000Z",
+            "prixEntree": 10918.273218,
+            "prixSortie": 10416.686246000001,
+            "pnl": -46.917167349090526,
+            "pnlPct": -4.691716734909052,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-09-27T04:00:00.000Z",
+            "sortie": "2020-10-03T00:00:00.000Z",
+            "prixEntree": 10783.356240000001,
+            "prixSortie": 10568.28592,
+            "pnl": -20.934682677236736,
+            "pnlPct": -2.093468267723674,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-10-08T16:00:00.000Z",
+            "sortie": "2020-11-27T04:00:00.000Z",
+            "prixEntree": 10899.139392,
+            "prixSortie": 17074.694378,
+            "pnl": 565.3261094759106,
+            "pnlPct": 56.53261094759105,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-11-30T04:00:00.000Z",
+            "sortie": "2020-12-09T00:00:00.000Z",
+            "prixEntree": 18583.385933999998,
+            "prixSortie": 18320.445178,
+            "pnl": -15.142163680794187,
+            "pnlPct": -1.5142163680794187,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-12-13T16:00:00.000Z",
+            "sortie": "2021-01-11T16:00:00.000Z",
+            "prixEntree": 19215.182268,
+            "prixSortie": 31576.503436,
+            "pnl": 641.9884627215652,
+            "pnlPct": 64.19884627215652,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-01-14T20:00:00.000Z",
+            "sortie": "2021-01-18T04:00:00.000Z",
+            "prixEntree": 39884.945394,
+            "prixSortie": 35101.248346,
+            "pnl": -120.87744128127265,
+            "pnlPct": -12.087744128127264,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-01-19T08:00:00.000Z",
+            "sortie": "2021-01-21T00:00:00.000Z",
+            "prixEntree": 37175.353584,
+            "prixSortie": 35461.136354,
+            "pnl": -47.08860323314887,
+            "pnlPct": -4.708860323314887,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-01-29T16:00:00.000Z",
+            "sortie": "2021-02-24T12:00:00.000Z",
+            "prixEntree": 37136.825880000004,
+            "prixSortie": 50349.947995999995,
+            "pnl": 354.61777944125123,
+            "pnlPct": 35.461777944125124,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-03-03T20:00:00.000Z",
+            "sortie": "2021-03-16T20:00:00.000Z",
+            "prixEntree": 50867.341433999994,
+            "prixSortie": 55720.213728,
+            "pnl": 94.35481354272125,
+            "pnlPct": 9.435481354272124,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-03-29T12:00:00.000Z",
+            "sortie": "2021-04-07T20:00:00.000Z",
+            "prixEntree": 57865.710827999996,
+            "prixSortie": 56142.609231999995,
+            "pnl": -30.76270438154965,
+            "pnlPct": -3.0762704381549653,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-04-10T08:00:00.000Z",
+            "sortie": "2021-04-17T16:00:00.000Z",
+            "prixEntree": 60492.49608,
+            "prixSortie": 60252.59707,
+            "pnl": -4.963781890862814,
+            "pnlPct": -0.4963781890862813,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-04-30T16:00:00.000Z",
+            "sortie": "2021-05-04T16:00:00.000Z",
+            "prixEntree": 57191.48601,
+            "prixSortie": 53791.779492,
+            "pnl": -60.41455453958398,
+            "pnlPct": -6.041455453958398,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-05-08T08:00:00.000Z",
+            "sortie": "2021-05-12T20:00:00.000Z",
+            "prixEntree": 58474.752612,
+            "prixSortie": 54426.1126,
+            "pnl": -70.20278429982726,
+            "pnlPct": -7.020278429982726,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-06-14T16:00:00.000Z",
+            "sortie": "2021-06-18T16:00:00.000Z",
+            "prixEntree": 40693.507074,
+            "prixSortie": 36348.698806,
+            "pnl": -107.7156943727912,
+            "pnlPct": -10.77156943727912,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-07-24T00:00:00.000Z",
+            "sortie": "2021-08-03T08:00:00.000Z",
+            "prixEntree": 33640.826819999995,
+            "prixSortie": 38585.711314,
+            "pnl": 145.9170801953852,
+            "pnlPct": 14.59170801953852,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-08-05T20:00:00.000Z",
+            "sortie": "2021-08-19T12:00:00.000Z",
+            "prixEntree": 40700.378447999996,
+            "prixSortie": 44206.396951999996,
+            "pnl": 85.09908871548093,
+            "pnlPct": 8.509908871548094,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-08-20T16:00:00.000Z",
+            "sortie": "2021-08-25T00:00:00.000Z",
+            "prixEntree": 48728.123675999996,
+            "prixSortie": 47664.475198,
+            "pnl": -22.817311514594827,
+            "pnlPct": -2.2817311514594825,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-09-02T04:00:00.000Z",
+            "sortie": "2021-09-07T16:00:00.000Z",
+            "prixEntree": 49567.791575999996,
+            "prixSortie": 46646.738786,
+            "pnl": -59.900995399977,
+            "pnlPct": -5.9900995399977,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-09-16T04:00:00.000Z",
+            "sortie": "2021-09-20T08:00:00.000Z",
+            "prixEntree": 47624.593014,
+            "prixSortie": 44821.043998,
+            "pnl": -59.83824016445163,
+            "pnlPct": -5.983824016445164,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-10-01T12:00:00.000Z",
+            "sortie": "2021-10-24T00:00:00.000Z",
+            "prixEntree": 47497.567614,
+            "prixSortie": 61274.49265,
+            "pnl": 288.91035257610235,
+            "pnlPct": 28.891035257610238,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-10-30T08:00:00.000Z",
+            "sortie": "2021-11-06T00:00:00.000Z",
+            "prixEntree": 61609.509438,
+            "prixSortie": 60927.991964,
+            "pnl": -12.05635674551985,
+            "pnlPct": -1.205635674551985,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-11-08T00:00:00.000Z",
+            "sortie": "2021-11-12T16:00:00.000Z",
+            "prixEntree": 63286.234716,
+            "prixSortie": 63143.31881,
+            "pnl": -3.2571171865101984,
+            "pnlPct": -0.32571171865101983,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-02-04T20:00:00.000Z",
+            "sortie": "2022-02-14T00:00:00.000Z",
+            "prixEntree": 40736.065583999996,
+            "prixSortie": 42045.239270000005,
+            "pnl": 31.121882179779274,
+            "pnlPct": 3.1121882179779274,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-02-15T12:00:00.000Z",
+            "sortie": "2022-02-17T20:00:00.000Z",
+            "prixEntree": 44242.44672,
+            "prixSortie": 41195.979156,
+            "pnl": -69.82404920977207,
+            "pnlPct": -6.982404920977207,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-02-28T20:00:00.000Z",
+            "sortie": "2022-03-04T20:00:00.000Z",
+            "prixEntree": 41337.705888000004,
+            "prixSortie": 39774.173574,
+            "pnl": -38.80448175032029,
+            "pnlPct": -3.880448175032029,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-03-09T20:00:00.000Z",
+            "sortie": "2022-03-12T16:00:00.000Z",
+            "prixEntree": 42213.09093,
+            "prixSortie": 39034.241590000005,
+            "pnl": -76.26717057034973,
+            "pnlPct": -7.6267170570349725,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-03-16T20:00:00.000Z",
+            "sortie": "2022-03-31T20:00:00.000Z",
+            "prixEntree": 40888.346033999995,
+            "prixSortie": 45572.863604000006,
+            "pnl": 113.51124257561382,
+            "pnlPct": 11.351124257561382,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-04-21T12:00:00.000Z",
+            "sortie": "2022-04-22T00:00:00.000Z",
+            "prixEntree": 42448.498002,
+            "prixSortie": 40471.913998,
+            "pnl": -47.54100392209201,
+            "pnlPct": -4.754100392209201,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-07-18T08:00:00.000Z",
+            "sortie": "2022-07-26T04:00:00.000Z",
+            "prixEntree": 22250.379186,
+            "prixSortie": 21137.301693999998,
+            "pnl": -51.000089614382915,
+            "pnlPct": -5.1000089614382915,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-07-28T12:00:00.000Z",
+            "sortie": "2022-08-05T00:00:00.000Z",
+            "prixEntree": 23120.813238,
+            "prixSortie": 22617.885518,
+            "pnl": -22.74128785893356,
+            "pnlPct": -2.2741287858933563,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-08-08T08:00:00.000Z",
+            "sortie": "2022-08-17T20:00:00.000Z",
+            "prixEntree": 23812.291505999998,
+            "prixSortie": 23272.234622,
+            "pnl": -23.668412883404663,
+            "pnlPct": -2.366841288340466,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-09-09T20:00:00.000Z",
+            "sortie": "2022-09-13T16:00:00.000Z",
+            "prixEntree": 21295.878323999998,
+            "prixSortie": 20825.604046,
+            "pnl": -23.071836329533923,
+            "pnlPct": -2.307183632953392,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-09-27T12:00:00.000Z",
+            "sortie": "2022-10-03T00:00:00.000Z",
+            "prixEntree": 20234.39607,
+            "prixSortie": 19053.928452000004,
+            "pnl": -59.31048182062175,
+            "pnlPct": -5.931048182062175,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-10-04T08:00:00.000Z",
+            "sortie": "2022-10-09T04:00:00.000Z",
+            "prixEntree": 19971.683537999997,
+            "prixSortie": 19361.47693,
+            "pnl": -31.53831208248123,
+            "pnlPct": -3.153831208248123,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-10-18T08:00:00.000Z",
+            "sortie": "2022-10-20T04:00:00.000Z",
+            "prixEntree": 19669.88319,
+            "prixSortie": 19039.39136,
+            "pnl": -33.03763733611674,
+            "pnlPct": -3.303763733611674,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-10-25T16:00:00.000Z",
+            "sortie": "2022-11-08T04:00:00.000Z",
+            "prixEntree": 19752.429696,
+            "prixSortie": 20143.590476,
+            "pnl": 18.79327129002135,
+            "pnlPct": 1.8793271290021352,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-12-13T12:00:00.000Z",
+            "sortie": "2022-12-16T20:00:00.000Z",
+            "prixEntree": 17447.808864,
+            "prixSortie": 16861.846956,
+            "pnl": -34.56690410876784,
+            "pnlPct": -3.4566904108767837,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-01-07T00:00:00.000Z",
+            "sortie": "2023-02-07T00:00:00.000Z",
+            "prixEntree": 16953.700062,
+            "prixSortie": 22757.967496,
+            "pnl": 341.18874222543155,
+            "pnlPct": 34.118874222543155,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-02-16T00:00:00.000Z",
+            "sortie": "2023-02-24T04:00:00.000Z",
+            "prixEntree": 24327.734574,
+            "prixSortie": 23949.7091,
+            "pnl": -16.531099293840818,
+            "pnlPct": -1.653109929384082,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-03-13T20:00:00.000Z",
+            "sortie": "2023-03-22T20:00:00.000Z",
+            "prixEntree": 24282.10545,
+            "prixSortie": 26663.46624,
+            "pnl": 97.02157043202374,
+            "pnlPct": 9.702157043202373,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-03-29T12:00:00.000Z",
+            "sortie": "2023-04-17T12:00:00.000Z",
+            "prixEntree": 28359.6708,
+            "prixSortie": 29564.88584,
+            "pnl": 41.476248789178435,
+            "pnlPct": 4.147624878917843,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-04-18T20:00:00.000Z",
+            "sortie": "2023-04-19T16:00:00.000Z",
+            "prixEntree": 30227.574306,
+            "prixSortie": 29254.577914,
+            "pnl": -33.172938653928306,
+            "pnlPct": -3.31729386539283,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-05-05T16:00:00.000Z",
+            "sortie": "2023-05-08T08:00:00.000Z",
+            "prixEntree": 29362.311287999997,
+            "prixSortie": 27969.874906,
+            "pnl": -48.39886278563441,
+            "pnlPct": -4.839886278563441,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-05-28T20:00:00.000Z",
+            "sortie": "2023-05-31T08:00:00.000Z",
+            "prixEntree": 27531.495198,
+            "prixSortie": 27162.476418000002,
+            "pnl": -14.396812194812874,
+            "pnlPct": -1.4396812194812876,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-06-18T20:00:00.000Z",
+            "sortie": "2023-07-07T12:00:00.000Z",
+            "prixEntree": 26655.340001999997,
+            "prixSortie": 30112.67626,
+            "pnl": 128.6403493488255,
+            "pnlPct": 12.86403493488255,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-07-11T16:00:00.000Z",
+            "sortie": "2023-07-14T20:00:00.000Z",
+            "prixEntree": 30602.559287999997,
+            "prixSortie": 30109.156964,
+            "pnl": -17.11484902935466,
+            "pnlPct": -1.711484902935466,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-08-08T20:00:00.000Z",
+            "sortie": "2023-08-15T20:00:00.000Z",
+            "prixEntree": 29890.206845999997,
+            "prixSortie": 29175.893654,
+            "pnl": -24.88595164571575,
+            "pnlPct": -2.4885951645715747,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-09-18T12:00:00.000Z",
+            "sortie": "2023-09-23T00:00:00.000Z",
+            "prixEntree": 27202.419395999998,
+            "prixSortie": 26574.823972,
+            "pnl": -24.059773366343965,
+            "pnlPct": -2.405977336634396,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-09-28T20:00:00.000Z",
+            "sortie": "2023-10-03T16:00:00.000Z",
+            "prixEntree": 27105.42,
+            "prixSortie": 27339.531,
+            "pnl": 7.6327363494091145,
+            "pnlPct": 0.7632736349409116,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-10-20T04:00:00.000Z",
+            "sortie": "2023-11-14T20:00:00.000Z",
+            "prixEntree": 29241.217074,
+            "prixSortie": 35286.9412,
+            "pnl": 205.65012843497215,
+            "pnlPct": 20.565012843497215,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-11-15T20:00:00.000Z",
+            "sortie": "2023-12-11T04:00:00.000Z",
+            "prixEntree": 37507.489998,
+            "prixSortie": 42301.108086,
+            "pnl": 126.7403867657229,
+            "pnlPct": 12.674038676572291,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-12-14T12:00:00.000Z",
+            "sortie": "2023-12-18T00:00:00.000Z",
+            "prixEntree": 43275.723414,
+            "prixSortie": 41366.365072,
+            "pnl": -45.09871198621298,
+            "pnlPct": -4.5098711986212985,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-12-19T12:00:00.000Z",
+            "sortie": "2023-12-27T00:00:00.000Z",
+            "prixEntree": 42984.695219999994,
+            "prixSortie": 42500.428214,
+            "pnl": -12.260400242916848,
+            "pnlPct": -1.2260400242916847,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-01-02T04:00:00.000Z",
+            "sortie": "2024-01-05T16:00:00.000Z",
+            "prixEntree": 45411.46047599999,
+            "prixSortie": 43491.309998000004,
+            "pnl": -43.2622479577657,
+            "pnlPct": -4.32622479577657,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-01-08T20:00:00.000Z",
+            "sortie": "2024-01-13T12:00:00.000Z",
+            "prixEntree": 46988.755872,
+            "prixSortie": 42615.485198,
+            "pnl": -94.02404282782197,
+            "pnlPct": -9.402404282782197,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-01-28T04:00:00.000Z",
+            "sortie": "2024-03-17T00:00:00.000Z",
+            "prixEntree": 42240.286367999994,
+            "prixSortie": 65287.579872,
+            "pnl": 544.3507027996675,
+            "pnlPct": 54.435070279966745,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-03-25T20:00:00.000Z",
+            "sortie": "2024-04-01T16:00:00.000Z",
+            "prixEntree": 70975.082178,
+            "prixSortie": 68223.50257,
+            "pnl": -39.74886416191392,
+            "pnlPct": -3.974886416191393,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-04-07T08:00:00.000Z",
+            "sortie": "2024-04-13T08:00:00.000Z",
+            "prixEntree": 69377.8728,
+            "prixSortie": 67433.040694,
+            "pnl": -29.018438898388965,
+            "pnlPct": -2.9018438898388967,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-04-22T20:00:00.000Z",
+            "sortie": "2024-04-24T20:00:00.000Z",
+            "prixEntree": 66538.074954,
+            "prixSortie": 63963.254790000006,
+            "pnl": -39.67759558263685,
+            "pnlPct": -3.9677595582636846,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-05-05T16:00:00.000Z",
+            "sortie": "2024-05-09T00:00:00.000Z",
+            "prixEntree": 64441.525728,
+            "prixSortie": 61180.791394,
+            "pnl": -51.574593478579175,
+            "pnlPct": -5.157459347857917,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-05-15T16:00:00.000Z",
+            "sortie": "2024-05-24T04:00:00.000Z",
+            "prixEntree": 64738.065024,
+            "prixSortie": 67878.251634,
+            "pnl": 47.481778309738395,
+            "pnlPct": 4.74817783097384,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-05-27T16:00:00.000Z",
+            "sortie": "2024-06-09T00:00:00.000Z",
+            "prixEntree": 70387.934772,
+            "prixSortie": 69296.59790800001,
+            "pnl": -16.49684898557209,
+            "pnlPct": -1.649684898557209,
+            "raison": "regle"
+          }
+        ],
+        "empreinteChronologieX1": "60232be50c7f6ee60d0e8ad0b70cab39f98bcbda38fc2e718a767c98362e1fed"
+      }
+    },
+    {
+      "id": "ETHUSDT 4h",
+      "statut": "disponible",
+      "resultat": {
+        "acquisition": {
+          "source": "https://data-api.binance.vision/api/v3/klines",
+          "acquisLeUtc": "2026-10-07T13:08:40.668Z",
+          "modeCalcul": "reseau",
+          "nombre": 14933,
+          "premierOpen": "2017-09-01T00:00:00.000Z",
+          "dernierClose": "2024-07-01T00:00:00.000Z",
+          "manquantes": 37,
+          "plagesManquantes": [
+            {
+              "apres": "2017-09-06T12:00:00.000Z",
+              "reprise": "2017-09-06T20:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2018-01-03T20:00:00.000Z",
+              "reprise": "2018-01-04T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2018-02-07T20:00:00.000Z",
+              "reprise": "2018-02-09T08:00:00.000Z",
+              "bougies": 8
+            },
+            {
+              "apres": "2018-06-25T20:00:00.000Z",
+              "reprise": "2018-06-26T12:00:00.000Z",
+              "bougies": 3
+            },
+            {
+              "apres": "2018-07-03T20:00:00.000Z",
+              "reprise": "2018-07-04T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2018-10-19T00:00:00.000Z",
+              "reprise": "2018-10-19T08:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2018-11-13T20:00:00.000Z",
+              "reprise": "2018-11-14T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2019-03-11T20:00:00.000Z",
+              "reprise": "2019-03-12T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2019-05-14T20:00:00.000Z",
+              "reprise": "2019-05-15T12:00:00.000Z",
+              "bougies": 3
+            },
+            {
+              "apres": "2019-08-14T20:00:00.000Z",
+              "reprise": "2019-08-15T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2019-11-12T20:00:00.000Z",
+              "reprise": "2019-11-13T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2019-11-24T20:00:00.000Z",
+              "reprise": "2019-11-25T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-02-19T04:00:00.000Z",
+              "reprise": "2020-02-19T16:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2020-04-24T20:00:00.000Z",
+              "reprise": "2020-04-25T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-06-27T20:00:00.000Z",
+              "reprise": "2020-06-28T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-12-21T08:00:00.000Z",
+              "reprise": "2020-12-21T16:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-02-10T20:00:00.000Z",
+              "reprise": "2021-02-11T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-04-19T20:00:00.000Z",
+              "reprise": "2021-04-20T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-04-25T00:00:00.000Z",
+              "reprise": "2021-04-25T08:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-08-12T20:00:00.000Z",
+              "reprise": "2021-08-13T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-09-29T00:00:00.000Z",
+              "reprise": "2021-09-29T08:00:00.000Z",
+              "bougies": 1
+            }
+          ],
+          "ecartees": [
+            {
+              "temps": "2017-09-06T16:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-01-04T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-02-08T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-06-26T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-07-04T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-10-19T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-11-14T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-03-12T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-05-15T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-08-15T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-11-13T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-11-25T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-02-19T08:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-04-25T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-06-28T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-12-21T12:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-02-11T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-04-20T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-04-25T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-08-13T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-09-29T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            }
+          ],
+          "sha256Ohlcv": "4ff371ea1469d86add31a0509c74d206df401bf41557b563c42c09b92e93dc3a"
+        },
+        "evaluation": {
+          "bougiePremiereDecisionUtc": "2017-10-21T00:00:00.000Z",
+          "premierFillUtc": "2017-10-21T04:00:00.000Z",
+          "finUtc": "2024-07-01T00:00:00.000Z",
+          "decisions": 14633,
+          "milieuUtc": "2021-02-26T16:00:00.000Z"
+        },
+        "achatConservationPct": 1053.744966442953,
+        "rejeu": {
+          "global": {
+            "nbTrades": 99,
+            "winRate": 40.4040404040404,
+            "expectancy": 4.818098078562407,
+            "pnlComposePct": 3103.190497022322,
+            "maxDrawdownPct": -41.79609035427089,
+            "dureeMoyenne": 61.37373737373738
+          },
+          "m1": {
+            "nbTrades": 48,
+            "winRate": 45.83333333333333,
+            "expectancy": 6.603922441154457,
+            "pnlComposePct": 1045.1587166134059,
+            "maxDrawdownPct": -27.52102848123734,
+            "dureeMoyenne": 61.270833333333336
+          },
+          "m2": {
+            "nbTrades": 51,
+            "winRate": 35.294117647058826,
+            "expectancy": 3.137322207887536,
+            "pnlComposePct": 179.715855151953,
+            "maxDrawdownPct": -41.79609035427088,
+            "dureeMoyenne": 61.470588235294116
+          }
+        },
+        "executions": [
+          {
+            "cout": "x1-central",
+            "metriques": {
+              "trades": 99,
+              "fermes": 99,
+              "finDonnees": 0,
+              "expectancyNette": 46.827487655363186,
+              "expectancyPct": 4.682748765536315,
+              "pnlTotal": 4635.921277880955,
+              "pnlTotalPct": 46.35921277880955,
+              "winRatePct": 39.39393939393939,
+              "profitFactor": 2.3100731342702883,
+              "ddRealiseMaxPct": 5.265530554491747,
+              "dureeMoyenneBarres": 61.37373737373738,
+              "fraisTotal": 101.36864496142118,
+              "meilleurPct": 63.549209921427206,
+              "pirePct": -15.89370265668785
+            }
+          },
+          {
+            "cout": "x2",
+            "metriques": {
+              "trades": 99,
+              "fermes": 99,
+              "finDonnees": 0,
+              "expectancyNette": 45.38492421795783,
+              "expectancyPct": 4.538492421795784,
+              "pnlTotal": 4493.107497577826,
+              "pnlTotalPct": 44.93107497577826,
+              "winRatePct": 39.39393939393939,
+              "profitFactor": 2.241356520945604,
+              "ddRealiseMaxPct": 5.358821141227081,
+              "dureeMoyenneBarres": 61.37373737373738,
+              "fraisTotal": 202.69580330087874,
+              "meilleurPct": 63.351975521988756,
+              "pirePct": -16.019440809116933
+            }
+          },
+          {
+            "cout": "x3",
+            "metriques": {
+              "trades": 99,
+              "fermes": 99,
+              "finDonnees": 0,
+              "expectancyNette": 43.94294710825828,
+              "expectancyPct": 4.394294710825829,
+              "pnlTotal": 4350.35176371757,
+              "pnlTotalPct": 43.5035176371757,
+              "winRatePct": 39.39393939393939,
+              "profitFactor": 2.17566810363389,
+              "ddRealiseMaxPct": 5.452075467924496,
+              "dureeMoyenneBarres": 61.37373737373738,
+              "fraisTotal": 303.9814998954194,
+              "meilleurPct": 63.154832710664344,
+              "pirePct": -16.14513184813659
+            }
+          }
+        ],
+        "timing": {
+          "capteLog": 3.4770343955159757,
+          "p": 0.0095,
+          "medianeNulle": 0.883520182616718,
+          "q95Nulle": 2.7943195457880536,
+          "L": 14633,
+          "exposition": 0.4152258593589831
+        },
+        "parAnneeX1": [
+          {
+            "annee": 2017,
+            "trades": 4,
+            "pnlNet": 405.6871093083436,
+            "expectancyPct": 10.14217773270859
+          },
+          {
+            "annee": 2018,
+            "trades": 9,
+            "pnlNet": 191.62333915180636,
+            "expectancyPct": 2.129148212797849
+          },
+          {
+            "annee": 2019,
+            "trades": 11,
+            "pnlNet": 814.6276647229895,
+            "expectancyPct": 7.4057060429362656
+          },
+          {
+            "annee": 2020,
+            "trades": 22,
+            "pnlNet": 1556.6823696917056,
+            "expectancyPct": 7.075828953144116
+          },
+          {
+            "annee": 2021,
+            "trades": 18,
+            "pnlNet": 789.3132054794178,
+            "expectancyPct": 4.385073363774541
+          },
+          {
+            "annee": 2022,
+            "trades": 13,
+            "pnlNet": -43.10229758524434,
+            "expectancyPct": -0.3315561352711101
+          },
+          {
+            "annee": 2023,
+            "trades": 16,
+            "pnlNet": 299.4049992492755,
+            "expectancyPct": 1.8712812453079717
+          },
+          {
+            "annee": 2024,
+            "trades": 6,
+            "pnlNet": 621.6848878626586,
+            "expectancyPct": 10.361414797710976
+          }
+        ],
+        "referenceEma": {
+          "executions": [
+            {
+              "cout": "x1-central",
+              "metriques": {
+                "trades": 220,
+                "fermes": 220,
+                "finDonnees": 0,
+                "expectancyNette": 32.082697964433756,
+                "expectancyPct": 3.2082697964433757,
+                "pnlTotal": 7058.193552175426,
+                "pnlTotalPct": 70.58193552175426,
+                "winRatePct": 17.727272727272727,
+                "profitFactor": 2.988398698756297,
+                "ddRealiseMaxPct": 5.637113026617815,
+                "dureeMoyenneBarres": 34.7,
+                "fraisTotal": 223.64091723470503,
+                "meilleurPct": 204.81546333478553,
+                "pirePct": -11.500874869337988
+              }
+            },
+            {
+              "cout": "x3",
+              "metriques": {
+                "trades": 220,
+                "fermes": 220,
+                "finDonnees": 0,
+                "expectancyNette": 29.224688902808445,
+                "expectancyPct": 2.9224688902808484,
+                "pnlTotal": 6429.431558617858,
+                "pnlTotalPct": 64.29431558617858,
+                "winRatePct": 17.272727272727273,
+                "profitFactor": 2.586663268498273,
+                "ddRealiseMaxPct": 6.10301733022856,
+                "dureeMoyenneBarres": 34.7,
+                "fraisTotal": 670.6501225217094,
+                "meilleurPct": 204.16689439733454,
+                "pirePct": -11.760208428980317
+              }
+            }
+          ],
+          "timing": {
+            "capteLog": 4.569792545551493,
+            "p": 0.0005,
+            "medianeNulle": 1.1341067730507524,
+            "q95Nulle": 2.9890879328904076,
+            "L": 14633,
+            "exposition": 0.5216975329734163
+          }
+        },
+        "tradesX1": [
+          {
+            "entree": "2017-10-30T04:00:00.000Z",
+            "sortie": "2017-11-02T00:00:00.000Z",
+            "prixEntree": 308.521692,
+            "prixSortie": 287.24254,
+            "pnl": -69.93684617806373,
+            "pnlPct": -6.993684617806373,
+            "raison": "regle"
+          },
+          {
+            "entree": "2017-11-08T20:00:00.000Z",
+            "sortie": "2017-11-12T04:00:00.000Z",
+            "prixEntree": 313.792746,
+            "prixSortie": 300.859816,
+            "pnl": -42.194271377452424,
+            "pnlPct": -4.219427137745242,
+            "raison": "regle"
+          },
+          {
+            "entree": "2017-11-15T00:00:00.000Z",
+            "sortie": "2017-11-30T16:00:00.000Z",
+            "prixEntree": 335.66712,
+            "prixSortie": 392.681448,
+            "pnl": 168.76884967464187,
+            "pnlPct": 16.876884967464186,
+            "raison": "regle"
+          },
+          {
+            "entree": "2017-12-09T16:00:00.000Z",
+            "sortie": "2017-12-24T00:00:00.000Z",
+            "prixEntree": 474.14481,
+            "prixSortie": 640.201934,
+            "pnl": 349.0493771892179,
+            "pnlPct": 34.904937718921786,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-01-02T04:00:00.000Z",
+            "sortie": "2018-01-17T04:00:00.000Z",
+            "prixEntree": 827.1654,
+            "prixSortie": 934.822998,
+            "pnl": 129.08736729195877,
+            "pnlPct": 12.90873672919588,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-01-28T08:00:00.000Z",
+            "sortie": "2018-01-31T20:00:00.000Z",
+            "prixEntree": 1183.206594,
+            "prixSortie": 1104.569042,
+            "pnl": -67.42815685998443,
+            "pnlPct": -6.742815685998442,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-02-15T08:00:00.000Z",
+            "sortie": "2018-02-21T16:00:00.000Z",
+            "prixEntree": 938.897742,
+            "prixSortie": 837.842398,
+            "pnl": -108.5780799225737,
+            "pnlPct": -10.85780799225737,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-04-13T08:00:00.000Z",
+            "sortie": "2018-05-07T08:00:00.000Z",
+            "prixEntree": 510.732126,
+            "prixSortie": 736.8326040000001,
+            "pnl": 441.477408912789,
+            "pnlPct": 44.1477408912789,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-07-17T04:00:00.000Z",
+            "sortie": "2018-07-19T20:00:00.000Z",
+            "prixEntree": 480.015984,
+            "prixSortie": 467.366508,
+            "pnl": -27.33902137308826,
+            "pnlPct": -2.733902137308826,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-07-25T00:00:00.000Z",
+            "sortie": "2018-07-31T04:00:00.000Z",
+            "prixEntree": 479.335848,
+            "prixSortie": 450.69984200000005,
+            "pnl": -60.71113597370658,
+            "pnlPct": -6.071113597370658,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-11-04T20:00:00.000Z",
+            "sortie": "2018-11-14T12:00:00.000Z",
+            "prixEntree": 213.702732,
+            "prixSortie": 204.529086,
+            "pnl": -43.90567130887214,
+            "pnlPct": -4.390567130887213,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-12-23T04:00:00.000Z",
+            "sortie": "2018-12-27T08:00:00.000Z",
+            "prixEntree": 127.735542,
+            "prixSortie": 122.785438,
+            "pnl": -39.73337733987927,
+            "pnlPct": -3.9733377339879272,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-12-28T20:00:00.000Z",
+            "sortie": "2019-01-10T16:00:00.000Z",
+            "prixEntree": 133.256646,
+            "prixSortie": 129.22415,
+            "pnl": -31.245994274837003,
+            "pnlPct": -3.1245994274837003,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-02-08T20:00:00.000Z",
+            "sortie": "2019-02-26T20:00:00.000Z",
+            "prixEntree": 119.753946,
+            "prixSortie": 135.002994,
+            "pnl": 126.27282887196051,
+            "pnlPct": 12.627282887196053,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-03-07T08:00:00.000Z",
+            "sortie": "2019-03-11T16:00:00.000Z",
+            "prixEntree": 137.94758399999998,
+            "prixSortie": 131.643666,
+            "pnl": -46.67507351922875,
+            "pnlPct": -4.6675073519228745,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-03-16T04:00:00.000Z",
+            "sortie": "2019-03-22T00:00:00.000Z",
+            "prixEntree": 139.70793600000002,
+            "prixSortie": 134.82303,
+            "pnl": -35.947646402850225,
+            "pnlPct": -3.5947646402850224,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-03-28T00:00:00.000Z",
+            "sortie": "2019-04-11T12:00:00.000Z",
+            "prixEntree": 139.48789200000002,
+            "prixSortie": 162.50749199999998,
+            "pnl": 163.94686291481102,
+            "pnlPct": 16.394686291481104,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-04-18T04:00:00.000Z",
+            "sortie": "2019-04-24T16:00:00.000Z",
+            "prixEntree": 171.844362,
+            "prixSortie": 163.39731400000002,
+            "pnl": -50.13064576421755,
+            "pnlPct": -5.013064576421755,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-05-03T12:00:00.000Z",
+            "sortie": "2019-05-31T00:00:00.000Z",
+            "prixEntree": 167.403474,
+            "prixSortie": 254.539082,
+            "pnl": 519.2522869746421,
+            "pnlPct": 51.925228697464206,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-06-13T00:00:00.000Z",
+            "sortie": "2019-06-30T20:00:00.000Z",
+            "prixEntree": 261.182226,
+            "prixSortie": 303.28933,
+            "pnl": 160.13673235942167,
+            "pnlPct": 16.013673235942168,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-07-08T16:00:00.000Z",
+            "sortie": "2019-07-11T04:00:00.000Z",
+            "prixEntree": 307.921572,
+            "prixSortie": 282.883412,
+            "pnl": -82.2727759132121,
+            "pnlPct": -8.22727759132121,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-09-15T00:00:00.000Z",
+            "sortie": "2019-09-24T00:00:00.000Z",
+            "prixEntree": 188.17762799999997,
+            "prixSortie": 201.20975,
+            "pnl": 68.21973710392419,
+            "pnlPct": 6.821973710392419,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-10-09T12:00:00.000Z",
+            "sortie": "2019-10-12T20:00:00.000Z",
+            "prixEntree": 183.5367,
+            "prixSortie": 179.654062,
+            "pnl": -22.143981999240406,
+            "pnlPct": -2.2143981999240405,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-10-27T00:00:00.000Z",
+            "sortie": "2019-11-15T04:00:00.000Z",
+            "prixEntree": 179.455884,
+            "prixSortie": 182.143564,
+            "pnl": 13.969340096978936,
+            "pnlPct": 1.3969340096978935,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-01-05T16:00:00.000Z",
+            "sortie": "2020-01-24T08:00:00.000Z",
+            "prixEntree": 137.267448,
+            "prixSortie": 159.208152,
+            "pnl": 158.75917063745518,
+            "pnlPct": 15.875917063745518,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-01-27T16:00:00.000Z",
+            "sortie": "2020-02-16T20:00:00.000Z",
+            "prixEntree": 170.04400199999998,
+            "prixSortie": 249.70005,
+            "pnl": 467.2095165932406,
+            "pnlPct": 46.72095165932406,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-02-18T20:00:00.000Z",
+            "sortie": "2020-02-26T00:00:00.000Z",
+            "prixEntree": 284.736936,
+            "prixSortie": 246.620666,
+            "pnl": -134.7979273085948,
+            "pnlPct": -13.47979273085948,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-03-07T00:00:00.000Z",
+            "sortie": "2020-03-08T16:00:00.000Z",
+            "prixEntree": 244.978986,
+            "prixSortie": 216.70665,
+            "pnl": -116.34948484112019,
+            "pnlPct": -11.63494848411202,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-04-06T12:00:00.000Z",
+            "sortie": "2020-04-10T16:00:00.000Z",
+            "prixEntree": 154.270848,
+            "prixSortie": 152.979398,
+            "pnl": -9.367130224110763,
+            "pnlPct": -0.9367130224110762,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-04-16T08:00:00.000Z",
+            "sortie": "2020-04-21T16:00:00.000Z",
+            "prixEntree": 164.58291,
+            "prixSortie": 170.285936,
+            "pnl": 33.6340606506471,
+            "pnlPct": 3.36340606506471,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-04-23T20:00:00.000Z",
+            "sortie": "2020-05-04T04:00:00.000Z",
+            "prixEntree": 189.247842,
+            "prixSortie": 203.55928,
+            "pnl": 74.58491621267738,
+            "pnlPct": 7.458491621267739,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-05-17T04:00:00.000Z",
+            "sortie": "2020-05-21T20:00:00.000Z",
+            "prixEntree": 201.560304,
+            "prixSortie": 198.57027800000003,
+            "pnl": -15.826981938864172,
+            "pnlPct": -1.582698193886417,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-05-28T16:00:00.000Z",
+            "sortie": "2020-06-12T12:00:00.000Z",
+            "prixEntree": 214.30285199999997,
+            "prixSortie": 237.322526,
+            "pnl": 106.36284630967039,
+            "pnlPct": 10.636284630967038,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-06-22T20:00:00.000Z",
+            "sortie": "2020-06-24T16:00:00.000Z",
+            "prixEntree": 242.418474,
+            "prixSortie": 232.05358,
+            "pnl": -43.73482702065022,
+            "pnlPct": -4.373482702065022,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-07-06T12:00:00.000Z",
+            "sortie": "2020-07-16T12:00:00.000Z",
+            "prixEntree": 235.737138,
+            "prixSortie": 231.643662,
+            "pnl": -18.355896048928795,
+            "pnlPct": -1.8355896048928793,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-07-21T08:00:00.000Z",
+            "sortie": "2020-08-19T20:00:00.000Z",
+            "prixEntree": 241.818354,
+            "prixSortie": 395.810822,
+            "pnl": 635.4920992142721,
+            "pnlPct": 63.549209921427206,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-08-30T16:00:00.000Z",
+            "sortie": "2020-09-04T00:00:00.000Z",
+            "prixEntree": 416.89336199999997,
+            "prixSortie": 381.27373000000006,
+            "pnl": -86.39791090269246,
+            "pnlPct": -8.639791090269245,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-09-13T04:00:00.000Z",
+            "sortie": "2020-09-14T04:00:00.000Z",
+            "prixEntree": 388.797744,
+            "prixSortie": 365.266932,
+            "pnl": -61.491725985940974,
+            "pnlPct": -6.149172598594096,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-09-18T00:00:00.000Z",
+            "sortie": "2020-09-21T12:00:00.000Z",
+            "prixEntree": 389.42787000000004,
+            "prixSortie": 352.409504,
+            "pnl": -96.01080859210208,
+            "pnlPct": -9.60108085921021,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-10-01T12:00:00.000Z",
+            "sortie": "2020-10-02T16:00:00.000Z",
+            "prixEntree": 368.62371,
+            "prixSortie": 343.09136800000005,
+            "pnl": -70.2293391247133,
+            "pnlPct": -7.0229339124713315,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-10-09T16:00:00.000Z",
+            "sortie": "2020-10-17T00:00:00.000Z",
+            "prixEntree": 365.20302599999997,
+            "prixSortie": 365.4269,
+            "pnl": -0.3872940609204497,
+            "pnlPct": -0.03872940609204497,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-10-19T16:00:00.000Z",
+            "sortie": "2020-10-29T08:00:00.000Z",
+            "prixEntree": 383.616708,
+            "prixSortie": 387.12256,
+            "pnl": 8.134375539242686,
+            "pnlPct": 0.8134375539242686,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-11-05T04:00:00.000Z",
+            "sortie": "2020-11-27T16:00:00.000Z",
+            "prixEntree": 404.72092799999996,
+            "prixSortie": 496.230734,
+            "pnl": 224.9928873680583,
+            "pnlPct": 22.499288736805827,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-11-30T00:00:00.000Z",
+            "sortie": "2020-12-09T04:00:00.000Z",
+            "prixEntree": 576.4352640000001,
+            "prixSortie": 551.999578,
+            "pnl": -43.369836965769025,
+            "pnlPct": -4.336983696576902,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-12-14T00:00:00.000Z",
+            "sortie": "2020-12-21T16:00:00.000Z",
+            "prixEntree": 590.9281619999999,
+            "prixSortie": 609.718032,
+            "pnl": 30.781316702587727,
+            "pnlPct": 3.078131670258773,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-12-26T20:00:00.000Z",
+            "sortie": "2021-01-11T16:00:00.000Z",
+            "prixEntree": 645.1890119999999,
+            "prixSortie": 977.0145580000001,
+            "pnl": 513.0503434782615,
+            "pnlPct": 51.30503434782615,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-01-19T04:00:00.000Z",
+            "sortie": "2021-01-22T16:00:00.000Z",
+            "prixEntree": 1321.844316,
+            "prixSortie": 1232.8933720000002,
+            "pnl": -68.25940978967732,
+            "pnlPct": -6.825940978967732,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-01-25T00:00:00.000Z",
+            "sortie": "2021-02-23T04:00:00.000Z",
+            "prixEntree": 1392.468438,
+            "prixSortie": 1679.454042,
+            "pnl": 204.99541315994978,
+            "pnlPct": 20.49954131599498,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-03-07T04:00:00.000Z",
+            "sortie": "2021-03-17T04:00:00.000Z",
+            "prixEntree": 1649.319798,
+            "prixSortie": 1766.556618,
+            "pnl": 70.04638029088892,
+            "pnlPct": 7.004638029088891,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-03-29T20:00:00.000Z",
+            "sortie": "2021-04-08T00:00:00.000Z",
+            "prixEntree": 1816.4632199999999,
+            "prixSortie": 1963.0673080000001,
+            "pnl": 79.66818218097488,
+            "pnlPct": 7.966818218097489,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-04-10T08:00:00.000Z",
+            "sortie": "2021-04-19T16:00:00.000Z",
+            "prixEntree": 2163.372588,
+            "prixSortie": 2095.160884,
+            "pnl": -32.51449663648982,
+            "pnlPct": -3.2514496636489825,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-04-21T16:00:00.000Z",
+            "sortie": "2021-04-25T08:00:00.000Z",
+            "prixEntree": 2443.278558,
+            "prixSortie": 2192.891334,
+            "pnl": -103.42877528989474,
+            "pnlPct": -10.342877528989474,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-04-27T12:00:00.000Z",
+            "sortie": "2021-05-15T12:00:00.000Z",
+            "prixEntree": 2573.204538,
+            "prixSortie": 3901.2495940000003,
+            "pnl": 514.8474632971444,
+            "pnlPct": 51.484746329714426,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-06-03T08:00:00.000Z",
+            "sortie": "2021-06-08T16:00:00.000Z",
+            "prixEntree": 2820.5940060000003,
+            "prixSortie": 2374.894926,
+            "pnl": -158.93702656687847,
+            "pnlPct": -15.89370265668785,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-07-04T08:00:00.000Z",
+            "sortie": "2021-07-09T20:00:00.000Z",
+            "prixEntree": 2334.936894,
+            "prixSortie": 2133.263262,
+            "pnl": -87.329012018258,
+            "pnlPct": -8.7329012018258,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-07-24T00:00:00.000Z",
+            "sortie": "2021-08-19T00:00:00.000Z",
+            "prixEntree": 2124.6848520000003,
+            "prixSortie": 3013.577164,
+            "pnl": 417.1551278099851,
+            "pnlPct": 41.71551278099851,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-08-21T04:00:00.000Z",
+            "sortie": "2021-08-26T08:00:00.000Z",
+            "prixEntree": 3277.10529,
+            "prixSortie": 3104.538968,
+            "pnl": -53.63182704727809,
+            "pnlPct": -5.363182704727809,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-08-30T20:00:00.000Z",
+            "sortie": "2021-09-07T16:00:00.000Z",
+            "prixEntree": 3341.838234,
+            "prixSortie": 3453.1992219999997,
+            "pnl": 32.30661142528538,
+            "pnlPct": 3.2306611425285383,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-09-16T08:00:00.000Z",
+            "sortie": "2021-09-20T00:00:00.000Z",
+            "prixEntree": 3634.8168180000002,
+            "prixSortie": 3327.9042860000004,
+            "pnl": -85.39464520327303,
+            "pnlPct": -8.539464520327304,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-10-01T20:00:00.000Z",
+            "sortie": "2021-11-12T12:00:00.000Z",
+            "prixEntree": 3298.299528,
+            "prixSortie": 4599.92983,
+            "pnl": 393.4394606386398,
+            "pnlPct": 39.343946063863974,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-11-25T20:00:00.000Z",
+            "sortie": "2021-11-26T16:00:00.000Z",
+            "prixEntree": 4502.95041,
+            "prixSortie": 4063.13721,
+            "pnl": -98.62339208172637,
+            "pnlPct": -9.862339208172637,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-11-30T00:00:00.000Z",
+            "sortie": "2021-12-04T08:00:00.000Z",
+            "prixEntree": 4445.428908,
+            "prixSortie": 3892.731298,
+            "pnl": -125.26725803687056,
+            "pnlPct": -12.526725803687055,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-12-09T04:00:00.000Z",
+            "sortie": "2021-12-10T04:00:00.000Z",
+            "prixEntree": 4359.72177,
+            "prixSortie": 4139.951844,
+            "pnl": -51.38395857013599,
+            "pnlPct": -5.138395857013599,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-12-23T20:00:00.000Z",
+            "sortie": "2021-12-28T16:00:00.000Z",
+            "prixEntree": 4134.466728,
+            "prixSortie": 3897.1304179999997,
+            "pnl": -58.37563208296801,
+            "pnlPct": -5.837563208296801,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-02-05T00:00:00.000Z",
+            "sortie": "2022-02-13T04:00:00.000Z",
+            "prixEntree": 2995.5889979999997,
+            "prixSortie": 2918.136256,
+            "pnl": -26.842669231555227,
+            "pnlPct": -2.6842669231555227,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-02-15T16:00:00.000Z",
+            "sortie": "2022-02-18T12:00:00.000Z",
+            "prixEntree": 3123.234522,
+            "prixSortie": 2878.084268,
+            "pnl": -79.45317959539386,
+            "pnlPct": -7.945317959539386,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-03-01T00:00:00.000Z",
+            "sortie": "2022-03-04T16:00:00.000Z",
+            "prixEntree": 2921.414166,
+            "prixSortie": 2671.195654,
+            "pnl": -86.60696585052429,
+            "pnlPct": -8.66069658505243,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-03-16T20:00:00.000Z",
+            "sortie": "2022-04-06T04:00:00.000Z",
+            "prixEntree": 2753.710632,
+            "prixSortie": 3342.171432,
+            "pnl": 212.59055042498028,
+            "pnlPct": 21.25905504249803,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-04-21T12:00:00.000Z",
+            "sortie": "2022-04-22T04:00:00.000Z",
+            "prixEntree": 3151.78023,
+            "prixSortie": 2994.810918,
+            "pnl": -50.778479429068476,
+            "pnlPct": -5.077847942906848,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-07-15T20:00:00.000Z",
+            "sortie": "2022-07-26T00:00:00.000Z",
+            "prixEntree": 1266.5832659999999,
+            "prixSortie": 1440.501842,
+            "pnl": 136.24452341848644,
+            "pnlPct": 13.624452341848645,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-07-28T08:00:00.000Z",
+            "sortie": "2022-08-10T04:00:00.000Z",
+            "prixEntree": 1618.763688,
+            "prixSortie": 1669.1661000000001,
+            "pnl": 30.120793706610584,
+            "pnlPct": 3.0120793706610587,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-08-10T16:00:00.000Z",
+            "sortie": "2022-08-19T08:00:00.000Z",
+            "prixEntree": 1837.857498,
+            "prixSortie": 1744.2810740000002,
+            "pnl": -51.890580956239,
+            "pnlPct": -5.189058095623899,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-09-06T12:00:00.000Z",
+            "sortie": "2022-09-07T04:00:00.000Z",
+            "prixEntree": 1668.813696,
+            "prixSortie": 1510.067926,
+            "pnl": -96.07735794313615,
+            "pnlPct": -9.607735794313616,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-09-08T20:00:00.000Z",
+            "sortie": "2022-09-13T16:00:00.000Z",
+            "prixEntree": 1649.9299199999998,
+            "prixSortie": 1594.121112,
+            "pnl": -34.80804415983909,
+            "pnlPct": -3.480804415983909,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-10-24T00:00:00.000Z",
+            "sortie": "2022-11-08T04:00:00.000Z",
+            "prixEntree": 1364.462838,
+            "prixSortie": 1506.758588,
+            "pnl": 103.23486676520245,
+            "pnlPct": 10.323486676520243,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-11-30T20:00:00.000Z",
+            "sortie": "2022-12-08T00:00:00.000Z",
+            "prixEntree": 1287.45744,
+            "prixSortie": 1230.933764,
+            "pnl": -44.88138388636738,
+            "pnlPct": -4.488138388636738,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-12-09T00:00:00.000Z",
+            "sortie": "2022-12-16T12:00:00.000Z",
+            "prixEntree": 1280.436036,
+            "prixSortie": 1212.597432,
+            "pnl": -53.95437084840061,
+            "pnlPct": -5.395437084840061,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-01-04T04:00:00.000Z",
+            "sortie": "2023-01-25T00:00:00.000Z",
+            "prixEntree": 1250.980146,
+            "prixSortie": 1555.6588060000001,
+            "pnl": 242.43017884314213,
+            "pnlPct": 24.243017884314213,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-01-29T20:00:00.000Z",
+            "sortie": "2023-02-10T00:00:00.000Z",
+            "prixEntree": 1654.190772,
+            "prixSortie": 1545.04093,
+            "pnl": -66.9508376697679,
+            "pnlPct": -6.695083766976791,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-02-16T04:00:00.000Z",
+            "sortie": "2023-02-24T16:00:00.000Z",
+            "prixEntree": 1691.748282,
+            "prixSortie": 1602.619412,
+            "pnl": -53.65813272154398,
+            "pnlPct": -5.365813272154398,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-03-02T00:00:00.000Z",
+            "sortie": "2023-03-03T04:00:00.000Z",
+            "prixEntree": 1665.563046,
+            "prixSortie": 1565.1169140000002,
+            "pnl": -61.2774594303768,
+            "pnlPct": -6.12774594303768,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-03-13T20:00:00.000Z",
+            "sortie": "2023-04-19T16:00:00.000Z",
+            "prixEntree": 1678.025538,
+            "prixSortie": 1983.013318,
+            "pnl": 180.66307914081332,
+            "pnlPct": 18.066307914081335,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-05-05T12:00:00.000Z",
+            "sortie": "2023-05-06T16:00:00.000Z",
+            "prixEntree": 1911.572238,
+            "prixSortie": 1876.944536,
+            "pnl": -19.105718141842985,
+            "pnlPct": -1.9105718141842987,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-05-23T04:00:00.000Z",
+            "sortie": "2023-05-25T04:00:00.000Z",
+            "prixEntree": 1866.383202,
+            "prixSortie": 1780.923744,
+            "pnl": -46.76591140526137,
+            "pnlPct": -4.676591140526138,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-05-28T04:00:00.000Z",
+            "sortie": "2023-06-06T00:00:00.000Z",
+            "prixEntree": 1851.080142,
+            "prixSortie": 1810.127902,
+            "pnl": -23.11236723428697,
+            "pnlPct": -2.311236723428697,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-06-21T00:00:00.000Z",
+            "sortie": "2023-07-07T04:00:00.000Z",
+            "prixEntree": 1792.3483979999999,
+            "prixSortie": 1857.658394,
+            "pnl": 35.42000688863851,
+            "pnlPct": 3.5420006888638507,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-07-13T20:00:00.000Z",
+            "sortie": "2023-07-18T08:00:00.000Z",
+            "prixEntree": 1995.659052,
+            "prixSortie": 1898.610202,
+            "pnl": -49.605660109019404,
+            "pnlPct": -4.960566010901941,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-09-28T16:00:00.000Z",
+            "sortie": "2023-10-03T20:00:00.000Z",
+            "prixEntree": 1652.900514,
+            "prixSortie": 1649.939946,
+            "pnl": -2.790239455391667,
+            "pnlPct": -0.27902394553916676,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-10-20T20:00:00.000Z",
+            "sortie": "2023-11-17T16:00:00.000Z",
+            "prixEntree": 1607.051346,
+            "prixSortie": 1917.956332,
+            "pnl": 192.36627562054264,
+            "pnlPct": 19.236627562054267,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-11-20T16:00:00.000Z",
+            "sortie": "2023-11-27T16:00:00.000Z",
+            "prixEntree": 2042.618442,
+            "prixSortie": 2002.679384,
+            "pnl": -20.543096082063048,
+            "pnlPct": -2.054309608206305,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-12-01T04:00:00.000Z",
+            "sortie": "2023-12-11T04:00:00.000Z",
+            "prixEntree": 2092.6184399999997,
+            "prixSortie": 2250.969716,
+            "pnl": 74.63352082570788,
+            "pnlPct": 7.463352082570787,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-12-15T00:00:00.000Z",
+            "sortie": "2023-12-17T20:00:00.000Z",
+            "prixEntree": 2315.783064,
+            "prixSortie": 2234.063098,
+            "pnl": -36.27062067546069,
+            "pnlPct": -3.6270620675460696,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-12-22T12:00:00.000Z",
+            "sortie": "2024-01-04T00:00:00.000Z",
+            "prixEntree": 2313.502608,
+            "prixSortie": 2209.2780559999997,
+            "pnl": -46.02801914455423,
+            "pnlPct": -4.602801914455423,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-01-10T00:00:00.000Z",
+            "sortie": "2024-01-20T00:00:00.000Z",
+            "prixEntree": 2344.76886,
+            "prixSortie": 2491.491602,
+            "pnl": 61.54321401598617,
+            "pnlPct": 6.154321401598618,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-01-31T08:00:00.000Z",
+            "sortie": "2024-03-14T20:00:00.000Z",
+            "prixEntree": 2341.308168,
+            "prixSortie": 3785.132822,
+            "pnl": 615.365996324923,
+            "pnlPct": 61.5365996324923,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-03-26T12:00:00.000Z",
+            "sortie": "2024-04-02T04:00:00.000Z",
+            "prixEntree": 3632.336322,
+            "prixSortie": 3365.3967860000002,
+            "pnl": -74.4530182725739,
+            "pnlPct": -7.44530182725739,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-04-08T12:00:00.000Z",
+            "sortie": "2024-04-12T20:00:00.000Z",
+            "prixEntree": 3633.796614,
+            "prixSortie": 3205.5287660000004,
+            "pnl": -118.79792859810273,
+            "pnlPct": -11.879792859810275,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-04-28T04:00:00.000Z",
+            "sortie": "2024-04-29T12:00:00.000Z",
+            "prixEntree": 3309.521772,
+            "prixSortie": 3159.4779780000003,
+            "pnl": -46.3143331377364,
+            "pnlPct": -4.63143331377364,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-05-17T16:00:00.000Z",
+            "sortie": "2024-06-08T04:00:00.000Z",
+            "prixEntree": 3112.162308,
+            "prixSortie": 3689.262,
+            "pnl": 184.34095753016243,
+            "pnlPct": 18.43409575301624,
+            "raison": "regle"
+          }
+        ],
+        "empreinteChronologieX1": "e9a68c52a6919537e7edb8ab232a00238515f404e87fd35a2b77158977db9e82"
+      }
+    },
+    {
+      "id": "XRPUSDT 4h",
+      "statut": "disponible",
+      "resultat": {
+        "acquisition": {
+          "source": "https://data-api.binance.vision/api/v3/klines",
+          "acquisLeUtc": "2026-10-07T13:08:42.259Z",
+          "modeCalcul": "reseau",
+          "nombre": 13305,
+          "premierOpen": "2018-06-01T00:00:00.000Z",
+          "dernierClose": "2024-07-01T00:00:00.000Z",
+          "manquantes": 27,
+          "plagesManquantes": [
+            {
+              "apres": "2018-06-25T20:00:00.000Z",
+              "reprise": "2018-06-26T12:00:00.000Z",
+              "bougies": 3
+            },
+            {
+              "apres": "2018-07-03T20:00:00.000Z",
+              "reprise": "2018-07-04T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2018-10-19T00:00:00.000Z",
+              "reprise": "2018-10-19T08:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2018-11-13T20:00:00.000Z",
+              "reprise": "2018-11-14T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2019-03-11T20:00:00.000Z",
+              "reprise": "2019-03-12T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2019-05-14T20:00:00.000Z",
+              "reprise": "2019-05-15T12:00:00.000Z",
+              "bougies": 3
+            },
+            {
+              "apres": "2019-08-14T20:00:00.000Z",
+              "reprise": "2019-08-15T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2019-11-12T20:00:00.000Z",
+              "reprise": "2019-11-13T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2019-11-24T20:00:00.000Z",
+              "reprise": "2019-11-25T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-02-19T04:00:00.000Z",
+              "reprise": "2020-02-19T16:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2020-04-24T20:00:00.000Z",
+              "reprise": "2020-04-25T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-06-27T20:00:00.000Z",
+              "reprise": "2020-06-28T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-12-21T08:00:00.000Z",
+              "reprise": "2020-12-21T16:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-02-10T20:00:00.000Z",
+              "reprise": "2021-02-11T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-04-19T20:00:00.000Z",
+              "reprise": "2021-04-20T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-04-25T00:00:00.000Z",
+              "reprise": "2021-04-25T08:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-08-12T20:00:00.000Z",
+              "reprise": "2021-08-13T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-09-29T00:00:00.000Z",
+              "reprise": "2021-09-29T08:00:00.000Z",
+              "bougies": 1
+            }
+          ],
+          "ecartees": [
+            {
+              "temps": "2018-06-26T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-07-04T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-10-19T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-11-14T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-03-12T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-05-15T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-08-15T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-11-13T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-11-25T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-02-19T08:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-04-25T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-06-28T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-12-21T12:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-02-11T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-04-20T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-04-25T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-08-13T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-09-29T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            }
+          ],
+          "sha256Ohlcv": "95688d40b6f4dddc2065328ae148d5795c09d3a1dd0445e18aba61aa219a15fb"
+        },
+        "evaluation": {
+          "bougiePremiereDecisionUtc": "2018-07-21T16:00:00.000Z",
+          "premierFillUtc": "2018-07-21T20:00:00.000Z",
+          "finUtc": "2024-07-01T00:00:00.000Z",
+          "decisions": 13005,
+          "milieuUtc": "2021-07-12T16:00:00.000Z"
+        },
+        "achatConservationPct": 4.635062965649106,
+        "rejeu": {
+          "global": {
+            "nbTrades": 84,
+            "winRate": 33.33333333333333,
+            "expectancy": 2.624143747482406,
+            "pnlComposePct": 141.80140206867839,
+            "maxDrawdownPct": -48.40842290242511,
+            "dureeMoyenne": 52.61904761904762
+          },
+          "m1": {
+            "nbTrades": 40,
+            "winRate": 37.5,
+            "expectancy": 4.9452538743846315,
+            "pnlComposePct": 171.33518368597177,
+            "maxDrawdownPct": -37.915124747199194,
+            "dureeMoyenne": 52.7
+          },
+          "m2": {
+            "nbTrades": 44,
+            "winRate": 29.545454545454547,
+            "expectancy": 0.5140436321167482,
+            "pnlComposePct": -10.884611872330563,
+            "maxDrawdownPct": -48.40842290242509,
+            "dureeMoyenne": 52.54545454545455
+          }
+        },
+        "executions": [
+          {
+            "cout": "x1-central",
+            "metriques": {
+              "trades": 84,
+              "fermes": 84,
+              "finDonnees": 0,
+              "expectancyNette": 24.832079607107787,
+              "expectancyPct": 2.483207960710778,
+              "pnlTotal": 2085.894686997054,
+              "pnlTotalPct": 20.85894686997054,
+              "winRatePct": 33.33333333333333,
+              "profitFactor": 1.5608125968397668,
+              "ddRealiseMaxPct": 5.323453202833303,
+              "dureeMoyenneBarres": 52.61904761904762,
+              "fraisTotal": 85.08549008854276,
+              "meilleurPct": 106.06199493277634,
+              "pirePct": -25.73634134278055
+            }
+          },
+          {
+            "cout": "x2",
+            "metriques": {
+              "trades": 84,
+              "fermes": 84,
+              "finDonnees": 0,
+              "expectancyNette": 23.409311379568937,
+              "expectancyPct": 2.3409311379568956,
+              "pnlTotal": 1966.3821558837906,
+              "pnlTotalPct": 19.663821558837906,
+              "winRatePct": 33.33333333333333,
+              "profitFactor": 1.5182202729423784,
+              "ddRealiseMaxPct": 5.850821891311464,
+              "dureeMoyenneBarres": 52.61904761904762,
+              "fraisTotal": 170.1365186745584,
+              "meilleurPct": 105.82650029740756,
+              "pirePct": -25.853221414559176
+            }
+          },
+          {
+            "cout": "x3",
+            "metriques": {
+              "trades": 84,
+              "fermes": 84,
+              "finDonnees": 0,
+              "expectancyNette": 21.98711716599708,
+              "expectancyPct": 2.1987117165997083,
+              "pnlTotal": 1846.9178419437546,
+              "pnlTotalPct": 18.469178419437547,
+              "winRatePct": 33.33333333333333,
+              "profitFactor": 1.4772967483247283,
+              "ddRealiseMaxPct": 6.377980717406596,
+              "dureeMoyenneBarres": 52.61904761904762,
+              "fraisTotal": 255.15310642254946,
+              "meilleurPct": 105.59112105018107,
+              "pirePct": -25.97005988315494
+            }
+          }
+        ],
+        "timing": {
+          "capteLog": 0.8845677159311944,
+          "p": 0.22,
+          "medianeNulle": -0.062110708239527246,
+          "q95Nulle": 1.896029078502826,
+          "L": 13005,
+          "exposition": 0.33986928104575165
+        },
+        "parAnneeX1": [
+          {
+            "annee": 2018,
+            "trades": 6,
+            "pnlNet": 203.0689716938556,
+            "expectancyPct": 3.384482861564259
+          },
+          {
+            "annee": 2019,
+            "trades": 11,
+            "pnlNet": -121.96612177679557,
+            "expectancyPct": -1.108782925243596
+          },
+          {
+            "annee": 2020,
+            "trades": 15,
+            "pnlNet": 1240.559409829671,
+            "expectancyPct": 8.27039606553114
+          },
+          {
+            "annee": 2021,
+            "trades": 13,
+            "pnlNet": 1207.3132571030094,
+            "expectancyPct": 9.287025054638532
+          },
+          {
+            "annee": 2022,
+            "trades": 14,
+            "pnlNet": -279.74994986965794,
+            "expectancyPct": -1.9982139276404138
+          },
+          {
+            "annee": 2023,
+            "trades": 16,
+            "pnlNet": 279.59498178698163,
+            "expectancyPct": 1.747468636168635
+          },
+          {
+            "annee": 2024,
+            "trades": 9,
+            "pnlNet": -442.9258617700102,
+            "expectancyPct": -4.921398464111224
+          }
+        ],
+        "referenceEma": {
+          "executions": [
+            {
+              "cout": "x1-central",
+              "metriques": {
+                "trades": 283,
+                "fermes": 283,
+                "finDonnees": 0,
+                "expectancyNette": 3.067022873435883,
+                "expectancyPct": 0.3067022873435883,
+                "pnlTotal": 867.9674731823549,
+                "pnlTotalPct": 8.679674731823548,
+                "winRatePct": 10.60070671378092,
+                "profitFactor": 1.1817935015189867,
+                "ddRealiseMaxPct": 10.492709474428025,
+                "dureeMoyenneBarres": 19.936395759717314,
+                "fraisTotal": 283.5757716224025,
+                "meilleurPct": 130.5579234956978,
+                "pirePct": -11.99942387065429
+              }
+            },
+            {
+              "cout": "x3",
+              "metriques": {
+                "trades": 283,
+                "fermes": 283,
+                "finDonnees": 0,
+                "expectancyNette": 0.26122404868026744,
+                "expectancyPct": 0.02612240486802683,
+                "pnlTotal": 73.92640577651568,
+                "pnlTotalPct": 0.7392640577651568,
+                "winRatePct": 10.247349823321555,
+                "profitFactor": 1.0135027031982098,
+                "ddRealiseMaxPct": 14.674249224617645,
+                "dureeMoyenneBarres": 19.936395759717314,
+                "fraisTotal": 850.3864693126335,
+                "meilleurPct": 130.04297211952013,
+                "pirePct": -12.257860350998333
+              }
+            }
+          ],
+          "timing": {
+            "capteLog": 0.04642544194855365,
+            "p": 0.479,
+            "medianeNulle": -0.022309734214356003,
+            "q95Nulle": 1.8360323955617803,
+            "L": 13005,
+            "exposition": 0.4338331410995771
+          }
+        },
+        "tradesX1": [
+          {
+            "entree": "2018-09-18T16:00:00.000Z",
+            "sortie": "2018-09-25T04:00:00.000Z",
+            "prixEntree": 0.32361470999999997,
+            "prixSortie": 0.47100578000000004,
+            "pnl": 454.2245924327732,
+            "pnlPct": 45.422459243277316,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-09-28T08:00:00.000Z",
+            "sortie": "2018-10-03T00:00:00.000Z",
+            "prixEntree": 0.540648108,
+            "prixSortie": 0.5168166160000001,
+            "pnl": -45.057448646430664,
+            "pnlPct": -4.5057448646430664,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-10-17T04:00:00.000Z",
+            "sortie": "2018-10-29T16:00:00.000Z",
+            "prixEntree": 0.482286438,
+            "prixSortie": 0.44716055,
+            "pnl": -73.79558845069576,
+            "pnlPct": -7.3795588450695755,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-11-03T00:00:00.000Z",
+            "sortie": "2018-11-09T00:00:00.000Z",
+            "prixEntree": 0.46290256199999996,
+            "prixSortie": 0.497030574,
+            "pnl": 72.68926161614124,
+            "pnlPct": 7.268926161614124,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-11-18T20:00:00.000Z",
+            "sortie": "2018-11-20T08:00:00.000Z",
+            "prixEntree": 0.516623304,
+            "prixSortie": 0.45474903200000005,
+            "pnl": -120.70682387955142,
+            "pnlPct": -12.070682387955141,
+            "raison": "regle"
+          },
+          {
+            "entree": "2018-12-19T04:00:00.000Z",
+            "sortie": "2018-12-28T08:00:00.000Z",
+            "prixEntree": 0.372784542,
+            "prixSortie": 0.341721642,
+            "pnl": -84.2850213783811,
+            "pnlPct": -8.428502137838109,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-02-18T04:00:00.000Z",
+            "sortie": "2019-02-24T16:00:00.000Z",
+            "prixEntree": 0.314022792,
+            "prixSortie": 0.302549478,
+            "pnl": -37.51829623564398,
+            "pnlPct": -3.751829623564398,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-02-26T00:00:00.000Z",
+            "sortie": "2019-03-04T12:00:00.000Z",
+            "prixEntree": 0.32746548000000003,
+            "prixSortie": 0.3014397,
+            "pnl": -80.43666950788233,
+            "pnlPct": -8.043666950788232,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-03-07T12:00:00.000Z",
+            "sortie": "2019-03-22T00:00:00.000Z",
+            "prixEntree": 0.31461290999999997,
+            "prixSortie": 0.30958807,
+            "pnl": -16.963513957516795,
+            "pnlPct": -1.6963513957516794,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-04-01T20:00:00.000Z",
+            "sortie": "2019-04-11T20:00:00.000Z",
+            "prixEntree": 0.312942576,
+            "prixSortie": 0.327274532,
+            "pnl": 44.77450024569375,
+            "pnlPct": 4.477450024569375,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-04-18T20:00:00.000Z",
+            "sortie": "2019-04-21T12:00:00.000Z",
+            "prixEntree": 0.33683735400000003,
+            "prixSortie": 0.316826622,
+            "pnl": -60.37799473985901,
+            "pnlPct": -6.037799473985901,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-05-11T16:00:00.000Z",
+            "sortie": "2019-05-19T00:00:00.000Z",
+            "prixEntree": 0.323444676,
+            "prixSortie": 0.371705644,
+            "pnl": 148.13473955589245,
+            "pnlPct": 14.813473955589245,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-05-27T04:00:00.000Z",
+            "sortie": "2019-06-04T20:00:00.000Z",
+            "prixEntree": 0.409151814,
+            "prixSortie": 0.390641856,
+            "pnl": -46.21720884023746,
+            "pnlPct": -4.621720884023746,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-06-16T04:00:00.000Z",
+            "sortie": "2019-06-27T08:00:00.000Z",
+            "prixEntree": 0.419113806,
+            "prixSortie": 0.436502682,
+            "pnl": 40.46888342303856,
+            "pnlPct": 4.0468883423038555,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-09-17T16:00:00.000Z",
+            "sortie": "2019-09-24T00:00:00.000Z",
+            "prixEntree": 0.286727334,
+            "prixSortie": 0.267816426,
+            "pnl": -66.92134862872894,
+            "pnlPct": -6.692134862872893,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-10-07T04:00:00.000Z",
+            "sortie": "2019-10-23T20:00:00.000Z",
+            "prixEntree": 0.26768352599999995,
+            "prixSortie": 0.26668665199999997,
+            "pnl": -4.722214728298152,
+            "pnlPct": -0.47222147282981514,
+            "raison": "regle"
+          },
+          {
+            "entree": "2019-10-26T20:00:00.000Z",
+            "sortie": "2019-11-08T08:00:00.000Z",
+            "prixEntree": 0.292288446,
+            "prixSortie": 0.28024394,
+            "pnl": -42.18699836325366,
+            "pnlPct": -4.218699836325366,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-01-06T12:00:00.000Z",
+            "sortie": "2020-01-09T12:00:00.000Z",
+            "prixEntree": 0.211212234,
+            "prixSortie": 0.20363926400000001,
+            "pnl": -36.836861206628704,
+            "pnlPct": -3.6836861206628706,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-01-11T20:00:00.000Z",
+            "sortie": "2020-01-24T08:00:00.000Z",
+            "prixEntree": 0.21876374399999998,
+            "prixSortie": 0.220415908,
+            "pnl": 6.548499069388808,
+            "pnlPct": 0.6548499069388809,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-01-28T04:00:00.000Z",
+            "sortie": "2020-02-16T20:00:00.000Z",
+            "prixEntree": 0.23389677,
+            "prixSortie": 0.28119375,
+            "pnl": 201.11194669340674,
+            "pnlPct": 20.11119466934067,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-04-06T08:00:00.000Z",
+            "sortie": "2020-04-10T16:00:00.000Z",
+            "prixEntree": 0.18568713,
+            "prixSortie": 0.181993594,
+            "pnl": -20.88123372901502,
+            "pnlPct": -2.0881233729015016,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-04-17T20:00:00.000Z",
+            "sortie": "2020-04-21T00:00:00.000Z",
+            "prixEntree": 0.18951789600000002,
+            "prixSortie": 0.181433706,
+            "pnl": -43.63527653873922,
+            "pnlPct": -4.363527653873922,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-04-24T04:00:00.000Z",
+            "sortie": "2020-05-04T04:00:00.000Z",
+            "prixEntree": 0.19530905399999998,
+            "prixSortie": 0.213087374,
+            "pnl": 89.98109112750102,
+            "pnlPct": 8.9981091127501,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-05-30T12:00:00.000Z",
+            "sortie": "2020-06-11T16:00:00.000Z",
+            "prixEntree": 0.20477094599999998,
+            "prixSortie": 0.19476104,
+            "pnl": -49.85898728523716,
+            "pnlPct": -4.985898728523717,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-07-06T16:00:00.000Z",
+            "sortie": "2020-07-16T12:00:00.000Z",
+            "prixEntree": 0.187657524,
+            "prixSortie": 0.190101972,
+            "pnl": 12.019599342044053,
+            "pnlPct": 1.2019599342044052,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-07-22T20:00:00.000Z",
+            "sortie": "2020-08-13T08:00:00.000Z",
+            "prixEntree": 0.20071013399999998,
+            "prixSortie": 0.278824224,
+            "pnl": 387.9939755358842,
+            "pnlPct": 38.79939755358841,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-08-14T20:00:00.000Z",
+            "sortie": "2020-08-20T08:00:00.000Z",
+            "prixEntree": 0.304450878,
+            "prixSortie": 0.287902408,
+            "pnl": -55.32796211216702,
+            "pnlPct": -5.532796211216702,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-09-01T08:00:00.000Z",
+            "sortie": "2020-09-03T12:00:00.000Z",
+            "prixEntree": 0.294588906,
+            "prixSortie": 0.266166756,
+            "pnl": -97.43248047161688,
+            "pnlPct": -9.74324804716169,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-10-05T04:00:00.000Z",
+            "sortie": "2020-10-15T12:00:00.000Z",
+            "prixEntree": 0.24984995999999998,
+            "prixSortie": 0.24500099,
+            "pnl": -20.397823857966518,
+            "pnlPct": -2.039782385796652,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-10-21T20:00:00.000Z",
+            "sortie": "2020-10-28T20:00:00.000Z",
+            "prixEntree": 0.25110021,
+            "prixSortie": 0.244871016,
+            "pnl": -25.795197913215578,
+            "pnlPct": -2.579519791321558,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-11-06T08:00:00.000Z",
+            "sortie": "2020-11-27T12:00:00.000Z",
+            "prixEntree": 0.25475094,
+            "prixSortie": 0.525334912,
+            "pnl": 1060.6199493277634,
+            "pnlPct": 106.06199493277634,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-12-18T00:00:00.000Z",
+            "sortie": "2020-12-22T04:00:00.000Z",
+            "prixEntree": 0.5769653699999999,
+            "prixSortie": 0.480823816,
+            "pnl": -167.54982815173105,
+            "pnlPct": -16.754982815173104,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-01-07T12:00:00.000Z",
+            "sortie": "2021-01-11T16:00:00.000Z",
+            "prixEntree": 0.35847168,
+            "prixSortie": 0.266526684,
+            "pnl": -257.3634134278055,
+            "pnlPct": -25.73634134278055,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-01-30T16:00:00.000Z",
+            "sortie": "2021-02-07T16:00:00.000Z",
+            "prixEntree": 0.38202639,
+            "prixSortie": 0.41206757000000005,
+            "pnl": 77.59708176181248,
+            "pnlPct": 7.759708176181247,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-02-10T04:00:00.000Z",
+            "sortie": "2021-02-18T00:00:00.000Z",
+            "prixEntree": 0.491978376,
+            "prixSortie": 0.53449308,
+            "pnl": 85.37259018067078,
+            "pnlPct": 8.537259018067079,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-03-08T12:00:00.000Z",
+            "sortie": "2021-03-12T00:00:00.000Z",
+            "prixEntree": 0.47279454,
+            "prixSortie": 0.451779626,
+            "pnl": -45.426076796487536,
+            "pnlPct": -4.542607679648754,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-03-20T20:00:00.000Z",
+            "sortie": "2021-03-25T00:00:00.000Z",
+            "prixEntree": 0.528445668,
+            "prixSortie": 0.480123956,
+            "pnl": -92.3954907167486,
+            "pnlPct": -9.23954907167486,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-03-30T12:00:00.000Z",
+            "sortie": "2021-04-18T12:00:00.000Z",
+            "prixEntree": 0.579145806,
+            "prixSortie": 1.186722608,
+            "pnl": 1047.5667120569635,
+            "pnlPct": 104.75667120569634,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-04-27T20:00:00.000Z",
+            "sortie": "2021-05-11T04:00:00.000Z",
+            "prixEntree": 1.3733746199999999,
+            "prixSortie": 1.3825234400000002,
+            "pnl": 5.658231087742308,
+            "pnlPct": 0.5658231087742308,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-05-16T12:00:00.000Z",
+            "sortie": "2021-05-19T16:00:00.000Z",
+            "prixEntree": 1.5411081599999998,
+            "prixSortie": 1.2012597,
+            "pnl": -221.4118728240332,
+            "pnlPct": -22.14118728240332,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-07-26T04:00:00.000Z",
+            "sortie": "2021-08-18T12:00:00.000Z",
+            "prixEntree": 0.6559311600000001,
+            "prixSortie": 1.07338528,
+            "pnl": 635.1115592374053,
+            "pnlPct": 63.511155923740525,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-09-02T00:00:00.000Z",
+            "sortie": "2021-09-07T16:00:00.000Z",
+            "prixEntree": 1.23644724,
+            "prixSortie": 1.13347326,
+            "pnl": -84.24050528027385,
+            "pnlPct": -8.424050528027385,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-10-01T20:00:00.000Z",
+            "sortie": "2021-10-18T12:00:00.000Z",
+            "prixEntree": 1.0382076,
+            "prixSortie": 1.08248346,
+            "pnl": 41.62511858899891,
+            "pnlPct": 4.162511858899891,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-10-31T16:00:00.000Z",
+            "sortie": "2021-11-14T04:00:00.000Z",
+            "prixEntree": 1.08581712,
+            "prixSortie": 1.1857628,
+            "pnl": 91.00049006410953,
+            "pnlPct": 9.100049006410954,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-12-21T20:00:00.000Z",
+            "sortie": "2021-12-29T00:00:00.000Z",
+            "prixEntree": 0.92028402,
+            "prixSortie": 0.8514296800000001,
+            "pnl": -75.7811668293446,
+            "pnlPct": -7.578116682934461,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-02-07T04:00:00.000Z",
+            "sortie": "2022-02-11T20:00:00.000Z",
+            "prixEntree": 0.7241447999999999,
+            "prixSortie": 0.7895420599999999,
+            "pnl": 89.26449043064319,
+            "pnlPct": 8.926449043064318,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-03-01T00:00:00.000Z",
+            "sortie": "2022-03-07T20:00:00.000Z",
+            "prixEntree": 0.78105618,
+            "prixSortie": 0.7111577400000001,
+            "pnl": -90.44745918276953,
+            "pnlPct": -9.044745918276952,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-03-12T00:00:00.000Z",
+            "sortie": "2022-03-31T16:00:00.000Z",
+            "prixEntree": 0.8029605599999999,
+            "prixSortie": 0.8228354,
+            "pnl": 23.739574481715593,
+            "pnlPct": 2.3739574481715593,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-07-08T04:00:00.000Z",
+            "sortie": "2022-07-11T16:00:00.000Z",
+            "prixEntree": 0.35497098,
+            "prixSortie": 0.32343530000000004,
+            "pnl": -89.79574369713252,
+            "pnlPct": -8.979574369713253,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-07-16T16:00:00.000Z",
+            "sortie": "2022-07-25T20:00:00.000Z",
+            "prixEntree": 0.34366872,
+            "prixSortie": 0.34283142,
+            "pnl": -3.4351397182728336,
+            "pnlPct": -0.3435139718272833,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-07-28T20:00:00.000Z",
+            "sortie": "2022-08-09T16:00:00.000Z",
+            "prixEntree": 0.37277454,
+            "prixSortie": 0.3634273,
+            "pnl": -26.06224373585165,
+            "pnlPct": -2.6062243735851647,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-08-11T00:00:00.000Z",
+            "sortie": "2022-08-16T16:00:00.000Z",
+            "prixEntree": 0.38147628,
+            "prixSortie": 0.37312535999999996,
+            "pnl": -22.88011411875999,
+            "pnlPct": -2.288011411875999,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-09-09T04:00:00.000Z",
+            "sortie": "2022-09-13T16:00:00.000Z",
+            "prixEntree": 0.34496898,
+            "prixSortie": 0.33923214,
+            "pnl": -17.62170198607413,
+            "pnlPct": -1.7621701986074125,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-09-17T16:00:00.000Z",
+            "sortie": "2022-09-28T04:00:00.000Z",
+            "prixEntree": 0.37097418,
+            "prixSortie": 0.4259148,
+            "pnl": 147.0241824107543,
+            "pnlPct": 14.70241824107543,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-09-30T00:00:00.000Z",
+            "sortie": "2022-10-11T00:00:00.000Z",
+            "prixEntree": 0.48769751999999994,
+            "prixSortie": 0.49380122000000004,
+            "pnl": 11.50908175624945,
+            "pnlPct": 1.1509081756249449,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-10-27T12:00:00.000Z",
+            "sortie": "2022-10-31T04:00:00.000Z",
+            "prixEntree": 0.47139426,
+            "prixSortie": 0.45560886,
+            "pnl": -34.46987572568237,
+            "pnlPct": -3.4469875725682364,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-11-04T20:00:00.000Z",
+            "sortie": "2022-11-08T04:00:00.000Z",
+            "prixEntree": 0.4940988,
+            "prixSortie": 0.44001198,
+            "pnl": -110.41086396081104,
+            "pnlPct": -11.041086396081104,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-11-25T08:00:00.000Z",
+            "sortie": "2022-11-28T12:00:00.000Z",
+            "prixEntree": 0.41578314,
+            "prixSortie": 0.37772444000000005,
+            "pnl": -92.48920913435774,
+            "pnlPct": -9.248920913435773,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-11-30T20:00:00.000Z",
+            "sortie": "2022-12-06T08:00:00.000Z",
+            "prixEntree": 0.4075815,
+            "prixSortie": 0.38202358000000003,
+            "pnl": -63.67492768930865,
+            "pnlPct": -6.367492768930866,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-01-11T08:00:00.000Z",
+            "sortie": "2023-01-31T00:00:00.000Z",
+            "prixEntree": 0.36227244000000003,
+            "prixSortie": 0.39322134,
+            "pnl": 84.38718967967847,
+            "pnlPct": 8.438718967967846,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-02-04T20:00:00.000Z",
+            "sortie": "2023-02-06T00:00:00.000Z",
+            "prixEntree": 0.4165833,
+            "prixSortie": 0.3984203,
+            "pnl": -44.57812351095204,
+            "pnlPct": -4.457812351095204,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-02-16T12:00:00.000Z",
+            "sortie": "2023-02-25T08:00:00.000Z",
+            "prixEntree": 0.39767952,
+            "prixSortie": 0.37782442000000005,
+            "pnl": -50.90242507333533,
+            "pnlPct": -5.090242507333533,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-03-08T16:00:00.000Z",
+            "sortie": "2023-03-10T20:00:00.000Z",
+            "prixEntree": 0.3970794,
+            "prixSortie": 0.36812636000000004,
+            "pnl": -73.8785312962596,
+            "pnlPct": -7.3878531296259595,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-03-18T04:00:00.000Z",
+            "sortie": "2023-04-04T00:00:00.000Z",
+            "prixEntree": 0.38377673999999995,
+            "prixSortie": 0.49570084000000003,
+            "pnl": 290.4927516190796,
+            "pnlPct": 29.04927516190796,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-04-11T08:00:00.000Z",
+            "sortie": "2023-04-19T12:00:00.000Z",
+            "prixEntree": 0.5231046,
+            "prixSortie": 0.49760045999999997,
+            "pnl": -49.730957307582585,
+            "pnlPct": -4.973095730758257,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-04-30T16:00:00.000Z",
+            "sortie": "2023-05-03T12:00:00.000Z",
+            "prixEntree": 0.47909579999999996,
+            "prixSortie": 0.45500898,
+            "pnl": -51.25044383607611,
+            "pnlPct": -5.125044383607611,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-05-18T12:00:00.000Z",
+            "sortie": "2023-06-05T16:00:00.000Z",
+            "prixEntree": 0.46529304,
+            "prixSortie": 0.50429912,
+            "pnl": 82.78929751452976,
+            "pnlPct": 8.278929751452976,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-06-13T12:00:00.000Z",
+            "sortie": "2023-06-15T00:00:00.000Z",
+            "prixEntree": 0.5618123399999999,
+            "prixSortie": 0.48010396000000005,
+            "pnl": -146.36442152552198,
+            "pnlPct": -14.636442152552199,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-06-22T04:00:00.000Z",
+            "sortie": "2023-06-27T08:00:00.000Z",
+            "prixEntree": 0.51650328,
+            "prixSortie": 0.47920414,
+            "pnl": -73.17861313484788,
+            "pnlPct": -7.317861313484787,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-07-03T20:00:00.000Z",
+            "sortie": "2023-07-06T20:00:00.000Z",
+            "prixEntree": 0.490098,
+            "prixSortie": 0.46770644,
+            "pnl": -46.66507967794192,
+            "pnlPct": -4.666507967794192,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-07-13T16:00:00.000Z",
+            "sortie": "2023-07-23T00:00:00.000Z",
+            "prixEntree": 0.59071812,
+            "prixSortie": 0.7328534,
+            "pnl": 239.4940826260755,
+            "pnlPct": 23.94940826260755,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-09-20T04:00:00.000Z",
+            "sortie": "2023-10-09T12:00:00.000Z",
+            "prixEntree": 0.52380474,
+            "prixSortie": 0.4979004,
+            "pnl": -50.42946455581897,
+            "pnlPct": -5.042946455581896,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-10-20T04:00:00.000Z",
+            "sortie": "2023-11-13T12:00:00.000Z",
+            "prixEntree": 0.5206040999999999,
+            "prixSortie": 0.65076982,
+            "pnl": 248.90321271000397,
+            "pnlPct": 24.890321271000396,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-12-03T12:00:00.000Z",
+            "sortie": "2023-12-12T12:00:00.000Z",
+            "prixEntree": 0.62832564,
+            "prixSortie": 0.6194760800000001,
+            "pnl": -15.077310644206598,
+            "pnlPct": -1.5077310644206599,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-12-24T16:00:00.000Z",
+            "sortie": "2024-01-04T00:00:00.000Z",
+            "prixEntree": 0.6216243,
+            "prixSortie": 0.58218354,
+            "pnl": -64.4161817998427,
+            "pnlPct": -6.441618179984271,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-01-11T20:00:00.000Z",
+            "sortie": "2024-01-18T00:00:00.000Z",
+            "prixEntree": 0.6050209799999999,
+            "prixSortie": 0.5683863,
+            "pnl": -61.52081476579527,
+            "pnlPct": -6.152081476579528,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-02-14T20:00:00.000Z",
+            "sortie": "2024-02-23T04:00:00.000Z",
+            "prixEntree": 0.5385076799999999,
+            "prixSortie": 0.53779242,
+            "pnl": -2.327562069309549,
+            "pnlPct": -0.2327562069309549,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-02-27T12:00:00.000Z",
+            "sortie": "2024-03-11T00:00:00.000Z",
+            "prixEntree": 0.5596118999999999,
+            "prixSortie": 0.6078784,
+            "pnl": 85.20682789268797,
+            "pnlPct": 8.520682789268797,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-03-11T16:00:00.000Z",
+            "sortie": "2024-03-16T12:00:00.000Z",
+            "prixEntree": 0.69343866,
+            "prixSortie": 0.6303738999999999,
+            "pnl": -91.89950020957882,
+            "pnlPct": -9.189950020957882,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-04-09T00:00:00.000Z",
+            "sortie": "2024-04-12T20:00:00.000Z",
+            "prixEntree": 0.6147229200000001,
+            "prixSortie": 0.5361927400000001,
+            "pnl": -128.68503069643148,
+            "pnlPct": -12.868503069643147,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-05-06T16:00:00.000Z",
+            "sortie": "2024-05-09T00:00:00.000Z",
+            "prixEntree": 0.55951188,
+            "prixSortie": 0.5168966,
+            "pnl": -77.12702050222762,
+            "pnlPct": -7.712702050222762,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-05-20T20:00:00.000Z",
+            "sortie": "2024-05-29T20:00:00.000Z",
+            "prixEntree": 0.53400678,
+            "prixSortie": 0.52319534,
+            "pnl": -21.235762324965247,
+            "pnlPct": -2.1235762324965246,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-06-05T12:00:00.000Z",
+            "sortie": "2024-06-08T00:00:00.000Z",
+            "prixEntree": 0.5288057399999999,
+            "prixSortie": 0.49900018,
+            "pnl": -57.33572967645908,
+            "pnlPct": -5.733572967645908,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-06-17T20:00:00.000Z",
+            "sortie": "2024-06-24T16:00:00.000Z",
+            "prixEntree": 0.5181036,
+            "prixSortie": 0.47300538000000003,
+            "pnl": -88.00126941793103,
+            "pnlPct": -8.800126941793103,
+            "raison": "regle"
+          }
+        ],
+        "empreinteChronologieX1": "adfdc26214f551a741eddbc4037c51c866cc25bbe475a1af3721a4e658d4f27d"
+      }
+    },
+    {
+      "id": "SOLUSDT 4h",
+      "statut": "disponible",
+      "resultat": {
+        "acquisition": {
+          "source": "https://data-api.binance.vision/api/v3/klines",
+          "acquisLeUtc": "2026-10-07T13:08:43.259Z",
+          "modeCalcul": "reseau",
+          "nombre": 8388,
+          "premierOpen": "2020-09-01T00:00:00.000Z",
+          "dernierClose": "2024-07-01T00:00:00.000Z",
+          "manquantes": 6,
+          "plagesManquantes": [
+            {
+              "apres": "2020-12-21T08:00:00.000Z",
+              "reprise": "2020-12-21T16:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-02-10T20:00:00.000Z",
+              "reprise": "2021-02-11T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-04-19T20:00:00.000Z",
+              "reprise": "2021-04-20T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-04-25T00:00:00.000Z",
+              "reprise": "2021-04-25T08:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-08-12T20:00:00.000Z",
+              "reprise": "2021-08-13T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-09-29T00:00:00.000Z",
+              "reprise": "2021-09-29T08:00:00.000Z",
+              "bougies": 1
+            }
+          ],
+          "ecartees": [
+            {
+              "temps": "2020-12-21T12:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-02-11T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-04-20T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-04-25T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-08-13T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-09-29T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            }
+          ],
+          "sha256Ohlcv": "7b2c70f95067235f7d02e464be7d30d4b07d4d8f559a0d321466b784c3acf744"
+        },
+        "evaluation": {
+          "bougiePremiereDecisionUtc": "2020-10-20T20:00:00.000Z",
+          "premierFillUtc": "2020-10-21T00:00:00.000Z",
+          "finUtc": "2024-07-01T00:00:00.000Z",
+          "decisions": 8088,
+          "milieuUtc": "2022-08-26T20:00:00.000Z"
+        },
+        "achatConservationPct": 7668.240343347639,
+        "rejeu": {
+          "global": {
+            "nbTrades": 59,
+            "winRate": 38.983050847457626,
+            "expectancy": 13.35881729908771,
+            "pnlComposePct": 8819.785710196944,
+            "maxDrawdownPct": -50.50973845730892,
+            "dureeMoyenne": 58.101694915254235
+          },
+          "m1": {
+            "nbTrades": 31,
+            "winRate": 38.70967741935484,
+            "expectancy": 15.645671372134002,
+            "pnlComposePct": 1129.5835545536436,
+            "maxDrawdownPct": -45.74632108145622,
+            "dureeMoyenne": 55.25806451612903
+          },
+          "m2": {
+            "nbTrades": 28,
+            "winRate": 39.285714285714285,
+            "expectancy": 10.826943146786443,
+            "pnlComposePct": 625.4314419840264,
+            "maxDrawdownPct": -24.303755789935078,
+            "dureeMoyenne": 61.25
+          }
+        },
+        "executions": [
+          {
+            "cout": "x1-central",
+            "metriques": {
+              "trades": 60,
+              "fermes": 59,
+              "finDonnees": 1,
+              "expectancyNette": 129.59200254537492,
+              "expectancyPct": 12.95920025453749,
+              "pnlTotal": 7775.520152722496,
+              "pnlTotalPct": 77.75520152722495,
+              "winRatePct": 38.333333333333336,
+              "profitFactor": 3.613680467569146,
+              "ddRealiseMaxPct": 6.533050182307261,
+              "dureeMoyenneBarres": 57.43333333333333,
+              "fraisTotal": 63.91971993632942,
+              "meilleurPct": 223.85618797798548,
+              "pirePct": -17.79321794153656
+            }
+          },
+          {
+            "cout": "x2",
+            "metriques": {
+              "trades": 60,
+              "fermes": 59,
+              "finDonnees": 1,
+              "expectancyNette": 128.0749535181523,
+              "expectancyPct": 12.807495351815238,
+              "pnlTotal": 7684.497211089139,
+              "pnlTotalPct": 76.84497211089139,
+              "winRatePct": 38.333333333333336,
+              "profitFactor": 3.5411112122434654,
+              "ddRealiseMaxPct": 6.6952210441623725,
+              "dureeMoyenneBarres": 57.43333333333333,
+              "fraisTotal": 127.81230952060973,
+              "meilleurPct": 223.51468208939193,
+              "pirePct": -17.91724658698012
+            }
+          },
+          {
+            "cout": "x3",
+            "metriques": {
+              "trades": 60,
+              "fermes": 59,
+              "finDonnees": 1,
+              "expectancyNette": 126.55853715288012,
+              "expectancyPct": 12.655853715288016,
+              "pnlTotal": 7593.512229172808,
+              "pnlTotalPct": 75.93512229172808,
+              "winRatePct": 38.333333333333336,
+              "profitFactor": 3.470890283622832,
+              "ddRealiseMaxPct": 6.857328349969557,
+              "dureeMoyenneBarres": 57.43333333333333,
+              "fraisTotal": 191.67778502129116,
+              "meilleurPct": 223.17335753392905,
+              "pirePct": -18.04122918242415
+            }
+          }
+        ],
+        "timing": {
+          "capteLog": 4.477797542028536,
+          "p": 0.0025,
+          "medianeNulle": 1.5633434736779819,
+          "q95Nulle": 3.3496750412231204,
+          "L": 8088,
+          "exposition": 0.42618694362017806
+        },
+        "parAnneeX1": [
+          {
+            "annee": 2020,
+            "trades": 4,
+            "pnlNet": 358.4581364806987,
+            "expectancyPct": 8.961453412017462
+          },
+          {
+            "annee": 2021,
+            "trades": 18,
+            "pnlNet": 4657.629627022016,
+            "expectancyPct": 25.87572015012232
+          },
+          {
+            "annee": 2022,
+            "trades": 14,
+            "pnlNet": -489.92115653457955,
+            "expectancyPct": -3.4994368323898533
+          },
+          {
+            "annee": 2023,
+            "trades": 14,
+            "pnlNet": 2920.119461640909,
+            "expectancyPct": 20.857996154577922
+          },
+          {
+            "annee": 2024,
+            "trades": 10,
+            "pnlNet": 329.2340841134523,
+            "expectancyPct": 3.2923408411345227
+          }
+        ],
+        "referenceEma": {
+          "executions": [
+            {
+              "cout": "x1-central",
+              "metriques": {
+                "trades": 139,
+                "fermes": 139,
+                "finDonnees": 0,
+                "expectancyNette": 98.84484448164771,
+                "expectancyPct": 9.884484448164772,
+                "pnlTotal": 13739.433382949032,
+                "pnlTotalPct": 137.3943338294903,
+                "winRatePct": 13.66906474820144,
+                "profitFactor": 5.17439766101029,
+                "ddRealiseMaxPct": 8.504003323169927,
+                "dureeMoyenneBarres": 30.158273381294965,
+                "fraisTotal": 145.9426880354922,
+                "meilleurPct": 694.7131119964866,
+                "pirePct": -11.67021279606883
+              }
+            },
+            {
+              "cout": "x3",
+              "metriques": {
+                "trades": 139,
+                "fermes": 139,
+                "finDonnees": 0,
+                "expectancyNette": 95.86670492253575,
+                "expectancyPct": 9.586670492253576,
+                "pnlTotal": 13325.471984232468,
+                "pnlTotalPct": 133.25471984232468,
+                "winRatePct": 12.949640287769784,
+                "profitFactor": 4.679051511125119,
+                "ddRealiseMaxPct": 9.692821822411915,
+                "dureeMoyenneBarres": 30.158273381294965,
+                "fraisTotal": 437.64467498883187,
+                "meilleurPct": 693.1830308350978,
+                "pirePct": -11.929241652365903
+              }
+            }
+          ],
+          "timing": {
+            "capteLog": 4.629784175445669,
+            "p": 0.0165,
+            "medianeNulle": 1.8122196566758397,
+            "q95Nulle": 3.814072483780259,
+            "L": 8088,
+            "exposition": 0.5182987141444114
+          }
+        },
+        "tradesX1": [
+          {
+            "entree": "2020-11-07T04:00:00.000Z",
+            "sortie": "2020-11-12T20:00:00.000Z",
+            "prixEntree": 2.1346268399999997,
+            "prixSortie": 1.86442704,
+            "pnl": -127.51611749620824,
+            "pnlPct": -12.751611749620823,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-11-15T16:00:00.000Z",
+            "sortie": "2020-11-26T12:00:00.000Z",
+            "prixEntree": 2.1969393,
+            "prixSortie": 1.83883216,
+            "pnl": -163.92124522056665,
+            "pnlPct": -16.392124522056665,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-12-02T20:00:00.000Z",
+            "sortie": "2020-12-05T00:00:00.000Z",
+            "prixEntree": 2.13522696,
+            "prixSortie": 1.85032986,
+            "pnl": -134.36036720424315,
+            "pnlPct": -13.436036720424315,
+            "raison": "regle"
+          },
+          {
+            "entree": "2020-12-30T00:00:00.000Z",
+            "sortie": "2021-01-22T00:00:00.000Z",
+            "prixEntree": 1.67373468,
+            "prixSortie": 2.98870214,
+            "pnl": 784.2558664017167,
+            "pnlPct": 78.42558664017166,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-01-24T08:00:00.000Z",
+            "sortie": "2021-03-06T12:00:00.000Z",
+            "prixEntree": 3.7283455199999995,
+            "prixSortie": 12.08238304,
+            "pnl": 2238.561879779855,
+            "pnlPct": 223.85618797798548,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-03-09T04:00:00.000Z",
+            "sortie": "2021-03-16T12:00:00.000Z",
+            "prixEntree": 13.922483940000001,
+            "prixSortie": 13.635772300000001,
+            "pnl": -21.58312908924785,
+            "pnlPct": -2.1583129089247857,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-03-20T12:00:00.000Z",
+            "sortie": "2021-03-21T16:00:00.000Z",
+            "prixEntree": 14.81076156,
+            "prixSortie": 13.92141516,
+            "pnl": -61.01728697062349,
+            "pnlPct": -6.101728697062348,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-03-22T04:00:00.000Z",
+            "sortie": "2021-03-25T12:00:00.000Z",
+            "prixEntree": 15.173034,
+            "prixSortie": 13.105278420000001,
+            "pnl": -137.21018065404704,
+            "pnlPct": -13.721018065404703,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-03-27T12:00:00.000Z",
+            "sortie": "2021-04-18T00:00:00.000Z",
+            "prixEntree": 15.621023580000001,
+            "prixSortie": 24.84672966,
+            "pnl": 589.3001925409038,
+            "pnlPct": 58.930019254090396,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-04-18T20:00:00.000Z",
+            "sortie": "2021-05-07T20:00:00.000Z",
+            "prixEntree": 30.206039999999998,
+            "prixSortie": 43.76124600000001,
+            "pnl": 447.53375010428414,
+            "pnlPct": 44.753375010428414,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-05-12T16:00:00.000Z",
+            "sortie": "2021-05-13T20:00:00.000Z",
+            "prixEntree": 47.421482399999995,
+            "prixSortie": 39.1001784,
+            "pnl": -176.3876708839452,
+            "pnlPct": -17.63876708839452,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-05-17T08:00:00.000Z",
+            "sortie": "2021-05-20T08:00:00.000Z",
+            "prixEntree": 50.618121599999995,
+            "prixSortie": 41.6576668,
+            "pnl": -177.93217941536565,
+            "pnlPct": -17.79321794153656,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-06-03T08:00:00.000Z",
+            "sortie": "2021-06-08T08:00:00.000Z",
+            "prixEntree": 36.6583302,
+            "prixSortie": 36.8016382,
+            "pnl": 2.907334164391305,
+            "pnlPct": 0.2907334164391305,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-06-15T08:00:00.000Z",
+            "sortie": "2021-06-18T20:00:00.000Z",
+            "prixEntree": 41.3172618,
+            "prixSortie": 35.4019182,
+            "pnl": -144.0972351657631,
+            "pnlPct": -14.409723516576308,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-06-29T16:00:00.000Z",
+            "sortie": "2021-07-10T12:00:00.000Z",
+            "prixEntree": 35.28905639999999,
+            "prixSortie": 32.7694448,
+            "pnl": -72.3635345092421,
+            "pnlPct": -7.23635345092421,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-07-29T20:00:00.000Z",
+            "sortie": "2021-08-25T12:00:00.000Z",
+            "prixEntree": 31.3702728,
+            "prixSortie": 67.6734626,
+            "pnl": 1155.6695143658426,
+            "pnlPct": 115.56695143658426,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-08-27T04:00:00.000Z",
+            "sortie": "2021-09-15T04:00:00.000Z",
+            "prixEntree": 81.41628,
+            "prixSortie": 157.238546,
+            "pnl": 929.8255654397378,
+            "pnlPct": 92.98255654397379,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-10-01T16:00:00.000Z",
+            "sortie": "2021-10-06T12:00:00.000Z",
+            "prixEntree": 157.461486,
+            "prixSortie": 152.909412,
+            "pnl": -29.894671824702613,
+            "pnlPct": -2.9894671824702614,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-10-15T20:00:00.000Z",
+            "sortie": "2021-10-28T08:00:00.000Z",
+            "prixEntree": 160.42207799999997,
+            "prixSortie": 186.73264600000002,
+            "pnl": 162.9263936975062,
+            "pnlPct": 16.29263936975062,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-11-01T08:00:00.000Z",
+            "sortie": "2021-11-12T08:00:00.000Z",
+            "prixEntree": 209.931978,
+            "prixSortie": 228.074376,
+            "pnl": 85.37715403700913,
+            "pnlPct": 8.537715403700913,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-12-01T08:00:00.000Z",
+            "sortie": "2021-12-04T04:00:00.000Z",
+            "prixEntree": 218.483688,
+            "prixSortie": 196.050782,
+            "pnl": -103.62408947893631,
+            "pnlPct": -10.362408947893629,
+            "raison": "regle"
+          },
+          {
+            "entree": "2021-12-23T20:00:00.000Z",
+            "sortie": "2021-12-28T16:00:00.000Z",
+            "prixEntree": 191.148222,
+            "prixSortie": 185.532886,
+            "pnl": -30.36217911563945,
+            "pnlPct": -3.036217911563945,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-03-02T04:00:00.000Z",
+            "sortie": "2022-03-04T20:00:00.000Z",
+            "prixEntree": 104.27085,
+            "prixSortie": 88.692258,
+            "pnl": -150.33035171382988,
+            "pnlPct": -15.033035171382988,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-03-19T16:00:00.000Z",
+            "sortie": "2022-04-06T04:00:00.000Z",
+            "prixEntree": 94.058808,
+            "prixSortie": 123.67526000000001,
+            "pnl": 313.7142134099765,
+            "pnlPct": 31.371421340997653,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-04-21T04:00:00.000Z",
+            "sortie": "2022-04-22T04:00:00.000Z",
+            "prixEntree": 107.081412,
+            "prixSortie": 102.539488,
+            "pnl": -43.39440770541945,
+            "pnlPct": -4.339440770541945,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-06-25T12:00:00.000Z",
+            "sortie": "2022-06-28T20:00:00.000Z",
+            "prixEntree": 41.868372,
+            "prixSortie": 35.922814,
+            "pnl": -142.93494843792823,
+            "pnlPct": -14.293494843792823,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-07-07T16:00:00.000Z",
+            "sortie": "2022-07-12T00:00:00.000Z",
+            "prixEntree": 38.297658,
+            "prixSortie": 33.413316,
+            "pnl": -128.4725422896616,
+            "pnlPct": -12.84725422896616,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-07-15T12:00:00.000Z",
+            "sortie": "2022-07-21T04:00:00.000Z",
+            "prixEntree": 37.727543999999995,
+            "prixSortie": 40.021994,
+            "pnl": 59.785901541855075,
+            "pnlPct": 5.9785901541855075,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-07-29T00:00:00.000Z",
+            "sortie": "2022-08-02T04:00:00.000Z",
+            "prixEntree": 42.928584,
+            "prixSortie": 40.231952,
+            "pnl": -63.78529205622065,
+            "pnlPct": -6.378529205622065,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-08-08T08:00:00.000Z",
+            "sortie": "2022-08-10T04:00:00.000Z",
+            "prixEntree": 42.678534,
+            "prixSortie": 39.272144000000004,
+            "pnl": -80.77515827980396,
+            "pnlPct": -8.077515827980395,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-08-11T00:00:00.000Z",
+            "sortie": "2022-08-16T08:00:00.000Z",
+            "prixEntree": 42.478494,
+            "prixSortie": 43.301338,
+            "pnl": 18.3611519749265,
+            "pnlPct": 1.83611519749265,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-09-09T08:00:00.000Z",
+            "sortie": "2022-09-13T16:00:00.000Z",
+            "prixEntree": 35.37707399999999,
+            "prixSortie": 34.733052,
+            "pnl": -19.19539934252315,
+            "pnlPct": -1.919539934252315,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-09-24T12:00:00.000Z",
+            "sortie": "2022-10-03T00:00:00.000Z",
+            "prixEntree": 34.486895999999994,
+            "prixSortie": 32.053588000000005,
+            "pnl": -71.52218749985472,
+            "pnlPct": -7.152218749985472,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-10-04T16:00:00.000Z",
+            "sortie": "2022-10-08T12:00:00.000Z",
+            "prixEntree": 34.176834,
+            "prixSortie": 32.94341,
+            "pnl": -37.07143037298304,
+            "pnlPct": -3.7071430372983043,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-10-26T08:00:00.000Z",
+            "sortie": "2022-11-04T00:00:00.000Z",
+            "prixEntree": 31.346268,
+            "prixSortie": 30.853828,
+            "pnl": -16.701830278487968,
+            "pnlPct": -1.670183027848797,
+            "raison": "regle"
+          },
+          {
+            "entree": "2022-11-05T08:00:00.000Z",
+            "sortie": "2022-11-07T08:00:00.000Z",
+            "prixEntree": 35.237046,
+            "prixSortie": 30.773844,
+            "pnl": -127.59887548462488,
+            "pnlPct": -12.759887548462487,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-01-03T16:00:00.000Z",
+            "sortie": "2023-02-06T00:00:00.000Z",
+            "prixEntree": 13.092618,
+            "prixSortie": 23.455308000000002,
+            "pnl": 790.0953069126435,
+            "pnlPct": 79.00953069126435,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-02-16T04:00:00.000Z",
+            "sortie": "2023-02-25T12:00:00.000Z",
+            "prixEntree": 23.824764,
+            "prixSortie": 22.765446,
+            "pnl": -45.44066438601439,
+            "pnlPct": -4.5440664386014396,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-03-14T16:00:00.000Z",
+            "sortie": "2023-03-25T12:00:00.000Z",
+            "prixEntree": 21.914382,
+            "prixSortie": 20.655868,
+            "pnl": -58.39996423353386,
+            "pnlPct": -5.839996423353385,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-04-11T08:00:00.000Z",
+            "sortie": "2023-04-20T08:00:00.000Z",
+            "prixEntree": 22.474494,
+            "prixSortie": 22.595480000000002,
+            "pnl": 4.380566387835118,
+            "pnlPct": 0.4380566387835118,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-04-28T20:00:00.000Z",
+            "sortie": "2023-05-01T04:00:00.000Z",
+            "prixEntree": 23.324664,
+            "prixSortie": 22.175564,
+            "pnl": -50.240814358569,
+            "pnlPct": -5.024081435856899,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-05-28T20:00:00.000Z",
+            "sortie": "2023-06-05T16:00:00.000Z",
+            "prixEntree": 20.774154,
+            "prixSortie": 19.916016000000003,
+            "pnl": -42.287309750375236,
+            "pnlPct": -4.228730975037524,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-06-29T16:00:00.000Z",
+            "sortie": "2023-07-23T08:00:00.000Z",
+            "prixEntree": 17.673534,
+            "prixSortie": 24.685062000000002,
+            "pnl": 395.52636739205656,
+            "pnlPct": 39.552636739205646,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-07-29T04:00:00.000Z",
+            "sortie": "2023-07-31T04:00:00.000Z",
+            "prixEntree": 25.135026,
+            "prixSortie": 24.64507,
+            "pnl": -20.483211276566784,
+            "pnlPct": -2.0483211276566786,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-08-09T04:00:00.000Z",
+            "sortie": "2023-08-16T00:00:00.000Z",
+            "prixEntree": 24.30486,
+            "prixSortie": 23.905218,
+            "pnl": -17.434662820522316,
+            "pnlPct": -1.7434662820522318,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-09-19T12:00:00.000Z",
+            "sortie": "2023-09-26T16:00:00.000Z",
+            "prixEntree": 20.214042,
+            "prixSortie": 19.156168,
+            "pnl": -53.30745355134803,
+            "pnlPct": -5.330745355134804,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-09-29T04:00:00.000Z",
+            "sortie": "2023-10-10T16:00:00.000Z",
+            "prixEntree": 20.20404,
+            "prixSortie": 21.965606,
+            "pnl": 86.14520546385783,
+            "pnlPct": 8.614520546385783,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-10-20T00:00:00.000Z",
+            "sortie": "2023-11-18T04:00:00.000Z",
+            "prixEntree": 24.924984000000002,
+            "prixSortie": 56.668664,
+            "pnl": 1271.9319368871008,
+            "pnlPct": 127.1931936887101,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-11-29T08:00:00.000Z",
+            "sortie": "2023-12-05T12:00:00.000Z",
+            "prixEntree": 59.381873999999996,
+            "prixSortie": 60.147968,
+            "pnl": 11.894691619196838,
+            "pnlPct": 1.1894691619196838,
+            "raison": "regle"
+          },
+          {
+            "entree": "2023-12-06T08:00:00.000Z",
+            "sortie": "2023-12-28T04:00:00.000Z",
+            "prixEntree": 63.36267,
+            "prixSortie": 104.48909800000001,
+            "pnl": 647.7394673551479,
+            "pnlPct": 64.77394673551478,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-01-02T08:00:00.000Z",
+            "sortie": "2024-01-04T08:00:00.000Z",
+            "prixEntree": 114.49289399999999,
+            "prixSortie": 98.870222,
+            "pnl": -137.38279301421096,
+            "pnlPct": -13.738279301421096,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-01-11T20:00:00.000Z",
+            "sortie": "2024-01-19T16:00:00.000Z",
+            "prixEntree": 101.38027199999999,
+            "prixSortie": 91.191758,
+            "pnl": -101.44774532662528,
+            "pnlPct": -10.144774532662527,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-01-27T20:00:00.000Z",
+            "sortie": "2024-02-06T04:00:00.000Z",
+            "prixEntree": 93.128622,
+            "prixSortie": 95.99079800000001,
+            "pnl": 29.718213698040326,
+            "pnlPct": 2.9718213698040326,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-02-08T04:00:00.000Z",
+            "sortie": "2024-02-17T20:00:00.000Z",
+            "prixEntree": 101.78035200000001,
+            "prixSortie": 107.988398,
+            "pnl": 59.96404517249062,
+            "pnlPct": 5.996404517249061,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-02-27T12:00:00.000Z",
+            "sortie": "2024-03-21T20:00:00.000Z",
+            "prixEntree": 111.51229799999999,
+            "prixSortie": 177.874418,
+            "pnl": 593.8127706954797,
+            "pnlPct": 59.38127706954796,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-03-25T16:00:00.000Z",
+            "sortie": "2024-04-01T16:00:00.000Z",
+            "prixEntree": 192.818556,
+            "prixSortie": 188.04238400000003,
+            "pnl": -25.75790719021863,
+            "pnlPct": -2.5757907190218634,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-05-06T12:00:00.000Z",
+            "sortie": "2024-05-13T04:00:00.000Z",
+            "prixEntree": 154.020798,
+            "prixSortie": 140.101974,
+            "pnl": -91.32458452786356,
+            "pnlPct": -9.132458452786356,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-05-15T20:00:00.000Z",
+            "sortie": "2024-05-24T08:00:00.000Z",
+            "prixEntree": 154.95098399999998,
+            "prixSortie": 166.11677,
+            "pnl": 71.0240867073166,
+            "pnlPct": 7.102408670731659,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-06-05T04:00:00.000Z",
+            "sortie": "2024-06-08T08:00:00.000Z",
+            "prixEntree": 173.004594,
+            "prixSortie": 163.56728,
+            "pnl": -55.522224669941345,
+            "pnlPct": -5.552222466994135,
+            "raison": "regle"
+          },
+          {
+            "entree": "2024-06-27T20:00:00.000Z",
+            "sortie": "2024-06-30T20:00:00.000Z",
+            "prixEntree": 148.489692,
+            "prixSortie": 146.580678,
+            "pnl": -13.84977743101511,
+            "pnlPct": -1.384977743101511,
+            "raison": "fin-donnees"
+          }
+        ],
+        "empreinteChronologieX1": "fd83adcd6e1fdab69aa6920b3eb852c398a4886d27b20e986dcde922c811eec6"
+      }
+    }
+  ],
+  "strategieValideeAutomatiquement": false
+}

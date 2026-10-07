@@ -288,8 +288,8 @@ describe("raisonUnusableIndicateur", () => {
     daemonSupporteMock.mockReturnValue(false);
   });
 
-  it("accepte les 218 définitions sans lever", () => {
-    expect(INDICATORS).toHaveLength(218);
+  it("accepte les 219 définitions sans lever", () => {
+    expect(INDICATORS).toHaveLength(219);
     for (const indicateur of INDICATORS) {
       expect(() => raisonUnusableIndicateur(indicateur, binanceBtc), indicateur.id).not.toThrow();
     }

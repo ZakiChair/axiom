@@ -21,7 +21,6 @@
  */
 import { createStore } from "zustand/vanilla";
 import type { Timeframe } from "@axiom/types";
-import type { Commande } from "../commands/registry";
 import { navigateTo } from "../lib/navigation";
 import { watchlistStore } from "./watchlist";
 import {
@@ -275,35 +274,3 @@ export function ouvrirDansChart(symbol: string): void {
 export function ajouterAWatchlist(symbol: string): void {
   watchlistStore.getState().add(symbol);
 }
-
-// ─────────────────────────── Commandes de la palette (EXPORT pour l'intégrateur) ───────────────────────────
-
-/**
- * Commande EQS pour la « command palette ». L'INTÉGRATEUR l'enregistre via
- * `enregistrerCommandes(commandesScreener)` (cf. commands/registry.ts). Import de type
- * seulement : aucun cycle runtime avec le registre.
- */
-export const commandesScreener: Commande[] = [
-  {
-    id: "panneau:screener",
-    mnemonique: "EQS",
-    libelle: "Screener d'actifs",
-    categorie: "panneau",
-    motsCles: [
-      "screener",
-      "eqs",
-      "scan",
-      "filtre",
-      "rsi",
-      "funding",
-      "volume",
-      "survendu",
-      "crowded",
-      "squeeze",
-      "oi",
-      "positionnement",
-    ],
-    apercu: "Ouvre / ferme le screener d'actifs",
-    action: () => screenerStore.getState().toggle(),
-  },
-];

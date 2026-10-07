@@ -1,0 +1,102 @@
+{
+  "schema": "axiom-axis-backtest-v1",
+  "figeLeUtc": "2026-10-07T10:12:00Z",
+  "objet": "Backtest d'AXIS (stratAxis), demandé par le propriétaire le 7 octobre 2026. Protocole et critères fixés avant tout calcul AXIS sur des données de marché.",
+  "statutIndependance": "paramètres AXIS = défauts livrés le 7 octobre 2026, choisis sans aucune mesure ; aucun résultat AXIS consulté avant ce figeage",
+  "signal": {
+    "indicateur": "stratAxis",
+    "params": { "seuil": 4, "emaRapide": 20, "emaLente": 50, "stPeriode": 10, "stMult": 3, "seuilAdx": 20 },
+    "coeursFixes": "DMI/ADX 14, MACD 12/26/9, RSI 14, CMF 20",
+    "etat": "episodesAxis(score, seuil, n-2) sur votesAxis : +1 épisode haussier fort, -1 épisode baissier fort, 0 aucun — exactement le calcul du chart",
+    "position": "long pendant un épisode haussier, short pendant un épisode baissier, à plat sinon",
+    "entree": "naissance d'un épisode (le ▲/▼ du chart) ; la première bougie au score défini reste silencieuse",
+    "sortie": "fin de l'épisode (score revenu à 0 ou passé de l'autre côté) ; un retournement direct ferme puis ouvre le sens opposé sur la même décision"
+  },
+  "marche": {
+    "type": "spot",
+    "source": "Binance Spot",
+    "endpoint": "https://data-api.binance.vision/api/v3/klines",
+    "remarqueEndpoint": "miroir public des données de marché de Binance (même API /api/v3/klines) ; api.binance.com répond 451 depuis l'environnement de calcul",
+    "funding": "non applicable",
+    "tailleFixeQuote": 1000,
+    "capitalInitialQuote": 10000
+  },
+  "cellules": [
+    { "symbol": "BTCUSDT", "timeframe": "1h" },
+    { "symbol": "BTCUSDT", "timeframe": "4h" },
+    { "symbol": "ETHUSDT", "timeframe": "1h" },
+    { "symbol": "ETHUSDT", "timeframe": "4h" }
+  ],
+  "fenetres": {
+    "W1": {
+      "id": "etude",
+      "debutInclus": "2024-07-01T00:00:00Z",
+      "finExclue": "2026-07-28T12:00:00Z",
+      "bougies": "clôturées avant finExclue",
+      "origine": "fenêtre figée de scripts/valider-strategies.ts (campagne des stratégies)",
+      "trous": "comptés et rapportés, sans effet sur le verdict"
+    },
+    "W2": {
+      "id": "hors-echantillon",
+      "debutInclus": "2026-07-29T00:00:00Z",
+      "finExclue": "2026-10-07T00:00:00Z",
+      "warmupBougies": 200,
+      "decisionAvantDebut": false,
+      "origine": "début de la fenêtre OOS du manifeste 2026-09-09, prolongée jusqu'au dernier jour complet avant la demande",
+      "serie": "continue, sans trou ni doublon, sinon cellule indisponible"
+    }
+  },
+  "mesures": {
+    "rejeu": "W1 : construireTradesStrategie sur l'état (close-à-close, hors frais), statsTrades global et moitiés partagerMoities",
+    "execution": "runBacktest : décision à la clôture, fill à l'open suivant, une jambe longue (entrée : état croise 0,5 à la hausse ; sortie : état < 0,5) et une jambe courte (entrée : état croise -0,5 à la baisse ; sortie : état > -0,5), trades réunis",
+    "coutsParCotePct": [
+      { "id": "x1-central", "frais": 0.05, "slippage": 0.02 },
+      { "id": "x2", "frais": 0.1, "slippage": 0.04 },
+      { "id": "x3", "frais": 0.15, "slippage": 0.06 }
+    ],
+    "expectancyNette": "moyenne des pnl nets en USDT par trade, jambes réunies, trade fin-données compris",
+    "controlesBloquants": [
+      "état de campagne identique à l'affichage : prixSignal de stratAxis indéfini quand l'état vaut 0, égal au close à chaque naissance d'épisode",
+      "W1 coûts x1 : chronologie des décisions moteur (entrée et sortie par règle) identique aux trades clos du rejeu",
+      "chronologie des trades identique à tous les niveaux de coût",
+      "en cas d'écart : arrêt sans verdict"
+    ]
+  },
+  "criteres": {
+    "C1": "W1, rejeu hors frais : au moins un trade et expectancy > 0 dans chacune des 4 cellules ET dans chaque moitié (12 blocs) — critère champion du spec v2.3 §3, inchangé",
+    "C2": "W1, exécution aux coûts x1 : au moins un trade et expectancy nette > 0 dans chacune des 4 cellules",
+    "C3": "W2, exécution : au moins 30 trades et expectancy nette > 0 aux coûts x1 ET x3 dans chacune des 4 cellules — critère OOS du manifeste 2026-09-09, inchangé",
+    "verdict": {
+      "FAVORABLE": "C1, C2 et C3 tenus",
+      "DEFAVORABLE": "au moins un bloc mesuré avec assez de trades a une expectancy <= 0",
+      "NON_CONCLUANT": "pas d'échec mesuré, mais un bloc sans trade, une cellule W2 sous 30 trades ou une cellule indisponible"
+    },
+    "selectionApresResultats": false,
+    "labelAutomatiqueStrategieValidee": false
+  },
+  "suites": {
+    "FAVORABLE": "AXIS sans champ validation ; statut « backtestée, critères pré-déclarés tenus — mesure passée, jamais une promesse » ; merge dans main et déploiement Vercel autorisés par la demande du propriétaire",
+    "DEFAVORABLE": "AXIS reçoit validation « non-valide » (badge « non validée », comme les stratégies recalées) ; pas de merge ni de déploiement sans décision explicite du propriétaire",
+    "NON_CONCLUANT": "AXIS sans champ validation ; statut « backtest non concluant » ; pas de merge ni de déploiement sans décision explicite du propriétaire"
+  },
+  "descriptif": {
+    "regle": "aucun effet sur le verdict, aucune sélection",
+    "jambes": "long seul et short seul, rendus séparément",
+    "couts": "x2 et x3 sur W1, x2 sur W2",
+    "sensibilitesOat": "seuil 3 et seuil 5 : rejeu W1 avec moitiés, exécution x1 sur W1 et W2",
+    "reference": "variation du close (achat-conservation) sur chaque fenêtre et cellule"
+  },
+  "versions": {
+    "baseCommit": "0ae8362780da89b60e42b6491684d7f474bd2f7b",
+    "travailNonCommite": "AXIS (stratAxis.ts, cmfOf) présent dans l'arbre de travail, non commité au figeage",
+    "codeAuFigeageSha256": {
+      "packages/indicators/src/strategy/stratAxis.ts": "88a7f6eac76597d8750834b5d105c699129604e0733f0f96979a764f1afc8be8",
+      "packages/indicators/src/volume/cmf.ts": "7e4a05cc6463cc94572be7f4c250ad81d71917f15962478ee8679339ff3f88a5",
+      "packages/backtest/src/engine.ts": "4b1baadc37494b10537818259bc94e0c7b334794d272b3efbc295b2af8011d9d",
+      "packages/indicators/src/utils-fabrique-strategie.ts": "d43cff07ce064260ef4895ac20d156a689821d9d6893e66743d692bfdb526605",
+      "packages/backtest/src/statsRejeu.ts": "165ebfc357c5ef330de58c295244d788e43c55abdbb1a16f2651c2ef16d6e8dd"
+    },
+    "pnpmLockSha256": "130d4fb62f5223486552e31137f28d4901e098bf7a78325b943f30fc6beac062",
+    "bun": "1.3.11"
+  }
+}

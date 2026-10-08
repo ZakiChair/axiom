@@ -1,0 +1,318 @@
+{
+  "schema": "axiom-axis-ut-backtest-v1",
+  "figeLeUtc": "2026-10-08T09:58:40Z",
+  "objet": "Test d'AXIS sur les autres unités de temps (signaux ▲/▼ et marqueurs « fort achat / forte vente »), sur des données jamais vues, après la demande du propriétaire du 8 octobre 2026 (« teste-le sur les autres unités de temps également »). Protocole, unités, symboles, fenêtres, critères et suites fixés avant tout téléchargement de ces données ; exécution unique.",
+  "historique": {
+    "v2": "scripts/axis/manifeste-v2-2026-10-07.json : signaux AXIS v2 FAVORABLES en 4h sur BTC/ETH/XRP/SOL 2017-2024 (21 blocs sur 21, timing p = 0,0005) ; pas mieux qu'une EMA 200 seule en PnL total sur 3 actifs sur 4",
+    "flux": "scripts/axis/manifeste-flux-2026-10-08.json : forts achats FAVORABLES en 4h sur BNB/ADA/LINK/DOGE 2017-2026 (690 événements, +1,61 % à 12 bougies, p ≤ 0,0005, 3 cellules sur 4) ; fortes ventes sans suite mesurable",
+    "attentes": "explorations antérieures, sur données déjà vues seulement : signaux v2 sans avantage en 2h et frais dominants en 1h, avantage à partir du 4h (BTC/ETH 2024-2026, unités agrégées depuis le 1h) ; forts achats faibles ou nuls en 1h (BTC/ETH depuis 2024-07). Aucune exploration de variantes pour ce test : les définitions, les paramètres et l'horizon de 12 bougies sont ceux du 4h, inchangés",
+    "repetitionLue": "la répétition technique (--essai : 8 symboles DÉJÀ VUS, 13 unités, mêmes fenêtres) a été exécutée et ses résultats lus avant le figeage ; l'auteur a donc des a priori par unité. Signaux : DÉFAVORABLES du 1s au 12h (frais dominants jusqu'au 15m ; en 2h, 6h et 12h, seul le timing échoue, p 0,014 à 0,023), NON CONCLUANTS en 1d, 3d et 1w (93, 27 et 0 trades clos). Forts achats : FAVORABLES en 2h, 6h, 12h et 1d (+1,19 % à +8,46 % à 12 bougies), DÉFAVORABLES du 1s au 1h, NON CONCLUANTS en 3d et 1w (55 et 16 événements). Aucune définition, aucun paramètre ni aucune fenêtre n'a changé après cette lecture ; les changements de critère qui ont suivi sont plus stricts (F3, seuil de coût des fortes ventes, statut « fenetre ») ou rendent le test exact (énumération des décalages : taille ramenée sous pMax ; la p exacte, en moyenne plus grande que l'estimation par tirages, peut en différer dans les deux sens sur une réalisation)",
+    "modificationsApresRepetition": [
+      "2026-10-08, après la première répétition (acquisition réseau de 08:46 à 08:47 UTC) et avant la revue : critère F3 (origineF3) et même seuil de coût pour la formulation « forte vente significative » ; texte « aucune suite mesurable au-delà des coûts » ; débit commun (pause à 4 800 de poids, 418 et 429, délai de 30 s par requête), écriture atomique du cache, cache illisible signalé ; bps à une décimale dans le rapport ; coquille « C2/S2 » ; empreintes du code figé",
+      "2026-10-08 à partir de 09:20 UTC, après la revue indépendante (journal-revue-ut-2026-10-08.md) : nul par énumération exhaustive des décalages quand il y en a au plus 4 999, plancher de p exact, bloc « insuffisant » et NON CONCLUANT « fenetre » quand ce plancher dépasse pMax (B1) ; historique et réserves (M1) ; commit de figeage exigé avant la campagne et empreinte de tout l'arbre de code (M2, m3) ; pagination sur page courte et mise en cache des séries invalides (m1) ; p arrondies vers le haut partout (m2) ; coût aller-retour recoupé avec les coûts x1 (m4) ; champs des gabarits documentés (m5) ; arrondi nul sans signe, accord « trade clos », texte F1 + F3 sans répétition de la moyenne (m6) ; texte F3 « sans dépasser le coût » au lieu de « sous le coût » et ordre des échecs F1, F3, F2 ; figeLeUtc contrôlé (m7) ; aucune attente après la dernière tentative (r7) ; limites connues (remarques de la revue)",
+      "2026-10-08, après la contre-revue (figeage autorisé, quatre mineurs) : plancher de p arrondi vers le bas dans le détail des blocs S2 et F1 ; formulation de l'effet de l'énumération exhaustive précisée (p exacte, pas plus stricte sur chaque réalisation) ; formatValeurs complété ({continué de baisser|rebondi}, valeur absolue) ; liste ci-dessus complétée ; réserve d'indépendance élargie"
+    ],
+    "parametresNonAjustes": "AXIS v2 : seuil 5, seuilVente 4, EMA 200/20/50, Supertrend 10 ×3, ADX ≥ 20, MACD 12/26/9, RSI 14, CMF 20 ; couche flux : rvolPeriode 20, seuilRvol 1,5, seuilGros 3, oiBougies 6, seuilOi 2, filtreFlux désactivé"
+  },
+  "statutIndependance": "Les 42 symboles du pool n'ont été lus par aucune campagne ni exploration du dépôt. Seules requêtes préalables : la date de la première kline journalière de chaque paire USDT cotée (faisabilité, deux fois le 8 octobre 2026). Une sonde de faisabilité a lu les temps d'ouverture et le nombre de bougies à volume nul de trois paires hors des deux ensembles (OGUSDT, FIDAUSDT, TLMUSDT, 1000 bougies 1s et 1m) : Binance émet une bougie par intervalle même sans transaction (sur ces paires peu liquides, environ 95 % des bougies 1s et 30 % des bougies 1m à volume nul). Réserves : même facteur de marché crypto que les actifs déjà vus ; les grandes phases 2020-2026 sont connues ; les fenêtres des petites unités sont récentes et courtes (un seul régime de marché) ; le décalage circulaire mesure la synchronisation avec les prix au-delà de l'exposition et de la dérive. LTCUSDT figure parmi les « majors » de l'étude d'événements de funding de l'application (apps/web/src/data/validationSignaux.ts, MAJORS_VALIDATION) : autres signaux, calculés à la demande dans l'interface, aucune lecture d'AXIS ; ses prix ont pu y être affichés. Plus largement, l'application affiche les prix de toute paire : ZECUSDT a servi de série réelle en recette (1m, 501 bougies) et d'autres paires du pool (TRX, XLM, LTC, HBAR, BCH, HOT…) figurent dans des listes ou des tests de l'interface ; aucune mesure d'AXIS dans ces usages.",
+  "limitesConnues": [
+    "prix constants (paires peu liquides, petites unités) : le RSI vaut 100 sans baisse enregistrée et les votes EMA et MACD se jouent sur des écarts infimes ; aucun NaN (vérifié en revue) ; mesuré tel que le chart le calcule",
+    "pas de cotation : sur les paires à bas prix (WIN, HOT…), un pas vaut 0,1 à 0,2 % du prix ; le rebond entre achat et vente joue contre les forts achats et les signaux ; une « forte vente » suivie d'un rebond peut en partie en venir",
+    "1s : le volume moyen inclut la bougie courante ; une seule transaction parmi 19 secondes vides donne un volume ×20 : « fort achat » y signifie surtout « seconde dominée par des achats taker »",
+    "moyennes de rendements log, prudentes : la moyenne arithmétique serait plus forte aux grandes unités",
+    "le chart calcule sur environ 500 bougies (apps/web/src/data/binance.ts) : l'amorce de l'EMA 200 y diffère de la série longue mesurée, comme en 4h",
+    "signaux 3d et 1w : NON CONCLUANT presque certain (524 et 53 décisions par cellule, peu de trades) ; 1w : test par décalages incapable d'atteindre le seuil dans les deux familles (criteres.resolutionDuTest)"
+  ],
+  "unites": {
+    "mesurees": ["1s", "1m", "3m", "5m", "15m", "30m", "1h", "2h", "6h", "12h", "1d", "3d", "1w"],
+    "dejaTestee": "4h : signaux (manifeste v2) et forts achats (manifeste flux) ; hors de ce test, ses infobulles restent inchangées",
+    "nonMesurables": {
+      "1M": "historique Binance de 110 bougies au plus (cotations 2017-2019) : l'EMA 200 n'est jamais définie (aucun signal possible) et l'amorce de 50 bougies plus l'horizon de 42 laissent au plus une quinzaine de décisions par actif, loin des 100 forts achats requis",
+      "3M": "unité agrégée côté client depuis le 1M : 37 bougies au plus",
+      "6M": "unité agrégée côté client depuis le 1M : 19 bougies au plus (volume moyen sur 20 bougies jamais défini)",
+      "12M": "unité agrégée côté client depuis le 1M : 10 bougies au plus"
+    },
+    "nonProposees": "5s et 15s existent dans le type Timeframe mais aucune source câblée ne les sert (Binance : 1s seulement) ; infobulle générique « non mesuré »",
+    "choix": "toutes les unités servies par Binance Spot dans l'application (SUPPORTED_TIMEFRAMES.binance), hors 4h déjà testé ; une unité non mesurable le dit dans l'infobulle"
+  },
+  "symboles": {
+    "regle": "toutes les paires USDT au statut TRADING sur Binance Spot le 8 octobre 2026 dont la première kline journalière est antérieure au 2020-01-01 (51), moins les 7 déjà lues par une campagne ou une exploration AXIS (BTC, ETH, BNB, ADA, XRP, LINK, DOGE ; SOL, déjà lu, est coté en 2020) et les 2 stablecoins (TUSD, USDC) : 42 paires, toutes utilisées dans toutes les unités, sans autre sélection",
+    "liste": [
+      { "symbol": "NEOUSDT", "premierJour": "2017-11-20" },
+      { "symbol": "LTCUSDT", "premierJour": "2017-12-13" },
+      { "symbol": "QTUMUSDT", "premierJour": "2018-03-19" },
+      { "symbol": "IOTAUSDT", "premierJour": "2018-05-31" },
+      { "symbol": "XLMUSDT", "premierJour": "2018-05-31" },
+      { "symbol": "ONTUSDT", "premierJour": "2018-06-08" },
+      { "symbol": "TRXUSDT", "premierJour": "2018-06-11" },
+      { "symbol": "ETCUSDT", "premierJour": "2018-06-12" },
+      { "symbol": "VETUSDT", "premierJour": "2018-07-25" },
+      { "symbol": "ONGUSDT", "premierJour": "2019-02-16" },
+      { "symbol": "HOTUSDT", "premierJour": "2019-02-18" },
+      { "symbol": "ZILUSDT", "premierJour": "2019-02-19" },
+      { "symbol": "FETUSDT", "premierJour": "2019-02-28" },
+      { "symbol": "ZRXUSDT", "premierJour": "2019-02-28" },
+      { "symbol": "BATUSDT", "premierJour": "2019-03-04" },
+      { "symbol": "ZECUSDT", "premierJour": "2019-03-21" },
+      { "symbol": "IOSTUSDT", "premierJour": "2019-03-22" },
+      { "symbol": "CELRUSDT", "premierJour": "2019-03-25" },
+      { "symbol": "DASHUSDT", "premierJour": "2019-03-28" },
+      { "symbol": "THETAUSDT", "premierJour": "2019-04-10" },
+      { "symbol": "ENJUSDT", "premierJour": "2019-04-18" },
+      { "symbol": "ATOMUSDT", "premierJour": "2019-04-29" },
+      { "symbol": "TFUELUSDT", "premierJour": "2019-05-24" },
+      { "symbol": "ONEUSDT", "premierJour": "2019-06-01" },
+      { "symbol": "ALGOUSDT", "premierJour": "2019-06-22" },
+      { "symbol": "DUSKUSDT", "premierJour": "2019-07-22" },
+      { "symbol": "ANKRUSDT", "premierJour": "2019-07-23" },
+      { "symbol": "WINUSDT", "premierJour": "2019-08-01" },
+      { "symbol": "MTLUSDT", "premierJour": "2019-08-23" },
+      { "symbol": "CVCUSDT", "premierJour": "2019-08-27" },
+      { "symbol": "CHZUSDT", "premierJour": "2019-09-06" },
+      { "symbol": "BANDUSDT", "premierJour": "2019-09-18" },
+      { "symbol": "XTZUSDT", "premierJour": "2019-09-24" },
+      { "symbol": "RVNUSDT", "premierJour": "2019-09-25" },
+      { "symbol": "HBARUSDT", "premierJour": "2019-09-29" },
+      { "symbol": "KAVAUSDT", "premierJour": "2019-10-25" },
+      { "symbol": "STXUSDT", "premierJour": "2019-10-25" },
+      { "symbol": "ARPAUSDT", "premierJour": "2019-11-06" },
+      { "symbol": "IOTXUSDT", "premierJour": "2019-11-14" },
+      { "symbol": "RLCUSDT", "premierJour": "2019-11-14" },
+      { "symbol": "BCHUSDT", "premierJour": "2019-11-28" },
+      { "symbol": "FTTUSDT", "premierJour": "2019-12-20" }
+    ]
+  },
+  "fenetres": {
+    "regle": "même fenêtre pour les 42 symboles d'une unité. Petites unités : fenêtre récente d'environ 43 200 bougies (1s à 5m) ou d'un à trois ans (15m à 1h) ; à partir du 2h : depuis le 2020-01-01 (tous les symboles sont cotés avant). Fin au 2026-10-08 00:00 UTC exclu, sauf 1w (dernier lundi, 2026-10-05). Grille : multiples de la durée depuis l'epoch UTC (1w : lundis 00:00 UTC) ; 3d : grille propre à chaque symbole (ancrée à sa cotation chez Binance), ancre = première bougie servie, qui doit ouvrir moins d'une bougie après le début",
+    "1s": { "debutInclus": "2026-10-07T12:00:00Z", "finExclue": "2026-10-08T00:00:00Z", "dureeMs": 1000, "ancre": "debut", "libelle": "12 h, 7 octobre 2026" },
+    "1m": { "debutInclus": "2026-09-08T00:00:00Z", "finExclue": "2026-10-08T00:00:00Z", "dureeMs": 60000, "ancre": "debut", "libelle": "30 jours, sept.-oct. 2026" },
+    "3m": { "debutInclus": "2026-07-10T00:00:00Z", "finExclue": "2026-10-08T00:00:00Z", "dureeMs": 180000, "ancre": "debut", "libelle": "90 jours, juil.-oct. 2026" },
+    "5m": { "debutInclus": "2026-05-11T00:00:00Z", "finExclue": "2026-10-08T00:00:00Z", "dureeMs": 300000, "ancre": "debut", "libelle": "150 jours, mai-oct. 2026" },
+    "15m": { "debutInclus": "2025-10-08T00:00:00Z", "finExclue": "2026-10-08T00:00:00Z", "dureeMs": 900000, "ancre": "debut", "libelle": "oct. 2025-oct. 2026" },
+    "30m": { "debutInclus": "2024-10-08T00:00:00Z", "finExclue": "2026-10-08T00:00:00Z", "dureeMs": 1800000, "ancre": "debut", "libelle": "oct. 2024-oct. 2026" },
+    "1h": { "debutInclus": "2023-10-08T00:00:00Z", "finExclue": "2026-10-08T00:00:00Z", "dureeMs": 3600000, "ancre": "debut", "libelle": "oct. 2023-oct. 2026" },
+    "2h": { "debutInclus": "2020-01-01T00:00:00Z", "finExclue": "2026-10-08T00:00:00Z", "dureeMs": 7200000, "ancre": "debut", "libelle": "2020-2026" },
+    "6h": { "debutInclus": "2020-01-01T00:00:00Z", "finExclue": "2026-10-08T00:00:00Z", "dureeMs": 21600000, "ancre": "debut", "libelle": "2020-2026" },
+    "12h": { "debutInclus": "2020-01-01T00:00:00Z", "finExclue": "2026-10-08T00:00:00Z", "dureeMs": 43200000, "ancre": "debut", "libelle": "2020-2026" },
+    "1d": { "debutInclus": "2020-01-01T00:00:00Z", "finExclue": "2026-10-08T00:00:00Z", "dureeMs": 86400000, "ancre": "debut", "libelle": "2020-2026" },
+    "3d": { "debutInclus": "2020-01-01T00:00:00Z", "finExclue": "2026-10-08T00:00:00Z", "dureeMs": 259200000, "ancre": "premiere-bougie", "libelle": "2020-2026" },
+    "1w": { "debutInclus": "2019-12-30T00:00:00Z", "finExclue": "2026-10-05T00:00:00Z", "dureeMs": 604800000, "ancre": "debut", "libelle": "2020-2026" }
+  },
+  "signal": {
+    "indicateur": "stratAxis",
+    "params": { "seuil": 5, "seuilVente": 4, "emaTendance": 200, "emaRapide": 20, "emaLente": 50, "stPeriode": 10, "stMult": 3, "seuilAdx": 20, "rvolPeriode": 20, "seuilRvol": 1.5, "seuilGros": 3, "oiBougies": 6, "seuilOi": 2, "filtreFlux": false },
+    "position": "1 quand la sortie prixSignal du chart est définie (achat affiché), 0 sinon : exactement le calcul du chart (votesAxis, positionsAxis, fin = n − 2), identique dans toutes les unités",
+    "entree": "passage de la position de 0 à 1 (le ▲ « Achat » du chart)",
+    "sortie": "passage de 1 à 0 (le ▼ « Vente » du chart) ; aucune vente à découvert",
+    "fortsMouvements": "grosMouvementsAxis(candles, fluxAxis(candles, undefined, 20, 6), 3, bougiesDeSignal) : volume ≥ 3 × la SMA 20 du volume (bougie courante comprise) ; sens = signe du delta taker si |delta| ≥ 0,1, sinon signe du corps ; hors bougies de signal AXIS et hors dernière bougie. Exactement les marqueurs --accent du chart (les 60 plus récents y sont affichés). Fort achat = sens +1, forte vente = sens −1",
+    "deltaTaker": "(takerBuyBase − (volume − takerBuyBase)) / volume, champ 9 des klines spot ; l'intérêt ouvert reste hors mesure (« n.d. »)"
+  },
+  "marche": {
+    "type": "spot",
+    "source": "Binance Spot",
+    "endpoint": "https://data-api.binance.vision/api/v3/klines",
+    "champs": "0 open time, 1-4 OHLC, 5 volume, 6 close time, 9 volume taker acheteur (base)",
+    "remarqueEndpoint": "miroir public des données de marché de Binance ; api.binance.com répond 451 depuis l'environnement de calcul",
+    "tailleFixeQuote": 1000,
+    "capitalInitialQuote": 10000
+  },
+  "donnees": {
+    "bougies": "ouvertes à partir de debutInclus et clôturées au plus tard à finExclue (bougie en formation exclue)",
+    "toleranceBordsH": 24,
+    "tolerances": "la première bougie ouvre au plus max(24 h, une bougie) après debutInclus (3d : moins d'une bougie, c'est l'ancre), la dernière clôture au plus max(24 h, une bougie) avant finExclue",
+    "partMaxBougiesManquantes": 0.01,
+    "bougiesEcartees": "une kline servie à OHLCV ou volume taker non fini ou incohérent (prix ≤ 0, volume < 0, taker < 0 ou > volume, high/low incohérents, closeTime ≠ open + durée − 1 ms) est écartée, datée et comptée comme manquante ; une bougie à volume nul est valide (émise par Binance sans transaction)",
+    "serieInexploitable": "cellule indisponible si la série est vide, hors grille, non strictement croissante, hors tolérances de bord, ou s'il manque plus de 1 % des bougies attendues (écartées comprises) ; HTTP 400 « symbole invalide » (code −1121) : toutes les cellules du symbole indisponibles",
+    "pagination": "pages de 1 000 klines de startTime à endTime = finExclue − 1 ms ; une page vide clôt la série ; une page courte la clôt seulement si sa dernière bougie est la dernière attendue (ouverture + 2 durées > finExclue), sinon la suite est redemandée (réponse tronquée d'un miroir)",
+    "reprises": { "tentativesParPage": 5, "attentesS": [1, 2, 4, 8, 16], "statutsRepris": "erreur réseau (délai dépassé compris), HTTP 418, 429 et 5xx ; attente Retry-After si l'en-tête est servi ; aucune attente après la dernière tentative" },
+    "debit": {
+      "poidsMaxParMinute": 4800,
+      "delaiMaxRequeteS": 30,
+      "regle": "Binance limite le poids des requêtes à 6 000 par minute (klines : 2). Quand l'en-tête x-mbx-used-weight-1m atteint 4 800 (80 %), toutes les requêtes attendent la minute suivante (+1 s) ; un HTTP 418 ou 429 suspend toutes les requêtes pendant l'attente de la reprise ; une requête sans réponse après 30 s est une erreur réseau"
+    },
+    "erreursAcquisition": "au-delà des reprises, ou toute autre erreur HTTP, réponse illisible, erreur de cache : arrêt du run avant toute mesure. Toutes les séries de toutes les unités sont acquises et validées avant le premier calcul ; une interruption technique est journalisée (cause, correctif, revue) avant toute relance, les séries déjà validées restant en cache",
+    "concurrence": 6,
+    "cache": "scripts/.cache-klines/axis-ut/H-<symbole>-<unité>.json.gz (gitignoré), écrit dès l'acquisition et AVANT la validation, que la série soit exploitable ou non (un « symbole invalide » y est aussi consigné) : une relance relit la même série et rend le même statut, sans nouvelle requête ; endpoint, bornes et SHA-256 des bougies, des bougies écartées et de l'erreur éventuelle, re-vérifiés à chaque lecture ; la mesure relit chaque série depuis ce cache"
+  },
+  "mesures": {
+    "signaux": {
+      "warmupBougies": 300,
+      "evaluation": "décisions à partir de la clôture de la 300e bougie (indice 299), fills à partir de l'open de la 301e ; une position née pendant le warmup ne produit aucune entrée",
+      "execution": "runBacktest, une jambe longue : entrée = position croise 0,5 à la hausse ; sortie = position < 0,5 ; décision à la clôture, fill à l'open suivant ; position ouverte liquidée au dernier close (fin-données) ; unité passée au moteur, finDonneesMs = open de la dernière bougie + durée",
+      "coutsParCotePct": [
+        { "id": "x1-central", "frais": 0.05, "slippage": 0.02 },
+        { "id": "x2", "frais": 0.1, "slippage": 0.04 },
+        { "id": "x3", "frais": 0.15, "slippage": 0.06 }
+      ],
+      "expectancyNetteRegroupee": "somme des PnL nets (USDT, taille fixe 1000) de tous les trades moteur des cellules disponibles, trades fin-données compris, divisée par leur nombre",
+      "pnlCellule": "PnL net total de la cellule aux coûts x1 (fin-données compris)",
+      "rejeu": "construireTradesStrategie sur la position (close-à-close, hors frais), trades clos nés à partir de la décision 299 ; moitiés par cellule au milieu des décisions évaluées (indices 299 à n − 2), trade rangé selon sa bougie d'entrée ; expectancy regroupée = moyenne des pnlPct des trades clos de toutes les cellules",
+      "timing": {
+        "statistique": "rendement log brut capté, somme sur les cellules et sur les décisions évaluées i de position × ln(open[i+2]/open[i+1]) (dernière décision : ln(close[n−1]/open[n−1])), soit le rendement brut des fills du moteur sans coûts",
+        "nul": "décalage circulaire de la position de chaque cellule sur sa fenêtre évaluée, un même k pour toutes les cellules de l'unité : même exposition, mêmes durées, synchronisation avec les prix détruite",
+        "tirages": 4999,
+        "graine": 20261011,
+        "generateur": "mulberry32",
+        "fractionMin": 0.1,
+        "fractionMax": 0.9,
+        "decalage": "K = {⌊fractionMin × Lmin⌋, …, ⌈fractionMax × Lmin⌉ − 1}, Lmin = plus courte fenêtre évaluée de l'unité. Si K compte au plus « tirages » décalages : chacun une fois (énumération exhaustive, p exacte du test) ; sinon « tirages » décalages k = floor(Lmin × (fractionMin + (fractionMax − fractionMin) × u)), u uniforme sur [0, 1[, mêmes tirages u pour toutes les unités. Des tirages avec remise dans un petit K afficheraient un plancher 1 / (tirages + 1) que le test n'atteint pas (revue, constat B1)",
+        "pValeur": "unilatérale : (1 + nombre de décalages dont la statistique décalée est ≥ à l'observée) / (nombre de décalages + 1) ; plancher 1 / (nombre de décalages + 1)"
+      },
+      "emaReference": 200
+    },
+    "fortsAchats": {
+      "warmupBougies": 50,
+      "pourquoiWarmup": "l'événement ne lit que la SMA 20 du volume et les bougies de signal ; à l'indice 49, le score AXIS est défini (EMA 50) ; 300 bougies rendraient le 3d et le 1w presque vides",
+      "horizons": [1, 2, 3, 6, 12, 24, 42],
+      "horizonPrincipal": 12,
+      "horizonMax": 42,
+      "decisionsEvaluees": "indices 49 à n − 2 − 42 inclus : chaque événement dispose de ses 42 bougies suivantes ; mêmes événements à tous les horizons",
+      "rendement": "rendement log signé r_h(i) = sens × ln(open[i+1+h] / open[i+1]) : positif = continuation, négatif = retour ; sans coût",
+      "statistique": "somme des r_12 des forts achats de toutes les cellules disponibles de l'unité",
+      "nul": "décalage circulaire des événements de chaque cellule dans sa fenêtre évaluée [a, b] : i → a + ((i − a + k) mod L), mêmes effectifs, mêmes sens, même regroupement ; un même k pour toutes les cellules de l'unité ; décalages comme pour les signaux (tous les k de K quand il y en a au plus « tirages », sinon tirés), Lmin = plus courte fenêtre évaluée",
+      "timing": { "tirages": 4999, "graine": 20261012, "generateur": "mulberry32", "fractionMin": 0.1, "fractionMax": 0.9 },
+      "pValeur": "unilatérale (continuation) : (1 + nombre de décalages dont la statistique décalée est ≥ à l'observée) / (nombre de décalages + 1) ; bilatérale : |décalée| ≥ |observée|. p calculées à l'horizon principal seulement (forts achats : unilatérale et bilatérale ; fortes ventes : bilatérale) ; les autres horizons donnent moyenne, médiane, part de continuation et t naïf",
+      "permutationSens": {
+        "objet": "nul complémentaire DESCRIPTIF : dans chaque cellule, les sens des forts mouvements évalués sont permutés (tirage sans remise d'autant de bougies qu'il y a de forts achats) ; statistique = somme des rendements bruts ln(open[i+13] / open[i+1]) des bougies tirées, sommée sur les cellules ; observé = la même somme sur les vrais forts achats",
+        "tirages": 4999,
+        "graine": 20261013,
+        "pValeur": "unilatérale : (1 + nombre de tirages dont la somme est ≥ à l'observée) / (tirages + 1)"
+      },
+      "coutAllerRetourPct": 0.14
+    },
+    "formatP": "p écrite à 4 décimales, arrondie vers le haut ; quand aucun décalage n'atteint l'observée (plancher 1 / (décalages + 1) : 0,0002 avec 4 999 tirages, davantage en énumération exhaustive, par exemple 0,0003 en 12h), elle s'écrit « p ≤ x » et non « p = » ; le plancher d'une fenêtre trop courte s'écrit arrondi vers le bas (« p ≥ x »). Permutation des sens (descriptive) : 4 999 tirages, plancher 0,0002",
+    "coupesCausalite": [0.4, 0.7, 0.9],
+    "controlesBloquants": [
+      "position de campagne (sortie prixSignal via le registre) = recalcul direct depuis les fonctions exportées (votesAxis, EMA de tendance, positionsAxis, fin = n − 2) à chaque bougie",
+      "marqueurs du chart : les 120 derniers changements de position (indices et sens) et les 60 derniers forts mouvements (indices et sens, couleur --accent) sont exactement les marqueurs de computeIndicator(stratAxis, candles, params)",
+      "causalité sur les données réelles : position et forts mouvements calculés sur trois préfixes (40 %, 70 %, 90 % de la série) identiques à ceux de la série complète jusqu'à l'avant-dernière bougie du préfixe",
+      "coûts x1 : chronologie des décisions du moteur (entrées, sorties par règle, position fin-données) identique aux trades du rejeu nés après le warmup ; chronologie des fills identique à tous les niveaux de coût et sans coût",
+      "statistique de timing observée = somme des ln(prixSortie/prixEntree) d'une exécution sans frais ni slippage (écart ≤ 1e-9)",
+      "forts achats : chaque événement évalué dispose de open[i+1+42] (re-vérifié bougie par bougie) ; somme observée directe = somme par rendements de bougie à bougie cumulés (écart ≤ 1e-9)",
+      "en cas d'écart : arrêt sans verdict ; le message et la trace (fichier horodaté distinct) ne nomment que la cellule et le contrôle, sans aucune valeur mesurée"
+    ]
+  },
+  "criteres": {
+    "minPartCellulesDisponibles": 0.75,
+    "pMax": 0.0038,
+    "pMaxJustification": "0,05 / 13 (Bonferroni sur les treize unités de chaque famille) : chaque infobulle d'unité est une affirmation distincte ; sans correction, environ 0,65 faux positif par famille serait attendu sous l'hypothèse nulle",
+    "resolutionDuTest": "le plancher de p d'un test par décalages est 1 / (nombre de décalages + 1). S'il dépasse pMax, le bloc S2 (signaux) ou F1 (forts achats) est « insuffisant » : verdict NON CONCLUANT (raison « fenetre »), sauf si un autre bloc est en échec (DÉFAVORABLE). Attendu en 1w dans les deux familles (43 et 209 décalages pour des fenêtres de 53 et 261 décisions par cellule)",
+    "origineResolution": "constat B1 de la revue indépendante, avant toute lecture des données de test : des tirages avec remise dans un petit ensemble de décalages affichaient « p ≤ 0,0002 » là où la p exacte ne descend pas sous 1 / (|K| + 1) ; taille réelle du test sous l'hypothèse nulle simulée par le réviseur : 3,9 % pour L = 53 au lieu de 0,38 %, 0 % en énumération exhaustive. Taille du test ramenée à au plus pMax ; la p exacte est en moyenne plus grande que l'estimation par tirages mais peut en différer dans les deux sens sur une réalisation (bruit des tirages) ; le statut « fenetre » ne peut que retirer un verdict",
+    "signaux": {
+      "minTradesClosRegroupes": 100,
+      "S1": "exécution : expectancy nette regroupée > 0 aux coûts x1 ET x3 (2 blocs)",
+      "S2": "timing : décalage circulaire commun, p unilatérale ≤ pMax (1 bloc) ; « insuffisant » si le plancher de p dépasse pMax (resolutionDuTest)",
+      "S3": "étendue : PnL net x1 > 0 dans strictement plus de la moitié des cellules ayant au moins un trade moteur (1 bloc)",
+      "S4": "stabilité : rejeu regroupé hors frais, expectancy > 0 dans chaque moitié (M1, M2), chacune avec au moins un trade clos (2 blocs)",
+      "verdict": {
+        "NON_CONCLUANT": "moins de 75 % des 42 cellules disponibles, ou moins de 100 trades clos par règle (coûts x1) regroupés, ou aucun bloc en échec mais S2 insuffisant (raison « fenetre ») ou une moitié sans trade (raison « moitie »)",
+        "DEFAVORABLE": "données suffisantes et au moins un bloc en échec",
+        "FAVORABLE": "données suffisantes et les six blocs tenus"
+      }
+    },
+    "fortsAchats": {
+      "minFortsAchatsRegroupes": 100,
+      "F1": "forts achats, horizon 12, cellules regroupées, décalage circulaire commun : p unilatérale ≤ pMax (1 bloc) ; « insuffisant » si le plancher de p dépasse pMax (resolutionDuTest)",
+      "F2": "forts achats, horizon 12 : rendement signé moyen > 0 dans strictement plus de la moitié des cellules ayant au moins un fort achat évalué (1 bloc)",
+      "F3": "économie : rendement signé moyen regroupé à 12 bougies strictement supérieur au coût aller-retour x1 (mesures.fortsAchats.coutAllerRetourPct = 0,14 % = 2 × (0,05 + 0,02)) ; un effet significatif plus petit que les coûts n'est pas présenté comme favorable (1 bloc)",
+      "origineF3": "ajouté après la répétition technique sur données déjà vues, avant toute lecture des données de test : en 1s, les forts achats y passaient F1 et F2 avec +0,0024 % en moyenne (14 877 événements, p ≤ 0,0002), soit une infobulle « favorable » pour un effet sans valeur économique. Critère plus strict, jamais plus favorable",
+      "verdict": {
+        "NON_CONCLUANT": "moins de 75 % des 42 cellules disponibles, ou moins de 100 forts achats évalués regroupés, ou aucun bloc en échec mais F1 insuffisant (raison « fenetre »)",
+        "DEFAVORABLE": "données suffisantes et F1, F2 ou F3 en échec",
+        "FAVORABLE": "données suffisantes, F1, F2 et F3 tenus"
+      }
+    },
+    "independance": "les deux familles et les treize unités sont jugées séparément ; aucun verdict n'en conditionne un autre ; les cellules indisponibles sont exclues mécaniquement (qualité des données), jamais sur un résultat",
+    "selectionApresResultats": false,
+    "executionUnique": "une seule exécution, par « bun scripts/valider-axis-ut.ts --campagne » (tout autre argument est refusé) ; une interruption technique avant le verdict est journalisée (cause, correctif, revue) avant toute relance ; aucun résultat partiel n'est affiché pendant le calcul",
+    "labelAutomatiqueStrategieValidee": false
+  },
+  "descriptif": {
+    "regle": "aucun effet sur le verdict, aucune sélection",
+    "signaux": "coûts x2 ; taux de gagnants ; PnL total ; exposition moyenne ; achat-conservation médian ; p de timing par cellule ; référence EMA 200 seule (long/plat, entrée : close croise l'EMA 200 à la hausse, sortie : close < EMA 200 ; même moteur, coûts x1 et x3, mêmes bornes) : expectancy, PnL, nombre de cellules où son PnL x1 est ≥ à celui d'AXIS, timing commun (mêmes tirages, statistique reconstruite depuis ses fills sans coût)",
+    "fortsAchats": "fortes ventes et forts achats à tous les horizons ; forts achats au-dessus et sous l'EMA 200 ; par année civile ; moyenne nette de 0,14 % aller-retour ; nul complémentaire par permutation des sens"
+  },
+  "suites": {
+    "application": "stratAxis lit l'unité du chart (ctx.timeframe, jamais inférée des bougies). 4h ou unité absente (alertes, backtest, screener) : formulations actuelles, inchangées. Unité mesurée ici : formulations de ce test, choisies par le runner selon le verdict de chaque famille. 1M, 3M, 6M, 12M : nonMesurable. Autre unité (5s, 15s) : generique",
+    "formatValeurs": "{u} = code de l'unité affiché par l'application (1m = minute, 1M = mois) ; {nAlts} = cellules disponibles de l'unité ; {periode} = libelle de la fenêtre ; {moyennePct} = moyenne regroupée à 12 bougies en %, 2 décimales, signe explicite sauf si l'arrondi est nul (« 0.00 ») ; dans forteVenteSignificatif, {moyennePct} est la valeur absolue de la moyenne signée des fortes ventes, sans signe, et {continué de baisser|rebondi} vaut « continué de baisser » si cette moyenne est > 0, « rebondi » sinon ; {hitsPct} = part des rendements > 0, entier ; {p}, {pBi} = « = x » ou « ≤ x » selon formatP ; {pMin} = plancher de p de la fenêtre, arrondi vers le bas ; {expX1} = expectancy nette regroupée x1 en % par trade, écrite comme {moyennePct} ; {coutPct} = coût aller-retour x1 en %, 2 décimales ; {k} / {m} = cellules qui tiennent le critère / cellules concernées (raison « cellules » : {k} = cellules disponibles) ; {n} / {total} = cellules où l'EMA 200 seule fait au moins aussi bien / cellules disponibles ; {n} de la raison « evenements » = forts achats évalués regroupés ; {nTradesClos} = « N trades clos » (« trade clos » pour 0 ou 1) ; {raison} = texte de « raisons » ; {echecs} = textes d'« echecs » joints par « , », dans l'ordre S1, S2, S3, S4 et F1, F3, F2",
+    "signaux": {
+      "favorableEmaDominee": "en {u} : test réussi sur données jamais vues ({nAlts} alts, {periode}), expectancy nette {expX1} % par trade (coûts x1), timing p {p} — mesure passée, pas une promesse",
+      "favorableEmaAuMoinsAussiBien": "en {u} : test réussi sur données jamais vues ({nAlts} alts, {periode}), expectancy nette {expX1} % par trade (coûts x1), timing p {p}, pas mieux qu'une EMA 200 seule sur {n}/{total} actifs — mesure passée, pas une promesse",
+      "defavorable": "en {u} : test échoué sur données jamais vues ({nAlts} alts, {periode}) — {echecs} ; expectancy nette {expX1} % par trade (coûts x1), timing p {p} — lecture indicative, pas un signal validé",
+      "echecs": { "S1": "expectancy nette ≤ 0 aux coûts x1 ou x3", "S2": "timing non significatif", "S3": "PnL positif sur {k}/{m} actifs seulement", "S4": "expectancy négative sur une moitié de la période" },
+      "nonConcluant": "en {u} : non mesuré ({raison}) — lecture indicative, jamais une promesse",
+      "raisons": {
+        "cellules": "données disponibles sur {k} actifs sur 42",
+        "trades": "trop peu de signaux sur données jamais vues : {nTradesClos}",
+        "moitie": "une moitié de la période sans trade",
+        "fenetre": "fenêtre trop courte pour tester le timing : p ≥ {pMin} quel que soit le résultat"
+      },
+      "nonMesurable": "en {u} : non mesuré (historique trop court pour l'EMA 200 et l'amorce) — lecture indicative, jamais une promesse",
+      "generique": "en {u} : non mesuré — lecture indicative, jamais une promesse"
+    },
+    "fortsAchats": {
+      "favorable": "fort achat : en {u}, sur données jamais vues ({nAlts} alts, {periode}), {moyennePct} % en moyenne sur les 12 bougies suivantes ({hitsPct} % de hausses, p {p}) — mesure passée, pas une promesse",
+      "forteVenteSignificatif": "forte vente : en {u}, sur données jamais vues ({nAlts} alts, {periode}), le prix a {continué de baisser|rebondi} de {moyennePct} % en moyenne sur les 12 bougies suivantes (p {p}) — mesure passée, pas une promesse",
+      "forteVenteNonSignificatif": "forte vente : repérée ; aucune suite mesurable au-delà des coûts à 12 bougies en {u} sur données jamais vues ({nAlts} alts, {periode})",
+      "regleForteVente": "si les forts achats sont FAVORABLES : forteVenteSignificatif quand la p bilatérale des fortes ventes à 12 bougies est ≤ pMax ET que la valeur absolue de leur moyenne signée est strictement supérieure au coût aller-retour x1 (sens : « continué de baisser » si la moyenne signée est > 0, « rebondi » sinon, valeur absolue), forteVenteNonSignificatif sinon ; si DÉFAVORABLES ou NON CONCLUANTS : même texte que les forts achats",
+      "defavorable": "fort achat / forte vente : test échoué à 12 bougies en {u} sur données jamais vues ({nAlts} alts, {periode}) — {echecs} — pas un signal validé",
+      "echecs": {
+        "F1": "forts achats suivis de {moyennePct} % en moyenne ({hitsPct} % de hausses, p bilatérale {pBi})",
+        "F2": "suite positive sur {k}/{m} actifs seulement",
+        "F3": "suite moyenne de {moyennePct} %, sans dépasser le coût aller-retour de {coutPct} %",
+        "F3ApresF1": "sans dépasser le coût aller-retour de {coutPct} %",
+        "ordre": "F1, F3, F2 ; quand F1 et F3 échouent ensemble, F3ApresF1 suit F1 sans répéter la moyenne"
+      },
+      "nonConcluant": "couche flux non mesurée en {u} ({raison})",
+      "raisons": {
+        "cellules": "données disponibles sur {k} actifs sur 42",
+        "evenements": "trop peu de forts achats : {n}",
+        "fenetre": "fenêtre trop courte pour un test significatif : p ≥ {pMin} quel que soit le résultat"
+      },
+      "nonMesurable": "couche flux non mesurée en {u} (historique trop court)",
+      "generique": "couche flux non mesurée en {u}"
+    },
+    "qualificationHors4h": "qualification descriptive, non mesurée en {u}",
+    "gardeSourceSansTaker": "inchangée : les formulations mesurées des forts mouvements ne s'affichent que sur une bougie dont le delta taker est disponible ; sinon « couche flux non mesurée »",
+    "filtreFlux": "inchangé : réglage hors des tests, son infobulle le dit dans toutes les unités",
+    "FAVORABLE": "les formulations remplacent, dans l'unité, la mention du test 4h ; aucun changement de calcul ; documentation (docs/axis, README, BUILD-CONTRACT) ; merge dans main et déploiement Vercel, comme pour les campagnes précédentes autorisées par le propriétaire",
+    "DEFAVORABLE": "les signaux et les marqueurs restent (ils décrivent des faits) ; l'infobulle de l'unité dit l'échec ; ces données sont consommées pour cette unité : aucune autre variante n'y sera jugée ; documentation",
+    "NON_CONCLUANT": "l'infobulle de l'unité dit « non mesuré » avec la raison ; pas de nouvelle variante sur ces données sans décision explicite du propriétaire"
+  },
+  "repetitionTechnique": {
+    "objet": "option --essai : même code, mêmes unités et mêmes fenêtres sur les 8 symboles DÉJÀ VUS (cache E-<symbole>-<unité>, même dossier), pour éprouver le runner, ses contrôles, le téléchargement multi-unités et les règles de verdict avant l'exécution ; sorties dans /tmp, hors dépôt, sans valeur probante. SOLUSDT (coté en 2020-08) rend les cellules depuis le 2020-01-01 indisponibles : chemin « cellule indisponible » éprouvé",
+    "symboles": ["BTCUSDT", "ETHUSDT", "XRPUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "LINKUSDT", "DOGEUSDT"]
+  },
+  "versions": {
+    "baseCommit": "605325ec808926f8879b864f82236ad349622dc0",
+    "commitDeFigeage": "commit local sur baseCommit, avant la campagne : ce manifeste, le runner, le journal de revue et l'unité du chart transmise aux indicateurs (CalcContext.timeframe dans packages/types, paramètre facultatif de computeIndicator dans engine.ts, cache et appels du chart dans apps/web/src/chart/indicators.ts, et leurs tests) ; aucun calcul figé ne lit ctx.timeframe et le runner appelle computeIndicator sans unité. Ce manifeste ne peut pas contenir le hash de ce commit (il en fait partie) : le runner refuse la campagne si le runner, ce manifeste ou un fichier des dossiers d'arbreCode diffère de HEAD (git status), puis consigne HEAD dans le résultat ; le journal le reporte",
+    "arbreCode": {
+      "dossiers": ["packages/indicators/src", "packages/backtest/src", "packages/types/src"],
+      "fichiers": 247,
+      "sha256": "3fcfaa2fedb5ea5cc47fc23cd235f7ab7394489d13af82582e95a4d25d5fa90e",
+      "regle": "SHA-256 de la liste triée des lignes « chemin sha256-du-fichier » (chemins relatifs à la racine du dépôt, joints par un saut de ligne), tous les fichiers de ces dossiers sauf *.test.ts et *.test.tsx : tout ce que le registre peut exécuter, au-delà des fichiers listés ci-dessous (constat m3 de la revue)"
+    },
+    "codeAuFigeageSha256": {
+      "packages/indicators/src/strategy/stratAxis.ts": "154f2ed2b1b964aef5eb5d984d54ac94b646acc292ca9c7372b4d83fa310a5e6",
+      "packages/indicators/src/utils.ts": "693259721a342f3adf0c897b5e279a9f6e9eb81bdb6d134449c3d19723c5266b",
+      "packages/indicators/src/utils-fabrique-strategie.ts": "d43cff07ce064260ef4895ac20d156a689821d9d6893e66743d692bfdb526605",
+      "packages/indicators/src/engine.ts": "fec8501639cca8e4afef677ec2426c310b408aad3868218cba6abff39da79470",
+      "packages/indicators/src/momentum/rsi.ts": "5c9b93ec36578152a1dde9ea139064f56ed7a2a997531c300b59d1c6a934ec7a",
+      "packages/indicators/src/trend/adx.ts": "c1704f2e876995c75d54fa572a9f691b944d107cf179fdc024b5ec0629fba6df",
+      "packages/indicators/src/trend/macd.ts": "ad8b1a85f0b344d0c390408cfd18288bfaeea92e66700f9f14b38e61ff39ebfc",
+      "packages/indicators/src/trend/supertrend.ts": "6401a4632aa4647c93c484b2da374c51590dc89acf197ee1e3352a1ff839b469",
+      "packages/indicators/src/volume/cmf.ts": "7e4a05cc6463cc94572be7f4c250ad81d71917f15962478ee8679339ff3f88a5",
+      "packages/indicators/src/trend/ema.ts": "b1546985251fe40c1e20d6869a18bbf9af69f92dcfa99c1480b731ca94b0107a",
+      "packages/indicators/src/registry.ts": "edf081a34bc36cc71c4d1b6aa24c47baaf7025836775665e59b9a7f217e6e507",
+      "packages/indicators/src/index.ts": "434bafab9343da78716366192ed5fe31e01be1fbb49e1d63fbd5f018dfb82cca",
+      "packages/indicators/src/timeframes.ts": "46f5435a7601a724f9f7a782570bc30d44e1a8789e188ae2e244c8748d5d11dd",
+      "packages/backtest/src/engine.ts": "4b1baadc37494b10537818259bc94e0c7b334794d272b3efbc295b2af8011d9d",
+      "packages/backtest/src/types.ts": "572e8128ba2513cbb59b366a624aac7c2f7d24e23fdca4e63202ed54355c5633",
+      "packages/types/src/index.ts": "6a5f5e2893cb50ce6c70e3bbc9e394b376aafb0c9b08dc70e346e1b6201c2f9f"
+    },
+    "codeFigeNote": "graphe d'import des signaux et des forts mouvements (stratAxis et ses cœurs), du moteur d'indicateurs, du rejeu, du moteur de backtest, des fonctions du registre qu'il appelle, du point d'entrée du paquet et des types ; l'empreinte d'arbreCode couvre en plus tout le reste de ces dossiers. Le runner n'y figure pas (il épingle le SHA-256 de ce manifeste) : le commit de figeage le date, son SHA-256 est consigné dans le journal de revue avant l'exécution et reporté dans le résultat",
+    "revue": "revue indépendante avant exécution : scripts/axis/journal-revue-ut-2026-10-08.md. Première revue du 8 octobre : figeage refusé (constats B1, M1, M2, m1 à m7, remarques) ; corrections listées dans historique.modificationsApresRepetition ; contre-revue limitée au diff avant le figeage",
+    "pnpmLockSha256": "130d4fb62f5223486552e31137f28d4901e098bf7a78325b943f30fc6beac062",
+    "bun": "1.4.2"
+  }
+}

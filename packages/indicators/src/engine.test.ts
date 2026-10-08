@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveParams, computeIndicator } from "./engine";
 import { ema } from "./trend/ema";
-import type { Candle } from "@axiom/types";
+import type { CalcContext, Candle } from "@axiom/types";
 const def = {
   id: "t", name: "t", category: "trend", pane: "overlay", outputs: [],
   inputs: [{ key: "period", name: "P", type: "number", default: 14, min: 1, max: 500 }],
@@ -62,4 +62,31 @@ it("computeIndicator clampe les params hors-borne (min-only) — le calcul reço
   expect(resultOutOfBounds.series.ema?.length).toBe(candles.length);
   // Au moins une valeur définie (EMA a besoin d'au moins 1 bougie)
   expect(resultOutOfBounds.series.ema?.some((v) => v !== undefined)).toBe(true);
+});
+
+describe("computeIndicator — unité de temps (ctx.timeframe)", () => {
+  const candles: Candle[] = [
+    { time: 1000, open: 1, high: 1, low: 1, close: 1, volume: 1 },
+    { time: 2000, open: 1, high: 1, low: 1, close: 1, volume: 1 },
+  ];
+  // Def minimal dont la sortie dépend de `ctx.timeframe` (et trace la présence de la clé).
+  const defTf = {
+    id: "tf", name: "tf", category: "trend", pane: "overlay", inputs: [], outputs: [],
+    calc: (c: Candle[], _p: unknown, ctx: CalcContext) => ({
+      series: {
+        minutes: c.map(() => (ctx.timeframe === "1h" ? 60 : ctx.timeframe === "1d" ? 1440 : undefined)),
+        cle: c.map(() => ("timeframe" in ctx ? 1 : 0)),
+      },
+    }),
+  } as never;
+
+  it("expose ctx.timeframe quand l'appelant le fournit", () => {
+    expect(computeIndicator(defTf, candles, {}, undefined, "1h").series).toEqual({ minutes: [60, 60], cle: [1, 1] });
+    expect(computeIndicator(defTf, candles, {}, undefined, "1d").series.minutes).toEqual([1440, 1440]);
+  });
+
+  it("ne pose pas la clé timeframe quand l'appelant ne la fournit pas", () => {
+    expect(computeIndicator(defTf, candles, {}).series).toEqual({ minutes: [undefined, undefined], cle: [0, 0] });
+    expect(computeIndicator(defTf, candles, {}, { oi: [1, 2] }).series.cle).toEqual([0, 0]);
+  });
 });

@@ -370,7 +370,10 @@ export class ChartIndicators {
    * (même référence), on NE recalcule PAS — deux instances de config identique
    * partagent le calcul, et un recompute redondant est un no-op.
    */
-  private readonly computeCache = new Map<string, { candles: Candle[]; result: IndicatorResult }>();
+  private readonly computeCache = new Map<
+    string,
+    { candles: Candle[]; timeframe: Timeframe | undefined; result: IndicatorResult }
+  >();
 
   /**
    * Throttle dédié de `recomputeThrottled` (leading+trailing, `RECOMPUTE_THROTTLE_MS`).
@@ -409,13 +412,17 @@ export class ChartIndicators {
     this.timeframe = timeframe;
   }
 
-  /** Calcul mémoïsé : recalcule seulement si la référence des candles a changé. */
+  /**
+   * Calcul mémoïsé : recalcule si la référence des candles OU l'unité de temps a changé
+   * (un def peut lire `ctx.timeframe` : même buffer, autre unité = autre résultat).
+   */
   private compute(def: IndicatorDef, params: ActiveIndicator["params"], candles: Candle[]): IndicatorResult {
     const key = computeKey(def.id, params);
+    const timeframe = this.timeframe ?? undefined;
     const cached = this.computeCache.get(key);
-    if (cached && cached.candles === candles) return cached.result;
-    const result = computeIndicator(def, candles, params);
-    this.computeCache.set(key, { candles, result });
+    if (cached && cached.candles === candles && cached.timeframe === timeframe) return cached.result;
+    const result = computeIndicator(def, candles, params, undefined, timeframe);
+    this.computeCache.set(key, { candles, timeframe, result });
     return result;
   }
 
@@ -499,15 +506,15 @@ export class ChartIndicators {
     const bonus = facultatives.length > 0 ? aligner(facultatives) : undefined;
     const auxBonus = bonus?.status === "ready" ? bonus.aux : undefined;
     if (requises.length === 0) {
-      return verifier(computeIndicator(def, candles, inst.params, auxBonus), "");
+      return verifier(computeIndicator(def, candles, inst.params, auxBonus, timeframe), "");
     }
     const status = aligner(requises);
     if (status.status === "ready") {
-      const result = computeIndicator(def, candles, inst.params, { ...auxBonus, ...status.aux });
+      const result = computeIndicator(def, candles, inst.params, { ...auxBonus, ...status.aux }, timeframe);
       return verifier(result, " (UNUSABLE)");
     }
     // `pending`/`error` : aux absent -> le def dégrade en séries all-undefined (garde Task 13).
-    const result = computeIndicator(def, candles, inst.params, auxBonus);
+    const result = computeIndicator(def, candles, inst.params, auxBonus, timeframe);
     if (status.status === "pending") {
       const statut = sortieFinie(def, result)
         ? null

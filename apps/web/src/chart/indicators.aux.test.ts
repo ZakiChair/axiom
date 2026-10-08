@@ -18,7 +18,8 @@ import type { Chart } from "klinecharts";
 import { ChartIndicators, statutIndicateur } from "./indicators";
 import { auxProvider, type AuxStatus } from "./auxProvider";
 import type { ActiveIndicator } from "../store/indicators";
-import type { Candle, IndicatorResult } from "@axiom/types";
+import type { CalcContext, Candle, IndicatorResult } from "@axiom/types";
+import { getIndicator } from "@axiom/indicators";
 
 // `sync()` appelle `ensureRegistered` -> `registerIndicator`/`IndicatorSeries` au premier
 // montage d'une instance ; le build UMD de klinecharts ne s'évalue pas correctement hors
@@ -265,5 +266,47 @@ describe("ChartIndicators — séries auxiliaires facultatives (auxFacultatives)
     expect(config.shortName).toBe("AXIS (50)");
     expect(statutIndicateur(chart as unknown as Chart, "axis-1")).toBeNull();
     expect(infos(config).every((info) => info.includes("OI n.d."))).toBe(true);
+  });
+});
+
+describe("ChartIndicators — unité de temps transmise au calcul (ctx.timeframe)", () => {
+  /** Unités lues par le `calc` espionné, dans l'ordre des appels. */
+  const unitesLues = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls.map((args) => (args[2] as CalcContext).timeframe);
+
+  it("def sans aux : l'unité courante atteint le calc", () => {
+    const calc = vi.spyOn(getIndicator("ema")!, "calc");
+    const { indicators } = makeIndicators();
+    indicators.setMarket("BTCUSDT", "1h");
+    indicators.sync([{ instanceId: "ema-1", defId: "ema", params: {}, couleurIdx: 0 }], candles, "binance");
+    expect(unitesLues(calc)).toEqual(["1h"]);
+  });
+
+  it("def avec auxFacultatives (servies ou non) et def avec aux requis : l'unité courante atteint le calc", () => {
+    const axis: ActiveIndicator = { instanceId: "axis-1", defId: "stratAxis", params: {}, couleurIdx: 0 };
+    for (const status of [{ status: "ready", aux: { oi: [1, 2] } }, { status: "pending" }] as AuxStatus[]) {
+      vi.spyOn(auxProvider, "getAligned").mockReturnValue(status);
+      const calcAxis = vi.spyOn(getIndicator("stratAxis")!, "calc");
+      const calcOi = vi.spyOn(getIndicator("openInterest")!, "calc");
+      const { indicators } = makeIndicators();
+      indicators.setMarket("BTCUSDT", "4h");
+      indicators.sync([axis, oiInstance], candles, "binance");
+      expect(unitesLues(calcAxis)).toEqual(["4h"]);
+      expect(unitesLues(calcOi)).toEqual(["4h"]);
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("changement d'unité avec la MÊME référence de bougies : le résultat mémoïsé de l'ancienne unité n'est pas resservi", () => {
+    const calc = vi.spyOn(getIndicator("ema")!, "calc");
+    const ema: ActiveIndicator = { instanceId: "ema-1", defId: "ema", params: {}, couleurIdx: 0 };
+    const { indicators } = makeIndicators();
+    indicators.setMarket("BTCUSDT", "1h");
+    indicators.sync([ema], candles, "binance");
+    indicators.recompute([ema], candles, "binance");
+    expect(unitesLues(calc)).toEqual(["1h"]); // même unité, mêmes bougies : cache servi
+    indicators.setMarket("BTCUSDT", "1d");
+    indicators.recompute([ema], candles, "binance");
+    expect(unitesLues(calc)).toEqual(["1h", "1d"]);
   });
 });

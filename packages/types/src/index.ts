@@ -359,6 +359,11 @@ export interface CalcContext {
   source: number[];
   /** Séries auxiliaires pré-alignées sur les bougies (fournies par l'appelant, voir `AuxSeries`). */
   aux?: AuxSeries;
+  /**
+   * Unité de temps des bougies, quand l'appelant la connaît (le chart). Jamais inférée
+   * de l'écart entre bougies ; absente ailleurs (alertes, backtest, screener).
+   */
+  timeframe?: Timeframe;
 }
 
 /** Définition déclarative d'un indicateur. Le moteur ne connaît que cette interface. */

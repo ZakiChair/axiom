@@ -14,6 +14,7 @@ import type {
   CalcContext,
   IndicatorDef,
   IndicatorResult,
+  Timeframe,
 } from "@axiom/types";
 
 /**
@@ -109,12 +110,15 @@ export function resolveParams(
  * Les paramètres absents sont complétés par les valeurs par défaut des inputs.
  * `aux` (optionnel) : séries auxiliaires DÉJÀ alignées sur `candles`, fournies par
  * l'appelant (ex. `AuxProvider`, Task 12) — le moteur reste pur, il ne les fetch jamais.
+ * `timeframe` (optionnel) : unité de temps des bougies, exposée en `ctx.timeframe`
+ * quand l'appelant la connaît (le chart) — jamais inférée de l'écart entre bougies.
  */
 export function computeIndicator(
   def: IndicatorDef,
   candles: Candle[],
   params?: Record<string, number | boolean | string>,
-  aux?: AuxSeries
+  aux?: AuxSeries,
+  timeframe?: Timeframe
 ): IndicatorResult {
   const resolved = resolveParams(def, params);
   // `source` (si le def le déclare) pilote la série mono-prix exposée en ctx.source.
@@ -122,5 +126,6 @@ export function computeIndicator(
     typeof resolved.source === "string" ? resolved.source : "close";
   const ctx = buildCalcContext(candles, sourceKey);
   if (aux !== undefined) ctx.aux = aux;
+  if (timeframe !== undefined) ctx.timeframe = timeframe;
   return def.calc(candles, resolved, ctx);
 }

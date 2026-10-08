@@ -1436,8 +1436,9 @@ qui combine plusieurs signaux d'achat et de vente et marque sur le prix les
 achats et les ventes. Cette demande autorise une définition
 supplémentaire, `stratAxis` (catégorie `strategy`, pane prix), soit **219
 indicateurs** dont 31 stratégies. Aucun nouvel écran, fournisseur, secret,
-dépendance ni ordre réel. Un seul changement de `@axiom/types`, le soir du
-même jour : `IndicatorDef.auxFacultatives` (voir la couche flux).
+dépendance ni ordre réel. Deux changements de `@axiom/types` :
+`IndicatorDef.auxFacultatives` le soir du même jour (voir la couche flux),
+`CalcContext.timeframe` le 8 octobre (voir l'unité de temps au calcul).
 
 - Six votes (+1, −1 ou 0) à la clôture, tous issus de cœurs existants : EMA 20/50,
   direction du Supertrend 10 × 3, +DI contre −DI seulement si l'ADX 14 atteint le
@@ -1452,8 +1453,9 @@ même jour : `IndicatorDef.auxFacultatives` (voir la couche flux).
   (prix d'achat tenu pendant la position) à l'échelle prix ; 120 marqueurs et
   10 étiquettes au plus. Calcul indépendant de l'unité de temps : AXIS est
   utilisable sur **toute unité** (demande du propriétaire du 2026-10-07,
-  après une première journée réservée au 4h) ; le test ne couvre que le 4h
-  et l'infobulle le rappelle.
+  après une première journée réservée au 4h) ; seul le 4h a passé un test,
+  et l'infobulle dit le statut de l'unité affichée (voir le test sur les
+  autres unités).
 - Statut : la v1 (épisodes ±4, sortie au retour du score à 0, long et short) a
   été **recalée** par la campagne du 2026-10-07
   (`scripts/axis/rapport-2026-10-07.md`, verdict DÉFAVORABLE). La v2, choisie
@@ -1511,6 +1513,46 @@ même jour : `IndicatorDef.auxFacultatives` (voir la couche flux).
   mesuré » ; garde : les formulations mesurées n'apparaissent que sur une bougie
   à delta taker (population mesurée), sinon « couche flux non mesurée ». OI et
   filtre flux non mesurés. Ces données sont consommées.
+- **Test sur les autres unités de temps** (demande du propriétaire du
+  2026-10-08 : « teste-le sur les autres unités de temps également »). Rien
+  ne change dans le calcul ; seuls les défauts sont mesurés, dans les treize
+  unités Binance Spot de l'application hors 4h (1s à 1w ; 1M à 12M non
+  mesurables, historique trop court ; 5s et 15s sans source), sur 42 alts
+  jamais lues par une campagne AXIS (paires USDT cotées avant 2020, hors
+  stablecoins). Protocole figé avant téléchargement
+  (`scripts/axis/manifeste-ut-2026-10-08.json`, hash épinglé dans
+  `scripts/valider-axis-ut.ts`) : signaux S1-S4 (expectancy nette aux coûts
+  x1 et x3, timing par décalages circulaires communs, étendue, deux moitiés)
+  et forts achats F1-F3 (continuation à 12 bougies, étendue, coût
+  aller-retour), seuil de Bonferroni 0,0038 sur les treize unités, contrôles
+  bloquants des campagnes précédentes. Revue indépendante
+  (`scripts/axis/journal-revue-ut-2026-10-08.md`) : figeage d'abord refusé
+  (p-valeurs des grandes unités, historique, traçabilité), autorisé après
+  corrections ; commit de figeage `287e014`, que la campagne exige
+  identique. Exécution unique le 2026-10-08, de 10:02 à 10:13 UTC (534
+  séries sur 546 ; CVC et FTT absentes de 2h à 1w). Verdict : **aucune unité
+  ne passe** (`scripts/axis/rapport-ut-2026-10-08.md`). Signaux perdants
+  après frais de 1s à 30m et en 3d, à peu près nuls en 1h (+0,06 % par trade
+  aux coûts x1, négatifs aux coûts x3) ; de 2h à 1d, expectancy nette
+  positive (+1,64 % à +35,76 % par trade) et PnL positif sur 32 à 39 actifs
+  sur 40, mais timing non significatif (p 0,055 à 0,12) et expectancy hors
+  frais 3,9 à 6,8 fois plus forte dans la première moitié des décisions
+  (jusqu'à juin-octobre 2023 selon l'unité, avec le cycle haussier de
+  2020-2021) ; 1w non concluant (2 trades clos, environ un an de décisions
+  après les 300 bougies d'amorce). Forts achats défavorables partout :
+  moyenne à 12 bougies quasi nulle (±0,02 %) de 1s à 5m, négative de 15m à
+  12h, positive mais non significative de 1d à 1w. La répétition sur les symboles déjà vus laissait croire à des
+  forts achats favorables de 2h à 1d : non confirmé. Suites du manifeste
+  appliquées : signaux et marqueurs inchangés ; `textesAxis(ctx.timeframe)`
+  donne l'infobulle de chaque unité (formulations pré-rédigées, chiffres du
+  résultat ; 4h ou unité absente : textes des tests 4h ; 1M à 12M, 5s et
+  15s : « non mesuré »). Ces données sont consommées.
+- **Unité de temps au calcul** : `CalcContext.timeframe` (nouveau champ
+  facultatif de `@axiom/types`), rempli par `computeIndicator` (paramètre
+  facultatif après `aux`) quand l'appelant connaît l'unité, c'est-à-dire le
+  chart ; jamais déduit de l'écart entre bougies. Le cache de calcul de
+  `chart/indicators.ts` en tient compte : même buffer, autre unité, autre
+  résultat. Alertes, screener et backtest calculent sans unité.
 - **Séries auxiliaires facultatives** : `IndicatorDef.auxFacultatives` (nouveau
   champ de `@axiom/types`) déclare des séries lues si l'appelant les fournit,
   jamais exigées — un def ne les déclare que si sa sortie reste complète sans
@@ -1523,7 +1565,7 @@ même jour : `IndicatorDef.auxFacultatives` (voir la couche flux).
   facultatives enrichissent le calcul quand elles arrivent (`onAuxReady`).
   Alertes, screener et backtest calculent sans aux : lectures « n.d. ».
 - Chargement initial : AXIS coûte ~800 octets gzip, la couche flux ~1 200 de
-  plus. Sur le modèle de BT et SIG, les commandes EQS, WHALE et MARKS vivent
+  plus, les infobulles par unité ~1 000 de plus. Sur le modèle de BT et SIG, les commandes EQS, WHALE et MARKS vivent
   dans `commands/windowPanels.ts` (EQS : bascule identique ; WHALE et MARKS :
   `import()` du contrôleur au premier usage, qui démarre à l'import comme
   avant) ; les marqueurs éco sont chargés avec EcoWindow, seule à les activer.
@@ -1541,7 +1583,16 @@ bruts/gzip après la couche flux et les trois modules différés, plafonds
 1 220 000 / 360 000 inchangés, marge gzip **1 846 octets** (166 avant) ;
 **1 198 919 / 358 429** après les infobulles mesurées du 8 octobre (marge gzip
 1 571).
+Après le test sur les autres unités : `pnpm -r typecheck` réussi ;
+indicateurs 977 tests (dont 48 pour AXIS ; mutations des textes par unité
+détectées), alertes 122, backtest 129, pacte 120, web 417 fichiers / 5 917
+tests (dont 21 qui recoupent au caractère près les infobulles de chaque
+unité avec le résultat de la campagne) ; daemon 780 tests (Bun 1.4.2) ;
+`scripts/valider-axis-ut.ts` passe `tsc --strict`. Budget : **1 202 601 /
+359 453**, marge gzip **547 octets** : le prochain lot qui touche le chemin
+initial doit d'abord libérer des octets.
 Usage, limites et tests :
 [`docs/axis-2026-10-07.md`](docs/axis-2026-10-07.md),
-[`scripts/axis/rapport-v2-2026-10-07.md`](scripts/axis/rapport-v2-2026-10-07.md)
-et [`scripts/axis/rapport-flux-2026-10-08.md`](scripts/axis/rapport-flux-2026-10-08.md).
+[`scripts/axis/rapport-v2-2026-10-07.md`](scripts/axis/rapport-v2-2026-10-07.md),
+[`scripts/axis/rapport-flux-2026-10-08.md`](scripts/axis/rapport-flux-2026-10-08.md)
+et [`scripts/axis/rapport-ut-2026-10-08.md`](scripts/axis/rapport-ut-2026-10-08.md).

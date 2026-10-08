@@ -168,8 +168,7 @@ n'est jamais lue ; le survol détaille le score, chaque vote et la performance
 depuis l'achat. Lecture indicative absente de BT, **testée le 7 octobre 2026
 sur données jamais vues** (BTC/ETH/XRP/SOL, 4h, 2017-2024, protocole figé avant
 calcul) : verdict FAVORABLE, mais pas mieux qu'une EMA 200 seule en PnL total
-sur 3 actifs sur 4 — mesure passée, jamais une promesse. Seule l'unité 4h est
-couverte par ce test ; sur les autres, l'infobulle le rappelle. La **couche
+sur 3 actifs sur 4 — mesure passée, jamais une promesse. La **couche
 flux** (volume relatif, delta taker Binance, variation d'intérêt ouvert sur les
 perps USDT) qualifie chaque signal (« Achat fort » quand les lectures
 disponibles confirment, « à contre-sens » quand le delta s'y oppose) et repère
@@ -182,9 +181,16 @@ lectures absentes sont dites « n.d. » ; rien ne déplace les signaux par défa
 achats sont suivis de +1,61 % en moyenne sur les 12 bougies suivantes
 (p ≤ 0,0005, 3 actifs sur 4), mais avec 51 % de hausses seulement — l'avantage
 tient aux grandes amplitudes ; les fortes ventes n'ont aucune suite mesurable,
-et un signal « fort » ne gagne pas plus qu'un signal ordinaire. Chaque
-infobulle dit ce qui est mesuré et ce qui ne l'est pas ; mesure passée, jamais
-une promesse.
+et un signal « fort » ne gagne pas plus qu'un signal ordinaire.
+**Test du 8 octobre 2026 sur les treize autres unités** (1s à 1w, 42 alts
+jamais vues, protocole figé avant téléchargement, exécution unique) : aucune
+ne passe. Les signaux perdent après frais de 1s à 30m et en 3d, sont à peu
+près nuls en 1h et, de 2h à 1d, gagnent sans timing démontré face à la même
+exposition placée au hasard (p 0,055 à 0,12) ; le 1w n'a que 2 trades clos,
+sur environ un an de décisions après l'amorce. Les forts achats n'ont de
+continuation démontrée dans aucune de ces unités. Le 4h reste la seule unité
+validée. Chaque infobulle dit, pour l'unité affichée, ce qui est mesuré et
+ce qui ne l'est pas ; mesure passée, jamais une promesse.
 [Méthode, réglages, limites et backtests](docs/axis-2026-10-07.md).
 
 ### Historique des décisions et nouveaux indicateurs

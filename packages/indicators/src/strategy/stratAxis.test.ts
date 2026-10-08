@@ -52,6 +52,7 @@ import {
   positionsAxis,
   sensGros,
   stratAxis,
+  textesAxis,
   votesAxis,
 } from "./stratAxis";
 
@@ -115,8 +116,8 @@ describe("stratAxis — contrat", () => {
     expect(stratAxis.auxFacultatives).toEqual(["oi"]);
     expect(stratAxis.aux).toBeUndefined();
     // Aucune unité requise : le propriétaire demande (7 octobre 2026) qu'AXIS
-    // fonctionne sur toute unité de temps. Le test sur données jamais vues ne
-    // couvre que le 4h ; l'infobulle RESERVE rappelle ce périmètre.
+    // fonctionne sur toute unité de temps. Test réussi en 4h ; échoué ou non
+    // mesuré ailleurs (8 octobre 2026) : l'infobulle dit le statut de l'unité.
     expect(stratAxis.minTimeframe).toBeUndefined();
     expect(TIMEFRAME_REQUIS.stratAxis).toBeUndefined();
     expect(supportsIndicatorTimeframe("stratAxis", "4h")).toBe(true);
@@ -599,5 +600,81 @@ describe("stratAxis — forts achats et fortes ventes", () => {
     expect(idxGros).not.toContain(73);
     expect(idxGros).not.toContain(283);
     expect(grosDe(computeIndicator(stratAxis, candles, { ...EMA50, seuilGros: 1.5 })).map((m) => m.idx)).toContain(73);
+  });
+});
+
+describe("stratAxis — infobulles par unité de temps (test du 8 octobre 2026)", () => {
+  // Textes AU LITTÉRAL du résultat (scripts/axis/resultat-ut-2026-10-08.json) pour quelques
+  // unités ; apps/web/src/chart/indicators.axisUnites.test.ts recoupe toutes les unités.
+  const votes = "EMA 20/50 ▲, Supertrend ▲, DMI ▲, MACD ▲, RSI ▲, CMF ▲";
+  // Pics de volume ×50 toutes les 5 bougies sur une série déclinante ; delta taker en 300 (achat)
+  // et 305 (vente) seulement.
+  const pics: Candle[] = Array.from({ length: 500 }, (_v, i) => {
+    const c = 1000 - i * 0.5 + (i % 3) * 0.1;
+    const taker = i === 300 ? { buyVolume: 40, sellVolume: 10 } : i === 305 ? { buyVolume: 10, sellVolume: 40 } : {};
+    return { time: i * 3_600_000, open: c + 0.2, high: c + 1, low: c - 1, close: c, volume: i % 5 === 0 ? 50 : 1, ...taker };
+  });
+  const infoGros = (tf: Parameters<typeof textesAxis>[0], idx: number) =>
+    grosDe(computeIndicator(stratAxis, pics, {}, undefined, tf)).find((m) => m.idx === idx)?.info;
+  const ECHEC_1H =
+    "fort achat / forte vente : test échoué à 12 bougies en 1h sur données jamais vues (42 alts, oct. 2023-oct. 2026) — forts achats suivis de -0.19 % en moyenne (45 % de hausses, p bilatérale = 0.0012), sans dépasser le coût aller-retour de 0.14 %, suite positive sur 17/42 actifs seulement — pas un signal validé";
+
+  it("4h ou unité absente : formulations des tests 4h, inchangées", () => {
+    expect(textesAxis(undefined)).toEqual({
+      signaux: RESERVE, fortAchat: MESURE_FORT_ACHAT, forteVente: MESURE_FORTE_VENTE, qualification: QUALIFICATION,
+    });
+    expect(textesAxis("4h")).toEqual(textesAxis(undefined));
+    expect(computeIndicator(stratAxis, candles, EMA50, undefined, "4h")).toEqual(computeIndicator(stratAxis, candles, EMA50));
+    expect(infoGros("4h", 300)).toBe(`AXIS fort achat — volume ×4.6, delta taker +60 %, OI n.d. ; sens du delta taker — ${MESURE_FORT_ACHAT}`);
+  });
+
+  it("1h : signaux et forts mouvements au statut « test échoué » de l'unité ; sans delta taker, garde inchangée", () => {
+    expect(computeIndicator(stratAxis, candles, EMA50, undefined, "1h").annotations?.marqueurs?.[0]?.info).toBe(
+      `AXIS achat — score +6/6 : ${votes} ; close au-dessus de l'EMA 50 ; ` +
+        "flux ordinaire (volume ×1.4, delta taker n.d., OI n.d. ; qualification descriptive, non mesurée en 1h) — " +
+        "en 1h : test échoué sur données jamais vues (42 alts, oct. 2023-oct. 2026) — expectancy nette ≤ 0 aux coûts x1 ou x3, " +
+        "timing non significatif, PnL positif sur 21/42 actifs seulement, expectancy négative sur une moitié de la période ; " +
+        "expectancy nette +0.06 % par trade (coûts x1), timing p = 0.4804 — lecture indicative, pas un signal validé"
+    );
+    expect(infoGros("1h", 300)).toBe(`AXIS fort achat — volume ×4.6, delta taker +60 %, OI n.d. ; sens du delta taker — ${ECHEC_1H}`);
+    expect(infoGros("1h", 305)).toBe(`AXIS forte vente — volume ×4.6, delta taker -60 %, OI n.d. ; sens du delta taker — ${ECHEC_1H}`);
+    expect(infoGros("1h", 310)).toBe(`AXIS forte vente — volume ×4.6, delta taker n.d., OI n.d. ; sens du corps de la bougie — ${NON_MESURE}`);
+  });
+
+  it("1d : seul le timing échoue ; 1w : signaux non mesurés, forts achats échoués", () => {
+    expect(textesAxis("1d").signaux).toBe(
+      "en 1d : test échoué sur données jamais vues (40 alts, 2020-2026) — timing non significatif ; expectancy nette +35.76 % par trade (coûts x1), timing p = 0.1208 — lecture indicative, pas un signal validé"
+    );
+    expect(textesAxis("1w")).toEqual({
+      signaux: "en 1w : non mesuré (trop peu de signaux sur données jamais vues : 2 trades clos) — lecture indicative, jamais une promesse",
+      fortAchat: "fort achat / forte vente : test échoué à 12 bougies en 1w sur données jamais vues (40 alts, 2020-2026) — suite positive sur 16/40 actifs seulement — pas un signal validé",
+      forteVente: "fort achat / forte vente : test échoué à 12 bougies en 1w sur données jamais vues (40 alts, 2020-2026) — suite positive sur 16/40 actifs seulement — pas un signal validé",
+      qualification: "qualification descriptive, non mesurée en 1w",
+    });
+  });
+
+  it("1M à 12M : historique trop court ; 5s et 15s (sans source) : générique", () => {
+    expect(textesAxis("3M")).toEqual({
+      signaux: "en 3M : non mesuré (historique trop court pour l'EMA 200 et l'amorce) — lecture indicative, jamais une promesse",
+      fortAchat: "couche flux non mesurée en 3M (historique trop court)",
+      forteVente: "couche flux non mesurée en 3M (historique trop court)",
+      qualification: "qualification descriptive, non mesurée en 3M",
+    });
+    expect(textesAxis("15s")).toEqual({
+      signaux: "en 15s : non mesuré — lecture indicative, jamais une promesse",
+      fortAchat: "couche flux non mesurée en 15s",
+      forteVente: "couche flux non mesurée en 15s",
+      qualification: "qualification descriptive, non mesurée en 15s",
+    });
+  });
+
+  it("filtre flux : sa réserve dans toutes les unités ; le calcul ne dépend jamais de l'unité", () => {
+    const filtre = computeIndicator(stratAxis, candles, { ...EMA50, filtreFlux: true }, undefined, "1d");
+    expect(filtre.annotations?.marqueurs?.[0]?.info?.endsWith(`non mesurée en 1d) — ${RESERVE_FILTRE}`)).toBe(true);
+    const sansTextes = (tf: Parameters<typeof textesAxis>[0]) => {
+      const r = computeIndicator(stratAxis, candles, EMA50, undefined, tf);
+      return [r.series, r.annotations?.labels, r.annotations?.marqueurs?.map(({ info: _info, ...m }) => m)];
+    };
+    for (const tf of ["1s", "1h", "1w", "1M", "5s"] as const) expect(sansTextes(tf)).toEqual(sansTextes(undefined));
   });
 });

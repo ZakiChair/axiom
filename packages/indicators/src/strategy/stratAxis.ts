@@ -80,11 +80,21 @@
  * en PnL total sur 3 actifs sur 4 (meilleure expectancy par trade partout,
  * exposition moindre). D'abord réservée au 4h (seule unité testée), AXIS est
  * utilisable sur toute unité depuis la demande du propriétaire du 7 octobre
- * 2026 : le test ne couvre que le 4h, ni la couche flux, l'infobulle le
- * rappelle. Mesure passée, jamais une promesse.
+ * 2026.
+ *
+ * AUTRES UNITÉS : test unique du 8 octobre 2026 sur 42 alts jamais vues (1s à
+ * 1w hors 4h ; scripts/axis/rapport-ut-2026-10-08.md, manifeste figé avant
+ * tout téléchargement) : aucune unité ne passe. Signaux perdants après frais
+ * de 1s à 30m et en 3d, quasi nuls en 1h ; gagnants de 2h à 1d, mais au timing
+ * non démontré face à la même exposition placée au hasard ; trop peu de trades
+ * en 1w (environ un an de décisions après l'amorce).
+ * Forts achats : continuation démontrée dans aucune unité. L'infobulle dit
+ * le statut de l'unité du chart (`ctx.timeframe`) ; en 4h ou sans unité
+ * (alertes, screener), elle garde les formulations des tests 4h. Mesures
+ * passées, jamais une promesse.
  */
 
-import type { Candle, IndicatorDef, LabelAnnotation, MarqueurAnnotation } from "@axiom/types";
+import type { Candle, IndicatorDef, LabelAnnotation, MarqueurAnnotation, Timeframe } from "@axiom/types";
 import { closeOf, ema, sma, volOf } from "../utils";
 import { MAX_LABELS_SORTIE } from "../utils-fabrique-strategie";
 import { rsiOf } from "../momentum/rsi";
@@ -296,6 +306,61 @@ const MESURE_FORTE_VENTE = "forte vente : repérée ; aucune suite mesurable à 
 const NON_MESURE = "couche flux non mesurée";
 const QUALIFICATION = "qualification descriptive, sans avantage mesuré pour les signaux « forts » (données jamais vues, 8 octobre 2026)";
 
+// Test du 8 octobre 2026 sur les autres unités (scripts/axis/rapport-ut-2026-10-08.md) :
+// aucune n'a passé. Par unité : alts disponibles, période, échecs des forts achats, puis
+// signaux [échecs, expectancy nette x1 %, p du timing] ou [raison du « non mesuré »].
+// Formulations du manifeste, chiffres du résultat ; le test croisé
+// apps/web/src/chart/indicators.axisUnites.test.ts les compare au résultat.
+/** S1 à S4 en échec ; `actifs` : cellules à PnL net positif / cellules ayant un trade. */
+const echecsSignaux = (actifs: string): string =>
+  `expectancy nette ≤ 0 aux coûts x1 ou x3, timing non significatif, PnL positif sur ${actifs} actifs seulement, expectancy négative sur une moitié de la période`;
+const SOUS_COUT = ", sans dépasser le coût aller-retour de 0.14 %";
+const UNITES: Partial<Record<Timeframe, [number, string, string, [string] | [string, string, string]]>> = {
+  "1s": [42, "12 h, 7 octobre 2026", `forts achats suivis de 0.00 % en moyenne (26 % de hausses, p bilatérale = 0.9612)${SOUS_COUT}`, [echecsSignaux("0/42"), "-0.17", "= 1.0000"]],
+  "1m": [42, "30 jours, sept.-oct. 2026", `forts achats suivis de +0.01 % en moyenne (44 % de hausses, p bilatérale = 0.2386)${SOUS_COUT}`, [echecsSignaux("1/42"), "-0.17", "= 1.0000"]],
+  "3m": [42, "90 jours, juil.-oct. 2026", `forts achats suivis de 0.00 % en moyenne (43 % de hausses, p bilatérale = 0.9124)${SOUS_COUT}`, [echecsSignaux("2/42"), "-0.18", "= 1.0000"]],
+  "5m": [42, "150 jours, mai-oct. 2026", `forts achats suivis de -0.02 % en moyenne (43 % de hausses, p bilatérale = 0.0204)${SOUS_COUT}, suite positive sur 15/42 actifs seulement`, [echecsSignaux("4/42"), "-0.23", "= 1.0000"]],
+  "15m": [42, "oct. 2025-oct. 2026", `forts achats suivis de -0.10 % en moyenne (44 % de hausses, p bilatérale ≤ 0.0002)${SOUS_COUT}, suite positive sur 7/42 actifs seulement`, [echecsSignaux("5/42"), "-0.28", "= 0.9948"]],
+  "30m": [42, "oct. 2024-oct. 2026", `forts achats suivis de -0.14 % en moyenne (45 % de hausses, p bilatérale = 0.0004)${SOUS_COUT}, suite positive sur 15/42 actifs seulement`, [echecsSignaux("10/42"), "-0.18", "= 0.6856"]],
+  "1h": [42, "oct. 2023-oct. 2026", `forts achats suivis de -0.19 % en moyenne (45 % de hausses, p bilatérale = 0.0012)${SOUS_COUT}, suite positive sur 17/42 actifs seulement`, [echecsSignaux("21/42"), "+0.06", "= 0.4804"]],
+  "2h": [40, "2020-2026", `forts achats suivis de -0.24 % en moyenne (45 % de hausses, p bilatérale = 0.0044)${SOUS_COUT}, suite positive sur 14/40 actifs seulement`, ["timing non significatif", "+1.64", "= 0.1048"]],
+  "6h": [40, "2020-2026", `forts achats suivis de -0.68 % en moyenne (44 % de hausses, p bilatérale = 0.0072)${SOUS_COUT}, suite positive sur 14/40 actifs seulement`, ["timing non significatif", "+7.38", "= 0.0742"]],
+  "12h": [40, "2020-2026", `forts achats suivis de -0.84 % en moyenne (44 % de hausses, p bilatérale = 0.0758)${SOUS_COUT}, suite positive sur 15/40 actifs seulement`, ["timing non significatif", "+20.24", "= 0.0552"]],
+  "1d": [40, "2020-2026", "forts achats suivis de +0.46 % en moyenne (44 % de hausses, p bilatérale = 0.6006), suite positive sur 20/40 actifs seulement", ["timing non significatif", "+35.76", "= 0.1208"]],
+  "3d": [40, "2020-2026", "forts achats suivis de +1.24 % en moyenne (44 % de hausses, p bilatérale = 0.6792)", [echecsSignaux("9/39"), "-7.50", "= 0.8381"]],
+  "1w": [40, "2020-2026", "suite positive sur 16/40 actifs seulement", ["trop peu de signaux sur données jamais vues : 2 trades clos"]],
+};
+
+/** Textes des infobulles selon l'unité du chart ; 4h ou unité absente : ceux des tests 4h. */
+export function textesAxis(u: Timeframe | undefined): { signaux: string; fortAchat: string; forteVente: string; qualification: string } {
+  if (u === undefined || u === "4h") return { signaux: RESERVE, fortAchat: MESURE_FORT_ACHAT, forteVente: MESURE_FORTE_VENTE, qualification: QUALIFICATION };
+  const qualification = `qualification descriptive, non mesurée en ${u}`;
+  const m = UNITES[u];
+  if (m === undefined) {
+    // 1M, 3M, 6M, 12M : historique trop court ; 5s, 15s : aucune source câblée.
+    const court = u.endsWith("M");
+    const flux = `couche flux non mesurée en ${u}${court ? " (historique trop court)" : ""}`;
+    return {
+      signaux: `en ${u} : non mesuré${court ? " (historique trop court pour l'EMA 200 et l'amorce)" : ""} — lecture indicative, jamais une promesse`,
+      fortAchat: flux,
+      forteVente: flux,
+      qualification,
+    };
+  }
+  const [n, periode, echecsFlux, [s, expectancy, p]] = m;
+  const jv = `sur données jamais vues (${n} alts, ${periode})`;
+  const flux = `fort achat / forte vente : test échoué à 12 bougies en ${u} ${jv} — ${echecsFlux} — pas un signal validé`;
+  return {
+    signaux:
+      expectancy === undefined
+        ? `en ${u} : non mesuré (${s}) — lecture indicative, jamais une promesse`
+        : `en ${u} : test échoué ${jv} — ${s} ; expectancy nette ${expectancy} % par trade (coûts x1), timing p ${p} — lecture indicative, pas un signal validé`,
+    fortAchat: flux,
+    forteVente: flux,
+    qualification,
+  };
+}
+
 export const stratAxis: IndicatorDef = {
   id: "stratAxis",
   name: "AXIS",
@@ -351,7 +416,8 @@ export const stratAxis: IndicatorDef = {
     }
 
     const noms = [`EMA ${params.emaRapide}/${params.emaLente}`, "Supertrend", "DMI", "MACD", "RSI", "CMF"];
-    const reserve = filtre ? RESERVE_FILTRE : RESERVE;
+    const textes = textesAxis(ctx.timeframe);
+    const reserve = filtre ? RESERVE_FILTRE : textes.signaux;
     const marqueurs: MarqueurAnnotation[] = [];
     const labels: LabelAnnotation[] = [];
     // Seuls les signaux les plus récents portent une étiquette (même règle que defStrategie).
@@ -379,7 +445,7 @@ export const stratAxis: IndicatorDef = {
           `AXIS ${achat ? "achat" : "vente"}${fort} — score ${achat ? "+" : ""}${s}/6 : ` +
           `${noms.map((nom, w) => `${nom} ${fleche(v[w] ?? 0)}`).join(", ")} ; ` +
           `${achat ? `close au-dessus de l'EMA ${params.emaTendance}` : `${resultat} depuis l'achat (hors frais)`} ; ` +
-          `flux ${qualite} (${texteFlux(flux[idx] ?? {}, oiBougies)} ; ${QUALIFICATION}) — ${reserve}`,
+          `flux ${qualite} (${texteFlux(flux[idx] ?? {}, oiBougies)} ; ${textes.qualification}) — ${reserve}`,
       });
       if (k >= recents.length - MAX_LABELS_SORTIE) {
         labels.push({
@@ -402,7 +468,7 @@ export const stratAxis: IndicatorDef = {
       const achat = sens > 0;
       const valeur = achat ? c.low : c.high;
       // Sans delta taker, le sens vient du corps seul : population hors de la mesure.
-      const mesure = f.delta === undefined ? NON_MESURE : achat ? MESURE_FORT_ACHAT : MESURE_FORTE_VENTE;
+      const mesure = f.delta === undefined ? NON_MESURE : achat ? textes.fortAchat : textes.forteVente;
       marqueurs.push({
         idx,
         valeur,

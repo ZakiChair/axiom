@@ -325,4 +325,42 @@ Remarques :
 
 ## Après l'exécution (consigné après coup)
 
-À_REMPLIR
+- Commit local de figeage : `287e014560c4e69dd5762235a264f943bdf98604` (parent
+  `605325e`), consigné par le runner (`code.commitFigeage`) avec
+  `cheminsFigesCommites` et `identiqueAuFigeage` vrais, arbre de code
+  inchangé (247 fichiers, `3fcfaa2f…`), aucun avertissement. Vérification
+  r-d : `git show 287e014:scripts/valider-axis-ut.ts | sha256sum` redonne
+  `059acc4a…c95b`, et le manifeste du commit redonne `05ed40f0…c068`.
+- Exécution unique : `bun scripts/valider-axis-ut.ts --campagne` (Bun 1.4.2),
+  lancée à 10:02:11, terminée à 10:13:14 (11 min), code de sortie 0. Aucune
+  interruption, aucune trace d'arrêt, aucune relance. Pendant le calcul, la
+  sortie n'a montré que la progression et, par unité, « contrôles bloquants
+  passés ».
+- Données : 546 séries téléchargées puis mises en cache (`H-*`, 240 Mo, hors
+  dépôt), 534 exploitables. Les 12 cellules indisponibles sont CVCUSDT et
+  FTTUSDT de 2h à 1w (trous de cotation : 621 et 1 249 bougies manquantes
+  sur 9 888 en 6h ; en 3d, une bougie hors grille). Ces unités gardent 40
+  cellules sur 42, au-dessus du minimum de 75 %.
+- Contrôles bloquants passés dans les treize unités.
+- Verdicts (`rapport-ut-2026-10-08.md`) : **aucune unité FAVORABLE**.
+  Signaux DÉFAVORABLES dans douze unités (de 2h à 1d, seul le timing S2
+  échoue, p de 0,055 à 0,12), NON CONCLUANTS en 1w (2 trades clos sur 100
+  requis). Forts achats DÉFAVORABLES dans les treize unités (en 1w, F1
+  « insuffisant » mais F2 en échec, donc DÉFAVORABLE selon
+  `criteres.resolutionDuTest`).
+- Empreintes des sorties : `resultat-ut-2026-10-08.json`
+  `77b755815e1521ebd6137d1361bc0ccac98b089ae26570519513b7cc926058ec`,
+  `rapport-ut-2026-10-08.md`
+  `5c6d6aa429362521b13d710ea9c3d1b29cc2699721ae350dc47ff6920ebfd9e4`.
+- Écart avec la répétition sur données déjà vues : les forts achats y
+  semblaient FAVORABLES de 2h à 1d (8 majors) ; sur les 42 alts jamais vues,
+  ils échouent partout, avec une moyenne négative de 2h à 12h. Les signaux
+  de 2h à 12h échouaient déjà au seul timing sur les données vues.
+- Suites appliquées (manifeste, `suites.DEFAVORABLE` et `NON_CONCLUANT`),
+  dans le commit qui suit le figeage : l'infobulle de chaque unité reprend la
+  formulation choisie par le runner (`textesAxis` dans `stratAxis.ts`, lue
+  par `ctx.timeframe`), recoupée au caractère près par
+  `apps/web/src/chart/indicators.axisUnites.test.ts`. 4h et unité absente
+  sont inchangés. Aucun changement de calcul, signaux et marqueurs conservés.
+  Ces données sont consommées : aucune autre variante n'y sera jugée sans
+  décision explicite du propriétaire.

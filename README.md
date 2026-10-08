@@ -172,12 +172,20 @@ sur 3 actifs sur 4 — mesure passée, jamais une promesse. Seule l'unité 4h es
 couverte par ce test ; sur les autres, l'infobulle le rappelle. La **couche
 flux** (volume relatif, delta taker Binance, variation d'intérêt ouvert sur les
 perps USDT) qualifie chaque signal (« Achat fort » quand les lectures
-disponibles confirment, « à contre-sens » quand le delta s'y oppose) et marque
-d'un triangle d'accent les **gros mouvements** (volume ≥ 3 × la moyenne, sens
-du delta ou du corps) ; un réglage optionnel n'achète que sur flux fort. Les
-lectures absentes sont dites « n.d. » ; la couche flux n'est pas mesurée et ne
-déplace aucun signal par défaut.
-[Méthode, réglages, limites et backtest](docs/axis-2026-10-07.md).
+disponibles confirment, « à contre-sens » quand le delta s'y oppose) et repère
+d'un triangle d'accent les **forts achats et fortes ventes** (volume ≥ 3 × la
+moyenne, sens du delta taker ou du corps ; étiquette « Fort achat ×n » sur les
+trois derniers) ; un réglage optionnel n'achète que sur flux fort. Les
+lectures absentes sont dites « n.d. » ; rien ne déplace les signaux par défaut.
+**Test du 8 octobre 2026 sur données jamais vues** (BNB/ADA/LINK/DOGE, 4h,
+2017-2026, protocole figé avant téléchargement, exécution unique) : les forts
+achats sont suivis de +1,61 % en moyenne sur les 12 bougies suivantes
+(p ≤ 0,0005, 3 actifs sur 4), mais avec 51 % de hausses seulement — l'avantage
+tient aux grandes amplitudes ; les fortes ventes n'ont aucune suite mesurable,
+et un signal « fort » ne gagne pas plus qu'un signal ordinaire. Chaque
+infobulle dit ce qui est mesuré et ce qui ne l'est pas ; mesure passée, jamais
+une promesse.
+[Méthode, réglages, limites et backtests](docs/axis-2026-10-07.md).
 
 ### Historique des décisions et nouveaux indicateurs
 

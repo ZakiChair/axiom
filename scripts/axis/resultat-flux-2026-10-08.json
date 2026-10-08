@@ -1,0 +1,2268 @@
+{
+  "schema": "axiom-axis-flux-backtest-result-v1",
+  "essai": false,
+  "manifesteSha256": "29d9449b8130d61adea69965f0e57debcfa6f2bcaa8ee952498f3e34efabfc88",
+  "calculeLeUtc": "2026-10-08T07:14:12.833Z",
+  "runtime": {
+    "bun": "1.4.2",
+    "node": "26.3.0"
+  },
+  "code": {
+    "runnerSha256": "cb0328ba85f4cac93af00610cebbba34199e4592e1039d17f302d1805483f104",
+    "observeSha256": {
+      "packages/indicators/src/strategy/stratAxis.ts": "09c347dca9f9adcffddccf80cad7e650a99b6354f77185d0ea56043c6717f653",
+      "packages/indicators/src/utils.ts": "693259721a342f3adf0c897b5e279a9f6e9eb81bdb6d134449c3d19723c5266b",
+      "packages/indicators/src/utils-fabrique-strategie.ts": "d43cff07ce064260ef4895ac20d156a689821d9d6893e66743d692bfdb526605",
+      "packages/indicators/src/engine.ts": "a0a8c2c8b767c0e7260e1b4c4b63b00499d8ed4d8d559e618985d40cd8396ece",
+      "packages/indicators/src/momentum/rsi.ts": "5c9b93ec36578152a1dde9ea139064f56ed7a2a997531c300b59d1c6a934ec7a",
+      "packages/indicators/src/trend/adx.ts": "c1704f2e876995c75d54fa572a9f691b944d107cf179fdc024b5ec0629fba6df",
+      "packages/indicators/src/trend/macd.ts": "ad8b1a85f0b344d0c390408cfd18288bfaeea92e66700f9f14b38e61ff39ebfc",
+      "packages/indicators/src/trend/supertrend.ts": "6401a4632aa4647c93c484b2da374c51590dc89acf197ee1e3352a1ff839b469",
+      "packages/indicators/src/volume/cmf.ts": "7e4a05cc6463cc94572be7f4c250ad81d71917f15962478ee8679339ff3f88a5",
+      "packages/indicators/src/trend/ema.ts": "b1546985251fe40c1e20d6869a18bbf9af69f92dcfa99c1480b731ca94b0107a",
+      "packages/indicators/src/registry.ts": "edf081a34bc36cc71c4d1b6aa24c47baaf7025836775665e59b9a7f217e6e507",
+      "packages/indicators/src/index.ts": "434bafab9343da78716366192ed5fe31e01be1fbb49e1d63fbd5f018dfb82cca",
+      "packages/indicators/src/timeframes.ts": "46f5435a7601a724f9f7a782570bc30d44e1a8789e188ae2e244c8748d5d11dd",
+      "packages/types/src/index.ts": "63adaf788972f00a514ec4f3e03fb2a2d04b075747dbed3b9c1be9e0df6a09c0"
+    },
+    "identiqueAuFigeage": true
+  },
+  "avertissements": [],
+  "verdict": "FAVORABLE",
+  "blocs": [
+    {
+      "critere": "C1",
+      "cle": "regroupé",
+      "statut": "tenu",
+      "detail": "690 forts achats, 161 bps en moyenne à 12 bougies (51.2 % de hausses), p unilatérale = 0.0005 (seuil 0.05) ; médiane nulle 20 bps"
+    },
+    {
+      "critere": "C2",
+      "cle": "cellules",
+      "statut": "tenu",
+      "detail": "3 cellule(s) sur 4 à moyenne > 0 (seuil 3) : BNBUSDT 4h -14 bps (n = 144), ADAUSDT 4h 195 bps (n = 143), LINKUSDT 4h 91 bps (n = 154), DOGEUSDT 4h 287 bps (n = 249)"
+    }
+  ],
+  "regroupe": [
+    {
+      "h": 1,
+      "achats": {
+        "n": 690,
+        "sommeLog": 2.370290887393867,
+        "moyenneBps": 34.35204184628793,
+        "medianeBps": 0,
+        "hitsPct": 49.56521739130435,
+        "t": 1.6462177330213856,
+        "pUni": 0.0005,
+        "pBi": 0.0005,
+        "medianeNulleBps": 1.5762011373381657,
+        "q95NulleBps": 16.121690612159462,
+        "L": 15394
+      },
+      "ventes": {
+        "n": 609,
+        "sommeLog": -0.16385409502890197,
+        "moyenneBps": -2.690543432330082,
+        "medianeBps": -12.760529166643275,
+        "hitsPct": 46.63382594417077,
+        "t": -0.20067657499399982,
+        "pUni": 0.5535,
+        "pBi": 0.787,
+        "medianeNulleBps": -1.2650209102294623,
+        "q95NulleBps": 14.032435786743463,
+        "L": 15394
+      }
+    },
+    {
+      "h": 2,
+      "achats": {
+        "n": 690,
+        "sommeLog": 5.018557617690749,
+        "moyenneBps": 72.73271909696737,
+        "medianeBps": 0,
+        "hitsPct": 49.56521739130435,
+        "t": 2.408166337676699,
+        "pUni": 0.0005,
+        "pBi": 0.0005,
+        "medianeNulleBps": 3.2875087373073404,
+        "q95NulleBps": 25.165006497250243,
+        "L": 15394
+      },
+      "ventes": {
+        "n": 609,
+        "sommeLog": -1.2356324724143277,
+        "moyenneBps": -20.28953156673773,
+        "medianeBps": -39.82238376393887,
+        "hitsPct": 43.02134646962233,
+        "t": -1.1639357695844637,
+        "pUni": 0.88,
+        "pBi": 0.163,
+        "medianeNulleBps": -2.4566135661891986,
+        "q95NulleBps": 19.11279061402106,
+        "L": 15394
+      }
+    },
+    {
+      "h": 3,
+      "achats": {
+        "n": 690,
+        "sommeLog": 9.52055754881729,
+        "moyenneBps": 137.9790949103955,
+        "medianeBps": 24.067400305649578,
+        "hitsPct": 53.47826086956522,
+        "t": 3.8762289699034262,
+        "pUni": 0.0005,
+        "pBi": 0.0005,
+        "medianeNulleBps": 4.4280995830625995,
+        "q95NulleBps": 33.9904983747721,
+        "L": 15394
+      },
+      "ventes": {
+        "n": 609,
+        "sommeLog": -1.5764875608176803,
+        "moyenneBps": -25.886495251521843,
+        "medianeBps": -52.01127429109498,
+        "hitsPct": 43.51395730706076,
+        "t": -1.2831758853060564,
+        "pUni": 0.869,
+        "pBi": 0.168,
+        "medianeNulleBps": -4.274995994453802,
+        "q95NulleBps": 23.537774740160174,
+        "L": 15394
+      }
+    },
+    {
+      "h": 6,
+      "achats": {
+        "n": 690,
+        "sommeLog": 9.100185228715707,
+        "moyenneBps": 131.8867424451552,
+        "medianeBps": 5.743825545623249,
+        "hitsPct": 50.72463768115942,
+        "t": 2.974192157162061,
+        "pUni": 0.0005,
+        "pBi": 0.0005,
+        "medianeNulleBps": 9.589772654357434,
+        "q95NulleBps": 52.15326882193029,
+        "L": 15394
+      },
+      "ventes": {
+        "n": 609,
+        "sommeLog": -2.825859420657618,
+        "moyenneBps": -46.40163252311359,
+        "medianeBps": -33.844975243164654,
+        "hitsPct": 45.48440065681445,
+        "t": -1.8797572721605602,
+        "pUni": 0.8965,
+        "pBi": 0.1245,
+        "medianeNulleBps": -10.749410353101842,
+        "q95NulleBps": 33.962672914898825,
+        "L": 15394
+      }
+    },
+    {
+      "h": 12,
+      "achats": {
+        "n": 690,
+        "sommeLog": 11.137450695905372,
+        "moyenneBps": 161.41232892616483,
+        "medianeBps": 9.58849454206323,
+        "hitsPct": 51.15942028985507,
+        "t": 3.3632808611930027,
+        "pUni": 0.0005,
+        "pBi": 0.0005,
+        "medianeNulleBps": 19.527014088780643,
+        "q95NulleBps": 82.11112608919396,
+        "L": 15394
+      },
+      "ventes": {
+        "n": 609,
+        "sommeLog": -3.4007680946599192,
+        "moyenneBps": -55.84184063480984,
+        "medianeBps": -38.59862274369519,
+        "hitsPct": 45.320197044334975,
+        "t": -1.8283804682108906,
+        "pUni": 0.807,
+        "pBi": 0.22,
+        "medianeNulleBps": -21.60967206375749,
+        "q95NulleBps": 45.42088677735075,
+        "L": 15394
+      }
+    },
+    {
+      "h": 24,
+      "achats": {
+        "n": 690,
+        "sommeLog": 21.807492724115193,
+        "moyenneBps": 316.0506191900753,
+        "medianeBps": 51.7591614288504,
+        "hitsPct": 53.04347826086957,
+        "t": 5.007039870078849,
+        "pUni": 0.0005,
+        "pBi": 0.0005,
+        "medianeNulleBps": 40.814964773111164,
+        "q95NulleBps": 125.07853209995228,
+        "L": 15394
+      },
+      "ventes": {
+        "n": 609,
+        "sommeLog": -3.7188261815587236,
+        "moyenneBps": -61.06446931951927,
+        "medianeBps": -51.090698674784996,
+        "hitsPct": 47.12643678160919,
+        "t": -1.3865352454877948,
+        "pUni": 0.6025,
+        "pBi": 0.437,
+        "medianeNulleBps": -46.494073231550544,
+        "q95NulleBps": 53.62292327054246,
+        "L": 15394
+      }
+    },
+    {
+      "h": 42,
+      "achats": {
+        "n": 690,
+        "sommeLog": 26.139645494295245,
+        "moyenneBps": 378.83544194630787,
+        "medianeBps": 126.46657045682907,
+        "hitsPct": 55.65217391304348,
+        "t": 4.946116238898144,
+        "pUni": 0.0005,
+        "pBi": 0.0005,
+        "medianeNulleBps": 73.85234702138911,
+        "q95NulleBps": 189.04902542142128,
+        "L": 15394
+      },
+      "ventes": {
+        "n": 609,
+        "sommeLog": -6.576465169310044,
+        "moyenneBps": -107.98793381461485,
+        "medianeBps": -56.98021114637797,
+        "hitsPct": 46.79802955665024,
+        "t": -1.8110674439085241,
+        "pUni": 0.6575,
+        "pBi": 0.348,
+        "medianeNulleBps": -80.18672951740864,
+        "q95NulleBps": 42.40838056155243,
+        "L": 15394
+      }
+    }
+  ],
+  "regroupePermutationSens": {
+    "n": 690,
+    "total": 1299,
+    "moyenneAchatsBps": 161.41232892616497,
+    "moyenneTousBps": 111.91854342236566,
+    "medianeNulleBps": 117.81300691159326,
+    "pUni": 0.047
+  },
+  "ventesFortesAxis": {
+    "n": 46,
+    "sommeLog": -0.1555606321394148,
+    "moyenneBps": -33.81752872595974,
+    "medianeBps": -61.93841087057894,
+    "hitsPct": 43.47826086956522,
+    "t": -0.33019569743858335,
+    "pUni": 0.5545,
+    "pBi": 0.765,
+    "medianeNulleBps": -18.77840981602832,
+    "q95NulleBps": 158.27511639386054,
+    "L": 15394
+  },
+  "formulations": {
+    "fortAchat": "fort achat : sur données jamais vues (BNB/ADA/LINK/DOGE 4h, 2017-2026), +1.61 % en moyenne sur les 12 bougies suivantes (51 % de hausses, p ≤ 0.0005) — mesure passée, pas une promesse",
+    "forteVente": "forte vente : repérée ; aucune suite mesurable à 12 bougies sur données jamais vues (BNB/ADA/LINK/DOGE 4h, 2017-2026)",
+    "venteForteAxis": null
+  },
+  "cellules": [
+    {
+      "id": "BNBUSDT 4h",
+      "statut": "disponible",
+      "resultat": {
+        "acquisition": {
+          "source": "https://data-api.binance.vision/api/v3/klines",
+          "acquisLeUtc": "2026-10-08T07:14:05.439Z",
+          "modeCalcul": "reseau",
+          "nombre": 19362,
+          "premierOpen": "2017-12-01T00:00:00.000Z",
+          "dernierClose": "2026-10-08T00:00:00.000Z",
+          "manquantes": 36,
+          "plagesManquantes": [
+            {
+              "apres": "2018-01-03T20:00:00.000Z",
+              "reprise": "2018-01-04T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2018-02-07T20:00:00.000Z",
+              "reprise": "2018-02-09T08:00:00.000Z",
+              "bougies": 8
+            },
+            {
+              "apres": "2018-06-25T20:00:00.000Z",
+              "reprise": "2018-06-26T12:00:00.000Z",
+              "bougies": 3
+            },
+            {
+              "apres": "2018-07-03T20:00:00.000Z",
+              "reprise": "2018-07-04T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2018-10-19T00:00:00.000Z",
+              "reprise": "2018-10-19T08:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2018-11-13T20:00:00.000Z",
+              "reprise": "2018-11-14T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2019-03-11T20:00:00.000Z",
+              "reprise": "2019-03-12T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2019-05-14T20:00:00.000Z",
+              "reprise": "2019-05-15T12:00:00.000Z",
+              "bougies": 3
+            },
+            {
+              "apres": "2019-08-14T20:00:00.000Z",
+              "reprise": "2019-08-15T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2019-11-12T20:00:00.000Z",
+              "reprise": "2019-11-13T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2019-11-24T20:00:00.000Z",
+              "reprise": "2019-11-25T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-02-19T04:00:00.000Z",
+              "reprise": "2020-02-19T16:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2020-04-24T20:00:00.000Z",
+              "reprise": "2020-04-25T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-06-27T20:00:00.000Z",
+              "reprise": "2020-06-28T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-12-21T08:00:00.000Z",
+              "reprise": "2020-12-21T16:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-02-10T20:00:00.000Z",
+              "reprise": "2021-02-11T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-04-19T20:00:00.000Z",
+              "reprise": "2021-04-20T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-04-25T00:00:00.000Z",
+              "reprise": "2021-04-25T08:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-08-12T20:00:00.000Z",
+              "reprise": "2021-08-13T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-09-29T00:00:00.000Z",
+              "reprise": "2021-09-29T08:00:00.000Z",
+              "bougies": 1
+            }
+          ],
+          "ecartees": [
+            {
+              "temps": "2018-01-04T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-02-08T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-06-26T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-07-04T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-10-19T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-11-14T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-03-12T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-05-15T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-08-15T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-11-13T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-11-25T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-02-19T08:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-04-25T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-06-28T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-12-21T12:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-02-11T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-04-20T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-04-25T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-08-13T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-09-29T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            }
+          ],
+          "sha256Ohlcv": "f1422c679e1ad15eafc9d56550e138f7e4bf74c8e301f7736d7693f9b9e9248b"
+        },
+        "evaluation": {
+          "premiereDecisionUtc": "2018-01-20T00:00:00.000Z",
+          "derniereDecisionUtc": "2026-09-30T16:00:00.000Z",
+          "decisions": 19020
+        },
+        "evenements": {
+          "total": 284,
+          "achats": 144,
+          "ventes": 140,
+          "parAn": [
+            {
+              "annee": 2018,
+              "achats": 12,
+              "ventes": 11,
+              "moyenneAchats12Bps": -693.5759083737643
+            },
+            {
+              "annee": 2019,
+              "achats": 12,
+              "ventes": 9,
+              "moyenneAchats12Bps": 0.08088887077317697
+            },
+            {
+              "annee": 2020,
+              "achats": 4,
+              "ventes": 3,
+              "moyenneAchats12Bps": -316.53021100502167
+            },
+            {
+              "annee": 2021,
+              "achats": 9,
+              "ventes": 11,
+              "moyenneAchats12Bps": 1164.16646330477
+            },
+            {
+              "annee": 2022,
+              "achats": 16,
+              "ventes": 24,
+              "moyenneAchats12Bps": -231.73158107093917
+            },
+            {
+              "annee": 2023,
+              "achats": 29,
+              "ventes": 26,
+              "moyenneAchats12Bps": -11.977592555560813
+            },
+            {
+              "annee": 2024,
+              "achats": 25,
+              "ventes": 15,
+              "moyenneAchats12Bps": 88.81296797778903
+            },
+            {
+              "annee": 2025,
+              "achats": 25,
+              "ventes": 28,
+              "moyenneAchats12Bps": -71.5863535989584
+            },
+            {
+              "annee": 2026,
+              "achats": 12,
+              "ventes": 13,
+              "moyenneAchats12Bps": 55.364757708184314
+            }
+          ]
+        },
+        "horizons": [
+          {
+            "h": 1,
+            "achats": {
+              "n": 144,
+              "sommeLog": -0.12144216271443109,
+              "moyenneBps": -8.433483521835493,
+              "medianeBps": -18.02391447274232,
+              "hitsPct": 46.52777777777778,
+              "t": -0.48416455338606673,
+              "pUni": 0.765,
+              "pBi": 0.5835,
+              "medianeNulleBps": 2.499285029804763,
+              "q95NulleBps": 26.49566109854317,
+              "L": 19020
+            },
+            "ventes": {
+              "n": 140,
+              "sommeLog": 0.08343483471769209,
+              "moyenneBps": 5.95963105126372,
+              "medianeBps": 8.35757868108189,
+              "hitsPct": 52.142857142857146,
+              "t": 0.2719819799022874,
+              "pUni": 0.311,
+              "pBi": 0.706,
+              "medianeNulleBps": -2.0705471491015346,
+              "q95NulleBps": 24.90239446589469,
+              "L": 19020
+            }
+          },
+          {
+            "h": 2,
+            "achats": {
+              "n": 144,
+              "sommeLog": 0.4160740070975417,
+              "moyenneBps": 28.89402827066262,
+              "medianeBps": 29.30186917561528,
+              "hitsPct": 55.55555555555556,
+              "t": 1.3619676466072193,
+              "pUni": 0.125,
+              "pBi": 0.1835,
+              "medianeNulleBps": 5.003533133318292,
+              "q95NulleBps": 40.780805036347054,
+              "L": 19020
+            },
+            "ventes": {
+              "n": 140,
+              "sommeLog": 0.45401240260298037,
+              "moyenneBps": 32.42945732878431,
+              "medianeBps": -4.747211102680282,
+              "hitsPct": 48.57142857142857,
+              "t": 1.0718303700044889,
+              "pUni": 0.0495,
+              "pBi": 0.152,
+              "medianeNulleBps": -3.6067934714821837,
+              "q95NulleBps": 32.25183170638684,
+              "L": 19020
+            }
+          },
+          {
+            "h": 3,
+            "achats": {
+              "n": 144,
+              "sommeLog": 0.737732059205441,
+              "moyenneBps": 51.23139300037785,
+              "medianeBps": 41.19090403569725,
+              "hitsPct": 59.02777777777778,
+              "t": 1.895502184008379,
+              "pUni": 0.054,
+              "pBi": 0.073,
+              "medianeNulleBps": 6.386689508189788,
+              "q95NulleBps": 52.23302265517254,
+              "L": 19020
+            },
+            "ventes": {
+              "n": 140,
+              "sommeLog": 0.6515178064202056,
+              "moyenneBps": 46.53698617287183,
+              "medianeBps": 6.34115430252713,
+              "hitsPct": 50,
+              "t": 1.3773535683164364,
+              "pUni": 0.0325,
+              "pBi": 0.103,
+              "medianeNulleBps": -6.424179094856502,
+              "q95NulleBps": 38.31914986635522,
+              "L": 19020
+            }
+          },
+          {
+            "h": 6,
+            "achats": {
+              "n": 144,
+              "sommeLog": 0.011904755756984242,
+              "moyenneBps": 0.8267191497905724,
+              "medianeBps": -12.070007500355473,
+              "hitsPct": 48.61111111111111,
+              "t": 0.02581032250446095,
+              "pUni": 0.644,
+              "pBi": 0.985,
+              "medianeNulleBps": 15.196959165195947,
+              "q95NulleBps": 81.71823965558524,
+              "L": 19020
+            },
+            "ventes": {
+              "n": 140,
+              "sommeLog": 0.42538030424824314,
+              "moyenneBps": 30.384307446303083,
+              "medianeBps": 10.104635079333235,
+              "hitsPct": 51.42857142857142,
+              "t": 0.6515375761767019,
+              "pUni": 0.148,
+              "pBi": 0.4915,
+              "medianeNulleBps": -13.56558925431068,
+              "q95NulleBps": 56.471923157233384,
+              "L": 19020
+            }
+          },
+          {
+            "h": 12,
+            "achats": {
+              "n": 144,
+              "sommeLog": -0.2070575937590362,
+              "moyenneBps": -14.378999566599738,
+              "medianeBps": -57.920785714555834,
+              "hitsPct": 44.44444444444444,
+              "t": -0.21791864964937072,
+              "pUni": 0.7595,
+              "pBi": 0.834,
+              "medianeNulleBps": 27.383464115867735,
+              "q95NulleBps": 123.60323227810966,
+              "L": 19020
+            },
+            "ventes": {
+              "n": 140,
+              "sommeLog": 1.3594526020761561,
+              "moyenneBps": 97.103757291154,
+              "medianeBps": 26.990143680079015,
+              "hitsPct": 52.85714285714286,
+              "t": 1.6787757566158292,
+              "pUni": 0.021,
+              "pBi": 0.1515,
+              "medianeNulleBps": -27.555190811510794,
+              "q95NulleBps": 71.05148009800078,
+              "L": 19020
+            }
+          },
+          {
+            "h": 24,
+            "achats": {
+              "n": 144,
+              "sommeLog": -0.10101918038611246,
+              "moyenneBps": -7.015220860146699,
+              "medianeBps": 40.42224232956748,
+              "hitsPct": 52.083333333333336,
+              "t": -0.09012901125314259,
+              "pUni": 0.7775,
+              "pBi": 0.9455,
+              "medianeNulleBps": 56.40658845578156,
+              "q95NulleBps": 181.33892139374652,
+              "L": 19020
+            },
+            "ventes": {
+              "n": 140,
+              "sommeLog": 2.191861619984902,
+              "moyenneBps": 156.56154428463586,
+              "medianeBps": 58.75254501932936,
+              "hitsPct": 54.285714285714285,
+              "t": 1.8169663598832957,
+              "pUni": 0.005,
+              "pBi": 0.1305,
+              "medianeNulleBps": -58.9743384203225,
+              "q95NulleBps": 79.08578635252928,
+              "L": 19020
+            }
+          },
+          {
+            "h": 42,
+            "achats": {
+              "n": 144,
+              "sommeLog": 0.2462049729678646,
+              "moyenneBps": 17.097567567212817,
+              "medianeBps": 37.10579396535074,
+              "hitsPct": 52.083333333333336,
+              "t": 0.19014129634464044,
+              "pUni": 0.7705,
+              "pBi": 0.9115,
+              "medianeNulleBps": 97.88153448539751,
+              "q95NulleBps": 268.598227226096,
+              "L": 19020
+            },
+            "ventes": {
+              "n": 140,
+              "sommeLog": 1.1689901249903905,
+              "moyenneBps": 83.49929464217075,
+              "medianeBps": 9.806053243104351,
+              "hitsPct": 50.71428571428571,
+              "t": 0.8972273769624758,
+              "pUni": 0.059,
+              "pBi": 0.615,
+              "medianeNulleBps": -99.9244489271964,
+              "q95NulleBps": 97.96580080079947,
+              "L": 19020
+            }
+          }
+        ],
+        "permutationSens": {
+          "n": 144,
+          "total": 284,
+          "moyenneAchatsBps": -14.378999566599738,
+          "moyenneTousBps": -55.15880971250678,
+          "medianeNulleBps": -54.23137296541038,
+          "pUni": 0.1795
+        },
+        "tendance": {
+          "achatsAuDessus": {
+            "n": 90,
+            "sommeLog": 0.6843395780930968,
+            "moyenneBps": 76.03773089923297,
+            "medianeBps": -58.15770547608068,
+            "hitsPct": 44.44444444444444,
+            "t": 0.8456347685135435,
+            "pUni": 0.247,
+            "pBi": 0.3335,
+            "medianeNulleBps": 27.12338379028149,
+            "q95NulleBps": 155.09033859057703,
+            "L": 19020
+          },
+          "achatsSous": {
+            "n": 54,
+            "sommeLog": -0.891397171852133,
+            "moyenneBps": -165.0735503429876,
+            "medianeBps": -18.63065280392817,
+            "hitsPct": 44.44444444444444,
+            "t": -1.8442623386711163,
+            "pUni": 0.9775,
+            "pBi": 0.0865,
+            "medianeNulleBps": 30.55322831686417,
+            "q95NulleBps": 179.1071064661903,
+            "L": 19020
+          }
+        },
+        "signauxAxis": {
+          "achatsParQualite": [
+            {
+              "qualite": "fort",
+              "trades": 23,
+              "expectancyPct": 0.6436988383368386,
+              "gagnantsPct": 39.130434782608695
+            },
+            {
+              "qualite": "ordinaire",
+              "trades": 118,
+              "expectancyPct": 4.3375395770015945,
+              "gagnantsPct": 41.52542372881356
+            },
+            {
+              "qualite": "contre-sens",
+              "trades": 7,
+              "expectancyPct": 0.5876884408174374,
+              "gagnantsPct": 42.857142857142854
+            },
+            {
+              "qualite": "indisponible",
+              "trades": 0,
+              "expectancyPct": null,
+              "gagnantsPct": null
+            }
+          ],
+          "ventesFortes": 10
+        }
+      }
+    },
+    {
+      "id": "ADAUSDT 4h",
+      "statut": "disponible",
+      "resultat": {
+        "acquisition": {
+          "source": "https://data-api.binance.vision/api/v3/klines",
+          "acquisLeUtc": "2026-10-08T07:14:08.011Z",
+          "modeCalcul": "reseau",
+          "nombre": 18465,
+          "premierOpen": "2018-05-01T00:00:00.000Z",
+          "dernierClose": "2026-10-08T00:00:00.000Z",
+          "manquantes": 27,
+          "plagesManquantes": [
+            {
+              "apres": "2018-06-25T20:00:00.000Z",
+              "reprise": "2018-06-26T12:00:00.000Z",
+              "bougies": 3
+            },
+            {
+              "apres": "2018-07-03T20:00:00.000Z",
+              "reprise": "2018-07-04T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2018-10-19T00:00:00.000Z",
+              "reprise": "2018-10-19T08:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2018-11-13T20:00:00.000Z",
+              "reprise": "2018-11-14T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2019-03-11T20:00:00.000Z",
+              "reprise": "2019-03-12T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2019-05-14T20:00:00.000Z",
+              "reprise": "2019-05-15T12:00:00.000Z",
+              "bougies": 3
+            },
+            {
+              "apres": "2019-08-14T20:00:00.000Z",
+              "reprise": "2019-08-15T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2019-11-12T20:00:00.000Z",
+              "reprise": "2019-11-13T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2019-11-24T20:00:00.000Z",
+              "reprise": "2019-11-25T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-02-19T04:00:00.000Z",
+              "reprise": "2020-02-19T16:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2020-04-24T20:00:00.000Z",
+              "reprise": "2020-04-25T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-06-27T20:00:00.000Z",
+              "reprise": "2020-06-28T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-12-21T08:00:00.000Z",
+              "reprise": "2020-12-21T16:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-02-10T20:00:00.000Z",
+              "reprise": "2021-02-11T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-04-19T20:00:00.000Z",
+              "reprise": "2021-04-20T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-04-25T00:00:00.000Z",
+              "reprise": "2021-04-25T08:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-08-12T20:00:00.000Z",
+              "reprise": "2021-08-13T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-09-29T00:00:00.000Z",
+              "reprise": "2021-09-29T08:00:00.000Z",
+              "bougies": 1
+            }
+          ],
+          "ecartees": [
+            {
+              "temps": "2018-06-26T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-07-04T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-10-19T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2018-11-14T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-03-12T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-05-15T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-08-15T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-11-13T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-11-25T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-02-19T08:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-04-25T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-06-28T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-12-21T12:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-02-11T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-04-20T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-04-25T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-08-13T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-09-29T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            }
+          ],
+          "sha256Ohlcv": "95ffff117d5dafd12367f023e50bdc428061b03608fb13a4515cebc6633d1644"
+        },
+        "evaluation": {
+          "premiereDecisionUtc": "2018-06-19T20:00:00.000Z",
+          "derniereDecisionUtc": "2026-09-30T16:00:00.000Z",
+          "decisions": 18123
+        },
+        "evenements": {
+          "total": 292,
+          "achats": 143,
+          "ventes": 149,
+          "parAn": [
+            {
+              "annee": 2018,
+              "achats": 6,
+              "ventes": 7,
+              "moyenneAchats12Bps": 572.1189936741563
+            },
+            {
+              "annee": 2019,
+              "achats": 23,
+              "ventes": 15,
+              "moyenneAchats12Bps": 214.00148320643532
+            },
+            {
+              "annee": 2020,
+              "achats": 24,
+              "ventes": 11,
+              "moyenneAchats12Bps": 535.9707780547708
+            },
+            {
+              "annee": 2021,
+              "achats": 21,
+              "ventes": 14,
+              "moyenneAchats12Bps": 26.555724420804623
+            },
+            {
+              "annee": 2022,
+              "achats": 10,
+              "ventes": 21,
+              "moyenneAchats12Bps": -341.5527867941965
+            },
+            {
+              "annee": 2023,
+              "achats": 14,
+              "ventes": 20,
+              "moyenneAchats12Bps": -74.64357331531525
+            },
+            {
+              "annee": 2024,
+              "achats": 15,
+              "ventes": 23,
+              "moyenneAchats12Bps": 493.5051911163558
+            },
+            {
+              "annee": 2025,
+              "achats": 13,
+              "ventes": 25,
+              "moyenneAchats12Bps": -137.51424339343436
+            },
+            {
+              "annee": 2026,
+              "achats": 17,
+              "ventes": 13,
+              "moyenneAchats12Bps": 289.38707575826476
+            }
+          ]
+        },
+        "horizons": [
+          {
+            "h": 1,
+            "achats": {
+              "n": 143,
+              "sommeLog": 0.7951984698443726,
+              "moyenneBps": 55.608284604501584,
+              "medianeBps": 30.63933944221997,
+              "hitsPct": 56.64335664335665,
+              "t": 2.4393788133306256,
+              "pUni": 0.001,
+              "pBi": 0.002,
+              "medianeNulleBps": 0.39697888711444673,
+              "q95NulleBps": 28.441266175786378,
+              "L": 18123
+            },
+            "ventes": {
+              "n": 149,
+              "sommeLog": 0.1169841893619176,
+              "moyenneBps": 7.851287876638764,
+              "medianeBps": -24.81627693362909,
+              "hitsPct": 42.281879194630875,
+              "t": 0.27826787477484577,
+              "pUni": 0.3255,
+              "pBi": 0.6645,
+              "medianeNulleBps": -0.08660049609185148,
+              "q95NulleBps": 27.852426780033873,
+              "L": 18123
+            }
+          },
+          {
+            "h": 2,
+            "achats": {
+              "n": 143,
+              "sommeLog": 0.994373543043527,
+              "moyenneBps": 69.53661140164525,
+              "medianeBps": 15.149222712453891,
+              "hitsPct": 52.44755244755245,
+              "t": 2.1252061691365074,
+              "pUni": 0.0025,
+              "pBi": 0.006,
+              "medianeNulleBps": -0.22436270666944372,
+              "q95NulleBps": 42.33269389737146,
+              "L": 18123
+            },
+            "ventes": {
+              "n": 149,
+              "sommeLog": 0.059156234788482254,
+              "moyenneBps": 3.970217099898138,
+              "medianeBps": -42.01686853700038,
+              "hitsPct": 44.966442953020135,
+              "t": 0.11257576209189453,
+              "pUni": 0.432,
+              "pBi": 0.8695,
+              "medianeNulleBps": 0.07268894506305587,
+              "q95NulleBps": 39.529360606467485,
+              "L": 18123
+            }
+          },
+          {
+            "h": 3,
+            "achats": {
+              "n": 143,
+              "sommeLog": 1.6362770529518786,
+              "moyenneBps": 114.42496873789362,
+              "medianeBps": 57.19748672787017,
+              "hitsPct": 53.84615384615385,
+              "t": 3.1709360259570376,
+              "pUni": 0.0005,
+              "pBi": 0.001,
+              "medianeNulleBps": -0.40193922479659816,
+              "q95NulleBps": 51.047365573251675,
+              "L": 18123
+            },
+            "ventes": {
+              "n": 149,
+              "sommeLog": 0.2178338742998147,
+              "moyenneBps": 14.619723107370113,
+              "medianeBps": -16.51528038472988,
+              "hitsPct": 48.322147651006716,
+              "t": 0.32208610796787596,
+              "pUni": 0.318,
+              "pBi": 0.6435,
+              "medianeNulleBps": -0.10439220838056826,
+              "q95NulleBps": 48.624237242284615,
+              "L": 18123
+            }
+          },
+          {
+            "h": 6,
+            "achats": {
+              "n": 143,
+              "sommeLog": 1.848920111973683,
+              "moyenneBps": 129.29511272543238,
+              "medianeBps": 89.10950053162559,
+              "hitsPct": 55.94405594405595,
+              "t": 2.6515593914071083,
+              "pUni": 0.005,
+              "pBi": 0.0055,
+              "medianeNulleBps": 0.3696228149982863,
+              "q95NulleBps": 77.17501329184134,
+              "L": 18123
+            },
+            "ventes": {
+              "n": 149,
+              "sommeLog": -0.16109265809423678,
+              "moyenneBps": -10.811587791559516,
+              "medianeBps": 2.855103516896662,
+              "hitsPct": 50.33557046979866,
+              "t": -0.21727974092960556,
+              "pUni": 0.586,
+              "pBi": 0.8065,
+              "medianeNulleBps": -1.6956197654218084,
+              "q95NulleBps": 72.70031181331586,
+              "L": 18123
+            }
+          },
+          {
+            "h": 12,
+            "achats": {
+              "n": 143,
+              "sommeLog": 2.7849652058109147,
+              "moyenneBps": 194.75281159516885,
+              "medianeBps": 123.91422086779319,
+              "hitsPct": 58.04195804195804,
+              "t": 2.7092880549456115,
+              "pUni": 0.0015,
+              "pBi": 0.0025,
+              "medianeNulleBps": -2.481135540134702,
+              "q95NulleBps": 107.92085379989601,
+              "L": 18123
+            },
+            "ventes": {
+              "n": 149,
+              "sommeLog": -0.6313862535180177,
+              "moyenneBps": -42.374916343491115,
+              "medianeBps": 25.736885338287774,
+              "hitsPct": 50.33557046979866,
+              "t": -0.7498073309188599,
+              "pUni": 0.7245,
+              "pBi": 0.5085,
+              "medianeNulleBps": -4.46163797397518,
+              "q95NulleBps": 102.60537712965196,
+              "L": 18123
+            }
+          },
+          {
+            "h": 24,
+            "achats": {
+              "n": 143,
+              "sommeLog": 4.729214531092214,
+              "moyenneBps": 330.71430287358135,
+              "medianeBps": 94.12402058125213,
+              "hitsPct": 55.24475524475524,
+              "t": 3.0706439236432512,
+              "pUni": 0.0005,
+              "pBi": 0.0005,
+              "medianeNulleBps": -2.023956227011165,
+              "q95NulleBps": 154.41419641313178,
+              "L": 18123
+            },
+            "ventes": {
+              "n": 149,
+              "sommeLog": -0.6894613714381497,
+              "moyenneBps": -46.272575264305345,
+              "medianeBps": -31.13774970912392,
+              "hitsPct": 48.99328859060403,
+              "t": -0.562731180794002,
+              "pUni": 0.6625,
+              "pBi": 0.637,
+              "medianeNulleBps": -5.631306502191723,
+              "q95NulleBps": 149.4226401748294,
+              "L": 18123
+            }
+          },
+          {
+            "h": 42,
+            "achats": {
+              "n": 143,
+              "sommeLog": 5.319811487047283,
+              "moyenneBps": 372.0147893040058,
+              "medianeBps": 319.28715464068614,
+              "hitsPct": 59.44055944055944,
+              "t": 2.771501425856008,
+              "pUni": 0.002,
+              "pBi": 0.002,
+              "medianeNulleBps": 7.874091264996779,
+              "q95NulleBps": 194.28425185124786,
+              "L": 18123
+            },
+            "ventes": {
+              "n": 149,
+              "sommeLog": -0.08970921099721851,
+              "moyenneBps": -6.020752415920706,
+              "medianeBps": 48.5988320851094,
+              "hitsPct": 52.348993288590606,
+              "t": -0.0495346036941711,
+              "pUni": 0.475,
+              "pBi": 0.97,
+              "medianeNulleBps": -14.518999965121829,
+              "q95NulleBps": 186.4873042965116,
+              "L": 18123
+            }
+          }
+        ],
+        "permutationSens": {
+          "n": 143,
+          "total": 292,
+          "moyenneAchatsBps": 194.75281159516885,
+          "moyenneTousBps": 116.9983376482511,
+          "medianeNulleBps": 114.00960628171983,
+          "pUni": 0.0505
+        },
+        "tendance": {
+          "achatsAuDessus": {
+            "n": 93,
+            "sommeLog": 2.82958257889499,
+            "moyenneBps": 304.2561912790312,
+            "medianeBps": 123.91422086779319,
+            "hitsPct": 61.29032258064516,
+            "t": 3.4190536396246225,
+            "pUni": 0.0005,
+            "pBi": 0.0005,
+            "medianeNulleBps": -3.409243452743645,
+            "q95NulleBps": 134.07310929102283,
+            "L": 18123
+          },
+          "achatsSous": {
+            "n": 50,
+            "sommeLog": -0.04461737308407415,
+            "moyenneBps": -8.923474616814831,
+            "medianeBps": 139.1057979552479,
+            "hitsPct": 52,
+            "t": -0.0757694020413313,
+            "pUni": 0.549,
+            "pBi": 0.931,
+            "medianeNulleBps": 3.612589661458132,
+            "q95NulleBps": 171.14639228119384,
+            "L": 18123
+          }
+        },
+        "signauxAxis": {
+          "achatsParQualite": [
+            {
+              "qualite": "fort",
+              "trades": 14,
+              "expectancyPct": -2.688765489207419,
+              "gagnantsPct": 21.428571428571427
+            },
+            {
+              "qualite": "ordinaire",
+              "trades": 103,
+              "expectancyPct": 5.357361746319693,
+              "gagnantsPct": 38.83495145631068
+            },
+            {
+              "qualite": "contre-sens",
+              "trades": 4,
+              "expectancyPct": 10.674509764509935,
+              "gagnantsPct": 75
+            },
+            {
+              "qualite": "indisponible",
+              "trades": 0,
+              "expectancyPct": null,
+              "gagnantsPct": null
+            }
+          ],
+          "ventesFortes": 13
+        }
+      }
+    },
+    {
+      "id": "LINKUSDT 4h",
+      "statut": "disponible",
+      "resultat": {
+        "acquisition": {
+          "source": "https://data-api.binance.vision/api/v3/klines",
+          "acquisLeUtc": "2026-10-08T07:14:09.981Z",
+          "modeCalcul": "reseau",
+          "nombre": 16817,
+          "premierOpen": "2019-02-01T00:00:00.000Z",
+          "dernierClose": "2026-10-08T00:00:00.000Z",
+          "manquantes": 19,
+          "plagesManquantes": [
+            {
+              "apres": "2019-03-11T20:00:00.000Z",
+              "reprise": "2019-03-12T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2019-05-14T20:00:00.000Z",
+              "reprise": "2019-05-15T12:00:00.000Z",
+              "bougies": 3
+            },
+            {
+              "apres": "2019-08-14T20:00:00.000Z",
+              "reprise": "2019-08-15T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2019-11-12T20:00:00.000Z",
+              "reprise": "2019-11-13T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2019-11-24T20:00:00.000Z",
+              "reprise": "2019-11-25T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-02-19T04:00:00.000Z",
+              "reprise": "2020-02-19T16:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2020-04-24T20:00:00.000Z",
+              "reprise": "2020-04-25T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-06-27T20:00:00.000Z",
+              "reprise": "2020-06-28T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-12-21T08:00:00.000Z",
+              "reprise": "2020-12-21T16:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-02-10T20:00:00.000Z",
+              "reprise": "2021-02-11T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-04-19T20:00:00.000Z",
+              "reprise": "2021-04-20T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-04-25T00:00:00.000Z",
+              "reprise": "2021-04-25T08:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-08-12T20:00:00.000Z",
+              "reprise": "2021-08-13T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-09-29T00:00:00.000Z",
+              "reprise": "2021-09-29T08:00:00.000Z",
+              "bougies": 1
+            }
+          ],
+          "ecartees": [
+            {
+              "temps": "2019-03-12T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-05-15T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-08-15T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-11-13T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-11-25T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-02-19T08:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-04-25T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-06-28T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-12-21T12:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-02-11T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-04-20T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-04-25T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-08-13T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-09-29T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            }
+          ],
+          "sha256Ohlcv": "80e52e7a406d3e6dbfcbf7abc6ae0cfe7957233de98ef832b23f3cd9234dfc15"
+        },
+        "evaluation": {
+          "premiereDecisionUtc": "2019-03-23T04:00:00.000Z",
+          "derniereDecisionUtc": "2026-09-30T16:00:00.000Z",
+          "decisions": 16475
+        },
+        "evenements": {
+          "total": 298,
+          "achats": 154,
+          "ventes": 144,
+          "parAn": [
+            {
+              "annee": 2019,
+              "achats": 31,
+              "ventes": 15,
+              "moyenneAchats12Bps": 182.04624066233313
+            },
+            {
+              "annee": 2020,
+              "achats": 26,
+              "ventes": 14,
+              "moyenneAchats12Bps": 286.576361078791
+            },
+            {
+              "annee": 2021,
+              "achats": 10,
+              "ventes": 15,
+              "moyenneAchats12Bps": -48.64408064583215
+            },
+            {
+              "annee": 2022,
+              "achats": 9,
+              "ventes": 15,
+              "moyenneAchats12Bps": -593.5699949895255
+            },
+            {
+              "annee": 2023,
+              "achats": 20,
+              "ventes": 28,
+              "moyenneAchats12Bps": 65.8090818035516
+            },
+            {
+              "annee": 2024,
+              "achats": 15,
+              "ventes": 21,
+              "moyenneAchats12Bps": 133.13882432731992
+            },
+            {
+              "annee": 2025,
+              "achats": 21,
+              "ventes": 25,
+              "moyenneAchats12Bps": -45.18514689016888
+            },
+            {
+              "annee": 2026,
+              "achats": 22,
+              "ventes": 11,
+              "moyenneAchats12Bps": 201.82432858220847
+            }
+          ]
+        },
+        "horizons": [
+          {
+            "h": 1,
+            "achats": {
+              "n": 154,
+              "sommeLog": -0.1490168619746826,
+              "moyenneBps": -9.676419608745624,
+              "medianeBps": -8.437293334857543,
+              "hitsPct": 47.4025974025974,
+              "t": -0.3553912276217071,
+              "pUni": 0.7515,
+              "pBi": 0.58,
+              "medianeNulleBps": 1.8813971014445248,
+              "q95NulleBps": 30.59018254363388,
+              "L": 16475
+            },
+            "ventes": {
+              "n": 144,
+              "sommeLog": -0.22786488247507736,
+              "moyenneBps": -15.823950171880371,
+              "medianeBps": -11.037528714377132,
+              "hitsPct": 47.22222222222222,
+              "t": -0.6410362036259882,
+              "pUni": 0.7525,
+              "pBi": 0.423,
+              "medianeNulleBps": -2.9587256215869484,
+              "q95NulleBps": 29.9140114073937,
+              "L": 16475
+            }
+          },
+          {
+            "h": 2,
+            "achats": {
+              "n": 154,
+              "sommeLog": -0.3592933549317805,
+              "moyenneBps": -23.3307373332325,
+              "medianeBps": -16.658958040548512,
+              "hitsPct": 46.103896103896105,
+              "t": -0.6223004480365006,
+              "pUni": 0.835,
+              "pBi": 0.3775,
+              "medianeNulleBps": 3.0141423794019664,
+              "q95NulleBps": 45.42579373015422,
+              "L": 16475
+            },
+            "ventes": {
+              "n": 144,
+              "sommeLog": -0.5266173096112967,
+              "moyenneBps": -36.57064650078449,
+              "medianeBps": -54.58103218721977,
+              "hitsPct": 40.97222222222222,
+              "t": -1.0113519764064631,
+              "pUni": 0.8745,
+              "pBi": 0.1885,
+              "medianeNulleBps": -7.183109319036012,
+              "q95NulleBps": 39.61832067225475,
+              "L": 16475
+            }
+          },
+          {
+            "h": 3,
+            "achats": {
+              "n": 154,
+              "sommeLog": 0.43315927936728216,
+              "moyenneBps": 28.127225932940398,
+              "medianeBps": 24.067400305649578,
+              "hitsPct": 51.94805194805194,
+              "t": 0.6476743309248983,
+              "pUni": 0.23,
+              "pBi": 0.3905,
+              "medianeNulleBps": 3.4777913217372265,
+              "q95NulleBps": 57.10999368135775,
+              "L": 16475
+            },
+            "ventes": {
+              "n": 144,
+              "sommeLog": -0.9163024543250842,
+              "moyenneBps": -63.632114883686405,
+              "medianeBps": -90.51022633327133,
+              "hitsPct": 40.97222222222222,
+              "t": -1.5275784007257287,
+              "pUni": 0.949,
+              "pBi": 0.074,
+              "medianeNulleBps": -8.401376637789244,
+              "q95NulleBps": 47.92512890397744,
+              "L": 16475
+            }
+          },
+          {
+            "h": 6,
+            "achats": {
+              "n": 154,
+              "sommeLog": 0.27952329113886265,
+              "moyenneBps": 18.150863060965108,
+              "medianeBps": 24.0894168848671,
+              "hitsPct": 52.5974025974026,
+              "t": 0.33620107645729524,
+              "pUni": 0.425,
+              "pBi": 0.7055,
+              "medianeNulleBps": 10.230478255852725,
+              "q95NulleBps": 86.93135177814828,
+              "L": 16475
+            },
+            "ventes": {
+              "n": 144,
+              "sommeLog": -2.000876960729815,
+              "moyenneBps": -138.94978893957048,
+              "medianeBps": -136.4515292282764,
+              "hitsPct": 38.88888888888889,
+              "t": -2.9047974569614787,
+              "pUni": 0.9935,
+              "pBi": 0.0085,
+              "medianeNulleBps": -15.861643368262,
+              "q95NulleBps": 65.36341719096073,
+              "L": 16475
+            }
+          },
+          {
+            "h": 12,
+            "achats": {
+              "n": 154,
+              "sommeLog": 1.4070359232312715,
+              "moyenneBps": 91.36596904099166,
+              "medianeBps": -14.033120461787174,
+              "hitsPct": 49.35064935064935,
+              "t": 1.2677395953786568,
+              "pUni": 0.146,
+              "pBi": 0.1895,
+              "medianeNulleBps": 17.09949094351321,
+              "q95NulleBps": 134.67587676374305,
+              "L": 16475
+            },
+            "ventes": {
+              "n": 144,
+              "sommeLog": -2.1014654103912136,
+              "moyenneBps": -145.93509794383428,
+              "medianeBps": -107.09974676877509,
+              "hitsPct": 43.05555555555556,
+              "t": -2.2699968021017423,
+              "pUni": 0.9595,
+              "pBi": 0.0525,
+              "medianeNulleBps": -27.6833318905757,
+              "q95NulleBps": 87.7480250795106,
+              "L": 16475
+            }
+          },
+          {
+            "h": 24,
+            "achats": {
+              "n": 154,
+              "sommeLog": 3.0843282065762896,
+              "moyenneBps": 200.28105237508376,
+              "medianeBps": 111.12894062119682,
+              "hitsPct": 53.246753246753244,
+              "t": 1.8135900668202896,
+              "pUni": 0.0525,
+              "pBi": 0.0625,
+              "medianeNulleBps": 40.49537761701923,
+              "q95NulleBps": 202.06553534240126,
+              "L": 16475
+            },
+            "ventes": {
+              "n": 144,
+              "sommeLog": -1.5045302744591553,
+              "moyenneBps": -104.48126905966356,
+              "medianeBps": -181.56923386489777,
+              "hitsPct": 43.05555555555556,
+              "t": -0.9890309048272897,
+              "pUni": 0.6805,
+              "pBi": 0.38,
+              "medianeNulleBps": -59.35579314512534,
+              "q95NulleBps": 114.81939485038565,
+              "L": 16475
+            }
+          },
+          {
+            "h": 42,
+            "achats": {
+              "n": 154,
+              "sommeLog": 4.7747989750971325,
+              "moyenneBps": 310.0518814998138,
+              "medianeBps": 304.8979928304985,
+              "hitsPct": 59.74025974025974,
+              "t": 2.4069944927565023,
+              "pUni": 0.0345,
+              "pBi": 0.0375,
+              "medianeNulleBps": 73.30957022808015,
+              "q95NulleBps": 277.32894957799965,
+              "L": 16475
+            },
+            "ventes": {
+              "n": 144,
+              "sommeLog": -3.8103240065163146,
+              "moyenneBps": -264.6058337858552,
+              "medianeBps": -216.3964291796172,
+              "hitsPct": 43.75,
+              "t": -2.0385889354051607,
+              "pUni": 0.899,
+              "pBi": 0.1055,
+              "medianeNulleBps": -98.7587827489018,
+              "q95NulleBps": 140.0480815526219,
+              "L": 16475
+            }
+          }
+        ],
+        "permutationSens": {
+          "n": 154,
+          "total": 298,
+          "moyenneAchatsBps": 91.36596904099166,
+          "moyenneTousBps": 117.7349440812914,
+          "medianeNulleBps": 117.00606453347575,
+          "pUni": 0.7105
+        },
+        "tendance": {
+          "achatsAuDessus": {
+            "n": 109,
+            "sommeLog": 1.762315708738204,
+            "moyenneBps": 161.6803402512114,
+            "medianeBps": 29.93694099412636,
+            "hitsPct": 51.37614678899083,
+            "t": 1.8531668425955439,
+            "pUni": 0.045,
+            "pBi": 0.0595,
+            "medianeNulleBps": 16.9363114234579,
+            "q95NulleBps": 157.74410396677877,
+            "L": 16475
+          },
+          "achatsSous": {
+            "n": 45,
+            "sommeLog": -0.35527978550693295,
+            "moyenneBps": -78.9510634459851,
+            "medianeBps": -219.946974358991,
+            "hitsPct": 44.44444444444444,
+            "t": -0.6316544343244661,
+            "pUni": 0.8235,
+            "pBi": 0.4935,
+            "medianeNulleBps": 24.6248762783244,
+            "q95NulleBps": 212.65413746130648,
+            "L": 16475
+          }
+        },
+        "signauxAxis": {
+          "achatsParQualite": [
+            {
+              "qualite": "fort",
+              "trades": 9,
+              "expectancyPct": 11.445622796763203,
+              "gagnantsPct": 44.44444444444444
+            },
+            {
+              "qualite": "ordinaire",
+              "trades": 108,
+              "expectancyPct": 5.13726635216435,
+              "gagnantsPct": 41.66666666666667
+            },
+            {
+              "qualite": "contre-sens",
+              "trades": 6,
+              "expectancyPct": -5.971319715954951,
+              "gagnantsPct": 16.666666666666664
+            },
+            {
+              "qualite": "indisponible",
+              "trades": 0,
+              "expectancyPct": null,
+              "gagnantsPct": null
+            }
+          ],
+          "ventesFortes": 17
+        }
+      }
+    },
+    {
+      "id": "DOGEUSDT 4h",
+      "statut": "disponible",
+      "resultat": {
+        "acquisition": {
+          "source": "https://data-api.binance.vision/api/v3/klines",
+          "acquisLeUtc": "2026-10-08T07:14:11.831Z",
+          "modeCalcul": "reseau",
+          "nombre": 15736,
+          "premierOpen": "2019-08-01T00:00:00.000Z",
+          "dernierClose": "2026-10-08T00:00:00.000Z",
+          "manquantes": 14,
+          "plagesManquantes": [
+            {
+              "apres": "2019-08-14T20:00:00.000Z",
+              "reprise": "2019-08-15T08:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2019-11-12T20:00:00.000Z",
+              "reprise": "2019-11-13T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2019-11-24T20:00:00.000Z",
+              "reprise": "2019-11-25T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-02-19T04:00:00.000Z",
+              "reprise": "2020-02-19T16:00:00.000Z",
+              "bougies": 2
+            },
+            {
+              "apres": "2020-04-24T20:00:00.000Z",
+              "reprise": "2020-04-25T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-06-27T20:00:00.000Z",
+              "reprise": "2020-06-28T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2020-12-21T08:00:00.000Z",
+              "reprise": "2020-12-21T16:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-02-10T20:00:00.000Z",
+              "reprise": "2021-02-11T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-04-19T20:00:00.000Z",
+              "reprise": "2021-04-20T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-04-25T00:00:00.000Z",
+              "reprise": "2021-04-25T08:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-08-12T20:00:00.000Z",
+              "reprise": "2021-08-13T04:00:00.000Z",
+              "bougies": 1
+            },
+            {
+              "apres": "2021-09-29T00:00:00.000Z",
+              "reprise": "2021-09-29T08:00:00.000Z",
+              "bougies": 1
+            }
+          ],
+          "ecartees": [
+            {
+              "temps": "2019-08-15T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-11-13T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2019-11-25T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-02-19T08:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-04-25T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-06-28T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2020-12-21T12:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-02-11T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-04-20T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-04-25T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-08-13T00:00:00.000Z",
+              "raison": "closeTime incohérent"
+            },
+            {
+              "temps": "2021-09-29T04:00:00.000Z",
+              "raison": "closeTime incohérent"
+            }
+          ],
+          "sha256Ohlcv": "8745f5a46cfcb9e9d01c74cdcae15c92ba141fbe842f54431199abb2068f1e24"
+        },
+        "evaluation": {
+          "premiereDecisionUtc": "2019-09-20T04:00:00.000Z",
+          "derniereDecisionUtc": "2026-09-30T16:00:00.000Z",
+          "decisions": 15394
+        },
+        "evenements": {
+          "total": 425,
+          "achats": 249,
+          "ventes": 176,
+          "parAn": [
+            {
+              "annee": 2019,
+              "achats": 11,
+              "ventes": 12,
+              "moyenneAchats12Bps": 27.603685232506173
+            },
+            {
+              "annee": 2020,
+              "achats": 53,
+              "ventes": 23,
+              "moyenneAchats12Bps": 303.54170934543913
+            },
+            {
+              "annee": 2021,
+              "achats": 50,
+              "ventes": 20,
+              "moyenneAchats12Bps": 582.8007023270756
+            },
+            {
+              "annee": 2022,
+              "achats": 35,
+              "ventes": 27,
+              "moyenneAchats12Bps": 127.56842190502488
+            },
+            {
+              "annee": 2023,
+              "achats": 31,
+              "ventes": 25,
+              "moyenneAchats12Bps": 1.350390980205951
+            },
+            {
+              "annee": 2024,
+              "achats": 30,
+              "ventes": 20,
+              "moyenneAchats12Bps": 486.732104044522
+            },
+            {
+              "annee": 2025,
+              "achats": 18,
+              "ventes": 32,
+              "moyenneAchats12Bps": 262.2220799687116
+            },
+            {
+              "annee": 2026,
+              "achats": 21,
+              "ventes": 17,
+              "moyenneAchats12Bps": 103.09370996037728
+            }
+          ]
+        },
+        "horizons": [
+          {
+            "h": 1,
+            "achats": {
+              "n": 249,
+              "sommeLog": 1.8455514422386066,
+              "moyenneBps": 74.11853181681151,
+              "medianeBps": -4.002031854168919,
+              "hitsPct": 48.59437751004016,
+              "t": 1.4055125550533325,
+              "pUni": 0.0005,
+              "pBi": 0.0005,
+              "medianeNulleBps": 1.790297945154413,
+              "q95NulleBps": 28.856680395248315,
+              "L": 15394
+            },
+            "ventes": {
+              "n": 176,
+              "sommeLog": -0.13640823663343427,
+              "moyenneBps": -7.7504679905360385,
+              "medianeBps": -10.351967798165607,
+              "hitsPct": 45.45454545454545,
+              "t": -0.261496856853922,
+              "pUni": 0.6525,
+              "pBi": 0.665,
+              "medianeNulleBps": -0.9596976473275569,
+              "q95NulleBps": 27.65421390968885,
+              "L": 15394
+            }
+          },
+          {
+            "h": 2,
+            "achats": {
+              "n": 249,
+              "sommeLog": 3.9674034224814583,
+              "moyenneBps": 159.33347078238788,
+              "medianeBps": -11.465699708219645,
+              "hitsPct": 46.58634538152611,
+              "t": 2.0697025828880706,
+              "pUni": 0.0005,
+              "pBi": 0.0005,
+              "medianeNulleBps": 3.5189613850079957,
+              "q95NulleBps": 43.13918833806747,
+              "L": 15394
+            },
+            "ventes": {
+              "n": 176,
+              "sommeLog": -1.2221838001944938,
+              "moyenneBps": -69.44226137468715,
+              "medianeBps": -54.93800606462429,
+              "hitsPct": 38.63636363636363,
+              "t": -1.941393582512466,
+              "pUni": 0.976,
+              "pBi": 0.03,
+              "medianeNulleBps": -3.1332338695246547,
+              "q95NulleBps": 38.907139631486324,
+              "L": 15394
+            }
+          },
+          {
+            "h": 3,
+            "achats": {
+              "n": 249,
+              "sommeLog": 6.713389157292676,
+              "moyenneBps": 269.61402238123196,
+              "medianeBps": 7.323325116750379,
+              "hitsPct": 51.00401606425703,
+              "t": 2.9692985006711132,
+              "pUni": 0.0005,
+              "pBi": 0.0005,
+              "medianeNulleBps": 5.2745118480706115,
+              "q95NulleBps": 58.70124179845808,
+              "L": 15394
+            },
+            "ventes": {
+              "n": 176,
+              "sommeLog": -1.529536787212616,
+              "moyenneBps": -86.90549927344408,
+              "medianeBps": -98.43100260430671,
+              "hitsPct": 36.36363636363637,
+              "t": -2.2617255450462506,
+              "pUni": 0.9735,
+              "pBi": 0.03,
+              "medianeNulleBps": -3.2765576022182863,
+              "q95NulleBps": 49.31930263992654,
+              "L": 15394
+            }
+          },
+          {
+            "h": 6,
+            "achats": {
+              "n": 249,
+              "sommeLog": 6.959837069846175,
+              "moyenneBps": 279.511528909485,
+              "medianeBps": -30.595803326249893,
+              "hitsPct": 47.791164658634536,
+              "t": 2.4761605898499934,
+              "pUni": 0.0005,
+              "pBi": 0.0005,
+              "medianeNulleBps": 10.36651084037101,
+              "q95NulleBps": 97.60826643062347,
+              "L": 15394
+            },
+            "ventes": {
+              "n": 176,
+              "sommeLog": -1.0892701060818073,
+              "moyenneBps": -61.89034693646633,
+              "medianeBps": -62.34434158429059,
+              "hitsPct": 42.04545454545455,
+              "t": -1.2197643477824243,
+              "pUni": 0.818,
+              "pBi": 0.249,
+              "medianeNulleBps": -10.210310579243748,
+              "q95NulleBps": 69.83809987486028,
+              "L": 15394
+            }
+          },
+          {
+            "h": 12,
+            "achats": {
+              "n": 249,
+              "sommeLog": 7.152507160622232,
+              "moyenneBps": 287.2492835591258,
+              "medianeBps": 14.368097534243063,
+              "hitsPct": 52.208835341365464,
+              "t": 2.5745211005622886,
+              "pUni": 0.0045,
+              "pBi": 0.0045,
+              "medianeNulleBps": 21.534166426312016,
+              "q95NulleBps": 148.01729902151445,
+              "L": 15394
+            },
+            "ventes": {
+              "n": 176,
+              "sommeLog": -2.027369032826846,
+              "moyenneBps": -115.19142231970714,
+              "medianeBps": -99.63794836095552,
+              "hitsPct": 36.93181818181818,
+              "t": -1.8481496020796393,
+              "pUni": 0.8605,
+              "pBi": 0.1575,
+              "medianeNulleBps": -25.63740514730692,
+              "q95NulleBps": 85.85662936851514,
+              "L": 15394
+            }
+          },
+          {
+            "h": 24,
+            "achats": {
+              "n": 249,
+              "sommeLog": 14.094969166832788,
+              "moyenneBps": 566.0630187483048,
+              "medianeBps": 42.631185283574794,
+              "hitsPct": 52.208835341365464,
+              "t": 4.037479872397826,
+              "pUni": 0.0005,
+              "pBi": 0.0005,
+              "medianeNulleBps": 42.644062877103636,
+              "q95NulleBps": 224.67287368895546,
+              "L": 15394
+            },
+            "ventes": {
+              "n": 176,
+              "sommeLog": -3.7166961556463196,
+              "moyenneBps": -211.17591793444998,
+              "medianeBps": -80.02980990961639,
+              "hitsPct": 43.18181818181818,
+              "t": -2.7329910039059087,
+              "pUni": 0.8875,
+              "pBi": 0.1175,
+              "medianeNulleBps": -56.08855915929117,
+              "q95NulleBps": 109.2449883019459,
+              "L": 15394
+            }
+          },
+          {
+            "h": 42,
+            "achats": {
+              "n": 249,
+              "sommeLog": 15.798830059182981,
+              "moyenneBps": 634.4911670354611,
+              "medianeBps": 55.33491658477718,
+              "hitsPct": 53.01204819277109,
+              "t": 3.685968969009722,
+              "pUni": 0.003,
+              "pBi": 0.003,
+              "medianeNulleBps": 82.43387491389036,
+              "q95NulleBps": 324.6124115704446,
+              "L": 15394
+            },
+            "ventes": {
+              "n": 176,
+              "sommeLog": -3.845422076786896,
+              "moyenneBps": -218.48989072652816,
+              "medianeBps": -115.42700295978925,
+              "hitsPct": 41.47727272727273,
+              "t": -1.7823693364372184,
+              "pUni": 0.7565,
+              "pBi": 0.2505,
+              "medianeNulleBps": -108.15948613346706,
+              "q95NulleBps": 113.9699249202395,
+              "L": 15394
+            }
+          }
+        ],
+        "permutationSens": {
+          "n": 249,
+          "total": 425,
+          "moyenneAchatsBps": 287.2492835591258,
+          "moyenneTousBps": 215.99708690468412,
+          "medianeNulleBps": 215.79672081040587,
+          "pUni": 0.11
+        },
+        "tendance": {
+          "achatsAuDessus": {
+            "n": 167,
+            "sommeLog": 7.621682291718967,
+            "moyenneBps": 456.3881611807764,
+            "medianeBps": 33.13156248984317,
+            "hitsPct": 53.293413173652695,
+            "t": 2.8594073898447174,
+            "pUni": 0.0015,
+            "pBi": 0.0015,
+            "medianeNulleBps": 14.367383111763464,
+            "q95NulleBps": 181.40661438860647,
+            "L": 15394
+          },
+          "achatsSous": {
+            "n": 82,
+            "sommeLog": -0.46917513109673703,
+            "moyenneBps": -57.216479402041095,
+            "medianeBps": 9.285051734850835,
+            "hitsPct": 50,
+            "t": -0.6730222916784736,
+            "pUni": 0.7785,
+            "pBi": 0.608,
+            "medianeNulleBps": 24.612904109462278,
+            "q95NulleBps": 244.7977559444326,
+            "L": 15394
+          }
+        },
+        "signauxAxis": {
+          "achatsParQualite": [
+            {
+              "qualite": "fort",
+              "trades": 9,
+              "expectancyPct": 6.442156865598996,
+              "gagnantsPct": 33.33333333333333
+            },
+            {
+              "qualite": "ordinaire",
+              "trades": 74,
+              "expectancyPct": 11.3936032894035,
+              "gagnantsPct": 44.5945945945946
+            },
+            {
+              "qualite": "contre-sens",
+              "trades": 7,
+              "expectancyPct": 0.4998779194352218,
+              "gagnantsPct": 28.57142857142857
+            },
+            {
+              "qualite": "indisponible",
+              "trades": 0,
+              "expectancyPct": null,
+              "gagnantsPct": null
+            }
+          ],
+          "ventesFortes": 6
+        }
+      }
+    }
+  ],
+  "strategieValideeAutomatiquement": false
+}

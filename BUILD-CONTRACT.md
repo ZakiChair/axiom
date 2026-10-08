@@ -1476,13 +1476,41 @@ même jour : `IndicatorDef.auxFacultatives` (voir la couche flux).
   défaut, elle ne déplace aucun ▲/▼ (cœur testé intact) : elle **qualifie** les
   signaux (« fort » : deux confirmations sur trois lectures, toutes sinon,
   jamais avec un delta à contre-sens ; étiquettes « Achat fort » / « Vente
-  forte »), pose des marqueurs **gros mouvement** (couleur `--accent`, volume
-  ≥ 3 × la moyenne, sens du delta sinon du corps, hors bougies de signal et
-  dernière bougie, 60 au plus) et offre un filtre optionnel « N'acheter que sur
+  forte »), pose des marqueurs **fort achat / forte vente** (couleur `--accent`,
+  volume ≥ 3 × la moyenne, sens du delta taker à 10 % du volume sinon du corps,
+  hors bougies de signal et dernière bougie, 60 au plus, étiquette « Fort achat
+  ×n » sur les trois derniers ; `grosMouvementsAxis`, fonction pure exportée
+  que la campagne rejoue) et offre un filtre optionnel « N'acheter que sur
   flux fort » (désactivé par défaut ; activé, l'infobulle remplace la réserve
   du test par « filtre flux actif : signaux hors du test…, non mesurés »).
-  Six réglages de plus (14 inputs). **Non mesurée** : chaque infobulle porte
-  « couche flux non mesurée ». Pure comme le reste du moteur : aucun fetch.
+  Six réglages de plus (14 inputs). Pure comme le reste du moteur : aucun fetch.
+- **Test de la couche flux** (demande du propriétaire du 2026-10-08 : repérer
+  les forts achats et fortes ventes et le backtester). Exploration sur les
+  seules données déjà vues (`scripts/explorer-axis-flux.ts`, 36 définitions ×
+  7 horizons) : la définition livrée a priori tient ; de l'exploration viennent
+  seulement le sens testé (forts achats → continuation) et l'horizon (12
+  bougies). Protocole figé avant téléchargement
+  (`scripts/axis/manifeste-flux-2026-10-08.json`, hash épinglé dans
+  `scripts/valider-axis-flux.ts`, 14 fichiers de code vérifiés), revue
+  indépendante (`scripts/axis/journal-revue-flux-2026-10-08.md`, aucun
+  bloquant, 4 mineurs corrigés avant figeage), répétition `--essai` sur les
+  séries vues, exécution unique sur quatre actifs jamais lus par le dépôt
+  (BNB/ADA/LINK/DOGE, Binance Spot 4h avec volume taker, 2017-2019 → 2026-10-08).
+  Contrôles bloquants : événements = marqueurs `--accent` du chart et signaux
+  exclus = ▲/▼ du chart, causalité sur préfixes réels, statistique par deux
+  méthodes. Verdict **FAVORABLE** (`scripts/axis/rapport-flux-2026-10-08.md`) :
+  690 forts achats, +1,61 % en moyenne à 12 bougies, p ≤ 0,0005 par décalage
+  circulaire commun, 3 cellules sur 4 positives (BNB −0,14 %) ; **51 % de
+  hausses** seulement, médiane +0,10 % ; nul complémentaire par permutation des
+  sens p = 0,047 (tout fort mouvement est suivi de +1,12 % en moyenne). Fortes
+  ventes : aucune suite mesurable. Signaux « forts » : pas meilleurs que les
+  ordinaires (3/4), ventes « fortes » sans baisse supplémentaire (p 0,55).
+  Suites du manifeste appliquées : infobulle des forts achats au statut mesuré
+  (formulation pré-rédigée, chiffres du résultat), fortes ventes « repérée ;
+  aucune suite mesurable », signaux « qualification descriptive, sans avantage
+  mesuré » ; garde : les formulations mesurées n'apparaissent que sur une bougie
+  à delta taker (population mesurée), sinon « couche flux non mesurée ». OI et
+  filtre flux non mesurés. Ces données sont consommées.
 - **Séries auxiliaires facultatives** : `IndicatorDef.auxFacultatives` (nouveau
   champ de `@axiom/types`) déclare des séries lues si l'appelant les fournit,
   jamais exigées — un def ne les déclare que si sa sortie reste complète sans
@@ -1503,12 +1531,17 @@ même jour : `IndicatorDef.auxFacultatives` (voir la couche flux).
   `chart/ecoMarkers` rejoignent les modules différés de
   `chargementInitial.test.ts`.
 
-Validation : `pnpm -r typecheck` réussi ; vitest indicateurs 968 tests (dont 41
+Validation : `pnpm -r typecheck` réussi ; vitest indicateurs 970 tests (dont 43
 pour AXIS ; mutations du calcul détectées), alertes 122, backtest 129, pacte
-120, web 416 fichiers / 5 893 tests ; daemon 780 tests (Bun 1.4.2).
+120, web 416 fichiers / 5 893 tests ; daemon 780 tests (Bun 1.4.2). Les
+runners `scripts/valider-axis-flux.ts` et `scripts/explorer-axis-flux.ts`
+passent `tsc --strict` avec les options du `tsconfig.base.json`.
 Budget d'entrée (Node 24.21, zlib 1.3.2.1) : **1 198 184 / 358 154** octets
 bruts/gzip après la couche flux et les trois modules différés, plafonds
-1 220 000 / 360 000 inchangés, marge gzip **1 846 octets** (166 avant).
-Usage, limites et test :
-[`docs/axis-2026-10-07.md`](docs/axis-2026-10-07.md) et
-[`scripts/axis/rapport-v2-2026-10-07.md`](scripts/axis/rapport-v2-2026-10-07.md).
+1 220 000 / 360 000 inchangés, marge gzip **1 846 octets** (166 avant) ;
+**1 198 919 / 358 429** après les infobulles mesurées du 8 octobre (marge gzip
+1 571).
+Usage, limites et tests :
+[`docs/axis-2026-10-07.md`](docs/axis-2026-10-07.md),
+[`scripts/axis/rapport-v2-2026-10-07.md`](scripts/axis/rapport-v2-2026-10-07.md)
+et [`scripts/axis/rapport-flux-2026-10-08.md`](scripts/axis/rapport-flux-2026-10-08.md).

@@ -45,12 +45,25 @@
  * QUALIFIE — « fort » quand les lectures disponibles confirment : volume ≥
  * seuilRvol × moyen, delta dans le sens du signal (≥ 10 % du volume), |ΔOI| ≥
  * seuilOi ; deux confirmations sur trois lectures, toutes sinon, jamais avec un
- * delta à contre-sens — et pose des marqueurs « gros mouvement » (couleur
- * --accent) sur les bougies à volume ≥ seuilGros × moyen, dans le sens du delta
- * taker (sinon du corps de la bougie), hors bougies de signal et hors dernière
- * bougie. Le filtre optionnel `filtreFlux` n'achète que sur flux fort : ce
- * réglage sort du test ci-dessous, l'infobulle le dit. La couche flux n'est
- * pas mesurée : ses lectures sont affichées, jamais promises.
+ * delta à contre-sens — et repère les FORTS ACHATS / FORTES VENTES (marqueurs
+ * couleur --accent, étiquette « Fort achat ×n » sur les trois plus récents) :
+ * bougies à volume ≥ seuilGros × moyen, dans le sens du delta taker (sinon du
+ * corps de la bougie), hors bougies de signal et hors dernière bougie
+ * (`grosMouvementsAxis`). Le filtre optionnel `filtreFlux` n'achète que sur flux fort : ce
+ * réglage sort des tests ci-dessous, l'infobulle le dit.
+ *
+ * STATUT de la couche flux : test unique du 8 octobre 2026 sur données jamais
+ * vues (BNB/ADA/LINK/DOGE 4h, 2017-2026 ; scripts/axis/rapport-flux-2026-10-08.md,
+ * manifeste figé avant tout téléchargement) : les forts achats sont suivis de
+ * +1,61 % en moyenne sur les 12 bougies suivantes (690 événements, p ≤ 0,0005
+ * par décalage circulaire, 3 actifs sur 4 à moyenne positive, BNB négatif ;
+ * 51 % de hausses seulement : l'avantage tient aux grandes amplitudes, pas à
+ * la fréquence). Fortes ventes : aucune suite mesurable. Qualification
+ * « fort » des signaux ▲/▼ : descriptive, sans avantage mesuré. Les infobulles
+ * au statut mesuré ne s'affichent que sur une bougie dont le delta taker est
+ * disponible (population mesurée : klines Binance) ; sans delta taker, le sens
+ * vient du corps seul et la couche reste « non mesurée ». L'OI n'est jamais
+ * mesuré (pas d'historique long). Mesures passées, jamais une promesse.
  *
  * Pourquoi cette lecture : la v1 (▲/▼ à la naissance d'épisodes ±4, sortie au
  * retour du score à 0, long et short) a été recalée par le backtest du
@@ -82,8 +95,10 @@ import { cmfOf } from "../volume/cmf";
 
 /** Cap de signaux annotés (les plus récents) — borne le coût du rendu. */
 export const MAX_SIGNAUX_AXIS = 120;
-/** Cap de marqueurs « gros mouvement » (les plus récents). */
+/** Cap de marqueurs « fort achat / forte vente » (les plus récents). */
 export const MAX_GROS_AXIS = 60;
+/** Étiquettes « Fort achat ×n / Forte vente ×n » : seuls les plus récents. */
+export const MAX_LABELS_GROS = 3;
 /** Part du volume que le delta taker doit atteindre pour donner un sens. */
 export const SEUIL_DELTA_AXIS = 0.1;
 
@@ -230,9 +245,32 @@ export function forceFlux(
   return { dispo, confirme, contre, fort: dispo > 0 && !contre && confirme >= Math.min(2, dispo) };
 }
 
-/** Sens d'un gros mouvement : delta taker s'il est marqué, sinon corps de la bougie (0 = indécis). */
+/** Sens d'un fort mouvement : delta taker s'il est marqué, sinon corps de la bougie (0 = indécis). */
 export const sensGros = (f: FluxBougie, c: Candle): number =>
   f.delta !== undefined && Math.abs(f.delta) >= SEUIL_DELTA_AXIS ? Math.sign(f.delta) : signe(c.close, c.open);
+
+/**
+ * Forts achats (+1) et fortes ventes (−1) : bougies à volume relatif ≥ `seuilGros`, de
+ * sens défini, hors `exclues` (bougies de signal, déjà qualifiées) et hors dernière bougie
+ * (volume en formation). Dans l'ordre des bougies, sans cap. PURE — c'est cette fonction
+ * que la campagne de mesure rejoue, bougie par bougie, pour contrôler le chart.
+ */
+export function grosMouvementsAxis(
+  candles: Candle[],
+  flux: FluxBougie[],
+  seuilGros: number,
+  exclues: ReadonlySet<number>
+): Array<{ idx: number; sens: number }> {
+  const out: Array<{ idx: number; sens: number }> = [];
+  for (let i = 0; i < candles.length - 1; i++) {
+    const f = flux[i];
+    const c = candles[i];
+    if (f?.rvol === undefined || c === undefined || f.rvol < seuilGros || exclues.has(i)) continue;
+    const sens = sensGros(f, c);
+    if (sens !== 0) out.push({ idx: i, sens });
+  }
+  return out;
+}
 
 const pct = (v: number, decimales: number): string => `${v > 0 ? "+" : ""}${v.toFixed(decimales)} %`;
 
@@ -250,7 +288,13 @@ const fleche = (v: number): string => (v > 0 ? "▲" : v < 0 ? "▼" : "–");
 const RESERVE =
   "test réussi sur données jamais vues (crypto 4h, 2017-2024), pas mieux qu'une EMA 200 seule sur 3/4 actifs — mesure passée, pas une promesse";
 const RESERVE_FILTRE = "filtre flux actif : signaux hors du test du 7 octobre 2026, non mesurés — jamais une promesse";
+// Formulations fixées par le manifeste flux (suites), chiffres du résultat regroupé
+// (scripts/axis/rapport-flux-2026-10-08.md) ; réservées aux bougies à delta taker.
+const MESURE_FORT_ACHAT =
+  "fort achat : sur données jamais vues (BNB/ADA/LINK/DOGE 4h, 2017-2026), +1.61 % en moyenne sur les 12 bougies suivantes (51 % de hausses, p ≤ 0.0005) — mesure passée, pas une promesse";
+const MESURE_FORTE_VENTE = "forte vente : repérée ; aucune suite mesurable à 12 bougies sur données jamais vues (BNB/ADA/LINK/DOGE 4h, 2017-2026)";
 const NON_MESURE = "couche flux non mesurée";
+const QUALIFICATION = "qualification descriptive, sans avantage mesuré pour les signaux « forts » (données jamais vues, 8 octobre 2026)";
 
 export const stratAxis: IndicatorDef = {
   id: "stratAxis",
@@ -335,7 +379,7 @@ export const stratAxis: IndicatorDef = {
           `AXIS ${achat ? "achat" : "vente"}${fort} — score ${achat ? "+" : ""}${s}/6 : ` +
           `${noms.map((nom, w) => `${nom} ${fleche(v[w] ?? 0)}`).join(", ")} ; ` +
           `${achat ? `close au-dessus de l'EMA ${params.emaTendance}` : `${resultat} depuis l'achat (hors frais)`} ; ` +
-          `flux ${qualite} (${texteFlux(flux[idx] ?? {}, oiBougies)} ; ${NON_MESURE}) — ${reserve}`,
+          `flux ${qualite} (${texteFlux(flux[idx] ?? {}, oiBougies)} ; ${QUALIFICATION}) — ${reserve}`,
       });
       if (k >= recents.length - MAX_LABELS_SORTIE) {
         labels.push({
@@ -349,32 +393,37 @@ export const stratAxis: IndicatorDef = {
       }
     });
 
-    // Gros mouvements : volume ≥ seuilGros × moyen, hors bougies de signal (déjà
-    // qualifiées) et hors dernière bougie (volume en formation).
-    const seuilGros = Number(params.seuilGros ?? 3);
-    const bougiesSignal = new Set(signaux);
-    const gros: number[] = [];
-    for (let i = 0; i < n - 1; i++) {
-      const f = flux[i];
-      const c = candles[i];
-      if (f?.rvol === undefined || c === undefined || f.rvol < seuilGros || bougiesSignal.has(i)) continue;
-      if (sensGros(f, c) !== 0) gros.push(i);
-    }
-    for (const idx of gros.slice(-MAX_GROS_AXIS)) {
+    // Forts achats / fortes ventes : volume ≥ seuilGros × moyen, hors bougies de signal
+    // (déjà qualifiées) et hors dernière bougie (volume en formation).
+    const gros = grosMouvementsAxis(candles, flux, Number(params.seuilGros ?? 3), new Set(signaux));
+    gros.slice(-MAX_GROS_AXIS).forEach(({ idx, sens }, k, recents) => {
       const f = flux[idx] ?? {};
       const c = candles[idx] as Candle;
-      const sens = sensGros(f, c);
+      const achat = sens > 0;
+      const valeur = achat ? c.low : c.high;
+      // Sans delta taker, le sens vient du corps seul : population hors de la mesure.
+      const mesure = f.delta === undefined ? NON_MESURE : achat ? MESURE_FORT_ACHAT : MESURE_FORTE_VENTE;
       marqueurs.push({
         idx,
-        valeur: sens > 0 ? c.low : c.high,
-        forme: sens > 0 ? "triangleHaut" : "triangleBas",
+        valeur,
+        forme: achat ? "triangleHaut" : "triangleBas",
         couleur: "--accent",
         cible: "prix",
         info:
-          `AXIS gros ${sens > 0 ? "achat" : "vente"} — ${texteFlux(f, oiBougies)} ; sens du ` +
-          `${f.delta !== undefined && Math.abs(f.delta) >= SEUIL_DELTA_AXIS ? "delta taker" : "corps de la bougie"} — ${NON_MESURE}`,
+          `AXIS ${achat ? "fort achat" : "forte vente"} — ${texteFlux(f, oiBougies)} ; sens du ` +
+          `${f.delta !== undefined && Math.abs(f.delta) >= SEUIL_DELTA_AXIS ? "delta taker" : "corps de la bougie"} — ${mesure}`,
       });
-    }
+      if (k >= recents.length - MAX_LABELS_GROS) {
+        labels.push({
+          idx,
+          valeur,
+          texte: `${achat ? "Fort achat" : "Forte vente"} ×${(f.rvol ?? 0).toFixed(1)}`,
+          couleur: "--accent",
+          cible: "prix",
+          position: achat ? "dessous" : "dessus",
+        });
+      }
+    });
 
     return marqueurs.length > 0
       ? { series: { prixSignal }, annotations: { marqueurs, labels } }

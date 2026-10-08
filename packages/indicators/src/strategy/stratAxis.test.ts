@@ -42,11 +42,13 @@ import { cmfOf } from "../volume/cmf";
 import fixtureRaw from "../golden/fixture-ohlcv.json";
 import {
   MAX_GROS_AXIS,
+  MAX_LABELS_GROS,
   MAX_SIGNAUX_AXIS,
   SEUIL_DELTA_AXIS,
   episodesAxis,
   fluxAxis,
   forceFlux,
+  grosMouvementsAxis,
   positionsAxis,
   sensGros,
   stratAxis,
@@ -60,11 +62,15 @@ const RESERVE =
   "test réussi sur données jamais vues (crypto 4h, 2017-2024), pas mieux qu'une EMA 200 seule sur 3/4 actifs — mesure passée, pas une promesse";
 const RESERVE_FILTRE = "filtre flux actif : signaux hors du test du 7 octobre 2026, non mesurés — jamais une promesse";
 const NON_MESURE = "couche flux non mesurée";
+const QUALIFICATION = "qualification descriptive, sans avantage mesuré pour les signaux « forts » (données jamais vues, 8 octobre 2026)";
+const MESURE_FORT_ACHAT =
+  "fort achat : sur données jamais vues (BNB/ADA/LINK/DOGE 4h, 2017-2026), +1.61 % en moyenne sur les 12 bougies suivantes (51 % de hausses, p ≤ 0.0005) — mesure passée, pas une promesse";
+const MESURE_FORTE_VENTE = "forte vente : repérée ; aucune suite mesurable à 12 bougies sur données jamais vues (BNB/ADA/LINK/DOGE 4h, 2017-2026)";
 /** Lectures de flux d'une bougie sans volumes taker ni OI : seul le volume relatif parle. */
 const fluxVolume = (qualite: string, rvol: string) =>
-  `flux ${qualite} (volume ×${rvol}, delta taker n.d., OI n.d. ; ${NON_MESURE})`;
+  `flux ${qualite} (volume ×${rvol}, delta taker n.d., OI n.d. ; ${QUALIFICATION})`;
 
-/** Signaux (▲/▼ du cœur, hors marqueurs « gros mouvement ») sous la forme « 60▲ 88▼ … ». */
+/** Signaux (▲/▼ du cœur, hors marqueurs « fort achat / forte vente ») sous la forme « 60▲ 88▼ … ». */
 function resume(candlesEntree: Candle[], params: Record<string, number | boolean> = {}): string {
   const res = computeIndicator(stratAxis, candlesEntree, params);
   return (res.annotations?.marqueurs ?? [])
@@ -73,7 +79,7 @@ function resume(candlesEntree: Candle[], params: Record<string, number | boolean
     .join(" ");
 }
 
-/** Marqueurs « gros mouvement » (couleur --accent) d'un résultat. */
+/** Marqueurs « fort achat / forte vente » (couleur --accent) d'un résultat. */
 const grosDe = (res: ReturnType<typeof computeIndicator>) =>
   (res.annotations?.marqueurs ?? []).filter((m) => m.couleur === "--accent");
 
@@ -457,14 +463,14 @@ describe("stratAxis — couche flux dans calc", () => {
   it("qualification : fort (2 lectures sur 3), à contre-sens (delta opposé), ordinaire, lectures absentes dites", () => {
     expect(res.annotations?.marqueurs?.map((m) => m.info)).toEqual([
       `AXIS achat fort — score +6/6 : ${votes} ; close au-dessus de l'EMA 50 ; ` +
-        `flux fort (volume ×1.4, delta taker +50 %, OI +3.0 % sur 6 b. ; ${NON_MESURE}) — ${RESERVE}`,
+        `flux fort (volume ×1.4, delta taker +50 %, OI +3.0 % sur 6 b. ; ${QUALIFICATION}) — ${RESERVE}`,
       `AXIS vente forte — score -4/6 : ${baisse} ; -0.50 % depuis l'achat (hors frais) ; ` +
-        `flux fort (volume ×1.1, delta taker -30 %, OI -2.5 % sur 6 b. ; ${NON_MESURE}) — ${RESERVE}`,
+        `flux fort (volume ×1.1, delta taker -30 %, OI -2.5 % sur 6 b. ; ${QUALIFICATION}) — ${RESERVE}`,
       `AXIS achat — score +6/6 : ${votes} ; close au-dessus de l'EMA 50 ; ` +
-        `flux à contre-sens (volume ×0.6, delta taker -20 %, OI +10.0 % sur 6 b. ; ${NON_MESURE}) — ${RESERVE}`,
+        `flux à contre-sens (volume ×0.6, delta taker -20 %, OI +10.0 % sur 6 b. ; ${QUALIFICATION}) — ${RESERVE}`,
       `AXIS vente — score -4/6 : ${baisse} ; -1.86 % depuis l'achat (hors frais) ; ${fluxVolume("ordinaire", "1.3")} — ${RESERVE}`,
       `AXIS achat — score +6/6 : ${votes} ; close au-dessus de l'EMA 50 ; ` +
-        `flux ordinaire (volume ×0.9, delta taker +5 %, OI +1.0 % sur 6 b. ; ${NON_MESURE}) — ${RESERVE}`,
+        `flux ordinaire (volume ×0.9, delta taker +5 %, OI +1.0 % sur 6 b. ; ${QUALIFICATION}) — ${RESERVE}`,
     ]);
     expect(res.annotations?.labels?.map((l) => l.texte)).toEqual([
       "Achat fort", "Vente forte -0.50 %", "Achat", "Vente -1.86 %", "Achat",
@@ -476,7 +482,7 @@ describe("stratAxis — couche flux dans calc", () => {
     const r = computeIndicator(stratAxis, sansVolume, EMA50);
     expect(r.annotations?.marqueurs?.[0]?.info).toBe(
       `AXIS achat — score +5/6 : EMA 20/50 ▲, Supertrend ▲, DMI ▲, MACD ▲, RSI ▲, CMF – ; close au-dessus de l'EMA 50 ; ` +
-        `flux indisponible (volume n.d., delta taker n.d., OI n.d. ; ${NON_MESURE}) — ${RESERVE}`
+        `flux indisponible (volume n.d., delta taker n.d., OI n.d. ; ${QUALIFICATION}) — ${RESERVE}`
     );
     expect(r.annotations?.labels?.map((l) => l.texte)).toEqual(["Achat", "Vente -1.98 %", "Achat", "Vente -1.87 %", "Achat"]);
     expect(grosDe(r)).toEqual([]);
@@ -510,7 +516,7 @@ describe("stratAxis — couche flux dans calc", () => {
   });
 });
 
-describe("stratAxis — gros mouvements", () => {
+describe("stratAxis — forts achats et fortes ventes", () => {
   // Série déclinante (close toujours sous l'EMA 200 : aucun achat, donc aucun signal) ;
   // un pic de volume ×50 toutes les 5 bougies, corps baissier (open > close).
   const n = 500;
@@ -519,27 +525,61 @@ describe("stratAxis — gros mouvements", () => {
     return { time: i * 3_600_000, open: c + 0.2, high: c + 1, low: c - 1, close: c, volume: i % 5 === 0 ? 50 : 1 };
   });
 
-  it("marque les pics ≥ seuilGros × volume moyen, au plus MAX_GROS_AXIS récents, jamais la dernière bougie", () => {
+  it("marque les pics ≥ seuilGros × volume moyen, au plus MAX_GROS_AXIS récents, jamais la dernière bougie ; sans delta taker : « non mesurée »", () => {
     const res = computeIndicator(stratAxis, declin, {});
     const gros = grosDe(res);
     expect(res.annotations?.marqueurs?.length).toBe(gros.length);
-    expect(res.annotations?.labels).toEqual([]);
     expect(fluxAxis(declin, undefined, 20, 6)[300]?.rvol).toBeCloseTo(50 / 10.8, 12); // SMA 20 = (4×50 + 16)/20
     // Pics de 20 à 495 (le volume relatif n'existe qu'à partir de 19) : 96, les 60 derniers gardés.
     expect(gros.map((m) => m.idx)).toEqual(Array.from({ length: MAX_GROS_AXIS }, (_v, k) => 200 + 5 * k));
     expect(gros[0]).toEqual({
       idx: 200, valeur: declin[200]!.high, forme: "triangleBas", couleur: "--accent", cible: "prix",
-      info: `AXIS gros vente — volume ×4.6, delta taker n.d., OI n.d. ; sens du corps de la bougie — ${NON_MESURE}`,
+      info: `AXIS forte vente — volume ×4.6, delta taker n.d., OI n.d. ; sens du corps de la bougie — ${NON_MESURE}`,
     });
+    // Étiquettes : les trois plus récents seulement, au-dessus du plus haut pour une vente.
+    expect(res.annotations?.labels).toEqual(
+      [485, 490, 495].map((idx) => ({
+        idx, valeur: declin[idx]!.high, texte: "Forte vente ×4.6", couleur: "--accent", cible: "prix", position: "dessus",
+      }))
+    );
+    expect(MAX_LABELS_GROS).toBe(3);
   });
 
-  it("delta taker marqué : sens et point d'ancrage suivent le delta, pas le corps", () => {
+  it("grosMouvementsAxis : même liste que les marqueurs, sans cap, hors exclues et dernière bougie", () => {
+    const flux = fluxAxis(declin, undefined, 20, 6);
+    const tous = grosMouvementsAxis(declin, flux, 3, new Set());
+    expect(tous.map((g) => g.idx)).toEqual(Array.from({ length: 96 }, (_v, k) => 20 + 5 * k));
+    expect(tous.every((g) => g.sens === -1)).toBe(true);
+    expect(grosMouvementsAxis(declin, flux, 3, new Set([300, 305])).map((g) => g.idx)).not.toContain(300);
+    const finPic = declin.map((c, i) => (i === n - 1 ? { ...c, volume: 50 } : c));
+    expect(grosMouvementsAxis(finPic, fluxAxis(finPic, undefined, 20, 6), 3, new Set()).some((g) => g.idx === n - 1)).toBe(false);
+    expect(grosMouvementsAxis(declin, flux, 5, new Set())).toEqual([]);
+  });
+
+  it("delta taker marqué : sens et point d'ancrage suivent le delta, pas le corps ; infobulle au statut mesuré", () => {
     const avecTaker = declin.map((c, i) => (i === 300 ? { ...c, buyVolume: 40, sellVolume: 10 } : c));
     const gros = grosDe(computeIndicator(stratAxis, avecTaker, {}));
     expect(gros.find((m) => m.idx === 300)).toEqual({
       idx: 300, valeur: declin[300]!.low, forme: "triangleHaut", couleur: "--accent", cible: "prix",
-      info: `AXIS gros achat — volume ×4.6, delta taker +60 %, OI n.d. ; sens du delta taker — ${NON_MESURE}`,
+      info: `AXIS fort achat — volume ×4.6, delta taker +60 %, OI n.d. ; sens du delta taker — ${MESURE_FORT_ACHAT}`,
     });
+    const recent = declin.map((c, i) => (i === 495 ? { ...c, buyVolume: 40, sellVolume: 10 } : c));
+    expect(computeIndicator(stratAxis, recent, {}).annotations?.labels?.at(-1)).toEqual({
+      idx: 495, valeur: declin[495]!.low, texte: "Fort achat ×4.6", couleur: "--accent", cible: "prix", position: "dessous",
+    });
+  });
+
+  it("forte vente à delta taker : formulation mesurée ; delta sous 10 % : sens du corps, mais population mesurée", () => {
+    const vendeur = declin.map((c, i) => (i === 300 ? { ...c, buyVolume: 10, sellVolume: 40 } : i === 305 ? { ...c, buyVolume: 26, sellVolume: 24 } : c));
+    const gros = grosDe(computeIndicator(stratAxis, vendeur, {}));
+    expect(gros.find((m) => m.idx === 300)?.info).toBe(
+      `AXIS forte vente — volume ×4.6, delta taker -60 %, OI n.d. ; sens du delta taker — ${MESURE_FORTE_VENTE}`
+    );
+    expect(gros.find((m) => m.idx === 305)?.info).toBe(
+      `AXIS forte vente — volume ×4.6, delta taker +4 %, OI n.d. ; sens du corps de la bougie — ${MESURE_FORTE_VENTE}`
+    );
+    // Les autres pics, sans delta taker, restent « non mesurés ».
+    expect(gros.find((m) => m.idx === 310)?.info?.endsWith(NON_MESURE)).toBe(true);
   });
 
   it("doji sans delta : indécis, pas de marqueur ; dernière bougie : exclue ; seuil réglable", () => {

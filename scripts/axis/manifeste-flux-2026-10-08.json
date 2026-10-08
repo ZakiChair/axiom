@@ -1,0 +1,148 @@
+{
+  "schema": "axiom-axis-flux-backtest-v1",
+  "figeLeUtc": "2026-10-08T07:14:00Z",
+  "objet": "Test final de la couche flux d'AXIS (forts achats / fortes ventes : bougies à volume exécuté ≥ 3 × la moyenne, sens par delta taker sinon corps) sur des données jamais vues, après la demande du propriétaire du 8 octobre 2026 (« améliore AXIS et backteste-le pour qu'il repère les mouvements de fort achat et de forte vente »). Protocole, hypothèse, sens, horizon, critères et suites fixés avant tout téléchargement de ces données ; exécution unique.",
+  "historique": {
+    "v2": "scripts/axis/manifeste-v2-2026-10-07.json : AXIS v2 FAVORABLE sur BTC/ETH/XRP/SOL 4h 2017-2024 (21 blocs sur 21, timing p = 0,0005) ; la couche flux ajoutée le soir du 7 octobre n'y était pas mesurée",
+    "exploration": "scripts/explorer-axis-flux.ts, 8 octobre 2026, sur les seules données DÉJÀ VUES : BTCUSDT, ETHUSDT, XRPUSDT, SOLUSDT 4h de 2017-2020 au 2026-10-08 et BTCUSDT, ETHUSDT 1h depuis 2024-07-01 (klines spot avec volume taker, champ 9). Grille de 36 définitions (volume ≥ 2, 3, 4, 5 × SMA 20 ; sens delta|corps, corps, delta&corps, delta seul ; seuil de delta 0,1, 0,2, 0,3 ; corps ≥ 1 ATR) × 7 horizons (1 à 42 bougies), rendement log signé après fill à l'open suivant, décalage circulaire bilatéral, sous-ensembles achats/ventes et EMA 200",
+    "constatsExploration": "aux défauts livrés (volume ≥ 3, delta|corps, seuil de delta 0,1 — choisis a priori le 7 octobre, avant toute donnée), 1 156 événements 4h : forts achats (566) suivis d'une continuation à tous les horizons (+35 bps à 1 bougie, +148 bps à 12, +267 bps à 42 ; taux de hausse 51 à 55 % ; p 0,001 ; moyenne positive dans les quatre cellules à 42 bougies ; +210 bps à 12 bougies au-dessus de l'EMA 200) ; fortes ventes (590) sans suite mesurable (−7 à +132 bps, p > 0,16). En 1h : effet faible ou nul. Les seuils de delta ≥ 0,2 laissent trop peu d'événements ; delta&corps réduit l'effectif sans gagner en netteté. Signaux AXIS : achats qualifiés « fort » (33) pas meilleurs que les ordinaires (437) ; ventes « fortes » (50) suivies d'une baisse supplémentaire (+194 bps signés à 12 bougies) ; variante filtreFlux : expectancy par trade plus haute sur 3 cellules sur 4 mais PnL total inférieur partout, XRP effondré — pas une amélioration",
+    "ceQuiVientDeLExploration": "le SENS testé (forts achats → continuation, les fortes ventes sans hypothèse) et l'HORIZON principal (12 bougies, t le plus net sur données vues) ; la définition elle-même (volume ≥ 3, SMA 20, delta|corps, seuil de delta 0,1) est celle livrée a priori le 7 octobre",
+    "parametresNonAjustes": "AXIS v2 : seuil 5, seuilVente 4, EMA 200/20/50, Supertrend 10 ×3, ADX ≥ 20, MACD 12/26/9, RSI 14, CMF 20 ; couche flux : rvolPeriode 20, seuilRvol 1,5, seuilGros 3, oiBougies 6, seuilOi 2, filtreFlux désactivé"
+  },
+  "statutIndependance": "BNBUSDT, ADAUSDT, LINKUSDT et DOGEUSDT n'ont été lus par aucune campagne ni exploration du dépôt (seules requêtes préalables : la date de la première kline journalière de chaque symbole, pour la faisabilité). Réserve : ces actifs dépendent du même facteur crypto que BTC/ETH, et les grandes phases 2017-2026 sont connues ; le décalage circulaire mesure la synchronisation des événements avec les prix au-delà de la dérive.",
+  "evenement": {
+    "indicateur": "stratAxis",
+    "params": { "seuil": 5, "seuilVente": 4, "emaTendance": 200, "emaRapide": 20, "emaLente": 50, "stPeriode": 10, "stMult": 3, "seuilAdx": 20, "rvolPeriode": 20, "seuilRvol": 1.5, "seuilGros": 3, "oiBougies": 6, "seuilOi": 2, "filtreFlux": false },
+    "definition": "grosMouvementsAxis(candles, fluxAxis(candles, undefined, 20, 6), 3, bougiesDeSignal) : volume relatif = volume / SMA 20 du volume (bougie courante comprise) ≥ 3 ; sens = signe du delta taker si |delta| ≥ 0,1, sinon signe du corps (close − open), 0 = pas d'événement ; hors bougies de signal AXIS (changements de position aux défauts, déjà qualifiées par le chart) et hors dernière bougie. Exactement les marqueurs de couleur --accent du chart (les 60 plus récents y sont affichés)",
+    "deltaTaker": "(takerBuyBase − (volume − takerBuyBase)) / volume, champ 9 des klines spot ; l'intérêt ouvert, sans historique long, reste hors mesure (lecture « n.d. » dans la campagne comme dans le chart sans OI)",
+    "fortAchat": "sens +1",
+    "forteVente": "sens −1",
+    "decision": "à la clôture de la bougie de l'événement (indice i) ; fill de référence à l'open de i+1"
+  },
+  "marche": {
+    "type": "spot",
+    "source": "Binance Spot",
+    "endpoint": "https://data-api.binance.vision/api/v3/klines",
+    "champs": "0 open time, 1-4 OHLC, 5 volume, 6 close time, 9 volume taker acheteur (base)",
+    "remarqueEndpoint": "miroir public des données de marché de Binance ; api.binance.com répond 451 depuis l'environnement de calcul"
+  },
+  "cellules": [
+    { "symbol": "BNBUSDT", "timeframe": "4h", "debutInclus": "2017-12-01T00:00:00Z" },
+    { "symbol": "ADAUSDT", "timeframe": "4h", "debutInclus": "2018-05-01T00:00:00Z" },
+    { "symbol": "LINKUSDT", "timeframe": "4h", "debutInclus": "2019-02-01T00:00:00Z" },
+    { "symbol": "DOGEUSDT", "timeframe": "4h", "debutInclus": "2019-08-01T00:00:00Z" }
+  ],
+  "choixCellules": "4h, unité de la v2 et de l'exploration ; quatre actifs jamais utilisés par AXIS, de liquidité et de nature différentes (plateforme, couche 1, oracle, meme), cotés sur Binance Spot depuis 2017-2019. Début = premier jour du mois suivant la cotation (BNB 2017-11-06, ADA 2018-04-17, LINK 2019-01-16, DOGE 2019-07-05).",
+  "fenetre": {
+    "id": "jamais-vue",
+    "finExclue": "2026-10-08T00:00:00Z",
+    "warmupBougies": 300,
+    "horizonMax": 42,
+    "decisionsEvaluees": "indices 299 à n − 2 − 42 inclus : chaque événement dispose de ses 42 bougies suivantes ; la fenêtre est la même à tous les horizons (mêmes événements)",
+    "retardMaxPremiereBougieH": 24,
+    "avanceMaxDerniereClotureH": 24,
+    "partMaxBougiesManquantes": 0.01,
+    "bougiesEcartees": "une kline servie à OHLCV ou volume taker non fini ou incohérent (prix ≤ 0, volume < 0, taker < 0 ou > volume, high/low incohérents, closeTime ≠ open + 4 h − 1 ms) est écartée, datée et comptée comme manquante",
+    "serieInexploitable": "cellule indisponible si la série est vide, hors grille 4h, non strictement croissante, si la première bougie ouvre plus de 24 h après debutInclus, si la dernière clôture plus de 24 h avant finExclue, ou si plus de 1 % des bougies attendues manquent (écartées comprises)",
+    "erreursAcquisition": "réponse illisible, erreur réseau, HTTP ou de cache : arrêt du run avant toute mesure (les quatre séries sont acquises et validées avant le premier calcul)"
+  },
+  "mesures": {
+    "rendement": "rendement log signé r_h(i) = sens × ln(open[i+1+h] / open[i+1]) : positif = continuation du mouvement, négatif = retour ; sans coût (le descriptif donne aussi la moyenne nette de 0,14 % aller-retour, coûts x1 de la v2)",
+    "horizons": [1, 2, 3, 6, 12, 24, 42],
+    "horizonPrincipal": 12,
+    "statistique": "somme des r_12 des forts achats des quatre cellules (équivalent à la moyenne, l'effectif étant fixé)",
+    "nul": "décalage circulaire des événements de chaque cellule dans sa fenêtre évaluée [a, b] : i → a + ((i − a + k) mod L), mêmes effectifs, mêmes sens, même regroupement, synchronisation avec les prix détruite ; un même k pour les quatre cellules (préserve en partie la corrélation entre actifs : fins alignées, débuts et bougies manquantes différents) ; k = floor(Lmin × (fractionMin + (fractionMax − fractionMin) × u)), Lmin = plus courte fenêtre évaluée. Limite connue : les événements sont conditionnés sur le volume, donc sur la volatilité ; le décalage ne préserve que leur regroupement, pas la volatilité locale de chaque bougie d'événement (sur données vues, σ du rendement à 12 bougies aux forts achats / σ toutes bougies : 0,92 BTC, 0,96 ETH, 1,37 XRP, 1,53 SOL)",
+    "timing": { "tirages": 1999, "graine": 20261008, "generateur": "mulberry32", "fractionMin": 0.1, "fractionMax": 0.9 },
+    "pValeur": "unilatérale (continuation) : (1 + nombre de tirages dont la statistique décalée est ≥ à l'observée) / (tirages + 1) ; les p bilatérales du descriptif comptent |décalée| ≥ |observée|",
+    "formatP": "p écrite à 4 décimales ; quand aucun tirage n'atteint l'observée (plancher 1 / (tirages + 1)), elle s'écrit « p ≤ 0.0005 » et non « p = »",
+    "permutationSens": {
+      "objet": "nul complémentaire, DESCRIPTIF (sans effet sur le verdict), pré-déclaré sur remarque de la revue : il préserve les instants, les effectifs par sens et la volatilité locale. Dans chaque cellule, les sens des forts mouvements évalués (achats et ventes réunis) sont permutés : on tire sans remise autant de bougies qu'il y a de forts achats parmi tous les forts mouvements ; statistique = somme de leurs rendements bruts r_12 = ln(open[i+13] / open[i+1]) ; observé = la même somme sur les vrais forts achats ; tirage commun aux quatre cellules (sommes additionnées), et par cellule",
+      "question": "les forts achats sont-ils suivis de plus de hausse que les forts mouvements en général (dont les fortes ventes) ?",
+      "tirages": 1999,
+      "graine": 20261009,
+      "pValeur": "unilatérale : (1 + nombre de tirages dont la somme est ≥ à l'observée) / (tirages + 1)"
+    },
+    "coupesCausalite": [0.4, 0.7, 0.9],
+    "controlesBloquants": [
+      "événements de campagne = marqueurs du chart : les 60 derniers événements de chaque série (indices et sens) sont exactement les marqueurs --accent de computeIndicator(stratAxis, candles, params), et les bougies de signal exclues sont exactement les changements de position du recalcul direct (votesAxis, positionsAxis, fin = n − 2)",
+      "causalité sur les données réelles : les événements calculés sur trois préfixes (40 %, 70 %, 90 % de la série) sont identiques à ceux de la série complète jusqu'à l'avant-dernière bougie du préfixe",
+      "horizon : chaque événement évalué dispose de open[i+1+42] dans la série (garanti par la fenêtre évaluée, re-vérifié bougie par bougie)",
+      "statistique : la somme observée recalculée directement bougie par bougie égale celle de la méthode des sommes préfixes (écart ≤ 1e-9)",
+      "en cas d'écart : arrêt sans verdict ; le message et la trace (fichier horodaté distinct) ne nomment que la cellule et le contrôle, sans aucune valeur mesurée"
+    ]
+  },
+  "criteres": {
+    "minFortsAchatsParCellule": 50,
+    "pMax": 0.05,
+    "minCellulesPositives": 3,
+    "C1": "forts achats, horizon 12, quatre cellules regroupées, décalage circulaire commun : p unilatérale ≤ pMax (1 bloc)",
+    "C2": "forts achats, horizon 12 : rendement signé moyen > 0 dans au moins minCellulesPositives cellules sur 4 (1 bloc)",
+    "verdict": {
+      "FAVORABLE": "C1 et C2 tenus, les quatre cellules disponibles avec au moins 50 forts achats chacune",
+      "DEFAVORABLE": "toutes les cellules disponibles et suffisantes, et C1 en échec (p > 0,05) ou C2 en échec (au plus 2 cellules à moyenne > 0)",
+      "NON_CONCLUANT": "au moins une cellule indisponible ou sous 50 forts achats (C1 et C2 non calculables au complet)"
+    },
+    "selectionApresResultats": false,
+    "executionUnique": "une seule exécution, par « bun scripts/valider-axis-flux.ts --campagne » (tout autre argument est refusé) ; une interruption technique avant le verdict est journalisée (cause, correctif, revue) avant toute relance ; aucun résultat partiel n'est affiché pendant le calcul"
+  },
+  "secondaires": {
+    "regle": "descriptifs, pré-déclarés, aucun effet sur le verdict, aucune sélection ; ils fixent seulement des formulations d'infobulle",
+    "fortesVentes": "horizon 12, quatre cellules regroupées, p bilatérale (décalage commun) : si p ≤ 0,05, l'infobulle des fortes ventes dit le sens mesuré ; sinon « aucune suite mesurable »",
+    "autresHorizons": "1, 2, 3, 6, 24, 42 bougies : tableau des forts achats et des fortes ventes (moyenne, taux de hausse, p), par cellule et regroupés",
+    "tendance": "forts achats au-dessus et sous l'EMA 200 (close de la bougie de l'événement), horizon 12",
+    "parAnnee": "effectifs et moyenne à 12 bougies par année civile, par cellule",
+    "signauxAxis": "achats AXIS (changements de position aux défauts, nés après le warmup) par qualité de flux à l'entrée (fort / ordinaire / contre-sens / indisponible, forceFlux sans OI) : effectif, expectancy close-à-close hors frais ; ventes AXIS fortes : rendement signé (−1 × ln) à 12 bougies après la sortie, p unilatérale (décalage commun) si l'effectif regroupé atteint minVentesFortesAxis, sinon effectif et moyenne seulement",
+    "minVentesFortesAxis": 30,
+    "permutationSens": "forts achats à 12 bougies contre le nul par permutation des sens (mesures.permutationSens) : effectif de forts mouvements, moyenne brute de tous les forts mouvements, moyenne des forts achats, p unilatérale ; regroupé et par cellule",
+    "netDesCouts": "moyenne à 12 bougies des forts achats, nette de coutAllerRetourPct",
+    "coutAllerRetourPct": 0.14
+  },
+  "suites": {
+    "FAVORABLE": "les marqueurs « fort achat » remplacent « couche flux non mesurée » par infobulleFortAchat (valeurs du résultat regroupé à 12 bougies) ; les marqueurs « forte vente » suivent infobulleForteVente selon le secondaire fortesVentes ; la qualification « fort » des signaux AXIS garde « non mesurée » (achats) et suit infobulleVenteForte si le secondaire signauxAxis est significatif ; l'OI et le filtre flux restent non mesurés et le disent ; documentation (docs/axis, README, BUILD-CONTRACT) ; merge dans main et déploiement Vercel, autorisés par le propriétaire",
+    "gardeSourceSansTaker": "la population mesurée est celle des klines Binance avec volume taker (sens par delta, corps en repli sous 10 % de delta). Une source sans volume taker donne des marqueurs au sens par corps seul, population non mesurée : les infobulles mesurées (fort achat, forte vente, vente forte) ne s'affichent que sur une bougie dont le delta taker est disponible ; sinon « couche flux non mesurée » reste",
+    "formatValeurs": "{moyennePct} = moyenne regroupée à 12 bougies en %, signe explicite, 2 décimales ; {hitsPct} = part des rendements > 0, entier ; {p} = « = x » à 4 décimales, ou « ≤ x » au plancher (mesures.formatP)",
+    "infobulleFortAchat": "fort achat : sur données jamais vues (BNB/ADA/LINK/DOGE 4h, 2017-2026), {moyennePct} % en moyenne sur les 12 bougies suivantes ({hitsPct} % de hausses, p {p}) — mesure passée, pas une promesse",
+    "infobulleForteVente": {
+      "significatif": "forte vente : sur données jamais vues (BNB/ADA/LINK/DOGE 4h, 2017-2026), le prix a {continué de baisser|rebondi} de {moyennePct} % en moyenne sur les 12 bougies suivantes (p {p}) — mesure passée, pas une promesse",
+      "nonSignificatif": "forte vente : repérée ; aucune suite mesurable à 12 bougies sur données jamais vues (BNB/ADA/LINK/DOGE 4h, 2017-2026)"
+    },
+    "infobulleVenteForte": "vente forte : sur données jamais vues (BNB/ADA/LINK/DOGE 4h, 2017-2026), le prix a encore baissé de {moyennePct} % en moyenne sur les 12 bougies suivantes (p {p}) — mesure passée, pas une promesse",
+    "infobulleDefavorable": "fort achat / forte vente : aucun pouvoir prédictif mesuré à 12 bougies sur données jamais vues (BNB/ADA/LINK/DOGE 4h, 2017-2026)",
+    "DEFAVORABLE": "les marqueurs restent (ils décrivent un fait : volume ≥ 3 × la moyenne) ; leur infobulle devient infobulleDefavorable ; ces données sont consommées : aucune autre variante n'y sera jugée ; documentation ; pas d'autre promesse",
+    "NON_CONCLUANT": "infobulles inchangées (« couche flux non mesurée ») ; pas de nouvelle variante sur ces données sans décision explicite du propriétaire"
+  },
+  "repetitionTechnique": {
+    "objet": "option --essai : même code sur les quatre séries 4h DÉJÀ VUES de l'exploration (cache E-<symbole>-4h, scripts/.cache-klines/axis-flux), pour éprouver le runner, ses contrôles et la règle de verdict (3 cellules sur 4) avant l'exécution ; sorties dans /tmp, hors dépôt, sans valeur probante",
+    "cellules": [
+      { "symbol": "BTCUSDT", "timeframe": "4h", "debutInclus": "2017-09-01T00:00:00Z" },
+      { "symbol": "ETHUSDT", "timeframe": "4h", "debutInclus": "2017-09-01T00:00:00Z" },
+      { "symbol": "XRPUSDT", "timeframe": "4h", "debutInclus": "2018-06-01T00:00:00Z" },
+      { "symbol": "SOLUSDT", "timeframe": "4h", "debutInclus": "2020-09-01T00:00:00Z" }
+    ],
+    "finExclue": "2026-10-08T00:00:00Z"
+  },
+  "versions": {
+    "baseCommit": "1dd488487dc5b3a29201f1358dc41666eaee4630",
+    "travailNonCommite": "stratAxis.ts (grosMouvementsAxis exportée, marqueurs « fort achat / forte vente », étiquettes des trois plus récents) et son test présents dans l'arbre de travail, non commités au figeage ; l'exploration (scripts/explorer-axis-flux.ts) aussi",
+    "codeAuFigeageSha256": {
+      "packages/indicators/src/strategy/stratAxis.ts": "09c347dca9f9adcffddccf80cad7e650a99b6354f77185d0ea56043c6717f653",
+      "packages/indicators/src/utils.ts": "693259721a342f3adf0c897b5e279a9f6e9eb81bdb6d134449c3d19723c5266b",
+      "packages/indicators/src/utils-fabrique-strategie.ts": "d43cff07ce064260ef4895ac20d156a689821d9d6893e66743d692bfdb526605",
+      "packages/indicators/src/engine.ts": "a0a8c2c8b767c0e7260e1b4c4b63b00499d8ed4d8d559e618985d40cd8396ece",
+      "packages/indicators/src/momentum/rsi.ts": "5c9b93ec36578152a1dde9ea139064f56ed7a2a997531c300b59d1c6a934ec7a",
+      "packages/indicators/src/trend/adx.ts": "c1704f2e876995c75d54fa572a9f691b944d107cf179fdc024b5ec0629fba6df",
+      "packages/indicators/src/trend/macd.ts": "ad8b1a85f0b344d0c390408cfd18288bfaeea92e66700f9f14b38e61ff39ebfc",
+      "packages/indicators/src/trend/supertrend.ts": "6401a4632aa4647c93c484b2da374c51590dc89acf197ee1e3352a1ff839b469",
+      "packages/indicators/src/volume/cmf.ts": "7e4a05cc6463cc94572be7f4c250ad81d71917f15962478ee8679339ff3f88a5",
+      "packages/indicators/src/trend/ema.ts": "b1546985251fe40c1e20d6869a18bbf9af69f92dcfa99c1480b731ca94b0107a",
+      "packages/indicators/src/registry.ts": "edf081a34bc36cc71c4d1b6aa24c47baaf7025836775665e59b9a7f217e6e507",
+      "packages/indicators/src/index.ts": "434bafab9343da78716366192ed5fe31e01be1fbb49e1d63fbd5f018dfb82cca",
+      "packages/indicators/src/timeframes.ts": "46f5435a7601a724f9f7a782570bc30d44e1a8789e188ae2e244c8748d5d11dd",
+      "packages/types/src/index.ts": "63adaf788972f00a514ec4f3e03fb2a2d04b075747dbed3b9c1be9e0df6a09c0"
+    },
+    "codeFigeNote": "graphe d'import de l'événement (stratAxis : fluxAxis, sensGros, grosMouvementsAxis, votesAxis, positionsAxis et ses cœurs), du moteur d'indicateurs, du rejeu (signaux AXIS descriptifs) et des types. Le runner n'y figure pas (il épingle le SHA-256 de ce manifeste) : son SHA-256 est consigné dans le journal de revue avant l'exécution et reporté dans le résultat",
+    "revue": "revue indépendante avant exécution : scripts/axis/journal-revue-flux-2026-10-08.md (constats, corrections, figeage)",
+    "pnpmLockSha256": "130d4fb62f5223486552e31137f28d4901e098bf7a78325b943f30fc6beac062",
+    "bun": "1.4.2"
+  }
+}

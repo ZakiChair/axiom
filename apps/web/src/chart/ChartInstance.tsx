@@ -79,7 +79,11 @@ import type { LiquidationHeatController } from "./liquidationHeat";
 import { liqMarksStore } from "./liquidationMarkers";
 import { liqEstStore } from "./liquidationEstimates";
 import { hlLiqStore } from "../data/hyperliquidLiq";
-import { DepthHeatController, depthHeatStore } from "./depthHeat";
+// Heatmap du carnet (BOOK) : même découpage que la heatmap des liquidations — seul le store
+// de bascule est chargé au démarrage, le module (échantillonnage + contrôleur, data/depth,
+// rampesHeat) arrive par import() à la première activation.
+import type { DepthHeatController } from "./depthHeat";
+import { depthHeatStore } from "./depthHeatBascule";
 import { NiveauxLignesController, type LigneNiveau } from "./niveauxLignes";
 import { distOverlayStore, fournisseurDistLignes } from "./distLignes";
 import { paperOverlayStore, fournisseurPaperLignes } from "./paperLignes";
@@ -1041,11 +1045,40 @@ export function ChartInstance({
         void assurerLiqHeat();
       }
 
-      // Heatmap de liquidité du carnet (BOOK) : lit le buffer de colonnes échantillonnées
-      // (demarrerDepthHeat, greffé ailleurs) ; la bascule `depthHeatStore.actif` pilote l'affichage.
-      depthHeat = new DepthHeatController(chart, container, depthHeatCanvas);
-      depthHeat.setEnabled(depthHeatStore.getState().actif);
-      unsubscribeDepthHeat = depthHeatStore.subscribe((state) => depthHeat?.setEnabled(state.actif));
+      // Heatmap de liquidité du carnet (BOOK) : chargement PARESSEUX comme la heatmap des
+      // liquidations. Le module importé démarre lui-même l'échantillonnage (buffer de
+      // colonnes) ; ici on ne construit que le contrôleur canvas. La promesse est mémorisée
+      // pour qu'une double activation pendant l'import ne construise pas deux contrôleurs,
+      // et l'état `actif` est relu à l'arrivée du module (bascule OFF entre-temps).
+      let chargementDepthHeat: Promise<void> | null = null;
+      const assurerDepthHeat = (): Promise<void> => {
+        chargementDepthHeat ??= import("./depthHeat")
+          .then(({ DepthHeatController }) => {
+            if (cancelled || depthHeat !== null) return;
+            depthHeat = new DepthHeatController(chart, container, depthHeatCanvas);
+          })
+          .catch((erreur: unknown) => {
+            chargementDepthHeat = null; // chunk introuvable (déploiement, réseau) : la prochaine bascule réessaie
+            throw erreur;
+          });
+        return chargementDepthHeat;
+      };
+      const synchroniserDepthHeat = (actif: boolean): void => {
+        if (!actif) {
+          depthHeat?.setEnabled(false);
+          return;
+        }
+        void assurerDepthHeat()
+          .then(() => {
+            if (!cancelled) depthHeat?.setEnabled(depthHeatStore.getState().actif);
+          })
+          .catch((erreur: unknown) => console.warn("[AXIOM] BOOK : heatmap du carnet non chargée", erreur));
+      };
+      // `rev` bouge ≤1/s pendant l'activation : seul le changement d'`actif` nous concerne.
+      unsubscribeDepthHeat = depthHeatStore.subscribe((state, precedent) => {
+        if (state.actif !== precedent.actif) synchroniserDepthHeat(state.actif);
+      });
+      if (depthHeatStore.getState().actif) synchroniserDepthHeat(true);
 
       // Overlay DIST (bandes VaR) : lignes de prix horizontales calculées depuis les bougies du
       // maître (même moteur `distVar` que la fenêtre). Toggle persisté (distOverlayStore, défaut OFF).

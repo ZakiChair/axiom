@@ -11,8 +11,8 @@
  */
 import { describe, it, expect, vi } from "vitest";
 
-// Le thème : forme minimale (THEMES + getState().setTheme) + `subscribe` inerte —
-// chart/depthHeat s'abonne au thème à l'import (contrôleur démarré par effet de bord).
+// Le thème : forme minimale (THEMES + getState().setTheme) + `subscribe` inerte pour les
+// modules chart importés plus bas (contrôleurs démarrés par effet de bord).
 vi.mock("../store/theme", () => ({
   THEMES: ["dark", "bloomberg", "matrix", "cute", "aurora"] as const,
   themeStore: {
@@ -55,8 +55,8 @@ import { toastsStore, retirerToast } from "../store/toasts";
 // que App.tsx (ou Toolbar.tsx) greffe par side-effect d'import. On importe donc les
 // tableaux BRUTS pour asserter l'unicité globale AVANT le dédoublonnage par id
 // d'`enregistrerCommandes` (qui masquerait justement une collision d'ids).
-// L'import de liquidation* / depthHeat démarre leurs contrôleurs (effet de bord) :
-// inertes ici grâce aux mocks theme / drawing / klinecharts ci-dessus.
+// L'import de liquidation* démarre leurs contrôleurs (effet de bord) : inertes ici grâce
+// aux mocks theme / drawing / klinecharts ci-dessus.
 import { ecoCommands } from "../store/eco";
 import { commandes as newsCommandes } from "../store/news";
 import { commandes as onchainCommandes } from "../store/onchain";
@@ -66,7 +66,6 @@ import { commandes as derivChartCommandes } from "../store/derivatives-chart";
 import { commandes as liqMarksCommandes } from "../chart/liquidationMarkers";
 import { commandes as liqEstCommandes } from "../chart/liquidationEstimates";
 import { commandes as hlLiqCommandes } from "../data/hyperliquidLiq";
-import { commandes as depthHeatCommandes } from "../chart/depthHeat";
 import { commandesNiveauxOverlays } from "../chart/niveauxOverlays";
 import { commandes as domCommandes } from "../store/dom-ui";
 import { commandes as replayCommandes } from "../store/replay";
@@ -74,6 +73,7 @@ import { commandes as globeCommandes } from "../store/globe-ui";
 import { commandes as tickerCommandes } from "../store/tickerBand";
 import {
   commandesBacktest,
+  commandesDepthHeat,
   commandesScreener,
   commandesSignaux,
   commandesTradeMarkers,
@@ -100,7 +100,7 @@ const SOURCES_GREFFEES: Record<string, readonly Commande[]> = {
   "chart/liquidationEstimates": liqEstCommandes,
   "data/hyperliquidLiq": hlLiqCommandes,
   "commands/windowPanels (WHALE)": commandesWhaleBubbles,
-  "chart/depthHeat": depthHeatCommandes,
+  "commands/windowPanels (BOOK)": commandesDepthHeat,
   "chart/niveauxOverlays": commandesNiveauxOverlays,
   "store/dom-ui": domCommandes,
   "commands/windowPanels (BT)": commandesBacktest,

@@ -34,6 +34,9 @@ const MODULES_DIFFERES: Record<string, string> = {
   "chart/whaleBubbles": "bulles de prints baleines — import() par la commande WHALE (commands/windowPanels), contrôleur démarré au premier usage",
   "chart/tradeMarkers": "marqueurs trades & notes — import() par la commande MARKS (commands/windowPanels), aussi chargé avec EcoWindow et BacktestWindow",
   "chart/ecoMarkers": "marqueurs éco — chargés avec EcoWindow (React.lazy), seule à les activer",
+  "chart/depthHeat": "heatmap du carnet — import() par la commande BOOK (commands/windowPanels) et par ChartInstance à la première activation ; seul chart/depthHeatBascule reste au démarrage",
+  "chart/rampesHeat": "rampes des heatmaps — partagées par chart/depthHeat et chart/liquidationHeat, tous deux différés",
+  "data/depth": "carnet Binance (WS + agrégation) — chargé avec DomWindow (React.lazy) et chart/depthHeat",
 };
 
 /** `import type { A } from "x"`, `import type * as M from "x"`, `export type { A } from "x"`, multi-lignes compris. */

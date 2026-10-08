@@ -32,7 +32,7 @@ import type { Candle } from "@axiom/types";
 import { computeIndicator } from "../engine";
 import { getIndicator } from "../registry";
 import { supportsIndicatorTimeframe, TIMEFRAME_REQUIS } from "../timeframes";
-import { closeOf, ema } from "../utils";
+import { closeOf, ema, rma, trueRange } from "../utils";
 import { MAX_LABELS_SORTIE, specStrategie } from "../utils-fabrique-strategie";
 import { rsiOf } from "../momentum/rsi";
 import { adxOf } from "../trend/adx";
@@ -41,6 +41,7 @@ import { supertrendOf } from "../trend/supertrend";
 import { cmfOf } from "../volume/cmf";
 import fixtureRaw from "../golden/fixture-ohlcv.json";
 import {
+  ATR_STOP_PERIODE,
   MAX_GROS_AXIS,
   MAX_LABELS_GROS,
   MAX_SIGNAUX_AXIS,
@@ -50,6 +51,7 @@ import {
   forceFlux,
   grosMouvementsAxis,
   positionsAxis,
+  positionsStopAxis,
   sensGros,
   stratAxis,
   textesAxis,
@@ -88,7 +90,7 @@ const grosDe = (res: ReturnType<typeof computeIndicator>) =>
 const sens = (a: number, b: number): number => Math.sign(a - b) + 0;
 
 describe("stratAxis — contrat", () => {
-  it("strategy/overlay enregistrée, quatorze inputs bornés, une sortie prix, toute unité de temps, sans spec de fabrique", () => {
+  it("strategy/overlay enregistrée, quinze inputs bornés, deux sorties prix, toute unité de temps, sans spec de fabrique", () => {
     expect(getIndicator("stratAxis")).toBe(stratAxis);
     expect(stratAxis.name).toBe("AXIS");
     expect(stratAxis.category).toBe("strategy");
@@ -108,9 +110,17 @@ describe("stratAxis — contrat", () => {
       ["oiBougies", 6, 1, 200],
       ["seuilOi", 2, 0.1, 100],
       ["filtreFlux", false, undefined, undefined],
+      ["stopAtr", 0, 0, 20],
     ]);
     expect(stratAxis.inputs.find((i) => i.key === "filtreFlux")?.type).toBe("boolean");
-    expect(stratAxis.outputs.map((o) => o.key)).toEqual(["prixSignal"]);
+    // Stop suiveur (v3) : dernier réglage, défaut 0 au figeage (v2 exacte) tant que le test
+    // sur données jamais vues n'a pas rendu son verdict (scripts/axis/manifeste-v3-2026-10-08.json).
+    expect(stratAxis.inputs.at(-1)).toEqual({ key: "stopAtr", name: "Stop suiveur (× ATR 14, 0 = sans)", type: "number", default: 0, min: 0, max: 20 });
+    expect(stratAxis.outputs).toEqual([
+      { key: "prixSignal", name: "Prix d'achat", style: "line" },
+      { key: "stop", name: "Stop suiveur", style: "line" },
+    ]);
+    expect(ATR_STOP_PERIODE).toBe(14);
     // L'OI enrichit la couche flux sans jamais conditionner AXIS : facultative, jamais requise
     // (une série `aux` rendrait AXIS inutilisable hors perp USDT et l'écarterait des alertes).
     expect(stratAxis.auxFacultatives).toEqual(["oi"]);
@@ -676,5 +686,287 @@ describe("stratAxis — infobulles par unité de temps (test du 8 octobre 2026)"
       return [r.series, r.annotations?.labels, r.annotations?.marqueurs?.map(({ info: _info, ...m }) => m)];
     };
     for (const tf of ["1s", "1h", "1w", "1M", "5s"] as const) expect(sansTextes(tf)).toEqual(sansTextes(undefined));
+  });
+});
+
+describe("stop suiveur (v3)", () => {
+  const haut = (n: number): boolean[] => new Array(n).fill(true);
+  const SUFFIXE_3 = " ; stop suiveur 3 × ATR 14 : non mesuré (test du 8 octobre 2026 en cours)";
+  const u: undefined = undefined;
+
+  describe("stopAtr 0 : la v2 exacte", () => {
+    it("fixture dorée : positions identiques à positionsAxis, stop entièrement indéfini", () => {
+      const score = votesAxis(candles, DEFAUTS).map((v) => v?.reduce((a, b) => a + b, 0));
+      const closes = closeOf(candles);
+      const atr = rma(trueRange(candles), ATR_STOP_PERIODE);
+      for (const periode of [50, 200]) {
+        const auDessus = ema(closes, periode).map((t, i) => (t === undefined ? undefined : closes[i]! > t));
+        const v3 = positionsStopAxis(score, auDessus, closes, atr, 5, 4, candles.length - 2, 0);
+        expect(v3.pos).toEqual(positionsAxis(score, auDessus, 5, 4, candles.length - 2));
+        expect(v3.stop.every((s) => s === undefined)).toBe(true);
+        expect(v3.raisons.size).toBe(periode === 50 ? 2 : 0);
+        expect([...v3.raisons.values()].every((r) => r === "score")).toBe(true);
+      }
+    });
+
+    it("20 séries aléatoires à graine (scores indéfinis, tendance indéfinie, fin < n−1) : positions identiques", () => {
+      // mulberry32 : générateur déterministe, le même que les campagnes.
+      const alea = (graine: number) => () => {
+        graine = (graine + 0x6d2b79f5) | 0;
+        let t = Math.imul(graine ^ (graine >>> 15), 1 | graine);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+      for (let g = 1; g <= 20; g++) {
+        const r = alea(20261008 + g);
+        const n = 200 + Math.floor(r() * 300);
+        const score = Array.from({ length: n }, () => (r() < 0.1 ? undefined : Math.round(r() * 12) - 6));
+        const auDessus = Array.from({ length: n }, () => (r() < 0.1 ? undefined : r() < 0.6));
+        const closes = Array.from({ length: n }, () => 50 + r() * 100);
+        const atr = Array.from({ length: n }, (_v, i) => (i < 14 ? undefined : 1 + r() * 5));
+        const fin = n - 2 - Math.floor(r() * 5);
+        const v3 = positionsStopAxis(score, auDessus, closes, atr, 5, 4, fin, 0);
+        expect(v3.pos, `graine ${g}`).toEqual(positionsAxis(score, auDessus, 5, 4, fin));
+        expect(v3.stop.every((s) => s === undefined), `graine ${g}`).toBe(true);
+        // Toute sortie est un passage 1 → 0, par score.
+        for (const [i, raison] of v3.raisons) {
+          expect(raison).toBe("score");
+          expect([v3.pos[i - 1], v3.pos[i]]).toEqual([1, 0]);
+        }
+      }
+    });
+
+    it("scores indéfinis au milieu, fin : mêmes reports que positionsAxis", () => {
+      const score = [undefined, 3, 5, undefined, undefined, -6, -6, 2, 5, undefined, 0];
+      const closes = score.map((_s, i) => 100 + i);
+      const atr = score.map(() => 2);
+      const v3 = positionsStopAxis(score, haut(11), closes, atr, 5, 4, 8, 0);
+      expect(v3.pos).toEqual(positionsAxis(score, haut(11), 5, 4, 8));
+      expect(v3.pos).toEqual([undefined, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1]);
+      expect(v3.stop.every((s) => s === undefined)).toBe(true);
+    });
+
+    it("chart : le paramètre explicite 0 et son absence donnent le même résultat, série stop vide", () => {
+      for (const params of [EMA50, {}, { ...EMA50, seuil: 4 }, { ...EMA50, filtreFlux: true }]) {
+        const implicite = computeIndicator(stratAxis, candles, params);
+        expect(computeIndicator(stratAxis, candles, { ...params, stopAtr: 0 })).toEqual(implicite);
+        expect(implicite.series.stop).toHaveLength(candles.length);
+        expect(implicite.series.stop?.every((s) => s === undefined)).toBe(true);
+      }
+      // Les textes 4h ne mentionnent pas le stop.
+      const res = computeIndicator(stratAxis, candles, EMA50);
+      expect(res.annotations?.marqueurs?.every((m) => !m.info?.includes("stop"))).toBe(true);
+      expect(res.annotations?.labels?.map((l) => l.texte)).toEqual(["Achat", "Vente -0.50 %", "Achat", "Vente -1.86 %", "Achat"]);
+    });
+  });
+
+  describe("mécanique sur une série construite", () => {
+    // seuil 5, vente ≤ −4, stop 2 × ATR. Entrée à 1 (close 100, ATR 5 → niveau 90) ; le plus
+    // haut close 104 (i=2) porte le niveau à 94 ; il n'y redescend ni quand le close recule
+    // (i=3) ni quand l'ATR grandit (i=4) ; i=5 : close = niveau, pas de sortie ; i=6 : close
+    // 93,9 < 94 → stop. 7-8 : achat vrai mais désarmé ; 9 : achat faux → armé ; 10 : entrée
+    // (niveau 92) ; 11 : score −4 ET close 80 < 92 → raison « score », réarmé aussitôt ;
+    // 12 : réentrée (niveau 81) ; 13 : score indéfini → reporté ; 14 : niveau 88.
+    const score = [3, 5, 4, 2, 1, 2, 2, 6, 6, 3, 5, -4, 5, undefined, 1, -6];
+    const closes = [99, 100, 104, 102, 103, 94, 93.9, 95, 96, 95, 96, 80, 85, 86, 90, 10];
+    const atr = [5, 5, 5, 5, 8, 8, 8, 2, 2, 2, 2, 2, 2, 2, 1, 1];
+    const v3 = positionsStopAxis(score, haut(16), closes, atr, 5, 4, 14, 2);
+
+    it("niveau initial = close − k × ATR, cliquet, sortie à la première clôture strictement sous le niveau précédent", () => {
+      expect(v3.pos).toEqual([0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1]);
+      expect(v3.stop).toEqual([undefined, 90, 94, 94, 94, 94, undefined, undefined, undefined, undefined, 92, undefined, 81, 81, 88, 88]);
+      expect([...v3.raisons]).toEqual([[6, "stop"], [11, "score"]]);
+    });
+
+    it("réarmement après un stop : pas de réachat tant que la condition d'achat n'est pas redevenue fausse", () => {
+      expect(v3.pos.slice(7, 11)).toEqual([0, 0, 0, 1]);
+      // Sans la bougie 9 (achat faux), l'achat n'aurait jamais lieu.
+      const sansRepit = positionsStopAxis(score.map((s, i) => (i === 9 ? 6 : s)), haut(16), closes, atr, 5, 4, 14, 2);
+      expect(sansRepit.pos.slice(6, 11)).toEqual([0, 0, 0, 0, 0]);
+    });
+
+    it("coexistence : score ≤ −seuilVente et close < stop à la même bougie → raison « score », réentrée dès la bougie suivante", () => {
+      expect(closes[11]).toBeLessThan(v3.stop[10]!);
+      expect(v3.raisons.get(11)).toBe("score");
+      expect(v3.pos[12]).toBe(1);
+      // Le même close sans retournement du score sort par stop et exige le réarmement.
+      const parStop = positionsStopAxis(score.map((s, i) => (i === 11 ? 0 : s)), haut(16), closes, atr, 5, 4, 14, 2);
+      expect(parStop.raisons.get(11)).toBe("stop");
+      expect(parStop.pos[12]).toBe(0);
+    });
+
+    it("après `fin`, la position et le niveau en vigueur sont reportés, jamais décidés", () => {
+      expect(score[15]).toBe(-6);
+      expect(v3.pos[15]).toBe(1);
+      expect(v3.stop[15]).toBe(88);
+    });
+
+    it("ATR indéfini à l'entrée : aucun niveau tant qu'il manque, le stop prend quand il apparaît", () => {
+      const tardif = positionsStopAxis([3, 5, 2, 2, 2], haut(5), [100, 100, 60, 100, 97], [undefined, undefined, undefined, 1, 1], 5, 4, 4, 2);
+      expect(tardif.pos).toEqual([0, 1, 1, 1, 0]);
+      expect(tardif.stop).toEqual([undefined, undefined, undefined, 98, undefined]);
+      expect(tardif.raisons.get(4)).toBe("stop");
+    });
+
+    it("exemple du manifeste à 3 × ATR : niveau à l'entrée, relevé par le plus haut close, franchi", () => {
+      const v = positionsStopAxis([3, 5, 2, 2], haut(4), [100, 100, 105, 90.9], [1, 1, 1, 1], 5, 4, 3, 3);
+      expect(v.stop).toEqual([undefined, 97, 102, undefined]);
+      expect(v.pos).toEqual([0, 1, 1, 0]);
+    });
+  });
+
+  describe("fixture dorée avec stopAtr 3 (EMA de tendance 50)", () => {
+    const res = computeIndicator(stratAxis, candles, { ...EMA50, stopAtr: 3 });
+    const stop = res.series.stop ?? [];
+    const prixSignal = res.series.prixSignal ?? [];
+
+    it("signaux : la vente 139 devient un stop à 137 ; les ▲ ne changent pas ; alternance", () => {
+      expect(resume(candles, { ...EMA50, stopAtr: 3 })).toBe("60▲ 88▼ 107▲ 137▼ 280▲");
+      expect(res.annotations?.labels?.map((l) => l.texte)).toEqual(["Achat", "Vente -0.50 %", "Achat", "Stop fort -0.78 %", "Achat"]);
+      expect((candles[137]!.close / candles[107]!.close - 1) * 100).toBeCloseTo(-0.78, 2);
+      const formes = res.annotations?.marqueurs?.map((m) => m.forme) ?? [];
+      formes.forEach((f, k) => expect(f).toBe(k % 2 === 0 ? "triangleHaut" : "triangleBas"));
+    });
+
+    it("▼ par stop : étiquette « Stop », infobulle nommant le niveau franchi (stop de la bougie précédente)", () => {
+      const m = res.annotations?.marqueurs?.find((x) => x.idx === 137);
+      expect(stop[136]).toBeCloseTo(61016.78, 2);
+      expect(candles[137]!.close).toBeLessThan(stop[136]!);
+      expect(candles[136]!.close).toBeGreaterThanOrEqual(stop[135]!);
+      expect(m).toEqual({
+        idx: 137, valeur: candles[137]!.high, forme: "triangleBas", couleur: "--down", cible: "prix",
+        info:
+          "AXIS stop fort — score -2/6 : EMA 20/50 ▲, Supertrend ▲, DMI ▼, MACD ▼, RSI ▼, CMF ▼ ; " +
+          "close sous le stop suiveur (61016.78) ; -0.78 % depuis l'achat (hors frais) ; " +
+          `${fluxVolume("fort", "1.6")} — ${RESERVE}${SUFFIXE_3}`,
+      });
+      expect(res.annotations?.labels?.[3]).toEqual({
+        idx: 137, valeur: candles[137]!.high, texte: "Stop fort -0.78 %", couleur: "--down", cible: "prix", position: "dessus",
+      });
+      // La vente par score garde ses textes, le suffixe du stop en plus.
+      const vente = res.annotations?.marqueurs?.find((x) => x.idx === 88);
+      expect(vente?.info).toBe(
+        "AXIS vente — score -4/6 : EMA 20/50 ▲, Supertrend ▼, DMI ▼, MACD ▼, RSI ▼, CMF ▼ ; -0.50 % depuis l'achat (hors frais) ; " +
+          `${fluxVolume("ordinaire", "1.1")} — ${RESERVE}${SUFFIXE_3}`
+      );
+      expect(res.annotations?.marqueurs?.[0]?.info?.endsWith(`close au-dessus de l'EMA 50 ; ${fluxVolume("ordinaire", "1.4")} — ${RESERVE}${SUFFIXE_3}`)).toBe(true);
+    });
+
+    it("série stop : définie exactement pendant les positions (sauf la bougie de sortie), ≤ close à l'entrée, jamais décroissante", () => {
+      const atr = rma(trueRange(candles), ATR_STOP_PERIODE);
+      const positions: Array<[de: number, a: number]> = [[60, 87], [107, 136], [280, 299]];
+      const attendu = new Array(candles.length).fill(false);
+      for (const [de, a] of positions) for (let i = de; i <= a; i++) attendu[i] = true;
+      expect(stop.map((s) => s !== undefined)).toEqual(attendu);
+      expect(prixSignal.map((p) => p !== undefined)).toEqual(attendu);
+      for (const [de, a] of positions) {
+        expect(stop[de]).toBeCloseTo(candles[de]!.close - 3 * atr[de]!, 8);
+        expect(stop[de]!).toBeLessThanOrEqual(candles[de]!.close);
+        let plusHaut = candles[de]!.close;
+        for (let i = de + 1; i <= a; i++) {
+          expect(stop[i]!, `i=${i}`).toBeGreaterThanOrEqual(stop[i - 1]!);
+          plusHaut = Math.max(plusHaut, candles[i]!.close);
+          // La dernière bougie (en formation, > fin) reporte le niveau sans le recalculer.
+          expect(stop[i]!, `i=${i}`).toBeCloseTo(i === candles.length - 1 ? stop[i - 1]! : Math.max(stop[i - 1]!, plusHaut - 3 * atr[i]!), 8);
+        }
+      }
+      expect(stop[60]).toBeCloseTo(59203.7047, 3);
+    });
+
+    it("stopAtr 1 : dix signaux, toutes les sorties par stop, réentrée après réarmement", () => {
+      expect(resume(candles, { ...EMA50, stopAtr: 1 })).toBe("60▲ 62▼ 70▲ 78▼ 107▲ 113▼ 123▲ 132▼ 280▲ 291▼");
+      const r = computeIndicator(stratAxis, candles, { ...EMA50, stopAtr: 1 });
+      const ventes = (r.annotations?.marqueurs ?? []).filter((m) => m.forme === "triangleBas");
+      expect(ventes.every((m) => m.info?.startsWith("AXIS stop") && m.info.includes("close sous le stop suiveur ("))).toBe(true);
+      expect(r.annotations?.labels?.filter((l) => l.position === "dessus").map((l) => l.texte.split(" ")[0])).toEqual(new Array(5).fill("Stop"));
+      // Score positif à la sortie : signe affiché, comme pour les achats.
+      expect(ventes[0]?.info?.startsWith("AXIS stop — score +2/6")).toBe(true);
+      expect(ventes[0]?.info).toContain(" ; stop suiveur 1 × ATR 14 : non mesuré (test du 8 octobre 2026 en cours)");
+      // Le niveau nommé est celui de la bougie précédente, même quand le cliquet vient de monter (113).
+      const stop = r.series.stop ?? [];
+      expect(stop[111]).toBeCloseTo(61377.68, 2);
+      expect(stop[112]).toBeCloseTo(61596.04, 2);
+      for (const m of ventes) expect(m.info, `idx ${m.idx}`).toContain(`close sous le stop suiveur (${stop[m.idx - 1]!.toFixed(2)})`);
+    });
+
+    it("filtre flux et stop : la réserve du filtre garde la priorité, le texte du stop s'y ajoute", () => {
+      const r = computeIndicator(stratAxis, candles, { ...EMA50, filtreFlux: true, stopAtr: 3 });
+      expect(r.annotations?.marqueurs?.[0]?.info?.endsWith(` — ${RESERVE_FILTRE}${SUFFIXE_3}`)).toBe(true);
+      expect(r.annotations?.marqueurs?.[0]?.info).not.toContain(RESERVE);
+    });
+
+    it("recoupement : la série stop du chart est celle de positionsStopAxis sur les séries exportées", () => {
+      const score = votesAxis(candles, DEFAUTS).map((v) => v?.reduce((a, b) => a + b, 0));
+      const closes = closeOf(candles);
+      const auDessus = ema(closes, 50).map((t, i) => (t === undefined ? undefined : closes[i]! > t));
+      const direct = positionsStopAxis(score, auDessus, closes, rma(trueRange(candles), 14), 5, 4, candles.length - 2, 3);
+      expect(stop).toEqual(direct.stop);
+      expect(prixSignal.map((p) => (p === undefined ? 0 : 1))).toEqual(direct.pos.map((p) => (p === 1 ? 1 : 0)));
+      expect([...direct.raisons]).toEqual([[88, "score"], [137, "stop"]]);
+    });
+  });
+
+  describe("anti-repaint et causalité avec stopAtr 3", () => {
+    const params = { ...EMA50, stopAtr: 3 };
+    const res = computeIndicator(stratAxis, candles, params);
+
+    it("la dernière bougie ne décide jamais : ni le stop de 137 ni l'achat de 107", () => {
+      const enFormation = computeIndicator(stratAxis, candles.slice(0, 138), params);
+      expect(enFormation.annotations?.marqueurs?.map((m) => m.idx)).toEqual([60, 88, 107]);
+      expect(enFormation.series.prixSignal?.[137]).toBe(candles[107]!.close);
+      // Le niveau en vigueur est reporté sur la bougie en formation (ligne continue).
+      expect(enFormation.series.stop?.[137]).toBe(enFormation.series.stop?.[136]);
+      const confirme = computeIndicator(stratAxis, candles.slice(0, 139), params);
+      expect(confirme.annotations?.marqueurs?.map((m) => m.idx)).toEqual([60, 88, 107, 137]);
+      expect(confirme.series.stop?.slice(136)).toEqual([res.series.stop?.[136], undefined, undefined]);
+    });
+
+    it("un préfixe ou un futur altéré ne change jamais le passé (positions, stop, marqueurs)", () => {
+      const complet = res.series;
+      const marqueurs = res.annotations?.marqueurs ?? [];
+      for (const k of [60, 88, 120, 137, 253, 280]) {
+        const prefixe = computeIndicator(stratAxis, candles.slice(0, k + 1), params);
+        expect(prefixe.series.prixSignal?.slice(0, k), `préfixe ${k}`).toEqual(complet.prixSignal?.slice(0, k));
+        expect(prefixe.series.stop?.slice(0, k), `préfixe ${k}`).toEqual(complet.stop?.slice(0, k));
+        expect(prefixe.annotations?.marqueurs ?? []).toEqual(marqueurs.filter((m) => m.idx < k));
+        const alterees = candles.map((c, i) => (i <= k ? c : { ...c, high: 1e12 + i, low: 1, close: 1e12 - i, volume: 1e12 }));
+        const futur = computeIndicator(stratAxis, alterees, params);
+        expect(futur.series.prixSignal?.slice(0, k + 1), `futur ${k}`).toEqual(complet.prixSignal?.slice(0, k + 1));
+        expect(futur.series.stop?.slice(0, k + 1), `futur ${k}`).toEqual(complet.stop?.slice(0, k + 1));
+        expect((futur.annotations?.marqueurs ?? []).filter((m) => m.idx <= k)).toEqual(marqueurs.filter((m) => m.idx <= k));
+      }
+    });
+  });
+
+  describe("textesAxis(u, stopAtr)", () => {
+    it("stopAtr 0 : identique à l'appel à un argument, dans toutes les unités", () => {
+      for (const tf of [u, "4h", "1h", "1d", "1w", "3M", "15s"] as const) expect(textesAxis(tf, 0)).toEqual(textesAxis(tf));
+    });
+
+    it("stopAtr 3 : texte de base de l'unité + suffixe d'attente ; fortAchat, forteVente, qualification inchangés", () => {
+      expect(textesAxis(u, 3)).toEqual({
+        signaux: `${RESERVE}${SUFFIXE_3}`, fortAchat: MESURE_FORT_ACHAT, forteVente: MESURE_FORTE_VENTE, qualification: QUALIFICATION,
+      });
+      expect(textesAxis("4h", 3)).toEqual(textesAxis(u, 3));
+      expect(textesAxis("1h", 3)).toEqual({
+        ...textesAxis("1h"),
+        signaux:
+          "en 1h : test échoué sur données jamais vues (42 alts, oct. 2023-oct. 2026) — expectancy nette ≤ 0 aux coûts x1 ou x3, " +
+          "timing non significatif, PnL positif sur 21/42 actifs seulement, expectancy négative sur une moitié de la période ; " +
+          "expectancy nette +0.06 % par trade (coûts x1), timing p = 0.4804 — lecture indicative, pas un signal validé" +
+          SUFFIXE_3,
+      });
+      expect(textesAxis("3M", 3).signaux).toBe(
+        "en 3M : non mesuré (historique trop court pour l'EMA 200 et l'amorce) — lecture indicative, jamais une promesse" + SUFFIXE_3
+      );
+      // Multiplicateur sans zéro inutile.
+      expect(textesAxis(u, 2.5).signaux).toBe(`${RESERVE} ; stop suiveur 2.5 × ATR 14 : non mesuré (test du 8 octobre 2026 en cours)`);
+      expect(textesAxis(u, 4).signaux.endsWith("stop suiveur 4 × ATR 14 : non mesuré (test du 8 octobre 2026 en cours)")).toBe(true);
+    });
+
+    it("le chart transmet le réglage : infobulle 1h avec stop 3", () => {
+      const r = computeIndicator(stratAxis, candles, { ...EMA50, stopAtr: 3 }, undefined, "1h");
+      expect(r.annotations?.marqueurs?.[0]?.info?.endsWith(`non mesurée en 1h) — ${textesAxis("1h", 3).signaux}`)).toBe(true);
+    });
   });
 });

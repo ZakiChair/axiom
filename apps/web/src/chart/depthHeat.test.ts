@@ -363,3 +363,34 @@ describe("demarrerDepthHeat (contrôleur — souscrireDepth mocké, pas de WS r�
     expect(subDepthSpy).toHaveBeenCalledTimes(1); // pas doublé par le second appel
   });
 });
+
+describe("chargement différé — module évalué alors que la bascule est DÉJÀ active", () => {
+  // Le store de bascule (`depthHeatBascule`) vit sur le chemin initial : BOOK peut être
+  // activée avant que l'import() de `depthHeat` n'aboutisse. Instances NEUVES des modules
+  // (vi.resetModules) pour rejouer cette évaluation tardive ; les vi.mock restent en place.
+  // Dernier describe du fichier : les imports statiques ci-dessus gardent leurs anciennes
+  // instances, seuls les import() de ce test voient les neuves.
+  it("demarrerDepthHeat() aligne l'abonnement au démarrage (sync initial)", async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    subDepthSpy.mockClear();
+    unsubDepthSpy.mockClear();
+    try {
+      const { depthHeatStore: bascule } = await import("./depthHeatBascule");
+      const { marketStore: marche } = await import("../store/market");
+      marche.getState().setSymbol("BTCUSDT");
+      bascule.getState().basculer(); // ON avant toute évaluation de depthHeat
+      expect(subDepthSpy).not.toHaveBeenCalled();
+
+      const differe = await import("./depthHeat");
+      expect(differe.depthHeatStore).toBe(bascule); // même store, ré-exporté
+      expect(subDepthSpy).toHaveBeenCalledTimes(1);
+      expect(subDepthSpy).toHaveBeenCalledWith("BTCUSDT", expect.any(Function));
+
+      bascule.getState().basculer(); // OFF : désabonne et coupe l'échantillonnage
+      expect(unsubDepthSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

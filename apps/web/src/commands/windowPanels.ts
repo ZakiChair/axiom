@@ -9,7 +9,8 @@
  * Les fenêtres dont le store est déjà dans `store/*.ts` (ECO, NEWS, DOM…) gardent
  * leurs commandes exportées depuis ces modules — sauf BT (`commandesBacktest`), EQS
  * (`commandesScreener`) et SIG (`commandesSignaux`), en fin de fichier, dont le store ne
- * sert qu'une fois la fenêtre montée.
+ * sert qu'une fois la fenêtre montée ; même logique pour les couches du chart chargées au
+ * premier usage (MARKS, WHALE, BOOK).
  */
 import type { Commande } from "./registry";
 import { cryptoquantUiStore, ENTREES_CQ, type CibleCq } from "../store/cryptoquantUi";
@@ -761,6 +762,30 @@ export const commandesWhaleBubbles: Commande[] = [
       void import("../chart/whaleBubbles")
         .then(({ whaleBubblesStore }) => whaleBubblesStore.getState().basculer())
         .catch((erreur: unknown) => console.warn("[AXIOM] WHALE : bulles de prints non chargées", erreur));
+    },
+  },
+];
+
+/**
+ * BOOK — commande rapatriée de `chart/depthHeat.ts` : ce module (échantillonnage du carnet
+ * via `data/depth`, contrôleur canvas, `rampesHeat`) ne sert qu'une fois la heatmap activée
+ * et reste hors du chargement initial (garde-fou : chargementInitial.test.ts) ; seul son
+ * store de bascule (`chart/depthHeatBascule`) y demeure, écouté par ChartInstance. Le module
+ * démarre son contrôleur de souscription à l'import ; le premier appel le charge puis
+ * bascule, les suivants ne font que basculer (module déjà évalué).
+ */
+export const commandesDepthHeat: Commande[] = [
+  {
+    id: "action:depth-heat",
+    mnemonique: "BOOK",
+    libelle: "Heatmap de liquidité du carnet (chart) — activer / désactiver",
+    categorie: "action",
+    motsCles: ["book", "carnet", "orderbook", "liquidite", "depth", "heatmap", "bookmap", "chart"],
+    apercu: "Superpose la trace temps × prix de la liquidité du carnet d'ordres (style Bookmap)",
+    action: () => {
+      void import("../chart/depthHeat")
+        .then(({ depthHeatStore }) => depthHeatStore.getState().basculer())
+        .catch((erreur: unknown) => console.warn("[AXIOM] BOOK : heatmap du carnet non chargée", erreur));
     },
   },
 ];

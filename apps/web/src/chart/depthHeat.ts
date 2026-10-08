@@ -13,14 +13,16 @@
  * relève les petits ordres face aux murs massifs.
  *
  * Toutes les fonctions d'accumulation/grille ci-dessus sont PURES (aucun accès DOM/
- * store/chart) et testées (depthHeat.test.ts). Le store de bascule + contrôleur de
- * souscription (ci-dessous, co-localisés — modèle `liquidationMarkers.ts`) exposent
- * `depthHeatStore`/`lireColonnes`/`demarrerDepthHeat` ; le buffer de colonnes vit en
- * variable MODULE (jamais dans le store Zustand, cf. invariant `store/orderflow.ts:6-8`).
- * Le contrôleur canvas (Task 4) consomme ces exports mais n'est pas dans ce module.
+ * store/chart) et testées (depthHeat.test.ts). Le contrôleur de souscription (ci-dessous,
+ * modèle `liquidationMarkers.ts`) expose `lireColonnes`/`demarrerDepthHeat` ; le buffer de
+ * colonnes vit en variable MODULE (jamais dans le store Zustand, cf. invariant
+ * `store/orderflow.ts:6-8`). Le contrôleur canvas (en fin de fichier) consomme ces exports.
+ *
+ * MODULE DIFFÉRÉ (garde-fou : chargementInitial.test.ts) : seul le store de bascule
+ * (`./depthHeatBascule`, ré-exporté ici) reste sur le chemin initial ; la commande BOOK
+ * (commands/windowPanels) et ChartInstance chargent ce module par `import()` à la première
+ * activation — `data/depth` et `rampesHeat` sortent ainsi du chunk d'entrée.
  */
-import { createStore } from "zustand/vanilla";
-import type { StoreApi } from "zustand/vanilla";
 import { ActionType, DomPosition } from "klinecharts";
 import type { Chart } from "klinecharts";
 import type { ExchangeId, Unsubscribe } from "@axiom/types";
@@ -29,7 +31,9 @@ import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 import { couleurRampeArrets, estFondClair, rampePourTheme } from "./rampesHeat";
-import type { Commande } from "../commands/registry";
+import { depthHeatStore } from "./depthHeatBascule";
+
+export { depthHeatStore, type DepthHeatState } from "./depthHeatBascule";
 
 /** Nombre de niveaux agrégés conservés PAR CÔTÉ (bid/ask) dans chaque colonne. Convention
  *  reprise de `pasArrondi` (vise ~20 niveaux couvrant ~1 % autour du mid) et de
@@ -151,24 +155,6 @@ export function intensiteLogDepth(qty: number, qtyMax: number): number {
   return t < 0 ? 0 : t > 1 ? 1 : t;
 }
 
-// ─────────────────────────── Bascule (store vanilla local) ───────────────────────────
-
-/** État du store de bascule : PAS de données tick ici (invariant `store/orderflow.ts:6-8`)
- *  — seuls `actif` et `rev` (compteur de révision, bumpé au plus 1×/s par l'échantillonnage,
- *  ou immédiatement lors d'un (ré)abonnement/reset). Le buffer de colonnes vit à part,
- *  en variable module (cf. `lireColonnes`). */
-export interface DepthHeatState {
-  actif: boolean;
-  rev: number;
-  basculer: () => void;
-}
-
-export const depthHeatStore: StoreApi<DepthHeatState> = createStore<DepthHeatState>((set, get) => ({
-  actif: false,
-  rev: 0,
-  basculer: () => set({ actif: !get().actif }),
-}));
-
 // ─────────────────────────── Contrôleur de souscription (données uniquement) ───────────────────────────
 
 /** Buffer FIFO des colonnes échantillonnées du symbole abonné (hors store, cf. tête de fichier). */
@@ -272,10 +258,10 @@ let controllerStarted = false;
 
 /**
  * Démarre le contrôleur (idempotent). S'abonne à `marketStore` (symbole) et à
- * `depthHeatStore` (actif) pour réaligner l'abonnement WS + l'échantillonnage via `sync()`.
- * Appelé à l'IMPORT du module (cf. auto-démarrage en bas de fichier, modèle
- * `demarrerTradeMarkers`) : idempotent, donc sans risque si le contrôleur canvas (Task 4)
- * le rappelle aussi à son montage.
+ * `depthHeatStore` (actif) pour réaligner l'abonnement WS + l'échantillonnage via `sync()`,
+ * puis aligne une première fois : le module étant chargé à la demande, `actif` peut déjà
+ * valoir `true` à son évaluation (bascule posée avant que l'`import()` n'aboutisse).
+ * Appelé à l'IMPORT du module (cf. auto-démarrage ci-dessous, modèle `demarrerTradeMarkers`).
  */
 export function demarrerDepthHeat(): void {
   if (controllerStarted) return;
@@ -303,26 +289,13 @@ export function demarrerDepthHeat(): void {
       sync();
     }
   });
+
+  sync();
 }
 
-// ─────────────────────────── Commande de palette (enregistrée par l'intégrateur) ───────────────────────────
-
-/** Commande à greffer dans la palette (via `enregistrerCommandes`), cf. modèle `tradeMarkers.ts`. */
-export const commandes: Commande[] = [
-  {
-    id: "action:depth-heat",
-    mnemonique: "BOOK",
-    libelle: "Heatmap de liquidité du carnet (chart) — activer / désactiver",
-    categorie: "action",
-    motsCles: ["book", "carnet", "orderbook", "liquidite", "depth", "heatmap", "bookmap", "chart"],
-    apercu: "Superpose la trace temps × prix de la liquidité du carnet d'ordres (style Bookmap)",
-    action: () => depthHeatStore.getState().basculer(),
-  },
-];
-
-// Auto-démarrage à l'import (l'intégrateur importe `commandes` → déclenche cet effet, cf.
-// modèle `tradeMarkers.ts` : sans cet appel, la commande basculerait un store que personne
-// n'écoute côté données — aucune souscription ne serait jamais ouverte).
+// Auto-démarrage à l'import (modèle `tradeMarkers.ts`) : la commande BOOK et ChartInstance
+// n'ont qu'à charger le module — sans cet appel, la bascule ne serait écoutée par personne
+// côté données et aucune souscription ne serait jamais ouverte.
 demarrerDepthHeat();
 
 // ─────────────────────────── Contrôleur canvas (non testé — couplage KLineChart) ───────────────────────────

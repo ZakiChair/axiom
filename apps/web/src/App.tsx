@@ -31,9 +31,6 @@ import { commandes as portfolioCommands } from "./store/portfolio";
 import { commandes as notesCommands } from "./store/notes";
 import { commandes as derivChartCommands } from "./store/derivatives-chart";
 import { commandes as liqMarksCommands } from "./chart/liquidationMarkers";
-// Heatmap de liquidité du carnet (BOOK) : l'import démarre aussi l'accumulation
-// (effet de bord d'import).
-import { commandes as depthHeatCommands } from "./chart/depthHeat";
 // Niveaux clés du chart maître : bascule persistée + familles (code des sources chargé à la demande).
 import { commandesNiveauxOverlays } from "./chart/niveauxOverlays";
 // Niveaux de liquidation ESTIMÉS (modèle levier sur l'OI) — l'import démarre le fetch OI
@@ -50,6 +47,7 @@ import { commandesOnboarding, onboardingStore } from "./store/onboarding";
 import { commandesPlaybooks } from "./data/playbooks";
 import {
   commandesBacktest,
+  commandesDepthHeat,
   commandesScreener,
   commandesSignaux,
   commandesTradeMarkers,
@@ -119,7 +117,8 @@ enregistrerCommandes([
   ...hlLiqCommands,
   // WHALE : bulles de prints, contrôleur chargé au premier usage (cf. commands/windowPanels.ts).
   ...commandesWhaleBubbles,
-  ...depthHeatCommands,
+  // BOOK : heatmap du carnet, module chargé au premier usage (cf. commands/windowPanels.ts).
+  ...commandesDepthHeat,
   ...commandesNiveauxOverlays,
   // Fenêtres Phase 4 (DOM/BT/REPLAY) + grille multi-chart.
   ...domCommands,

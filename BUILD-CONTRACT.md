@@ -1571,7 +1571,10 @@ dépendance ni ordre réel. Deux changements de `@axiom/types` :
   avant) ; les marqueurs éco sont chargés avec EcoWindow, seule à les activer.
   `store/screener`, `chart/whaleBubbles`, `chart/tradeMarkers` et
   `chart/ecoMarkers` rejoignent les modules différés de
-  `chargementInitial.test.ts`.
+  `chargementInitial.test.ts`. BOOK suit le même modèle : seul le store de bascule
+  (`chart/depthHeatBascule`) reste au démarrage, `chart/depthHeat` (avec `data/depth` et
+  `chart/rampesHeat`) est chargé par `import()` à la première activation — par la commande
+  comme par ChartInstance, qui construit le contrôleur canvas à l'arrivée du module.
 
 Validation : `pnpm -r typecheck` réussi ; vitest indicateurs 970 tests (dont 43
 pour AXIS ; mutations du calcul détectées), alertes 122, backtest 129, pacte

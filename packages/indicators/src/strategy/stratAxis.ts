@@ -92,10 +92,34 @@
  * le statut de l'unité du chart (`ctx.timeframe`) ; en 4h ou sans unité
  * (alertes, screener), elle garde les formulations des tests 4h. Mesures
  * passées, jamais une promesse.
+ *
+ * STOP SUIVEUR (v3, 8 octobre 2026). La v2 tient une position jusqu'au
+ * retournement franc de la confluence, sans stop (drawdowns de 10 % du capital
+ * en médiane sur les 8 grandes cryptos vues, 46 % sur DOGE). La v3 ajoute une
+ * sortie : à l'entrée, niveau = close − stopAtr × ATR 14 (rma du true range) ;
+ * à chaque clôture tenue, niveau = max(niveau précédent, plus haut close depuis
+ * l'entrée − stopAtr × ATR 14) — un cliquet, le niveau ne descend jamais ;
+ * à la clôture de la bougie i, close < niveau en vigueur (fixé sur les bougies
+ * ≤ i−1) → position 0, sortie « stop ». La sortie par score (≤ −seuilVente)
+ * reste lue ; si les deux sont vraies à la même bougie, la raison est « score ».
+ * Après une sortie par stop, la condition d'achat doit redevenir fausse une
+ * fois avant un nouvel achat (même armement qu'au début de série : sans cela,
+ * une confluence encore ≥ seuil rachèterait dès la bougie suivante le titre
+ * que le stop vient de couper) ; après une sortie par score, réentrée possible
+ * dès la bougie suivante, comme en v2. Les ▲ ne changent pas. Sortie « stop »
+ * à l'échelle prix : niveau en vigueur après chaque clôture tenue, absente à
+ * plat, à la bougie de sortie et sans stop. Une sortie par stop est un ▼
+ * étiqueté « Stop ±x % » (au lieu de « Vente ») dont l'infobulle nomme le
+ * niveau franchi. Réglage `stopAtr` (× ATR 14) ; 0 = sans stop, la v2 exacte
+ * (positions identiques à `positionsAxis`). Au figeage, le défaut du chart est
+ * 0 : le multiplicateur 3 vient d'une exploration sur données déjà vues
+ * (scripts/explorer-axis-v3.ts), et le test sur données jamais vues est en
+ * cours (scripts/axis/manifeste-v3-2026-10-08.json) ; l'infobulle d'un stop
+ * actif le dit. Le défaut et les textes suivront le verdict.
  */
 
 import type { Candle, IndicatorDef, LabelAnnotation, MarqueurAnnotation, Timeframe } from "@axiom/types";
-import { closeOf, ema, sma, volOf } from "../utils";
+import { closeOf, ema, rma, sma, trueRange, volOf } from "../utils";
 import { MAX_LABELS_SORTIE } from "../utils-fabrique-strategie";
 import { rsiOf } from "../momentum/rsi";
 import { adxOf } from "../trend/adx";
@@ -111,6 +135,8 @@ export const MAX_GROS_AXIS = 60;
 export const MAX_LABELS_GROS = 3;
 /** Part du volume que le delta taker doit atteindre pour donner un sens. */
 export const SEUIL_DELTA_AXIS = 0.1;
+/** Période de l'ATR du stop suiveur (Wilder, comme l'ADX et le RSI du score). */
+export const ATR_STOP_PERIODE = 14;
 
 const signe = (a: number, b: number): number => (a > b ? 1 : a < b ? -1 : 0);
 
@@ -201,6 +227,84 @@ export function positionsAxis(
     }
     return pos;
   });
+}
+
+/** Raison d'une sortie : retournement du score (v2) ou close sous le stop suiveur (v3). */
+export type RaisonSortieAxis = "score" | "stop";
+
+/**
+ * Positions de la v3 : entrées de `positionsAxis`, sorties par score OU par stop
+ * suiveur à cliquet (plus haut close depuis l'entrée − stopAtr × ATR). `pos` comme
+ * `positionsAxis` ; `stop` : niveau en vigueur après chaque clôture tenue (absent à
+ * plat, à la bougie de sortie, sans stop) ; `raisons` : bougie de sortie → raison.
+ * Avec stopAtr = 0, `pos` est strictement celle de `positionsAxis`. PURE.
+ */
+export function positionsStopAxis(
+  score: Array<number | undefined>,
+  auDessus: Array<boolean | undefined>,
+  closes: number[],
+  atr: Array<number | undefined>,
+  seuil: number,
+  seuilVente: number,
+  fin: number,
+  stopAtr: number
+): { pos: Array<number | undefined>; stop: Array<number | undefined>; raisons: Map<number, RaisonSortieAxis> } {
+  const n = score.length;
+  const posSerie: Array<number | undefined> = new Array(n).fill(undefined);
+  const stop: Array<number | undefined> = new Array(n).fill(undefined);
+  const raisons = new Map<number, RaisonSortieAxis>();
+  let pos: number | undefined;
+  let arme = false;
+  let plusHaut = -Infinity;
+  let stopCourant: number | undefined;
+  for (let i = 0; i < n; i++) {
+    const s = score[i];
+    const c = closes[i];
+    if (s === undefined || i > fin) {
+      posSerie[i] = pos;
+      stop[i] = pos === 1 ? stopCourant : undefined;
+      continue;
+    }
+    if (pos === 1) {
+      const sortieScore = s <= -seuilVente;
+      // Le niveau comparé a été fixé sur les bougies ≤ i−1 : la bougie i ne peut pas
+      // relever le stop qui la coupe (décision à la clôture, sans regard sur elle-même).
+      const sortieStop = stopAtr > 0 && stopCourant !== undefined && c !== undefined && c < stopCourant;
+      if (sortieScore || sortieStop) {
+        pos = 0;
+        // Après un stop, la confluence peut encore valoir ≥ seuil : sans réarmement,
+        // le titre coupé serait racheté dès la bougie suivante.
+        arme = sortieScore;
+        raisons.set(i, sortieScore ? "score" : "stop");
+        stopCourant = undefined;
+      } else {
+        const a = atr[i];
+        if (stopAtr > 0 && a !== undefined && c !== undefined) {
+          plusHaut = Math.max(plusHaut, c);
+          // Cliquet : un ATR qui grandit ne fait jamais redescendre le niveau acquis.
+          stopCourant = Math.max(stopCourant ?? -Infinity, plusHaut - stopAtr * a);
+        }
+        stop[i] = stopCourant;
+      }
+      posSerie[i] = pos;
+      continue;
+    }
+    pos = 0;
+    const tendance = auDessus[i];
+    if (tendance !== undefined) {
+      const achat = s >= seuil && tendance;
+      if (achat && arme) {
+        pos = 1;
+        plusHaut = c ?? -Infinity;
+        const a = atr[i];
+        stopCourant = stopAtr > 0 && a !== undefined && c !== undefined ? c - stopAtr * a : undefined;
+        stop[i] = stopCourant;
+      }
+      arme = !achat;
+    }
+    posSerie[i] = pos;
+  }
+  return { pos: posSerie, stop, raisons };
 }
 
 /** Lectures de flux d'une bougie ; une lecture sans donnée reste absente. */
@@ -331,8 +435,25 @@ const UNITES: Partial<Record<Timeframe, [number, string, string, [string] | [str
   "1w": [40, "2020-2026", "suite positive sur 16/40 actifs seulement", ["trop peu de signaux sur données jamais vues : 2 trades clos"]],
 };
 
-/** Textes des infobulles selon l'unité du chart ; 4h ou unité absente : ceux des tests 4h. */
-export function textesAxis(u: Timeframe | undefined): { signaux: string; fortAchat: string; forteVente: string; qualification: string } {
+// Texte d'attente du stop suiveur : le test sur données jamais vues du 8 octobre 2026
+// (scripts/axis/manifeste-v3-2026-10-08.json) n'a pas rendu son verdict ; le runner
+// remplacera cette formulation par celle des suites du manifeste.
+const suffixeStop = (stopAtr: number): string =>
+  stopAtr > 0 ? ` ; stop suiveur ${stopAtr} × ATR ${ATR_STOP_PERIODE} : non mesuré (test du 8 octobre 2026 en cours)` : "";
+
+/**
+ * Textes des infobulles selon l'unité du chart (4h ou unité absente : ceux des tests 4h)
+ * et le réglage du stop (`stopAtr` > 0 : mention ajoutée aux signaux ; 0 : textes inchangés).
+ */
+export function textesAxis(
+  u: Timeframe | undefined,
+  stopAtr = 0
+): { signaux: string; fortAchat: string; forteVente: string; qualification: string } {
+  const t = textesUnite(u);
+  return stopAtr > 0 ? { ...t, signaux: t.signaux + suffixeStop(stopAtr) } : t;
+}
+
+function textesUnite(u: Timeframe | undefined): { signaux: string; fortAchat: string; forteVente: string; qualification: string } {
   if (u === undefined || u === "4h") return { signaux: RESERVE, fortAchat: MESURE_FORT_ACHAT, forteVente: MESURE_FORTE_VENTE, qualification: QUALIFICATION };
   const qualification = `qualification descriptive, non mesurée en ${u}`;
   const m = UNITES[u];
@@ -361,6 +482,9 @@ export function textesAxis(u: Timeframe | undefined): { signaux: string; fortAch
   };
 }
 
+/** Niveau de prix d'une infobulle : deux décimales dès 1, quatre chiffres significatifs en dessous. */
+const prix = (v: number): string => (v >= 1 ? v.toFixed(2) : v.toPrecision(4));
+
 export const stratAxis: IndicatorDef = {
   id: "stratAxis",
   name: "AXIS",
@@ -384,8 +508,12 @@ export const stratAxis: IndicatorDef = {
     { key: "oiBougies", name: "Variation d'OI sur (bougies)", type: "number", default: 6, min: 1, max: 200 },
     { key: "seuilOi", name: "OI significatif si |Δ| ≥ (%)", type: "number", default: 2, min: 0.1, max: 100 },
     { key: "filtreFlux", name: "N'acheter que sur flux fort", type: "boolean", default: false },
+    { key: "stopAtr", name: "Stop suiveur (× ATR 14, 0 = sans)", type: "number", default: 0, min: 0, max: 20 },
   ],
-  outputs: [{ key: "prixSignal", name: "Prix d'achat", style: "line" }],
+  outputs: [
+    { key: "prixSignal", name: "Prix d'achat", style: "line" },
+    { key: "stop", name: "Stop suiveur", style: "line" },
+  ],
   calc(candles, params, ctx) {
     const n = candles.length;
     const votes = votesAxis(candles, params);
@@ -398,12 +526,16 @@ export const stratAxis: IndicatorDef = {
     const flux = fluxAxis(candles, ctx.aux?.oi, Number(params.rvolPeriode ?? 20), oiBougies);
     const force = (i: number, sens: number) => forceFlux(flux[i] ?? {}, sens, seuilRvol, seuilOi);
     const filtre = params.filtreFlux === true;
-    const pos = positionsAxis(
+    const stopAtr = Number(params.stopAtr ?? 0);
+    const { pos, stop, raisons } = positionsStopAxis(
       score,
       tendance.map((t, i) => (t === undefined ? undefined : (closes[i] ?? t) > t && (!filtre || force(i, 1).fort))),
+      closes,
+      rma(trueRange(candles), ATR_STOP_PERIODE),
       Number(params.seuil ?? 5),
       Number(params.seuilVente ?? 4),
-      n - 2
+      n - 2,
+      stopAtr
     );
 
     // Signal = changement de position entre deux bougies définies (jamais la première).
@@ -416,8 +548,8 @@ export const stratAxis: IndicatorDef = {
     }
 
     const noms = [`EMA ${params.emaRapide}/${params.emaLente}`, "Supertrend", "DMI", "MACD", "RSI", "CMF"];
-    const textes = textesAxis(ctx.timeframe);
-    const reserve = filtre ? RESERVE_FILTRE : textes.signaux;
+    const textes = textesAxis(ctx.timeframe, stopAtr);
+    const reserve = filtre ? RESERVE_FILTRE + suffixeStop(stopAtr) : textes.signaux;
     const marqueurs: MarqueurAnnotation[] = [];
     const labels: LabelAnnotation[] = [];
     // Seuls les signaux les plus récents portent une étiquette (même règle que defStrategie).
@@ -434,7 +566,13 @@ export const stratAxis: IndicatorDef = {
       const resultat = pct(pctSignal, 2);
       const fo = force(idx, achat ? 1 : -1);
       const qualite = fo.dispo === 0 ? "indisponible" : fo.fort ? "fort" : fo.contre ? "à contre-sens" : "ordinaire";
-      const fort = fo.fort ? (achat ? " fort" : " forte") : "";
+      const parStop = !achat && raisons.get(idx) === "stop";
+      const fort = fo.fort ? (achat || parStop ? " fort" : " forte") : "";
+      // Niveau franchi : le stop en vigueur à la décision, fixé à la bougie précédente.
+      const niveau = stop[idx - 1];
+      const sortie = parStop
+        ? `close sous le stop suiveur (${niveau === undefined ? "n.d." : prix(niveau)}) ; ${resultat} depuis l'achat (hors frais)`
+        : `${resultat} depuis l'achat (hors frais)`;
       marqueurs.push({
         idx,
         valeur,
@@ -442,16 +580,16 @@ export const stratAxis: IndicatorDef = {
         couleur,
         cible: "prix",
         info:
-          `AXIS ${achat ? "achat" : "vente"}${fort} — score ${achat ? "+" : ""}${s}/6 : ` +
+          `AXIS ${achat ? "achat" : parStop ? "stop" : "vente"}${fort} — score ${s > 0 ? "+" : ""}${s}/6 : ` +
           `${noms.map((nom, w) => `${nom} ${fleche(v[w] ?? 0)}`).join(", ")} ; ` +
-          `${achat ? `close au-dessus de l'EMA ${params.emaTendance}` : `${resultat} depuis l'achat (hors frais)`} ; ` +
+          `${achat ? `close au-dessus de l'EMA ${params.emaTendance}` : sortie} ; ` +
           `flux ${qualite} (${texteFlux(flux[idx] ?? {}, oiBougies)} ; ${textes.qualification}) — ${reserve}`,
       });
       if (k >= recents.length - MAX_LABELS_SORTIE) {
         labels.push({
           idx,
           valeur,
-          texte: achat ? `Achat${fort}` : `Vente${fort} ${resultat}`,
+          texte: achat ? `Achat${fort}` : `${parStop ? "Stop" : "Vente"}${fort} ${resultat}`,
           couleur,
           cible: "prix",
           position: achat ? "dessous" : "dessus",
@@ -492,7 +630,7 @@ export const stratAxis: IndicatorDef = {
     });
 
     return marqueurs.length > 0
-      ? { series: { prixSignal }, annotations: { marqueurs, labels } }
-      : { series: { prixSignal } };
+      ? { series: { prixSignal, stop }, annotations: { marqueurs, labels } }
+      : { series: { prixSignal, stop } };
   },
 };

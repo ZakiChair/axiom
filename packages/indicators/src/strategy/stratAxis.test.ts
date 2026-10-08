@@ -691,7 +691,11 @@ describe("stratAxis — infobulles par unité de temps (test du 8 octobre 2026)"
 
 describe("stop suiveur (v3)", () => {
   const haut = (n: number): boolean[] => new Array(n).fill(true);
-  const SUFFIXE_3 = " ; stop suiveur 3 × ATR 14 : non mesuré (test du 8 octobre 2026 en cours)";
+  // Suites du manifeste v3 après le verdict DÉFAVORABLE (scripts/axis/resultat-v3-2026-10-08.json,
+  // champ formulations) : stop testé → l'échec chiffré ; autre multiplicateur → « hors du test ».
+  const SUFFIXE_3 =
+    " ; stop suiveur 3 × ATR 14 actif : test du 8 octobre 2026 échoué sur données jamais vues (151 alts 4h, 2023-2026 : Sharpe meilleur que sans stop sur 41 % des actifs seulement ; amélioration absente dans une moitié de la période (37 % puis 51 %)) — pas une amélioration validée";
+  const horsTest = (k: number): string => ` ; stop suiveur ${k} × ATR 14 : réglage hors du test du 8 octobre 2026 (3 × ATR 14 mesuré) — non mesuré`;
   const u: undefined = undefined;
 
   describe("stopAtr 0 : la v2 exacte", () => {
@@ -881,7 +885,7 @@ describe("stop suiveur (v3)", () => {
       expect(r.annotations?.labels?.filter((l) => l.position === "dessus").map((l) => l.texte.split(" ")[0])).toEqual(new Array(5).fill("Stop"));
       // Score positif à la sortie : signe affiché, comme pour les achats.
       expect(ventes[0]?.info?.startsWith("AXIS stop — score +2/6")).toBe(true);
-      expect(ventes[0]?.info).toContain(" ; stop suiveur 1 × ATR 14 : non mesuré (test du 8 octobre 2026 en cours)");
+      expect(ventes[0]?.info).toContain(horsTest(1));
       // Le niveau nommé est celui de la bougie précédente, même quand le cliquet vient de monter (113).
       const stop = r.series.stop ?? [];
       expect(stop[111]).toBeCloseTo(61377.68, 2);
@@ -959,9 +963,9 @@ describe("stop suiveur (v3)", () => {
       expect(textesAxis("3M", 3).signaux).toBe(
         "en 3M : non mesuré (historique trop court pour l'EMA 200 et l'amorce) — lecture indicative, jamais une promesse" + SUFFIXE_3
       );
-      // Multiplicateur sans zéro inutile.
-      expect(textesAxis(u, 2.5).signaux).toBe(`${RESERVE} ; stop suiveur 2.5 × ATR 14 : non mesuré (test du 8 octobre 2026 en cours)`);
-      expect(textesAxis(u, 4).signaux.endsWith("stop suiveur 4 × ATR 14 : non mesuré (test du 8 octobre 2026 en cours)")).toBe(true);
+      // Multiplicateur sans zéro inutile, hors du test.
+      expect(textesAxis(u, 2.5).signaux).toBe(`${RESERVE}${horsTest(2.5)}`);
+      expect(textesAxis(u, 4).signaux.endsWith(horsTest(4).slice(3))).toBe(true);
     });
 
     it("le chart transmet le réglage : infobulle 1h avec stop 3", () => {

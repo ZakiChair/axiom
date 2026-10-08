@@ -111,11 +111,16 @@
  * plat, à la bougie de sortie et sans stop. Une sortie par stop est un ▼
  * étiqueté « Stop ±x % » (au lieu de « Vente ») dont l'infobulle nomme le
  * niveau franchi. Réglage `stopAtr` (× ATR 14) ; 0 = sans stop, la v2 exacte
- * (positions identiques à `positionsAxis`). Au figeage, le défaut du chart est
- * 0 : le multiplicateur 3 vient d'une exploration sur données déjà vues
- * (scripts/explorer-axis-v3.ts), et le test sur données jamais vues est en
- * cours (scripts/axis/manifeste-v3-2026-10-08.json) ; l'infobulle d'un stop
- * actif le dit. Le défaut et les textes suivront le verdict.
+ * (positions identiques à `positionsAxis`). Le multiplicateur 3 vient d'une
+ * exploration sur données déjà vues (scripts/explorer-axis-v3.ts) ; le test
+ * sur données jamais vues (151 alts 4h, 2023-07 → 2026-10, protocole figé
+ * scripts/axis/manifeste-v3-2026-10-08.json) a rendu un verdict DÉFAVORABLE :
+ * drawdown plus faible sur 82 % des actifs, mais Sharpe meilleur que sans stop
+ * sur 41 % seulement (37 % puis 51 % par moitié), PnL moyen +3,8 % contre
+ * +6,4 % sans stop, 81 % des sorties par stop. Suites appliquées : le défaut
+ * reste 0 (signaux et textes de la v2 inchangés) ; le réglage reste
+ * disponible et l'infobulle d'un stop actif dit l'échec (3 × ATR 14) ou « hors
+ * du test » (autre multiplicateur). Ces données sont consommées.
  */
 
 import type { Candle, IndicatorDef, LabelAnnotation, MarqueurAnnotation, Timeframe } from "@axiom/types";
@@ -435,11 +440,19 @@ const UNITES: Partial<Record<Timeframe, [number, string, string, [string] | [str
   "1w": [40, "2020-2026", "suite positive sur 16/40 actifs seulement", ["trop peu de signaux sur données jamais vues : 2 trades clos"]],
 };
 
-// Texte d'attente du stop suiveur : le test sur données jamais vues du 8 octobre 2026
-// (scripts/axis/manifeste-v3-2026-10-08.json) n'a pas rendu son verdict ; le runner
-// remplacera cette formulation par celle des suites du manifeste.
+// Test du stop suiveur du 8 octobre 2026 sur données jamais vues (151 alts 4h, 2023-2026,
+// scripts/axis/rapport-v3-2026-10-08.md) : verdict DÉFAVORABLE. Formulations des suites du
+// manifeste v3 (suites.DEFAVORABLE.infobulleStopActif, communes.reglageHorsTest), chiffres du
+// résultat ; le test croisé apps/web/src/chart/indicators.axisStop.test.ts les compare au résultat.
+// Sans stop (0, le défaut), les textes d'avant le test restent inchangés.
+/** Multiplicateur mesuré par le test ; tout autre réglage > 0 est hors test. */
+export const STOP_ATR_TESTE = 3;
 const suffixeStop = (stopAtr: number): string =>
-  stopAtr > 0 ? ` ; stop suiveur ${stopAtr} × ATR ${ATR_STOP_PERIODE} : non mesuré (test du 8 octobre 2026 en cours)` : "";
+  stopAtr <= 0
+    ? ""
+    : stopAtr === STOP_ATR_TESTE
+      ? ` ; stop suiveur ${STOP_ATR_TESTE} × ATR ${ATR_STOP_PERIODE} actif : test du 8 octobre 2026 échoué sur données jamais vues (151 alts 4h, 2023-2026 : Sharpe meilleur que sans stop sur 41 % des actifs seulement ; amélioration absente dans une moitié de la période (37 % puis 51 %)) — pas une amélioration validée`
+      : ` ; stop suiveur ${stopAtr} × ATR ${ATR_STOP_PERIODE} : réglage hors du test du 8 octobre 2026 (${STOP_ATR_TESTE} × ATR ${ATR_STOP_PERIODE} mesuré) — non mesuré`;
 
 /**
  * Textes des infobulles selon l'unité du chart (4h ou unité absente : ceux des tests 4h)

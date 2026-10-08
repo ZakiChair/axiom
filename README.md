@@ -190,7 +190,15 @@ exposition placée au hasard (p 0,055 à 0,12) ; le 1w n'a que 2 trades clos,
 sur environ un an de décisions après l'amorce. Les forts achats n'ont de
 continuation démontrée dans aucune de ces unités. Le 4h reste la seule unité
 validée. Chaque infobulle dit, pour l'unité affichée, ce qui est mesuré et
-ce qui ne l'est pas ; mesure passée, jamais une promesse.
+ce qui ne l'est pas ; mesure passée, jamais une promesse. Un **stop suiveur
+optionnel** (réglage `stopAtr`, × ATR 14, défaut 0 = sans) trace son niveau
+sur le prix et étiquette « Stop » les sorties qu'il déclenche.
+**Test du 8 octobre 2026 sur données jamais vues** (151 alts, 4h, 2023-2026,
+protocole figé avant téléchargement, exécution unique) : le stop 3 × ATR 14
+réduit le drawdown sur 82,8 % des actifs mais n'améliore le rendement ajusté
+du risque que sur 41,1 % — verdict **DÉFAVORABLE**. Le défaut reste donc sans
+stop ; le réglage reste disponible et l'infobulle d'un stop actif dit cet
+échec, chiffres à l'appui.
 [Méthode, réglages, limites et backtests](docs/axis-2026-10-07.md).
 
 ### Historique des décisions et nouveaux indicateurs

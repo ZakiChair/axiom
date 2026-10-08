@@ -1547,6 +1547,43 @@ dépendance ni ordre réel. Deux changements de `@axiom/types` :
   donne l'infobulle de chaque unité (formulations pré-rédigées, chiffres du
   résultat ; 4h ou unité absente : textes des tests 4h ; 1M à 12M, 5s et
   15s : « non mesuré »). Ces données sont consommées.
+- **Stop suiveur et test v3** (demande du propriétaire du 2026-10-08 :
+  « améliore encore l'outil et backteste-le » ; la faiblesse visée était
+  « aucun stop » dans les limites du test v2). Nouveau réglage `stopAtr`
+  (× ATR 14 de Wilder, défaut 0 = la v2 exacte, vérifiée identique au
+  caractère près) : stop suiveur à cliquet = plus haut close depuis l'entrée
+  − k × ATR, déclenché sur une clôture sous le niveau fixé à la bougie
+  précédente, réarmement après une sortie par stop, raison « score »
+  prioritaire ; sortie `stop` à l'échelle prix (absente à plat et à la sortie,
+  reportée sur la bougie en formation), ▼ étiquetés « Stop » avec le niveau
+  franchi ; `positionsStopAxis` et `textesAxis(u, stopAtr)` exportés.
+  Exploration sur les seules données déjà vues (`scripts/explorer-axis-v3.ts`,
+  8 symboles 4h avant le 2023-07-01, 13 variantes) : le choix (3 × ATR 14,
+  métrique Sharpe par bougie) a changé la règle annoncée (RoMaD médian) après
+  lecture des résultats — degré de liberté journalisé dans le manifeste.
+  Protocole figé avant téléchargement
+  (`scripts/axis/manifeste-v3-2026-10-08.json`, hash épinglé dans
+  `scripts/valider-axis-v3.ts`, 15 fichiers de code et l'arbre des trois
+  paquets vérifiés), revue indépendante
+  (`scripts/axis/journal-revue-v3-2026-10-08.md` : trois majeurs corrigés —
+  indépendance en temps reformulée, trois paires du test de charge UT
+  retirées du pool, part des sorties par stop corrigée — puis contre-revue),
+  répétition sur les symboles vus défavorable (1/8) consignée sans
+  modification, commit de figeage `3894910`. Exécution unique le 2026-10-08
+  (13:50-13:51 UTC) sur **151 alts USDT jamais lues** (cotées 2020-01 →
+  2023-06), 4h, 2023-07-01 → 2026-10-08 : verdict **DÉFAVORABLE**
+  (`scripts/axis/rapport-v3-2026-10-08.md`) — P1 tenu (7 947 trades clos,
+  +0,71 % par trade à ×1, +0,43 % à ×3), mais Sharpe v3 > v2 sur 41,1 % des
+  cellules seulement (seuil 60 %) et 37,7 % en première moitié (seuil > 50 %
+  dans chaque). Le stop réduit le drawdown (plus faible sur 82,8 % des
+  actifs, médiane 12,1 % contre 15,4 %) et l'exposition (23,4 % contre
+  30,5 %), mais coupe 81 % des sorties à +1,57 % de gain moyen là où la v2
+  récupère (PnL moyen +3,8 % contre +6,4 % par actif). Suites du manifeste
+  appliquées : défaut conservé à 0 (signaux et textes de la v2 inchangés),
+  infobulle à stopAtr 3 = échec chiffré des suites DÉFAVORABLE, autre
+  multiplicateur = « hors du test », test croisé
+  `apps/web/src/chart/indicators.axisStop.test.ts` (empreinte du résultat
+  épinglée). Ces données sont consommées.
 - **Unité de temps au calcul** : `CalcContext.timeframe` (nouveau champ
   facultatif de `@axiom/types`), rempli par `computeIndicator` (paramètre
   facultatif après `aux`) quand l'appelant connaît l'unité, c'est-à-dire le
@@ -1594,8 +1631,21 @@ unité avec le résultat de la campagne) ; daemon 780 tests (Bun 1.4.2) ;
 `scripts/valider-axis-ut.ts` passe `tsc --strict`. Budget : **1 202 601 /
 359 453**, marge gzip **547 octets** : le prochain lot qui touche le chemin
 initial doit d'abord libérer des octets.
+Après le stop suiveur (v3) et BOOK différé : `pnpm -r typecheck` réussi ;
+indicateurs 998 tests (dont 69 pour AXIS ; mutations du stop détectées),
+alertes 122, backtest 129, pacte 120, web 419 fichiers / 5 933 tests (dont 10
+qui recoupent au caractère près les infobulles du stop avec le résultat de la
+campagne v3, empreinte épinglée) ; daemon 780 tests (Bun 1.4.2) ;
+`tsc --strict` propre sur `scripts/valider-axis-v3.ts` et
+`scripts/explorer-axis-v3.ts` au figeage (depuis, la garde
+`HASH_MANIFESTE === "A_FIGER"` du runner soulève TS2367, littéraux
+disjoints : erreur statique sans effet à l'exécution, et le fichier figé
+ne peut être retouché sans invalider l'arbre vérifié). Budget :
+**1 192 494 / 356 283**, marge gzip **3 717 octets** (BOOK différé a
+libéré 3 665 ; le stop en a coûté 495).
 Usage, limites et tests :
 [`docs/axis-2026-10-07.md`](docs/axis-2026-10-07.md),
 [`scripts/axis/rapport-v2-2026-10-07.md`](scripts/axis/rapport-v2-2026-10-07.md),
-[`scripts/axis/rapport-flux-2026-10-08.md`](scripts/axis/rapport-flux-2026-10-08.md)
-et [`scripts/axis/rapport-ut-2026-10-08.md`](scripts/axis/rapport-ut-2026-10-08.md).
+[`scripts/axis/rapport-flux-2026-10-08.md`](scripts/axis/rapport-flux-2026-10-08.md),
+[`scripts/axis/rapport-ut-2026-10-08.md`](scripts/axis/rapport-ut-2026-10-08.md)
+et [`scripts/axis/rapport-v3-2026-10-08.md`](scripts/axis/rapport-v3-2026-10-08.md).

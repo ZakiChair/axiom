@@ -50,7 +50,8 @@ export const NB_COULEURS_SERIE = 6;
  * répètent de toute façon à l'intérieur de l'instance.
  */
 export function jetonsConsommes(defId: string): number {
-  const n = getIndicator(defId)?.outputs.length ?? 1;
+  // Les sorties masquées ne sont jamais tracées : aucun jeton consommé.
+  const n = getIndicator(defId)?.outputs.filter((o) => o.masquee !== true).length ?? 1;
   return Math.max(1, Math.min(n, NB_COULEURS_SERIE));
 }
 

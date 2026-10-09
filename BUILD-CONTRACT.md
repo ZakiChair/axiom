@@ -1437,10 +1437,11 @@ qui combine plusieurs signaux d'achat et de vente et marque sur le prix les
 achats et les ventes. Cette demande autorise une définition
 supplémentaire, `stratAxis` (catégorie `strategy`, pane prix), soit **219
 indicateurs** dont 31 stratégies. Aucun nouvel écran, fournisseur, secret,
-dépendance ni ordre réel. Trois changements de `@axiom/types` :
+dépendance ni ordre réel. Quatre changements de `@axiom/types` :
 `IndicatorDef.auxFacultatives` le soir du même jour (voir la couche flux),
 `CalcContext.timeframe` le 8 octobre (voir l'unité de temps au calcul),
-`IndicatorDef.amorceBougies` le 9 octobre (voir la fidélité d'affichage).
+`IndicatorDef.amorceBougies` le 9 octobre (voir la fidélité d'affichage),
+`IndicatorOutput.masquee` le 9 octobre encore (voir les sorties masquées).
 
 - Six votes (+1, −1 ou 0) à la clôture, tous issus de cœurs existants : EMA 20/50,
   direction du Supertrend 10 × 3, +DI contre −DI seulement si l'ADX 14 atteint le
@@ -1669,6 +1670,26 @@ dépendance ni ordre réel. Trois changements de `@axiom/types` :
   seules les séries requises décident du statut (pending/UNUSABLE), les
   facultatives enrichissent le calcul quand elles arrivent (`onAuxReady`).
   Alertes, screener et backtest calculent sans aux : lectures « n.d. ».
+- **Sorties masquées et rejeu commun** (9 octobre 2026). Quatre sorties dont
+  deux **masquées** — `etat` (1 acheté, 0 à plat) et `score` (−6 à +6),
+  calculées mais jamais tracées : nouveau champ `IndicatorOutput.masquee`
+  (déclaratif, honoré par `chart/indicators.ts` : ni figure ni jeton de
+  couleur ni statut « tracé » ; le panneau d'alertes les liste comme les
+  autres sorties). La borne de décision `fin` vaut n−1 quand la source dit la
+  dernière bougie clôturée (`closed === true` : runtime des alertes, flux WS
+  ou REST des sources qui posent le drapeau), n−2 sinon — les campagnes
+  figées (klines sans `closed`) sont inchangées ; le chart gagne au plus
+  l'instant entre la clôture constatée par la source et la bougie suivante.
+  Fenêtre BT : opérandes `stratAxis.etat`/`stratAxis.score` au catalogue et
+  preset livré `builtin:axis` (« AXIS confluence (4h) », entrée `etat ≥ 1`,
+  sortie `etat ≤ 0`, le moteur remplit à l'open suivant avec frais/slippage ;
+  stop/target/risque à la main, `stopAtr` non pré-réglé — test v3 échoué ;
+  « mesure passée, pas une promesse », BTC/ETH 2024-2026 in-sample). Rejeu
+  commun : `enregistrerSpecStrategie` (nouvel export de
+  `utils-fabrique-strategie.ts`) enregistre la spec d'AXIS hors
+  `defStrategie` — `etatsStrategie("stratAxis")` et
+  `scripts/valider-strategies.ts` la rejouent (clôture-à-clôture hors frais),
+  `positionAxis` étant identique à `calc().series.etat` élément par élément.
 - Chargement initial : AXIS coûte ~800 octets gzip, la couche flux ~1 200 de
   plus, les infobulles par unité ~1 000 de plus. Sur le modèle de BT et SIG, les commandes EQS, WHALE et MARKS vivent
   dans `commands/windowPanels.ts` (EQS : bascule identique ; WHALE et MARKS :
@@ -1734,6 +1755,15 @@ filtre avec le résultat de la campagne v4, empreinte épinglée), daemon
 déclaré `string`) et sur `scripts/explorer-axis-v4.ts` ; banc des chemins de
 verdict 39 vérifications. Budget : **1 193 835 / 356 648** (+749 / +195),
 marge gzip **3 352 octets**.
+Après les sorties masquées et le rejeu commun (9 octobre) : `pnpm check`
+réussi — typage des 8 projets ; indicateurs 1 659 tests (dont 87 pour AXIS :
+`etat` = `positionsStopAxis`/`positionAxis` élément par élément, bougie
+`closed` décidée, invariant sans `closed` identique au caractère près),
+alertes 142 (dont 3 de tir aux signaux de la fixture), backtest 143, pacte
+120, web 421 fichiers / 5 958 tests (dont 4 sur le masquage — figures, statut
+« vide », jetons — et 3 sur le preset `builtin:axis` et `runBacktest` de la
+fixture), daemon 785 tests (Bun 1.3.11). Budget : **1 194 813 / 355 849**
+(+978 / −799), marge gzip **4 151 octets**.
 Usage, limites et tests :
 [`docs/axis-2026-10-07.md`](docs/axis-2026-10-07.md),
 [`scripts/axis/rapport-v2-2026-10-07.md`](scripts/axis/rapport-v2-2026-10-07.md),

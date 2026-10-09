@@ -23,6 +23,10 @@
  *  - `undefined` au MILIEU de la série = maintien de l'état précédent.
  *  - cap MAX_TRADES_ANNOTES trades clos annotés (les plus récents) ; le trade
  *    en cours est toujours annoté.
+ *
+ * Une stratégie au rendu propre (hors `defStrategie`, comme AXIS) peut quand
+ * même entrer dans le rejeu commun (`etatsStrategie`, campagne) en appelant
+ * `enregistrerSpecStrategie` après la définition de son def.
  */
 
 import type {
@@ -166,6 +170,15 @@ const SPECS_STRATEGIES = new Map<string, SpecStrategie>();
 
 export function specStrategie(id: string): SpecStrategie | undefined {
   return SPECS_STRATEGIES.get(id);
+}
+
+/**
+ * Enregistre la spec d'une stratégie qui ne passe PAS par `defStrategie`
+ * (rendu propre, comme AXIS) mais que le rejeu commun (`etatsStrategie`,
+ * `scripts/valider-strategies.ts`, campagne) doit pouvoir mesurer.
+ */
+export function enregistrerSpecStrategie(spec: SpecStrategie): void {
+  SPECS_STRATEGIES.set(spec.id, spec);
 }
 
 /**

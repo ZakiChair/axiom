@@ -49,7 +49,11 @@ import {
 type AxiomPoint = Record<string, number>;
 
 function sortieFinie(def: IndicatorDef, result: IndicatorResult): boolean {
+  // Les sorties masquées (masquee === true) ne comptent pas : calculées pour
+  // les alertes/BT, elles ne sont jamais tracées — sinon une stratégie à plat
+  // dont l'état vaut 0 passerait de « vide » à « tracé ».
   return def.outputs.some((output) =>
+    output.masquee !== true &&
     result.series[output.key]?.some((value) => typeof value === "number" && Number.isFinite(value)) === true
   );
 }
@@ -234,9 +238,13 @@ function seriesFor(def: IndicatorDef): IndicatorSeries {
 function ensureRegistered(def: IndicatorDef, name: string, instanceId: string): void {
   if (registered.has(name)) return;
 
-  const outputKeys = def.outputs.map((o) => o.key);
+  // Sorties masquées (masquee === true, ex. etat/score d'AXIS) : présentes dans
+  // extendData pour les alertes et le BT, mais ni figures ni points tracés —
+  // elles ne pèsent ni sur l'auto-scale ni sur les jetons de couleur.
+  const sortiesTracees = def.outputs.filter((o) => o.masquee !== true);
+  const outputKeys = sortiesTracees.map((o) => o.key);
 
-  const figures: Array<IndicatorFigure<AxiomPoint>> = def.outputs.map((o, i) => {
+  const figures: Array<IndicatorFigure<AxiomPoint>> = sortiesTracees.map((o, i) => {
     // Couleur lue AU RENDU (callback rappelé par KLineChart), pour DEUX raisons :
     //  - le thème peut changer sans re-registration (pattern orderflow.ts CVD S/P) ;
     //  - l'index de couleur appartient à l'INSTANCE et peut être réalloué (suppression

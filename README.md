@@ -220,6 +220,13 @@ actifs, mais **perd à lui seul** sur ce pool (−1,8 % par trade après frais,
 seconde moitié (48,8 %) — verdict **DÉFAVORABLE**. Le défaut reste donc sans
 filtre ; le réglage reste disponible et l'infobulle d'un filtre actif dit cet
 échec, chiffres à l'appui. Ces 123 paires sont consommées.
+**Alertes et backtest (9 octobre 2026)** : AXIS expose deux sorties calculées
+mais jamais tracées — **État** (1 acheté, 0 à plat) et **Score** (−6 à +6) —
+sélectionnables dans une alerte de seuil d'indicateur (achat : État ≥ 1,
+vente : État ≤ 0, sans bougie de retard quand la source dit la dernière
+clôturée) et dans la fenêtre **BT** (opérandes du catalogue, preset livré
+« AXIS confluence (4h) », fills à l'open suivant avec frais et slippage ;
+stop, objectif et risque restent à régler).
 [Méthode, réglages, limites et backtests](docs/axis-2026-10-07.md).
 
 ### Historique des décisions et nouveaux indicateurs

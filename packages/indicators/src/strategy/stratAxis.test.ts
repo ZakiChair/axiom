@@ -29,11 +29,11 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Candle, MarqueurAnnotation } from "@axiom/types";
-import { computeIndicator } from "../engine";
+import { buildCalcContext, computeIndicator } from "../engine";
 import { getIndicator } from "../registry";
 import { supportsIndicatorTimeframe, TIMEFRAME_REQUIS } from "../timeframes";
 import { closeOf, ema, rma, trueRange } from "../utils";
-import { MAX_LABELS_SORTIE, specStrategie } from "../utils-fabrique-strategie";
+import { MAX_LABELS_SORTIE, etatsStrategie, specStrategie } from "../utils-fabrique-strategie";
 import { rsiOf } from "../momentum/rsi";
 import { adxOf } from "../trend/adx";
 import { macdOf } from "../trend/macd";
@@ -53,6 +53,7 @@ import {
   fluxAxis,
   forceFlux,
   grosMouvementsAxis,
+  positionAxis,
   positionsAxis,
   positionsStopAxis,
   sensGros,
@@ -99,7 +100,7 @@ const grosDe = (res: ReturnType<typeof computeIndicator>) =>
 const sens = (a: number, b: number): number => Math.sign(a - b) + 0;
 
 describe("stratAxis — contrat", () => {
-  it("strategy/overlay enregistrée, seize inputs bornés, deux sorties prix, toute unité de temps, sans spec de fabrique", () => {
+  it("strategy/overlay enregistrée, seize inputs bornés, quatre sorties dont deux masquées, spec enregistrée hors fabrique", () => {
     expect(getIndicator("stratAxis")).toBe(stratAxis);
     expect(stratAxis.name).toBe("AXIS");
     expect(stratAxis.category).toBe("strategy");
@@ -133,6 +134,9 @@ describe("stratAxis — contrat", () => {
     expect(stratAxis.outputs).toEqual([
       { key: "prixSignal", name: "Prix d'achat", style: "line" },
       { key: "stop", name: "Stop suiveur", style: "line" },
+      // Sorties masquées (alertes, backtest, screener) : jamais tracées ni légendées.
+      { key: "etat", name: "État (1 acheté, 0 à plat)", style: "line", masquee: true },
+      { key: "score", name: "Score (−6 à +6)", style: "line", masquee: true },
     ]);
     expect(ATR_STOP_PERIODE).toBe(14);
     // Amorce déclarée au chart : il remonte à 1500 bougies quand AXIS est actif (mesure du
@@ -155,8 +159,9 @@ describe("stratAxis — contrat", () => {
     expect(supportsIndicatorTimeframe("stratAxis", "1M")).toBe(true);
     // Verdict FAVORABLE du test sur données jamais vues (scripts/axis/rapport-v2-2026-10-07.md).
     expect(stratAxis.validation).toBeUndefined();
-    // Hors fabrique defStrategie : ni trades ni PnL, et scripts/valider-strategies l'ignore.
-    expect(specStrategie("stratAxis")).toBeUndefined();
+    // Hors fabrique defStrategie (rendu propre : ni trades ni PnL de la fabrique),
+    // mais spec enregistrée à part : le rejeu commun (etatsStrategie, campagne) lit AXIS.
+    expect(specStrategie("stratAxis")?.position).toBe(positionAxis);
   });
 });
 
@@ -584,6 +589,18 @@ describe("stratAxis — forts achats et fortes ventes", () => {
     const finPic = declin.map((c, i) => (i === n - 1 ? { ...c, volume: 50 } : c));
     expect(grosMouvementsAxis(finPic, fluxAxis(finPic, undefined, 20, 6), 3, new Set()).some((g) => g.idx === n - 1)).toBe(false);
     expect(grosMouvementsAxis(declin, flux, 5, new Set())).toEqual([]);
+  });
+
+  it("grosMouvementsAxis — `fin` facultatif : défaut n−2 (comportement inchangé), n−1 inclut la dernière bougie", () => {
+    const finPic = declin.map((c, i) => (i === n - 1 ? { ...c, volume: 50 } : c));
+    const fluxPic = fluxAxis(finPic, undefined, 20, 6);
+    // Défaut = comportement actuel : identique à la borne explicite n−2, dernière exclue.
+    expect(grosMouvementsAxis(finPic, fluxPic, 3, new Set())).toEqual(grosMouvementsAxis(finPic, fluxPic, 3, new Set(), n - 2));
+    expect(grosMouvementsAxis(finPic, fluxPic, 3, new Set()).some((g) => g.idx === n - 1)).toBe(false);
+    // n−1 (bougie dite clôturée par la source, comme dans calc) : le pic de la dernière entre.
+    expect(grosMouvementsAxis(finPic, fluxPic, 3, new Set(), n - 1).some((g) => g.idx === n - 1)).toBe(true);
+    // `fin` borne seulement : la liste des 96 pics est la même, plus la dernière.
+    expect(grosMouvementsAxis(finPic, fluxPic, 3, new Set(), n - 1)).toHaveLength(97);
   });
 
   it("delta taker marqué : sens et point d'ancrage suivent le delta, pas le corps ; infobulle au statut mesuré", () => {
@@ -1163,5 +1180,82 @@ describe("amorce courte (fidélité d'affichage, 9 octobre 2026)", () => {
 
   it("les forts achats / fortes ventes (volume moyen sur 20 bougies) ne portent pas la mention", () => {
     for (const m of grosDe(computeIndicator(stratAxis, candles, EMA50))) expect(m.info).not.toContain("amorce courte");
+  });
+});
+
+describe("stratAxis — sorties masquées et rejeu commun (9 octobre 2026)", () => {
+  const res = computeIndicator(stratAxis, candles, EMA50);
+  const ctx = () => buildCalcContext(candles, "close");
+
+  /** Recoupe positionsStopAxis sur les séries du cœur, au `fin` du jour (n−2 : la fixture n'a pas de `closed`). */
+  const positionsRecalculees = (params: { emaTendance?: number; stopAtr?: number; adxEntree?: number }) => {
+    const score = votesAxis(candles, DEFAUTS).map((v) => v?.reduce((a, b) => a + b, 0));
+    const closes = closeOf(candles);
+    const k = params.adxEntree ?? 0;
+    const adx = k > 0 ? adxOf(candles, ADX_ENTREE_PERIODE).adx : undefined;
+    const auDessus = ema(closes, params.emaTendance ?? 200).map(
+      (t, i) => (t === undefined ? undefined : closes[i]! > t && (adx === undefined || (adx[i] ?? -Infinity) >= k))
+    );
+    return positionsStopAxis(score, auDessus, closes, rma(trueRange(candles), ATR_STOP_PERIODE), 5, 4, candles.length - 2, params.stopAtr ?? 0);
+  };
+
+  it("etat : la série de positionsStopAxis, undefined avant le premier score, dernière bougie reportée", () => {
+    for (const params of [EMA50, { ...EMA50, stopAtr: 3 }, { ...EMA50, adxEntree: ADX_ENTREE_TESTE }]) {
+      const r = computeIndicator(stratAxis, candles, params);
+      const attendu = positionsRecalculees(params).pos;
+      expect(r.series.etat).toEqual(attendu);
+      // Undefined avant le premier score (l'EMA 50 amorce à i=49), reportée à n−1.
+      expect(r.series.etat?.slice(0, 49).every((v) => v === undefined)).toBe(true);
+      expect(r.series.etat?.[candles.length - 1]).toBe(attendu[candles.length - 2]);
+      // Long/plat seulement : jamais −1 (AXIS ne vend pas à découvert).
+      expect(r.series.etat?.every((v) => v === undefined || v === 0 || v === 1)).toBe(true);
+    }
+    expect(res.series.etat?.slice(60, 62)).toEqual([1, 1]);
+    expect(res.series.etat?.[88]).toBe(0);
+  });
+
+  it("score : somme des votes, undefined avant l'amorce, borné à [−6, 6]", () => {
+    const attendu = votesAxis(candles, DEFAUTS).map((v) => v?.reduce((a, b) => a + b, 0));
+    expect(res.series.score).toEqual(attendu);
+    expect(res.series.score?.slice(0, 49).every((v) => v === undefined)).toBe(true);
+    for (const v of res.series.score ?? []) {
+      if (v === undefined) continue;
+      expect(v).toBeGreaterThanOrEqual(-6);
+      expect(v).toBeLessThanOrEqual(6);
+    }
+  });
+
+  it("positionAxis = calc().series.etat élément par élément ; etatsStrategie rend la même série", () => {
+    for (const params of [EMA50, { ...EMA50, stopAtr: 3 }, { ...EMA50, adxEntree: ADX_ENTREE_TESTE }, {}]) {
+      const etatChart = computeIndicator(stratAxis, candles, params).series.etat;
+      expect(positionAxis(candles, params, ctx())).toEqual(etatChart);
+      expect(etatsStrategie("stratAxis", candles, params)).toEqual(etatChart);
+    }
+    // Inconnu du registre des specs : undefined, comme avant.
+    expect(etatsStrategie("inexistant", candles)).toBeUndefined();
+  });
+
+  it("une série SANS champ closed : calc() identique au caractère près au comportement épinglé", () => {
+    // Champ explicitement absent vs absent : même fin (n−2), même résultat.
+    const explicite = computeIndicator(stratAxis, candles.map((c) => ({ ...c, closed: undefined })), EMA50);
+    expect(JSON.stringify(explicite)).toBe(JSON.stringify(res));
+    // Faits déjà épinglés par les tests existants : signaux et positions de la v2.
+    expect(resume(candles, EMA50)).toBe("60▲ 88▼ 107▲ 139▼ 280▲");
+    expect(res.series.etat).toEqual(positionsRecalculees(EMA50).pos);
+  });
+
+  it("dernière bougie dite clôturée (closed: true) : elle est décidée — l'achat de 60 apparaît dès 61 bougies", () => {
+    // Sans `closed`, l'achat de 60 exige 62 bougies (test « anti-repaint » ci-dessus).
+    expect(computeIndicator(stratAxis, candles.slice(0, 61), EMA50).annotations).toBeUndefined();
+    const cloturee = candles.slice(0, 61).map((c, i) => (i === 60 ? { ...c, closed: true } : c));
+    const decidee = computeIndicator(stratAxis, cloturee, EMA50);
+    expect(decidee.annotations?.marqueurs?.map((m) => m.idx)).toEqual([60]);
+    expect(decidee.series.etat?.[60]).toBe(1);
+    expect(decidee.series.prixSignal?.[60]).toBe(candles[60]!.close);
+    // closed: false, ou une bougie plus ancienne marquée : exclusion inchangée.
+    const fausse = candles.slice(0, 61).map((c, i) => (i === 60 ? { ...c, closed: false } : c));
+    expect(computeIndicator(stratAxis, fausse, EMA50).annotations).toBeUndefined();
+    const ancienne = candles.slice(0, 61).map((c, i) => (i === 59 ? { ...c, closed: true } : c));
+    expect(computeIndicator(stratAxis, ancienne, EMA50).annotations).toBeUndefined();
   });
 });

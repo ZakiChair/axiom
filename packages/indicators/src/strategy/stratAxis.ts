@@ -26,7 +26,11 @@
  *    tendance définis) reste silencieux : son début est inconnu, il doit
  *    redevenir faux une fois (armement) ;
  *  - anti-repaint : décisions sur i ≤ n−2, jamais la dernière bougie
- *    (potentiellement en formation), qui reporte la position précédente.
+ *    (potentiellement en formation), qui reporte la position précédente —
+ *    sauf si la source la dit clôturée (`closed === true` : runtime des
+ *    alertes, flux WS ou REST des sources qui posent le drapeau), où elle est
+ *    décidée comme les autres (i ≤ n−1). Sans champ `closed` (fixtures,
+ *    klines des campagnes figées) : comportement n−2 inchangé.
  * Sortie `prixSignal` à l'échelle prix (jamais le score : l'auto-scale du pane
  * prix inclut les figures) : close de la bougie d'achat, tenu pendant la
  * position. Le calcul est indépendant de l'unité de temps ; sur les grandes
@@ -156,9 +160,9 @@
  * données sont consommées.
  */
 
-import type { Candle, IndicatorDef, LabelAnnotation, MarqueurAnnotation, Timeframe } from "@axiom/types";
+import type { CalcContext, Candle, IndicatorDef, LabelAnnotation, MarqueurAnnotation, Timeframe } from "@axiom/types";
 import { closeOf, ema, rma, sma, trueRange, volOf } from "../utils";
-import { MAX_LABELS_SORTIE } from "../utils-fabrique-strategie";
+import { MAX_LABELS_SORTIE, enregistrerSpecStrategie, type EtatStrategie } from "../utils-fabrique-strategie";
 import { rsiOf } from "../momentum/rsi";
 import { adxOf } from "../trend/adx";
 import { macdOf } from "../trend/macd";
@@ -412,18 +416,21 @@ export const sensGros = (f: FluxBougie, c: Candle): number =>
 
 /**
  * Forts achats (+1) et fortes ventes (−1) : bougies à volume relatif ≥ `seuilGros`, de
- * sens défini, hors `exclues` (bougies de signal, déjà qualifiées) et hors dernière bougie
- * (volume en formation). Dans l'ordre des bougies, sans cap. PURE — c'est cette fonction
- * que la campagne de mesure rejoue, bougie par bougie, pour contrôler le chart.
+ * sens défini, hors `exclues` (bougies de signal, déjà qualifiées) et hors bougies
+ * au-delà de `fin` (défaut n−2 : la dernière bougie, à volume en formation, est
+ * écartée ; n−1 quand la source la dit clôturée, comme dans `calc`). Dans l'ordre
+ * des bougies, sans cap. PURE — c'est cette fonction que la campagne de mesure
+ * rejoue, bougie par bougie, pour contrôler le chart.
  */
 export function grosMouvementsAxis(
   candles: Candle[],
   flux: FluxBougie[],
   seuilGros: number,
-  exclues: ReadonlySet<number>
+  exclues: ReadonlySet<number>,
+  fin = candles.length - 2
 ): Array<{ idx: number; sens: number }> {
   const out: Array<{ idx: number; sens: number }> = [];
-  for (let i = 0; i < candles.length - 1; i++) {
+  for (let i = 0; i <= fin; i++) {
     const f = flux[i];
     const c = candles[i];
     if (f?.rvol === undefined || c === undefined || f.rvol < seuilGros || exclues.has(i)) continue;
@@ -566,6 +573,74 @@ export const texteAmorce = (n: number): string =>
     ? ` ; amorce courte (${n} bougies, ${AMORCE_AXIS} attendues) : signaux pouvant différer de ceux d'une série longue`
     : "";
 
+/**
+ * Cœur commun à `calc` et au rejeu `positionAxis` : votes → score → tendance
+ * complétée du filtre flux (`filtreFlux`) et du filtre ADX (`adxEntree`) →
+ * positions et stop de `positionsStopAxis`. `fin`, borne des décisions, vaut
+ * n−1 quand la source dit la dernière bougie clôturée (`closed === true` :
+ * runtime des alertes, flux des sources qui posent le drapeau), n−2 sinon —
+ * la bougie en formation n'est jamais lue (anti-repaint).
+ */
+function coeurAxis(
+  candles: Candle[],
+  params: Record<string, number | boolean | string>,
+  ctx: CalcContext
+): {
+  votes: Array<number[] | undefined>;
+  score: Array<number | undefined>;
+  flux: FluxBougie[];
+  adx: Array<number | undefined> | undefined;
+  pos: Array<number | undefined>;
+  stop: Array<number | undefined>;
+  raisons: Map<number, RaisonSortieAxis>;
+  fin: number;
+} {
+  const n = candles.length;
+  const fin = candles[n - 1]?.closed === true ? n - 1 : n - 2;
+  const votes = votesAxis(candles, params);
+  const score = votes.map((v) => v?.reduce((a, b) => a + b, 0));
+  const closes = closeOf(candles);
+  const tendance = ema(closes, Number(params.emaTendance ?? 200));
+  const seuilRvol = Number(params.seuilRvol ?? 1.5);
+  const seuilOi = Number(params.seuilOi ?? 2);
+  const flux = fluxAxis(candles, ctx.aux?.oi, Number(params.rvolPeriode ?? 20), Number(params.oiBougies ?? 6));
+  const force = (i: number, sens: number) => forceFlux(flux[i] ?? {}, sens, seuilRvol, seuilOi);
+  const filtre = params.filtreFlux === true;
+  const stopAtr = Number(params.stopAtr ?? 0);
+  const adxEntree = Number(params.adxEntree ?? 0);
+  // Même ADX que le vote DMI ; calculé seulement si le filtre est actif (défaut intact).
+  const adx = adxEntree > 0 ? adxOf(candles, ADX_ENTREE_PERIODE).adx : undefined;
+  const adxSuffisant = (i: number): boolean => adx === undefined || (adx[i] ?? -Infinity) >= adxEntree;
+  const { pos, stop, raisons } = positionsStopAxis(
+    score,
+    tendance.map((t, i) => (t === undefined ? undefined : (closes[i] ?? t) > t && (!filtre || force(i, 1).fort) && adxSuffisant(i))),
+    closes,
+    rma(trueRange(candles), ATR_STOP_PERIODE),
+    Number(params.seuil ?? 5),
+    Number(params.seuilVente ?? 4),
+    fin,
+    stopAtr
+  );
+  return { votes, score, flux, adx, pos, stop, raisons, fin };
+}
+
+/**
+ * Série d'états d'AXIS pour le rejeu commun (alertes, backtest, campagnes via
+ * `etatsStrategie`) : 1 acheté, 0 à plat, `undefined` avant le premier score
+ * (dernière bougie reportée quand elle n'est pas décidée). IDENTIQUE élément
+ * par élément à `stratAxis.calc(...).series.etat` : même `fin` (règle
+ * `closed`), mêmes réglages, même `positionsStopAxis` — c'est `coeurAxis`
+ * qui produit les deux.
+ */
+export function positionAxis(
+  candles: Candle[],
+  params: Record<string, number | boolean | string>,
+  ctx: CalcContext
+): Array<EtatStrategie | undefined> {
+  // `pos` ne vaut jamais que 1 ou 0 : AXIS est long/plat, jamais short.
+  return coeurAxis(candles, params, ctx).pos as Array<EtatStrategie | undefined>;
+}
+
 export const stratAxis: IndicatorDef = {
   id: "stratAxis",
   name: "AXIS",
@@ -596,34 +671,22 @@ export const stratAxis: IndicatorDef = {
   outputs: [
     { key: "prixSignal", name: "Prix d'achat", style: "line" },
     { key: "stop", name: "Stop suiveur", style: "line" },
+    // Sorties MASQUÉES (IndicatorOutput.masquee) : calculées pour les alertes,
+    // le backtest et le screener, jamais tracées — une série 0/1 ou −6..+6
+    // polluerait l'auto-scale du pane prix.
+    { key: "etat", name: "État (1 acheté, 0 à plat)", style: "line", masquee: true },
+    { key: "score", name: "Score (−6 à +6)", style: "line", masquee: true },
   ],
   calc(candles, params, ctx) {
     const n = candles.length;
-    const votes = votesAxis(candles, params);
-    const score = votes.map((v) => v?.reduce((a, b) => a + b, 0));
-    const closes = closeOf(candles);
-    const tendance = ema(closes, Number(params.emaTendance ?? 200));
+    const { votes, score, flux, adx, pos, stop, raisons, fin } = coeurAxis(candles, params, ctx);
     const seuilRvol = Number(params.seuilRvol ?? 1.5);
     const seuilOi = Number(params.seuilOi ?? 2);
     const oiBougies = Number(params.oiBougies ?? 6);
-    const flux = fluxAxis(candles, ctx.aux?.oi, Number(params.rvolPeriode ?? 20), oiBougies);
     const force = (i: number, sens: number) => forceFlux(flux[i] ?? {}, sens, seuilRvol, seuilOi);
     const filtre = params.filtreFlux === true;
     const stopAtr = Number(params.stopAtr ?? 0);
     const adxEntree = Number(params.adxEntree ?? 0);
-    // Même ADX que le vote DMI ; calculé seulement si le filtre est actif (défaut intact).
-    const adx = adxEntree > 0 ? adxOf(candles, ADX_ENTREE_PERIODE).adx : undefined;
-    const adxSuffisant = (i: number): boolean => adx === undefined || (adx[i] ?? -Infinity) >= adxEntree;
-    const { pos, stop, raisons } = positionsStopAxis(
-      score,
-      tendance.map((t, i) => (t === undefined ? undefined : (closes[i] ?? t) > t && (!filtre || force(i, 1).fort) && adxSuffisant(i))),
-      closes,
-      rma(trueRange(candles), ATR_STOP_PERIODE),
-      Number(params.seuil ?? 5),
-      Number(params.seuilVente ?? 4),
-      n - 2,
-      stopAtr
-    );
 
     // Signal = changement de position entre deux bougies définies (jamais la première).
     const prixSignal: Array<number | undefined> = new Array(n).fill(undefined);
@@ -690,8 +753,9 @@ export const stratAxis: IndicatorDef = {
     });
 
     // Forts achats / fortes ventes : volume ≥ seuilGros × moyen, hors bougies de signal
-    // (déjà qualifiées) et hors dernière bougie (volume en formation).
-    const gros = grosMouvementsAxis(candles, flux, Number(params.seuilGros ?? 3), new Set(signaux));
+    // (déjà qualifiées) et hors bougies au-delà de `fin` (dernière bougie en formation,
+    // sauf si la source la dit clôturée).
+    const gros = grosMouvementsAxis(candles, flux, Number(params.seuilGros ?? 3), new Set(signaux), fin);
     gros.slice(-MAX_GROS_AXIS).forEach(({ idx, sens }, k, recents) => {
       const f = flux[idx] ?? {};
       const c = candles[idx] as Candle;
@@ -722,7 +786,23 @@ export const stratAxis: IndicatorDef = {
     });
 
     return marqueurs.length > 0
-      ? { series: { prixSignal, stop }, annotations: { marqueurs, labels } }
-      : { series: { prixSignal, stop } };
+      ? { series: { prixSignal, stop, etat: pos, score }, annotations: { marqueurs, labels } }
+      : { series: { prixSignal, stop, etat: pos, score } };
   },
 };
+
+// Rejeu commun (alertes, fenêtre BT, scripts/valider-strategies.ts, campagnes) :
+// AXIS ne passe pas par `defStrategie` (rendu propre), sa spec est enregistrée
+// à part ; `etatsStrategie("stratAxis", candles)` rend la même série que la
+// sortie masquée `etat`.
+enregistrerSpecStrategie({
+  id: "stratAxis",
+  name: "AXIS",
+  inputsStrategie: stratAxis.inputs,
+  position: positionAxis,
+  libelles: () => ({
+    long: "AXIS : score de confluence ≥ seuil et close au-dessus de l'EMA de tendance",
+    short: "AXIS ne vend jamais à découvert",
+    sortie: "AXIS : score ≤ −seuil de vente (ou stop suiveur si réglé)",
+  }),
+});

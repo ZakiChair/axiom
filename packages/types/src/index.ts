@@ -74,7 +74,7 @@ export interface Candle {
   sellVolume?: number;
   /** nombre de trades dans la bougie. */
   trades?: number;
-  /** true tant que la bougie n'est pas clôturée (live). */
+  /** true quand la bougie est clôturée (définitive) ; false = en formation ; absent = inconnu (sources sans drapeau, klines des campagnes). */
   closed?: boolean;
 }
 
@@ -272,6 +272,13 @@ export interface IndicatorOutput {
   name: string;
   style: PlotStyle;
   color?: string;
+  /**
+   * Sortie calculée mais jamais tracée ni légendée par le chart (elle ne pèse
+   * pas sur l'auto-scale du pane) ; lue par les alertes, le backtest et le
+   * screener. Sert aux stratégies overlay qui exposent un état ou un score
+   * numérique à côté de leurs séries à l'échelle prix.
+   */
+  masquee?: boolean;
 }
 
 // ---------- Annotations d'indicateur (canal de rendu visuel, lot v2.1) ----------

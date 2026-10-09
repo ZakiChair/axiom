@@ -143,6 +143,10 @@ export const CATALOGUE_OPERANDES: OperandeSpec[] = [
   indFixe("supertrend", "direction", "Supertrend (direction)", { period: 10, multiplier: 3 }),
   indLen("adx", "adx", "ADX", 14),
   indFixe("psar", "psar", "PSAR", { step: 0.02, max: 0.2 }),
+  // Sorties masquées d'AXIS (jamais tracées sur le chart) : état et score de la
+  // stratégie, aux défauts — donc la v2 exacte mesurée en 4h.
+  indFixe("stratAxis", "etat", "AXIS (état : 1 acheté, 0 à plat)", {}),
+  indFixe("stratAxis", "score", "AXIS (score −6 à +6)", {}),
 ];
 
 /** Résout une spec d'opérande par son id. */
@@ -256,6 +260,13 @@ const psarDefaut = (): Operande => ({
   indicateurId: "psar",
   params: { step: 0.02, max: 0.2 },
   output: "psar",
+});
+/** État masqué d'AXIS aux défauts (1 acheté, 0 à plat) — la v2 exacte. */
+const axisEtat = (): Operande => ({
+  type: "indicateur",
+  indicateurId: "stratAxis",
+  params: {},
+  output: "etat",
 });
 
 /**
@@ -426,6 +437,30 @@ export const BUILTIN_STRATEGIES: StrategiePreset[] = [
     // alors que la def chart est flat forcé dès ADX < 25 — le déclencheur
     // seul est strictement plus proche du comportement chart.
     reglesSortie: [{ type: "comparaison", gauche: prixClose, comparateur: "<", droite: psarDefaut() }],
+    builtin: true,
+  },
+  /**
+   * AXIS par l'état masqué : signaux = ceux du chart (décision à la clôture de
+   * la bougie — y compris la dernière quand la source la dit clôturée —, le
+   * moteur remplit à l'open suivant, avec ses frais et son slippage). Statut
+   * mesuré : test réussi sur données jamais vues en 4h (BTC/ETH/XRP/SOL,
+   * 2017-2024, `scripts/axis/rapport-v2-2026-10-07.md`), mais pas mieux qu'une
+   * EMA 200 seule en PnL total sur 3 actifs sur 4 ; échoué dans les autres
+   * unités (`scripts/axis/rapport-ut-2026-10-08.md`). Le 4h n'est qu'un défaut
+   * de commodité — mesure passée, pas une promesse. `stopPct`, `targetPct` et
+   * `risquePct` restent à la main de l'utilisateur : le stop suiveur interne
+   * (`stopAtr`) a échoué son test v3, il n'est pas pré-réglé ici.
+   */
+  {
+    id: "builtin:axis",
+    name: "AXIS confluence (4h)",
+    tf: "4h",
+    direction: "long",
+    tailleFixe: 1000,
+    stopPct: null,
+    targetPct: null,
+    reglesEntree: [{ type: "comparaison", gauche: axisEtat(), comparateur: ">=", droite: constante(1) }],
+    reglesSortie: [{ type: "comparaison", gauche: axisEtat(), comparateur: "<=", droite: constante(0) }],
     builtin: true,
   },
 ];

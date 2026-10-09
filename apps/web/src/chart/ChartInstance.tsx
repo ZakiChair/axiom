@@ -178,7 +178,10 @@ const PROFONDEUR_SESSION: Record<string, number> = {
   pivotFibonacci: 1,
   pivotWoodie: 1,
 };
-/** Plafond de pages de l'extension de session (2 jours en 1 min = 6 pages de 500). */
+/**
+ * Plafond de pages d'une extension (2 jours en 1 min = 6 pages de 500 ; une amorce de
+ * 1 500 bougies depuis un backfill de 500 = 2 pages).
+ */
 const MAX_PAGES_SESSION = 8;
 
 /**
@@ -195,6 +198,32 @@ export function cibleSessionUTC(defIds: string[], dernierTime: number): number |
   }
   if (profondeur < 0) return undefined;
   return (Math.floor(dernierTime / JOUR_MS) - profondeur) * JOUR_MS;
+}
+
+/**
+ * Plus grande amorce (`IndicatorDef.amorceBougies`) déclarée par les définitions
+ * ACTIVES : nombre de bougies que le buffer doit compter pour que leurs signaux
+ * soient ceux d'une série longue (AXIS : 1 500, mesure du 9 octobre 2026 — sur le
+ * backfill de 500, 60 % des fenêtres montraient un signal faux ou manquant).
+ * `undefined` = aucune n'en déclare, rien de plus à charger. Compte en BOUGIES,
+ * pas en temps : exact même sur une série à trous (actions, forex).
+ */
+export function amorceMinimale(defIds: string[]): number | undefined {
+  let bougies: number | undefined;
+  for (const id of defIds) {
+    const a = getIndicator(id)?.amorceBougies;
+    if (a !== undefined && a > 0 && (bougies === undefined || a > bougies)) bougies = a;
+  }
+  return bougies;
+}
+
+/**
+ * Taille de page de l'amorce : les bougies qui manquent pour atteindre `bougiesMin`,
+ * plafonnées à `limitePage`. 0 = aucune amorce exigée ou buffer déjà assez long.
+ */
+export function limitePageAmorce(nombre: number, bougiesMin: number | undefined, limitePage: number): number {
+  if (bougiesMin === undefined || nombre >= bougiesMin) return 0;
+  return Math.min(limitePage, bougiesMin - nombre);
 }
 
 /**
@@ -224,14 +253,21 @@ export function limitePageSession(
   return Math.min(limitePage, Math.ceil((premierTime - cible) / tfMs));
 }
 
-/** Vrai si une définition sessionnée active exige un historique plus ancien que le buffer. */
-export function doitEtendreSession(
+/**
+ * Vrai si une définition active exige plus d'historique que le buffer : une session
+ * entière plus ancienne que sa première bougie (`cibleSessionUTC`) ou une amorce plus
+ * longue que son nombre de bougies (`amorceMinimale`).
+ */
+export function doitEtendreHistorique(
   defIds: string[],
   premierTime: number,
   dernierTime: number,
+  nombre: number,
 ): boolean {
   const cible = cibleSessionUTC(defIds, dernierTime);
-  return cible !== undefined && premierTime > cible;
+  if (cible !== undefined && premierTime > cible) return true;
+  const amorce = amorceMinimale(defIds);
+  return amorce !== undefined && nombre < amorce;
 }
 
 /** Une pagination concurrente peut avoir préfixé le buffer pendant la requête. */
@@ -243,18 +279,24 @@ export function bougiesAvantBuffer(fetched: Candle[], buffer: Candle[], avantTim
 }
 
 export interface ParamsExtensionSession {
-  cible: number;
+  /** Temps d'ouverture à atteindre (sessions entières) ; absent = aucune contrainte de date. */
+  cible?: number;
   tfMs: number;
   limitePage: number;
   maxPages?: number;
+  /** Nombre minimal de bougies (amorce) ; absent = aucune contrainte de nombre. */
+  bougiesMin?: number;
   lirePremierTime: () => number | undefined;
+  /** Nombre de bougies du buffer, lu à chaque page ; requis avec `bougiesMin`. */
+  lireNombre?: () => number;
   chargerPlusAncien: (avantTime: number, limit: number) => Promise<number>;
   estAnnule?: () => boolean;
 }
 
 /**
- * Boucle d'extension : pages successives jusqu'à la cible, 0 requête si déjà couverte.
- * S'arrête aussi si `estAnnule` (identité/révision invalidée) ou si la source est à sec.
+ * Boucle d'extension : pages successives jusqu'à la cible de date ET au nombre de
+ * bougies demandés, 0 requête si le buffer les couvre déjà. S'arrête aussi si
+ * `estAnnule` (identité/révision invalidée) ou si la source est à sec.
  */
 export async function etendreSessionJusqua(params: ParamsExtensionSession): Promise<number> {
   const maxPages = params.maxPages ?? MAX_PAGES_SESSION;
@@ -263,7 +305,11 @@ export async function etendreSessionJusqua(params: ParamsExtensionSession): Prom
     if (params.estAnnule?.()) return pages;
     const premierTime = params.lirePremierTime();
     if (premierTime === undefined) return pages;
-    const limit = limitePageSession(premierTime, params.cible, params.tfMs, params.limitePage);
+    const nombre = params.lireNombre?.();
+    const limit = Math.max(
+      params.cible === undefined ? 0 : limitePageSession(premierTime, params.cible, params.tfMs, params.limitePage),
+      nombre === undefined ? 0 : limitePageAmorce(nombre, params.bougiesMin, params.limitePage),
+    );
     if (limit === 0) return pages;
     const recus = await params.chargerPlusAncien(premierTime, limit);
     pages += 1;
@@ -1313,24 +1359,28 @@ export function ChartInstance({
             });
         });
 
-        // Extension du backfill aux sessions UTC ENTIÈRES. Le backfill initial est
-        // borné à 500 bougies : en 1 min il démarre en milieu de journée, la VWAP
-        // s'ancre alors au mauvais endroit et les pivots lisent une veille tronquée.
-        // On ne remonte QUE si une définition sessionnée est active (coût réseau
-        // inchangé sinon), et jamais au-delà de la veille (`cibleSessionUTC`).
+        // Extension du backfill aux sessions UTC ENTIÈRES et aux AMORCES longues. Le
+        // backfill initial est borné à 500 bougies : en 1 min il démarre en milieu de
+        // journée, la VWAP s'ancre alors au mauvais endroit et les pivots lisent une
+        // veille tronquée ; AXIS (EMA 200, ADX de Wilder, position tenue) y rend des
+        // signaux qui diffèrent de la série longue mesurée par ses tests. On ne remonte
+        // QUE si une définition l'exige (coût réseau inchangé sinon), jamais au-delà de
+        // la veille (`cibleSessionUTC`) ni de l'amorce déclarée (`amorceMinimale`).
         // Lancé APRÈS le premier rendu : le chien de garde du gate G1 n'est pas allongé.
-        const etendreSession = async (cible: number): Promise<void> => {
+        const etendreHistorique = async (cible: number | undefined, bougiesMin: number | undefined): Promise<void> => {
           const tfMs = pasBougiesMs(store.getState().candles.length >= 2 ? store.getState().candles : candles);
+          const lisible = (etat: ReturnType<typeof store.getState>): boolean =>
+            isMarketDataReady(etat, requestedIdentity, requestId) && etat.candles.length < paginationMaxCandles;
           await etendreSessionJusqua({
             cible,
+            bougiesMin,
             tfMs,
             limitePage: paginationLimit,
             lirePremierTime: () => {
               const etat = store.getState();
-              if (!isMarketDataReady(etat, requestedIdentity, requestId)) return undefined;
-              if (etat.candles.length >= paginationMaxCandles) return undefined;
-              return etat.candles[0]?.time;
+              return lisible(etat) ? etat.candles[0]?.time : undefined;
             },
+            lireNombre: () => store.getState().candles.length,
             chargerPlusAncien: async (avantTime, limit) =>
               (await chargerPlusAncien(avantTime, limit)).length,
             estAnnule: () => cancelled,
@@ -1346,15 +1396,13 @@ export function ChartInstance({
             const dernier = buffer[buffer.length - 1];
             if (premier === undefined || dernier === undefined) return;
             const defIds = indicatorsStore.getState().indicators.map((i) => i.defId);
-            if (!doitEtendreSession(defIds, premier.time, dernier.time)) return;
-            const cible = cibleSessionUTC(defIds, dernier.time);
-            if (cible === undefined) return;
+            if (!doitEtendreHistorique(defIds, premier.time, dernier.time, buffer.length)) return;
             const avant = buffer.length;
             extensionSessionEnCours = true;
             try {
-              await etendreSession(cible);
+              await etendreHistorique(cibleSessionUTC(defIds, dernier.time), amorceMinimale(defIds));
             } catch (err) {
-              console.error("[AXIOM] extension de session échouée", err);
+              console.error("[AXIOM] extension d'historique échouée", err);
             } finally {
               extensionSessionEnCours = false;
             }

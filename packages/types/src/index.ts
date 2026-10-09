@@ -393,6 +393,14 @@ export interface IndicatorDef {
   /** Timeframe minimal en dessous duquel ce def n'est pas pertinent (ex. données on-chain journalières). */
   minTimeframe?: Timeframe;
   /**
+   * Nombre minimal de bougies d'historique pour que la sortie affichée soit celle d'une
+   * série longue (cœurs à longue mémoire : EMA 200, lissages de Wilder, position tenue
+   * d'une bougie à l'autre). Le chart étend son backfill jusqu'à ce nombre quand le def
+   * est actif ; en deçà, le def le dit lui-même dans ses infobulles. Absent = le
+   * backfill courant suffit (indicateurs à mémoire courte).
+   */
+  amorceBougies?: number;
+  /**
    * Statut de VALIDATION d'une stratégie. « non-valide » = mesurée par la campagne de
    * rejeu et recalée : le résultat dépend d'hypothèses d'exécution non tenues en réel.
    *

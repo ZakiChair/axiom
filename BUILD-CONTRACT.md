@@ -739,7 +739,8 @@ dépendance, aucun hôte ni fournisseur, aucune règle de proxy modifiée,
 5. **Panes sans valeur.** Un indicateur UNUSABLE n'est plus tracé. Son en-tête
    de pane (ou la légende d'overlay) affiche la raison. Un résultat sans valeur
    finie affiche « indisponible » avec sa cause, par exemple « Historique
-   insuffisant : 74 bougies, horizon 96 » en 1M. Pendant l'extension de session,
+   insuffisant : 74 bougies, horizon 96 » en 1M. Pendant l'extension de session
+   (ou d'amorce, depuis le 2026-10-09, cf. AXIS « Fidélité d'affichage »),
    aucun recalcul par page ni sur tick : un seul recalcul après sa réapplication
    finale (un indicateur ajouté pendant l'extension reste calculé sur le buffer
    étendu, comportement préexistant). Les grands nombres négatifs sont abrégés comme
@@ -1436,9 +1437,10 @@ qui combine plusieurs signaux d'achat et de vente et marque sur le prix les
 achats et les ventes. Cette demande autorise une définition
 supplémentaire, `stratAxis` (catégorie `strategy`, pane prix), soit **219
 indicateurs** dont 31 stratégies. Aucun nouvel écran, fournisseur, secret,
-dépendance ni ordre réel. Deux changements de `@axiom/types` :
+dépendance ni ordre réel. Trois changements de `@axiom/types` :
 `IndicatorDef.auxFacultatives` le soir du même jour (voir la couche flux),
-`CalcContext.timeframe` le 8 octobre (voir l'unité de temps au calcul).
+`CalcContext.timeframe` le 8 octobre (voir l'unité de temps au calcul),
+`IndicatorDef.amorceBougies` le 9 octobre (voir la fidélité d'affichage).
 
 - Six votes (+1, −1 ou 0) à la clôture, tous issus de cœurs existants : EMA 20/50,
   direction du Supertrend 10 × 3, +DI contre −DI seulement si l'ADX 14 atteint le
@@ -1584,6 +1586,31 @@ dépendance ni ordre réel. Deux changements de `@axiom/types` :
   multiplicateur = « hors du test », test croisé
   `apps/web/src/chart/indicators.axisStop.test.ts` (empreinte du résultat
   épinglée). Ces données sont consommées.
+- **Fidélité d'affichage** (demande du propriétaire du 2026-10-09 : « revoir
+  l'outil pour le rendre encore plus précis » ; lot A, aucune donnée jamais
+  vue consommée). Les tests lisent des séries longues, le chart calculait sur
+  son backfill de 500 bougies ; AXIS a une longue mémoire (EMA 200, lissages
+  de Wilder, position tenue). Mesure sur les 8 séries 4h déjà vues (fenêtres
+  glissantes, 300 dernières bougies décidées) : à 500 bougies, **60 % des
+  fenêtres** montrent au moins un signal absent ou en trop par rapport à la
+  série longue (11,6 % des signaux affichés faux, 11,6 % des signaux mesurés
+  manquants) ; 0,4 % des fenêtres à 1 000 ; **aucun écart à 1 500**. Suites :
+  `IndicatorDef.amorceBougies` (déclaratif, comme `aux` et `minTimeframe` ;
+  AXIS déclare 1 500) ; le chart étend son backfill jusqu'à l'amorce des
+  définitions actives par le mécanisme de l'extension de session
+  (`amorceMinimale`, `limitePageAmorce`, `doitEtendreHistorique`,
+  `etendreSessionJusqua` avec `bougiesMin`/`lireNombre`, compte en bougies
+  donc exact sur une série à trous ; deux pages après le premier rendu, un
+  recalcul, rien sans définition qui l'exige) ; sous 1 500 bougies,
+  l'infobulle de chaque signal porte « amorce courte (N bougies, 1500
+  attendues) : signaux pouvant différer de ceux d'une série longue », placée
+  avant la couche flux pour laisser intacte la fin de l'infobulle que les tests
+  croisés comparent aux formulations figées ; daemon : fenêtre glissante 1 min
+  portée de 500 à 1 500 (`FENETRE_BOUGIES`), backfill REST paginé (1 000 klines
+  par requête au plus) et fusionné avec les clôtures du flux au lieu de les
+  remplacer — n'affecte que les alertes évaluées onglet fermé (1 min ou
+  héritées). Signaux et textes sur série longue inchangés au caractère près ;
+  screener (200 klines) inchangé.
 - **Unité de temps au calcul** : `CalcContext.timeframe` (nouveau champ
   facultatif de `@axiom/types`), rempli par `computeIndicator` (paramètre
   facultatif après `aux`) quand l'appelant connaît l'unité, c'est-à-dire le
@@ -1643,6 +1670,17 @@ disjoints : erreur statique sans effet à l'exécution, et le fichier figé
 ne peut être retouché sans invalider l'arbre vérifié). Budget :
 **1 192 494 / 356 283**, marge gzip **3 717 octets** (BOOK différé a
 libéré 3 665 ; le stop en a coûté 495).
+Après la fidélité d'affichage (9 octobre) : `pnpm check` réussi — typage des
+8 projets ; indicateurs 1 001 tests (dont 72 pour AXIS : amorce déclarée,
+mention chiffrée présente sous 1 500 bougies et absente au-delà sur une même
+série, jamais sur les forts achats), alertes 122, backtest 129, pacte 120,
+web 419 fichiers / 5 940 tests (dont 32 pour l'extension d'historique :
+amorce lue sur la définition, 500 → 1 500 en deux pages puis rien, session et
+amorce combinées, source à sec), daemon 785 tests (Bun 1.4.2 ; backfill
+paginé, fusion avec le flux) ; les tests croisés des infobulles figées
+(`indicators.axisUnites.test.ts`, `indicators.axisStop.test.ts`) passent
+sans modification. Budget : **1 193 086 / 356 453** (+592 / +170), marge gzip
+**3 547 octets**.
 Usage, limites et tests :
 [`docs/axis-2026-10-07.md`](docs/axis-2026-10-07.md),
 [`scripts/axis/rapport-v2-2026-10-07.md`](scripts/axis/rapport-v2-2026-10-07.md),

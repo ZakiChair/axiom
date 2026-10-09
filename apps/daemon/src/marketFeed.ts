@@ -10,7 +10,12 @@
  * Pour chaque symbole surveillé, UN flux Binance combiné :
  *   - `<sym>@miniTicker` → dernier prix (conditions `prix-croise`) ;
  *   - `<sym>@kline_1m`   → bougies 1 min CLÔTURÉES (conditions variation/indicateur),
- *     en fenêtre glissante de 500 bougies max (backfill REST au démarrage).
+ *     en fenêtre glissante de 1 500 bougies max (backfill REST au démarrage, en deux
+ *     pages : Binance sert au plus 1 000 klines par requête). 1 500 et non 500 depuis
+ *     le 9 octobre 2026 : les indicateurs à longue mémoire (AXIS : EMA 200, ADX de
+ *     Wilder, position tenue) rendaient sur 500 bougies des signaux différents de
+ *     la série longue dans 60 % des fenêtres mesurées, aucun à 1 500. Ne concerne
+ *     que les alertes évaluées ici, donc en 1 min ou héritées (`evaluableSurBougie1m`).
  *
  * Funding (lot D3) : poll REST `fapi/v1/premiumIndex` (tous symboles, 1 requête) pour
  * injecter `fundingRate` (fraction) dans le contexte des conditions `funding-extreme`.
@@ -37,8 +42,10 @@ const WS_STREAM_BASE = "wss://stream.binance.com:9443/stream?streams=";
 /** Fenêtre glissante pour z-score funding (même ordre de grandeur que le runtime front). */
 export const FENETRE_Z_FUNDING = 30;
 
-/** Taille de la fenêtre glissante de bougies par symbole. */
-export const FENETRE_BOUGIES = 500;
+/** Taille de la fenêtre glissante de bougies par symbole (amorce d'AXIS : 1 500). */
+export const FENETRE_BOUGIES = 1500;
+/** Plafond de klines par requête `/api/v3/klines` (limite Binance). */
+export const PAGE_KLINES_MAX = 1000;
 
 // ─────────────────────────── Mapping des payloads Binance ───────────────────────────
 // (copie annotée du strict nécessaire depuis apps/web/src/data/binance.ts ;
@@ -118,6 +125,18 @@ export function ajouterBougie(fenetre: Candle[], c: Candle): void {
   if (fenetre.length > FENETRE_BOUGIES) fenetre.splice(0, fenetre.length - FENETRE_BOUGIES);
 }
 
+/**
+ * Fusion du backfill avec les bougies déjà reçues du flux pendant la requête : union
+ * triée par temps, la bougie du flux prime à temps égal (c'est la clôture définitive),
+ * fenêtre bornée à `FENETRE_BOUGIES`. Remplacer le buffer perdrait ces bougies. PURE.
+ */
+export function fusionnerBougies(backfill: readonly Candle[], recues: readonly Candle[]): Candle[] {
+  const parTemps = new Map<number, Candle>();
+  for (const c of backfill) parTemps.set(c.time, c);
+  for (const c of recues) parTemps.set(c.time, c);
+  return [...parTemps.values()].sort((a, b) => a.time - b.time).slice(-FENETRE_BOUGIES);
+}
+
 /** Construit l'URL du flux combiné (miniTicker + kline_1m) pour un jeu de symboles. */
 export function construireUrlFlux(symboles: readonly string[]): string | null {
   if (symboles.length === 0) return null;
@@ -151,17 +170,39 @@ interface EtatSymbole {
   dernierPrix?: number;
 }
 
-/** Backfill REST des 500 dernières bougies 1 min (clôturées uniquement). */
-async function backfill(symbol: string): Promise<Candle[]> {
-  const params = new URLSearchParams({
-    symbol: symbol.toUpperCase(),
-    interval: "1m",
-    limit: String(FENETRE_BOUGIES),
-  });
-  const res = await fetch(`${REST_KLINES_URL}?${params.toString()}`);
+/** GET JSON ; échec HTTP → erreur (le backfill est best-effort, l'appelant journalise). */
+async function lireJson(url: string): Promise<unknown> {
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`Binance REST ${res.status} ${res.statusText}`);
-  const brut = (await res.json()) as BinanceRestKline[];
-  return brut.map(restKlineToCandle).filter((c) => c.closed === true);
+  return res.json();
+}
+
+/**
+ * Backfill REST des `FENETRE_BOUGIES` dernières bougies 1 min clôturées, par pages : la
+ * plus récente d'abord, puis `endTime` juste avant la plus ancienne reçue, jusqu'au
+ * compte voulu ou à une page sans bougie plus ancienne (historique plus court).
+ * Ordre croissant, sans doublon. `lire` est injectable pour les tests.
+ */
+export async function backfill(symbol: string, lire: (url: string) => Promise<unknown> = lireJson): Promise<Candle[]> {
+  let bougies: Candle[] = [];
+  let avant: number | undefined;
+  while (bougies.length < FENETRE_BOUGIES) {
+    const params = new URLSearchParams({
+      symbol: symbol.toUpperCase(),
+      interval: "1m",
+      // +1 : la première page contient la bougie en formation, écartée ci-dessous.
+      limit: String(Math.min(PAGE_KLINES_MAX, FENETRE_BOUGIES - bougies.length + 1)),
+    });
+    if (avant !== undefined) params.set("endTime", String(avant - 1));
+    const brut = (await lire(`${REST_KLINES_URL}?${params.toString()}`)) as BinanceRestKline[];
+    const page = brut
+      .map(restKlineToCandle)
+      .filter((c) => c.closed === true && (avant === undefined || c.time < avant));
+    if (page.length === 0) break;
+    bougies = [...page, ...bougies];
+    avant = page[0]!.time;
+  }
+  return bougies.slice(-FENETRE_BOUGIES);
 }
 
 // ─────────────────────────── Funding (premiumIndex + z) ───────────────────────────
@@ -312,7 +353,8 @@ export function creerFeed(o: OptionsFeed): Feed {
       backfill(s)
         .then((bougies) => {
           const etat = etats.get(s);
-          if (etat) etat.candles = bougies; // le symbole peut avoir été retiré entre-temps
+          // Le symbole peut avoir été retiré entre-temps ; des clôtures WS ont pu arriver.
+          if (etat) etat.candles = fusionnerBougies(bougies, etat.candles);
         })
         .catch((err) => console.error(`[axiomd] backfill ${s} échoué :`, err));
     }

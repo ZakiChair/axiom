@@ -199,6 +199,14 @@ réduit le drawdown sur 82,8 % des actifs mais n'améliore le rendement ajusté
 du risque que sur 41,1 % — verdict **DÉFAVORABLE**. Le défaut reste donc sans
 stop ; le réglage reste disponible et l'infobulle d'un stop actif dit cet
 échec, chiffres à l'appui.
+**Fidélité d'affichage (9 octobre 2026)** : les tests lisent des séries
+longues, le chart calculait sur 500 bougies — sur les huit grandes cryptos
+déjà vues, 60 % des fenêtres de 500 bougies montraient au moins un signal
+absent ou en trop (un signal affiché sur neuf), aucun écart à 1 500. Le chart
+remonte désormais à **1 500 bougies** de lui-même quand AXIS est actif, et
+l'infobulle dit « amorce courte » tant que l'historique n'y arrive pas
+(source plus courte, alertes). Le daemon évalue ses alertes 1 min sur la
+même profondeur.
 [Méthode, réglages, limites et backtests](docs/axis-2026-10-07.md).
 
 ### Historique des décisions et nouveaux indicateurs

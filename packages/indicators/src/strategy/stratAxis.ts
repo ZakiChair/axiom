@@ -121,6 +121,17 @@
  * reste 0 (signaux et textes de la v2 inchangés) ; le réglage reste
  * disponible et l'infobulle d'un stop actif dit l'échec (3 × ATR 14) ou « hors
  * du test » (autre multiplicateur). Ces données sont consommées.
+ *
+ * AMORCE (fidélité d'affichage, 9 octobre 2026). Les tests ont lu des séries
+ * longues (300 bougies d'amorce puis des années de décisions) ; le chart, lui,
+ * calcule sur son backfill. Mesure sur les 8 grandes cryptos vues (4h,
+ * 2017-2026, fenêtres glissantes, 300 dernières bougies décidées) : sur 500
+ * bougies, 60 % des fenêtres montrent au moins un signal absent ou en trop
+ * par rapport à la série longue (11,6 % des signaux affichés sont faux, 11,6 %
+ * des signaux de référence manquent) ; sur 1 000, 0,4 % des fenêtres ; sur
+ * 1 500, aucun écart. `amorceBougies` = 1500 : le chart remonte jusque-là
+ * quand AXIS est actif ; en deçà (source à sec, historique court, alertes sur
+ * un buffer plus court), l'infobulle des signaux le dit.
  */
 
 import type { Candle, IndicatorDef, LabelAnnotation, MarqueurAnnotation, Timeframe } from "@axiom/types";
@@ -142,6 +153,11 @@ export const MAX_LABELS_GROS = 3;
 export const SEUIL_DELTA_AXIS = 0.1;
 /** Période de l'ATR du stop suiveur (Wilder, comme l'ADX et le RSI du score). */
 export const ATR_STOP_PERIODE = 14;
+/**
+ * Bougies d'historique à partir desquelles les signaux affichés sont ceux d'une série
+ * longue (aucun écart mesuré sur 8 séries 4h 2017-2026 ; 60 % de fenêtres en écart à 500).
+ */
+export const AMORCE_AXIS = 1500;
 
 const signe = (a: number, b: number): number => (a > b ? 1 : a < b ? -1 : 0);
 
@@ -498,6 +514,17 @@ function textesUnite(u: Timeframe | undefined): { signaux: string; fortAchat: st
 /** Niveau de prix d'une infobulle : deux décimales dès 1, quatre chiffres significatifs en dessous. */
 const prix = (v: number): string => (v >= 1 ? v.toFixed(2) : v.toPrecision(4));
 
+/**
+ * Mention d'une amorce plus courte que `AMORCE_AXIS` dans l'infobulle d'un signal :
+ * l'EMA 200, les lissages de Wilder et la position tenue dépendent du début de la
+ * série, donc le signal peut différer de celui qu'une série longue aurait donné.
+ * Vide dès que l'historique suffit. PURE.
+ */
+export const texteAmorce = (n: number): string =>
+  n < AMORCE_AXIS
+    ? ` ; amorce courte (${n} bougies, ${AMORCE_AXIS} attendues) : signaux pouvant différer de ceux d'une série longue`
+    : "";
+
 export const stratAxis: IndicatorDef = {
   id: "stratAxis",
   name: "AXIS",
@@ -506,6 +533,7 @@ export const stratAxis: IndicatorDef = {
   // Facultative : sans OI (symbole hors perp USDT, fetch en échec), la couche flux lit
   // volume et delta seuls ; les signaux du cœur ne dépendent de rien d'auxiliaire.
   auxFacultatives: ["oi"],
+  amorceBougies: AMORCE_AXIS,
   inputs: [
     { key: "seuil", name: "Achat si score ≥", type: "number", default: 5, min: 1, max: 6 },
     { key: "seuilVente", name: "Vente si score ≤ −", type: "number", default: 4, min: 1, max: 6 },
@@ -563,6 +591,9 @@ export const stratAxis: IndicatorDef = {
     const noms = [`EMA ${params.emaRapide}/${params.emaLente}`, "Supertrend", "DMI", "MACD", "RSI", "CMF"];
     const textes = textesAxis(ctx.timeframe, stopAtr);
     const reserve = filtre ? RESERVE_FILTRE + suffixeStop(stopAtr) : textes.signaux;
+    // Placée avant la couche flux : la fin de l'infobulle (« ; qualification) — statut »)
+    // reste celle que les tests croisés comparent aux formulations figées des campagnes.
+    const amorce = texteAmorce(n);
     const marqueurs: MarqueurAnnotation[] = [];
     const labels: LabelAnnotation[] = [];
     // Seuls les signaux les plus récents portent une étiquette (même règle que defStrategie).
@@ -595,7 +626,7 @@ export const stratAxis: IndicatorDef = {
         info:
           `AXIS ${achat ? "achat" : parStop ? "stop" : "vente"}${fort} — score ${s > 0 ? "+" : ""}${s}/6 : ` +
           `${noms.map((nom, w) => `${nom} ${fleche(v[w] ?? 0)}`).join(", ")} ; ` +
-          `${achat ? `close au-dessus de l'EMA ${params.emaTendance}` : sortie} ; ` +
+          `${achat ? `close au-dessus de l'EMA ${params.emaTendance}` : sortie}${amorce} ; ` +
           `flux ${qualite} (${texteFlux(flux[idx] ?? {}, oiBougies)} ; ${textes.qualification}) — ${reserve}`,
       });
       if (k >= recents.length - MAX_LABELS_SORTIE) {

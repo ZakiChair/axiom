@@ -1,12 +1,14 @@
 /**
  * Extension du backfill aux sessions UTC ENTIÈRES (constat « VWAP et pivots
- * lisent une session tronquée »).
+ * lisent une session tronquée ») et aux AMORCES longues (constat « AXIS sur
+ * 500 bougies diffère de la série longue mesurée », 9 octobre 2026).
  *
  * Le backfill initial est borné à 500 bougies : en 1 min il démarre en milieu
  * de journée, donc la VWAP s'ancre au mauvais endroit et les pivots lisent une
- * veille tronquée. Ces deux fonctions PURES décident jusqu'où remonter et de
- * combien de bougies par page — et surtout : elles ne demandent RIEN quand
- * aucune définition sessionnée n'est active.
+ * veille tronquée ; AXIS y rend des signaux faux ou manquants dans 60 % des
+ * fenêtres (mesure sur 8 séries 4h), aucun à 1 500 bougies. Ces fonctions PURES
+ * décident jusqu'où remonter et de combien de bougies par page — et surtout :
+ * elles ne demandent RIEN quand aucune définition active ne l'exige.
  *
  * NOTE environnement : même préambule que `backfillDelai.test.ts` — le graphe
  * d'import de `ChartInstance.tsx` touche `document` et enregistre des overlays
@@ -78,13 +80,16 @@ vi.mock("klinecharts", () => ({
 }));
 
 import type { Candle } from "@axiom/types";
+import { getIndicator } from "@axiom/indicators";
 import {
+  amorceMinimale,
   bougiesAvantBuffer,
   cibleSessionUTC,
   creerOrdonnanceurExtension,
-  doitEtendreSession,
+  doitEtendreHistorique,
   doitSignalerLimiteKraken,
   etendreSessionJusqua,
+  limitePageAmorce,
   limitePageSession,
   MESSAGE_LIMITE_KRAKEN,
   pasBougiesMs,
@@ -157,17 +162,17 @@ describe("pasBougiesMs", () => {
   });
 });
 
-describe("doitEtendreSession — ajout à chaud", () => {
+describe("doitEtendreHistorique — ajout à chaud (sessions)", () => {
   const premier = 20_000 * JOUR_MS + 5 * HEURE_MS + 41 * MINUTE_MS;
   const dernier = premier + 499 * MINUTE_MS;
 
-  it("ne demande rien tant qu'aucune définition sessionnée n'est active", () => {
-    expect(doitEtendreSession([], premier, dernier)).toBe(false);
-    expect(doitEtendreSession(["rsi", "ema"], premier, dernier)).toBe(false);
+  it("ne demande rien tant qu'aucune définition sessionnée ou à amorce n'est active", () => {
+    expect(doitEtendreHistorique([], premier, dernier, 500)).toBe(false);
+    expect(doitEtendreHistorique(["rsi", "ema"], premier, dernier, 500)).toBe(false);
   });
 
   it("500 bougies depuis 05:41 UTC + VWAP → il manque 341 bougies jusqu'à minuit (841 au total)", () => {
-    expect(doitEtendreSession(["vwap"], premier, dernier)).toBe(true);
+    expect(doitEtendreHistorique(["vwap"], premier, dernier, 500)).toBe(true);
     const cible = cibleSessionUTC(["vwap"], dernier);
     expect(cible).toBe(20_000 * JOUR_MS);
     expect(limitePageSession(premier, cible!, MINUTE_MS, 500)).toBe(341);
@@ -176,15 +181,120 @@ describe("doitEtendreSession — ajout à chaud", () => {
 
   it("idempotent : buffer déjà depuis minuit → zéro extension", () => {
     const minuit = 20_000 * JOUR_MS;
-    expect(doitEtendreSession(["vwap"], minuit, minuit + 840 * MINUTE_MS)).toBe(false);
+    expect(doitEtendreHistorique(["vwap"], minuit, minuit + 840 * MINUTE_MS, 841)).toBe(false);
   });
 
   it("l'ajout de pivots après VWAP augmente la profondeur (veille entière)", () => {
     const minuit = 20_000 * JOUR_MS;
     const fin = minuit + 840 * MINUTE_MS;
-    expect(doitEtendreSession(["vwap"], minuit, fin)).toBe(false);
-    expect(doitEtendreSession(["vwap", "pivotStandard"], minuit, fin)).toBe(true);
+    expect(doitEtendreHistorique(["vwap"], minuit, fin, 841)).toBe(false);
+    expect(doitEtendreHistorique(["vwap", "pivotStandard"], minuit, fin, 841)).toBe(true);
     expect(cibleSessionUTC(["vwap", "pivotStandard"], fin)).toBe(19_999 * JOUR_MS);
+  });
+});
+
+describe("amorce longue (AXIS : 1 500 bougies déclarées par la définition)", () => {
+  const H4 = 4 * HEURE_MS;
+  // Backfill de 500 bougies 4h : la première ouvre 499 × 4 h avant la dernière.
+  const premier = DERNIER - 499 * H4;
+
+  it("amorceMinimale : lue sur `IndicatorDef.amorceBougies`, maximum des définitions actives, undefined sinon", () => {
+    expect(getIndicator("stratAxis")?.amorceBougies).toBe(1500);
+    expect(amorceMinimale([])).toBeUndefined();
+    expect(amorceMinimale(["rsi", "ema", "vwap", "pivotStandard"])).toBeUndefined();
+    expect(amorceMinimale(["stratAxis"])).toBe(1500);
+    expect(amorceMinimale(["rsi", "stratAxis", "vwap"])).toBe(1500);
+    expect(amorceMinimale(["definition-inconnue"])).toBeUndefined();
+  });
+
+  it("limitePageAmorce : le manque plafonné à la page, 0 sans amorce ou buffer assez long", () => {
+    expect(limitePageAmorce(500, undefined, 500)).toBe(0);
+    expect(limitePageAmorce(1500, 1500, 500)).toBe(0);
+    expect(limitePageAmorce(2000, 1500, 500)).toBe(0);
+    expect(limitePageAmorce(500, 1500, 500)).toBe(500);
+    expect(limitePageAmorce(1000, 1500, 500)).toBe(500);
+    expect(limitePageAmorce(1200, 1500, 500)).toBe(300);
+  });
+
+  it("doitEtendreHistorique : AXIS sur 500 bougies → vrai ; sur 1 500 → faux ; sans AXIS → faux", () => {
+    expect(doitEtendreHistorique(["stratAxis"], premier, DERNIER, 500)).toBe(true);
+    expect(doitEtendreHistorique(["stratAxis"], premier, DERNIER, 1499)).toBe(true);
+    expect(doitEtendreHistorique(["stratAxis"], DERNIER - 1499 * H4, DERNIER, 1500)).toBe(false);
+    expect(doitEtendreHistorique(["rsi"], premier, DERNIER, 500)).toBe(false);
+  });
+
+  it("l'extension compte en BOUGIES : 500 → 1 500 en deux pages de 500, puis rien (idempotent)", async () => {
+    let buffer = Array.from({ length: 500 }, (_, i) => bougie(premier + i * H4));
+    const limits: number[] = [];
+    const params = {
+      bougiesMin: 1500,
+      tfMs: H4,
+      limitePage: 500,
+      lirePremierTime: () => buffer[0]?.time,
+      lireNombre: () => buffer.length,
+      chargerPlusAncien: async (avant: number, limit: number) => {
+        limits.push(limit);
+        buffer = [...Array.from({ length: limit }, (_, i) => bougie(avant - (limit - i) * H4)), ...buffer];
+        return limit;
+      },
+    };
+    expect(await etendreSessionJusqua(params)).toBe(2);
+    expect(limits).toEqual([500, 500]);
+    expect(buffer).toHaveLength(1500);
+    expect(await etendreSessionJusqua(params)).toBe(0);
+    expect(limits).toHaveLength(2);
+  });
+
+  it("session ET amorce : chaque page demande le plus grand des deux manques", async () => {
+    // 1 min, 1 000 bougies depuis 05:00 UTC : la session manque 300 bougies, l'amorce 500.
+    const minuit = 20_000 * JOUR_MS;
+    let tete = minuit + 5 * HEURE_MS;
+    let nombre = 1000;
+    const limits: number[] = [];
+    await etendreSessionJusqua({
+      cible: minuit,
+      bougiesMin: 1500,
+      tfMs: MINUTE_MS,
+      limitePage: 500,
+      lirePremierTime: () => tete,
+      lireNombre: () => nombre,
+      chargerPlusAncien: async (_avant, limit) => {
+        limits.push(limit);
+        tete -= limit * MINUTE_MS;
+        nombre += limit;
+        return limit;
+      },
+    });
+    expect(limits).toEqual([500]);
+    expect(nombre).toBe(1500);
+    expect(tete).toBeLessThan(minuit);
+  });
+
+  it("source à sec (historique plus court que l'amorce) : une page vide termine, sans boucle", async () => {
+    const charger = vi.fn(async () => 0);
+    const pages = await etendreSessionJusqua({
+      bougiesMin: 1500,
+      tfMs: H4,
+      limitePage: 500,
+      lirePremierTime: () => premier,
+      lireNombre: () => 500,
+      chargerPlusAncien: charger,
+    });
+    expect(pages).toBe(1);
+    expect(charger).toHaveBeenCalledTimes(1);
+  });
+
+  it("sans `lireNombre`, `bougiesMin` est ignoré (jamais de page demandée à l'aveugle)", async () => {
+    const charger = vi.fn(async () => 500);
+    const pages = await etendreSessionJusqua({
+      bougiesMin: 1500,
+      tfMs: H4,
+      limitePage: 500,
+      lirePremierTime: () => premier,
+      chargerPlusAncien: charger,
+    });
+    expect(pages).toBe(0);
+    expect(charger).not.toHaveBeenCalled();
   });
 });
 

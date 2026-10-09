@@ -1,0 +1,797 @@
+{
+  "schema": "axiom-axis-v4-backtest-v1",
+  "figeLeUtc": "2026-10-09T09:48:50Z",
+  "objet": "Test de la v4 d'AXIS (filtre ADX 14 ≥ 25 ajouté à la condition d'achat de la v2 ; sorties inchangées, sans stop) contre la v2 livrée et contre l'EMA 200 seule, sur des données jamais vues : les paires USDT de Binance Spot cotées entre le 1er juillet 2023 et le 30 juin 2025, en 4h, suivies jusqu'au 9 octobre 2026. Décision du propriétaire du 9 octobre 2026, après la revue d'AXIS (« revoie l'outil AXIS pour l'améliorer et le rendre encore plus précis ») : tester adx-25 bien que la règle pré-écrite de l'exploration ne l'ait pas retenue, l'écart étant déclaré ici (historique.choixV4). Protocole, pool de symboles, fenêtres, métrique, critères et suites fixés avant tout téléchargement de ces données ; exécution unique ; ces données sont consommées quel que soit le verdict.",
+  "historique": {
+    "v2": "scripts/axis/manifeste-v2-2026-10-07.json : signaux AXIS v2 FAVORABLES en 4h sur BTC/ETH/XRP/SOL 2017-2024 (21 blocs sur 21, timing p = 0,0005) ; pas mieux qu'une EMA 200 seule en PnL total sur 3 actifs sur 4 ; limites écrites : « taille fixe, aucun stop, aucune gestion du risque »",
+    "flux": "scripts/axis/manifeste-flux-2026-10-08.json : forts achats FAVORABLES en 4h sur BNB/ADA/LINK/DOGE 2017-2026 (+1,61 % à 12 bougies, p ≤ 0,0005) ; fortes ventes sans suite ; qualification « fort » sans avantage",
+    "ut": "scripts/axis/manifeste-ut-2026-10-08.json : aucune des treize autres unités ne passe sur 42 alts jamais vues",
+    "v3": "scripts/axis/manifeste-v3-2026-10-08.json : stop suiveur 3 × ATR 14, verdict DÉFAVORABLE sur 151 alts 4h 2023-2026 (Sharpe meilleur que sans stop sur 41 % des cellules, 37 % puis 51 % par moitié ; drawdown plus faible sur 82 %, PnL moyen +3,8 % contre +6,4 %) ; défaut resté sans stop ; ces 151 paires sont consommées",
+    "amorce": "9 octobre 2026 (commit f106f4b) : fidélité d'affichage — le chart remonte à 1 500 bougies quand AXIS est actif (sur 500, 60 % des fenêtres montraient un signal absent ou en trop par rapport à la série longue mesurée) ; aucun changement du calcul",
+    "faiblesseVisee": "la sélection des entrées : la v2 achète dès que six votes de confluence valent ≥ 5 au-dessus de l'EMA 200, y compris dans une tendance molle (le vote DMI est neutre sous ADX 20, les cinq autres suffisent) ; le test v3 a montré que les sorties (stop) n'améliorent pas le rendement ajusté du risque ; restait à tester une condition d'entrée plus exigeante",
+    "explorationV4": {
+      "script": "scripts/explorer-axis-v4.ts (commit db5689b ; rapport scripts/axis/rapport-explo-v4-2026-10-09.md ; sorties brutes /tmp/axis-v4-explo/, hors dépôt)",
+      "donnees": "UNIQUEMENT des données déjà vues : panel A = les 151 alts du test v3 (cache gzip vérifié par hash, 2023-07 → 2026-10-08, 4h), panel de confirmation B = les 8 grandes cryptos (BTC, ETH, XRP, SOL, BNB, ADA, LINK, DOGE ; caches des campagnes précédentes, 2017 → 2026-10-08, 4h) ; warmup 300 bougies ; même moteur, mêmes coûts que ce test",
+      "grille": "13 variantes d'ENTRÉE, sorties inchangées (score ≤ −4) : v2 (référence) ; seuil-6 ; confirmation-2, confirmation-3 (base vraie sur 2 ou 3 clôtures) ; adx-25, adx-30 (ADX 14 ≥ 25 ou 30 à la décision) ; rsi-70 (RSI 14 < 70) ; pente-20, pente-50 (EMA 200 croissante sur 20 ou 50 bougies) ; distance-10, distance-20 (close ≤ EMA 200 × 1,10 ou 1,20) ; volume-1 (volume ≥ SMA 20) ; flux-fort (réglage filtreFlux du chart). Toutes par positionsAxis, la condition ajoutée pliée dans la tendance (lecture absente = faux)",
+      "regle": "pré-écrite dans l'en-tête du script avant la première exécution : éligibilité = expectancy nette regroupée x3 > 0 sur le panel A ET au moins 50 % des trades clos de la v2 ; métrique = part des cellules comparables du panel A où le Sharpe par bougie (x1) bat STRICTEMENT la v2 ; classement par cette part, puis trades clos, puis ordre de grille ; retenue si et seulement si part ≥ 60 % sur la fenêtre du panel A, > 50 % dans chaque moitié, ET Sharpe > v2 sur au moins 5 des 8 grandes cryptos du panel B",
+      "resultat": "AUCUNE VARIANTE RETENUE. 11 variantes éligibles (flux-fort ne garde que 46 % des trades). Classement du panel A (Sharpe > v2) : adx-25 94/151 (62,3 %), distance-10 91/151 (60,3 %), adx-30 90/151, distance-20 87, seuil-6 86, confirmation-3 85, confirmation-2 84, volume-1 77, rsi-70 73, pente-20 69, pente-50 66. adx-25 : moitiés 79/151 (52,3 %) et 92/151 (60,9 %) tenues ; panel B 2/8 seulement (XRP et SOL ; PnL total moyen des 8 grandes cryptos 60,9 % → 53,9 % ; expectancy par trade meilleure sur 6/8, drawdown plus faible sur 6/8). Agrégats du panel A : v2 6 320 trades, expectancy nette 1,52 % (x1) et 1,24 % (x3), PnL total moyen par cellule 6,4 %, drawdown médian 15,4 %, Sharpe médian 0,19, exposition 30,5 % ; adx-25 4 991 trades (78,9 % de la v2), 2,07 % et 1,79 %, 6,9 %, 13,3 %, 0,21, 25,2 %. Métrique descriptive (expectancy par trade > v2) : adx-25 102/151 (67,5 %), 90 puis 82 par moitié, 6/8 sur le panel B — les deux métriques ne coïncident pas",
+      "lecture": "le filtre ADX 14 ≥ 25 retire un cinquième des trades de la v2 et relève l'expectancy par trade et le Sharpe sur une majorité d'alts, mais pas sur les grandes cryptos (où la v2 tient déjà ses positions dans des tendances longues) : la condition « 5 grandes cryptos sur 8 » de la règle n'est pas tenue. Mesures en échantillon, après sélection parmi 13 variantes : optimistes"
+    },
+    "choixV4": "adx-25 — achat si score ≥ 5 ET close > EMA 200 ET ADX 14 ≥ 25 à la clôture de décision (ADX indéfini = faux), la condition complète étant celle que l'armement observe ; sorties de la v2 inchangées (score ≤ −4), sans stop ; métrique du test = Sharpe par bougie, celle de l'exploration. CE CHOIX N'EST PAS CELUI DE LA RÈGLE PRÉ-ÉCRITE : la règle n'a retenu aucune variante, adx-25 échouant sur la condition « Sharpe > v2 sur au moins 5 des 8 grandes cryptos » (2/8). Le propriétaire a décidé, le 9 octobre 2026, après lecture de ces résultats, de la tester quand même sur le pool jamais vu, en consommant ce pool. Degré de liberté assumé et déclaré : le candidat est la première variante du classement sur les alts (la population du test) et sa métrique n'a pas changé, mais la condition de confirmation sur les grandes cryptos a été levée après coup. Le test unique sur données jamais vues contrôle ce degré de liberté, il ne l'élimine pas ; la documentation le dira quel que soit le verdict.",
+    "repetitionAvantFigeage": "bun scripts/valider-axis-v4.ts --essai, avant le figeage (9 octobre 2026, 09:18 UTC), sur les 8 symboles déjà vus, cellules du 2023-07-01 au 2026-10-09 exclu (période déjà lue par l'exploration v4, le test v3 et les campagnes précédentes) : 8/8 cellules de 7 176 bougies, contrôles bloquants passés (seconde méthode du Sharpe sur 3 cellules comprise) ; v4 305 trades clos contre 393 pour la v2 (77,6 % conservés ; 266 entrées de la v2 sur 393 refusées à la décision par ADX 14 < 25, la v4 entrant plus tard dans la même tendance quand la condition d'achat tient encore), expectancy nette 4,38 % (x1) et 4,10 % (x3) contre 3,54 % et 3,25 % ; Sharpe v4 > v2 sur 4/8 cellules, par moitié 4/8 puis 5/8 ; drawdown max plus faible sur 5/8, PnL total moyen 16,7 % contre 17,4 % ; verdict NON_CONCLUANT (8 comparables < 80). Sans valeur probante (données vues, 8 grandes cryptos : la population où l'exploration donnait 2/8) ; cette lecture n'a conduit à AUCUNE modification du signal, de la métrique, des critères ni des suites : le test unique tranche, quel que soit son sens.",
+    "parametresNonAjustes": "entrées de la v2 (score ≥ 5, close > EMA 200, armement), sortie par score ≤ −4, EMA 20/50, Supertrend 10 ×3, ADX 14 ≥ 20 pour le vote DMI, MACD 12/26/9, RSI 14, CMF 20, période de l'ADX du filtre (14, celle du vote) : inchangés ; seul le seuil du filtre d'entrée (25, parmi 25 et 30) vient de l'exploration ; stopAtr = 0 (le stop a échoué le 8 octobre 2026)"
+  },
+  "statutIndependance": "Les symboles du pool sont des paires USDT de Binance Spot dont la première kline journalière est comprise entre le 2023-07-01 et le 2025-06-30 : aucune campagne ni exploration du dépôt n'a lu leurs prix (204 symboles touchés jusqu'ici par les manifestes et résultats du dossier scripts/axis/ et par l'exploration v4, tous cotés avant le 2023-07-01 ; intersection avec le pool : vide, vérifiée par script le 9 octobre 2026). Les jetons renommés du pool (POL ex-MATIC, S ex-FTM, A ex-EOS, RENDER ex-RNDR, KAIA ex-KLAY, LUMIA ex-ORN, G ex-GAL, FORM ex-BNX, BEAMX ex-MC) sont des séries de prix nouvelles sous leur nouveau symbole ; leurs prédécesseurs, radiés, n'ont été lus par aucune campagne (vérifié sur le même ensemble de 204 symboles). Seule requête préalable : exchangeInfo puis l'open time de la première kline journalière de chaque paire USDT au statut TRADING (sonde du 9 octobre 2026, 08:51:23 → 08:51:30 UTC, 506 paires ; seul l'open time conservé : la première kline journalière est reçue, aucun prix gardé). Indépendance en ACTIFS : entière. Indépendance en TEMPS : partielle seulement. La période du test (2023-07 → 2026-10) a été lue, sur 159 autres séries (151 alts du test v3 et 8 grandes cryptos), par le test v3, par l'exploration v4 et par les campagnes précédentes ; les grandes phases du marché crypto 2023-2026 sont connues de l'auteur ; les actifs du pool partagent le facteur de marché crypto, ce qui réduit l'information indépendante apportée par chaque cellule (criteres.dependance). Interface : aucun symbole du pool ne figure dans MAJORS_VALIDATION (apps/web/src/data/validationSignaux.ts) ; 36 paires du pool apparaissent dans des listes ou tests de l'application (AI, ARKM, A, BEAMX, BOME, BONK, ENA, ETHFI, HAEDAL, HMSTR, HOME, HYPER, IO, JTO, JUP, KMNO, NOT, ONDO, PENDLE, PIXEL, PNUT, POL, PYTH, RENDER, STRK, SYRUP, TAO, TNSR, TRUMP, TURBO, USUAL, VIRTUAL, WIF, WLD, W, ZK ; revue : S retiré, faux positif de sous-chaîne) : aucune lecture d'AXIS ni de leurs prix par le dépôt, mais ces paires sont visibles dans l'application.",
+  "limitesConnues": [
+    "une seule unité (4h) et un seul marché (Binance Spot) ; fenêtres de 15 à 39 mois selon la date de cotation, un seul enchaînement de régimes (hausse 2024, puis 2025-2026)",
+    "paires encore cotées le 9 octobre 2026 (biais de survie du pool : les paires cotées puis radiées entre 2023 et 2026 n'y sont pas)",
+    "paires jeunes : les premières semaines d'une cotation (découverte du prix, offre en circulation réduite) tombent dans le warmup de 300 bougies (50 jours) mais influencent l'EMA 200 et les lissages des premières décisions ; mèmes et jetons d'actualité (TRUMP, PNUT, NEIRO, 1000CHEEMS, BROCCOLI714, MUBARAK…) : la règle du pool est mécanique, aucune exclusion au cas par cas",
+    "beaucoup de jetons récents ont baissé contre USDT après leur cotation : une stratégie long/plat peut y perdre quelle que soit son entrée ; P1 juge la v4 seule, P2 et P3 jugent l'écart à la v2",
+    "fenêtres inégales : les moitiés sont celles de chaque cellule (frontière au milieu de ses décisions évaluées), pas des dates communes ; P3 mesure la stabilité à l'intérieur de chaque cellule, pas entre deux périodes du marché",
+    "le filtre retire des trades (un cinquième en exploration) : une cellule où la v4 n'a aucune variation d'equity a un Sharpe indéfini, compté comme NON supérieur à la v2 (mesures.comparable) — jamais écarté de la part",
+    "le chart calcule sur 1 500 bougies depuis le 9 octobre 2026 (aucun écart mesuré avec la série longue à cette amorce sur 8 séries 4h) ; le test lit chaque série depuis sa cotation",
+    "même facteur de marché entre les cellules : les parts de cellules ne sont pas des épreuves indépendantes (criteres.dependance)",
+    "taille fixe (1 000 USDT par position sur 10 000 de capital) : Sharpe et drawdown sont mesurés sur une equity exposée à environ 10 % ; les critères sont ordinaux (v4 contre v2), pas des niveaux absolus",
+    "le seuil 25 a été choisi après lecture des résultats sur données vues, parmi 13 variantes, et la règle pré-écrite de l'exploration ne l'a pas retenu (condition sur les grandes cryptos levée après coup, historique.choixV4) : sélection en échantillon et degré de liberté supplémentaire, que le test unique contrôle sans les éliminer",
+    "indépendance en temps partielle : la période du test a été lue sur 159 autres séries (statutIndependance)"
+  ],
+  "signal": {
+    "indicateur": "stratAxis",
+    "version": "v4",
+    "params": {
+      "seuil": 5,
+      "seuilVente": 4,
+      "emaTendance": 200,
+      "emaRapide": 20,
+      "emaLente": 50,
+      "stPeriode": 10,
+      "stMult": 3,
+      "seuilAdx": 20,
+      "stopAtr": 0,
+      "adxEntree": 25
+    },
+    "paramsV2": {
+      "seuil": 5,
+      "seuilVente": 4,
+      "emaTendance": 200,
+      "emaRapide": 20,
+      "emaLente": 50,
+      "stPeriode": 10,
+      "stMult": 3,
+      "seuilAdx": 20,
+      "stopAtr": 0,
+      "adxEntree": 0
+    },
+    "adxPeriode": 14,
+    "coeursFixes": "DMI/ADX 14 de Wilder, MACD 12/26/9, RSI 14, CMF 20, EMA 20/50/200, Supertrend 10 ×3",
+    "entree": "score ≥ 5 ET close > EMA 200 ET ADX 14 ≥ 25 à la clôture de décision (ADX indéfini = condition fausse ; c'est le même ADX que celui du vote DMI), après armement de cette condition complète (elle doit avoir été évaluable et fausse une fois ; un refus par l'ADX arme comme une condition fausse) ; décisions sur i ≤ n−2 ; une bougie au score indéfini reporte la position",
+    "sortie": "inchangée : score ≤ −4 (▼ « Vente » du chart) ; aucun stop (stopAtr 0) ; aucune vente à découvert",
+    "position": "1 quand la sortie prixSignal du chart est définie (achat affiché), 0 sinon : exactement le calcul du chart (votesAxis, EMA de tendance, ADX 14, positionsAxis sur la tendance complétée du filtre, fin = n−2), pour adxEntree = 25 (v4) et adxEntree = 0 (v2)",
+    "reglage": "paramètre `adxEntree` (seuil d'ADX 14 à l'entrée), 0 = sans filtre : la v2 exacte ; au figeage, le défaut du chart est 0 ; la campagne mesure adxEntree = 25 (v4) et adxEntree = 0 (v2) explicitement",
+    "reference": "EMA 200 seule, long/plat : entrée = close croise l'EMA 200 à la hausse, sortie = close < EMA 200, même moteur, mêmes coûts, mêmes bornes"
+  },
+  "marche": {
+    "type": "spot",
+    "source": "Binance Spot",
+    "endpoint": "https://data-api.binance.vision/api/v3/klines",
+    "champs": "0 open time, 1-4 OHLC, 5 volume, 6 close time, 9 volume taker acheteur (base)",
+    "remarqueEndpoint": "miroir public des données de marché de Binance ; api.binance.com répond 451 depuis l'environnement de calcul",
+    "funding": "non applicable",
+    "tailleFixeQuote": 1000,
+    "capitalInitialQuote": 10000
+  },
+  "symboles": {
+    "regle": "toutes les paires USDT au statut TRADING et autorisées au spot sur Binance Spot le 9 octobre 2026 dont la première kline journalière est comprise entre le 2023-07-01 et le 2025-06-30 inclus (129 paires), moins : les stablecoins et monnaies fiat (USDC, BUSD, TUSD, USDP, DAI, FDUSD, PAXG, EUR, GBP, AUD, BRL, TRY, RUB, UAH, NGN, ZAR, IDRT, BIDR, VAI, USD1, AEUR, XUSD, USDS, SUSD, USTC, UST, EURI, PLN, RON, CZK, ARS, JPY, MXN, COP, USDE, RLUSD, USDD, PYUSD, BFUSD, FRAX, XAUT, USDG, USYC, GUSD, LUSD, EURC, BUIDL, USDQ, USDR, USDY, USDX, USDJ, USDK, USDN, USDH ; 4 dans la fenêtre : FDUSD, EURI, XUSD, USD1), les jetons à effet de levier de Binance (noms de la forme <actif>UP / <actif>DOWN / BULL / BEAR : aucun au statut TRADING dans la fenêtre ; JUP et SYRUP, dont le nom finit par UP, sont des jetons ordinaires et restent dans le pool) et les jetons adossés à un actif déjà vu (WBETH, même série de prix que ETH ; BNSOL, même série que SOL — comme WBTC au test v3). Aucun symbole de la fenêtre n'a été vu par une campagne ou une exploration. 123 symboles, listés ci-dessous avec leur première kline journalière, dans l'ordre de cotation",
+    "exclusionsNominatives": {
+      "stables": [
+        "FDUSDUSDT (2023-07-26)",
+        "EURIUSDT (2024-08-28)",
+        "XUSDUSDT (2025-03-19)",
+        "USD1USDT (2025-05-22)"
+      ],
+      "adosses": [
+        "WBETHUSDT (2023-07-19, même série de prix que ETHUSDT)",
+        "BNSOLUSDT (2024-10-17, même série de prix que SOLUSDT)"
+      ],
+      "dejaVus": []
+    },
+    "nombre": 123,
+    "parAnneeDeCotation": {
+      "2023": 16,
+      "2024": 56,
+      "2025": 51
+    },
+    "liste": [
+      {
+        "symbol": "PENDLEUSDT",
+        "premierJour": "2023-07-03"
+      },
+      {
+        "symbol": "ARKMUSDT",
+        "premierJour": "2023-07-18"
+      },
+      {
+        "symbol": "WLDUSDT",
+        "premierJour": "2023-07-24"
+      },
+      {
+        "symbol": "CYBERUSDT",
+        "premierJour": "2023-08-15"
+      },
+      {
+        "symbol": "SEIUSDT",
+        "premierJour": "2023-08-15"
+      },
+      {
+        "symbol": "ARKUSDT",
+        "premierJour": "2023-09-22"
+      },
+      {
+        "symbol": "IQUSDT",
+        "premierJour": "2023-09-22"
+      },
+      {
+        "symbol": "TIAUSDT",
+        "premierJour": "2023-10-31"
+      },
+      {
+        "symbol": "MEMEUSDT",
+        "premierJour": "2023-11-03"
+      },
+      {
+        "symbol": "ORDIUSDT",
+        "premierJour": "2023-11-07"
+      },
+      {
+        "symbol": "BEAMXUSDT",
+        "premierJour": "2023-11-14"
+      },
+      {
+        "symbol": "BLURUSDT",
+        "premierJour": "2023-11-24"
+      },
+      {
+        "symbol": "JTOUSDT",
+        "premierJour": "2023-12-07"
+      },
+      {
+        "symbol": "1000SATSUSDT",
+        "premierJour": "2023-12-12"
+      },
+      {
+        "symbol": "BONKUSDT",
+        "premierJour": "2023-12-15"
+      },
+      {
+        "symbol": "ACEUSDT",
+        "premierJour": "2023-12-18"
+      },
+      {
+        "symbol": "AIUSDT",
+        "premierJour": "2024-01-04"
+      },
+      {
+        "symbol": "XAIUSDT",
+        "premierJour": "2024-01-09"
+      },
+      {
+        "symbol": "MANTAUSDT",
+        "premierJour": "2024-01-18"
+      },
+      {
+        "symbol": "ALTUSDT",
+        "premierJour": "2024-01-25"
+      },
+      {
+        "symbol": "JUPUSDT",
+        "premierJour": "2024-01-31"
+      },
+      {
+        "symbol": "PYTHUSDT",
+        "premierJour": "2024-02-02"
+      },
+      {
+        "symbol": "RONINUSDT",
+        "premierJour": "2024-02-05"
+      },
+      {
+        "symbol": "DYMUSDT",
+        "premierJour": "2024-02-06"
+      },
+      {
+        "symbol": "PIXELUSDT",
+        "premierJour": "2024-02-19"
+      },
+      {
+        "symbol": "STRKUSDT",
+        "premierJour": "2024-02-20"
+      },
+      {
+        "symbol": "PORTALUSDT",
+        "premierJour": "2024-02-29"
+      },
+      {
+        "symbol": "AXLUSDT",
+        "premierJour": "2024-03-01"
+      },
+      {
+        "symbol": "WIFUSDT",
+        "premierJour": "2024-03-05"
+      },
+      {
+        "symbol": "METISUSDT",
+        "premierJour": "2024-03-11"
+      },
+      {
+        "symbol": "AEVOUSDT",
+        "premierJour": "2024-03-13"
+      },
+      {
+        "symbol": "BOMEUSDT",
+        "premierJour": "2024-03-16"
+      },
+      {
+        "symbol": "ETHFIUSDT",
+        "premierJour": "2024-03-18"
+      },
+      {
+        "symbol": "ENAUSDT",
+        "premierJour": "2024-04-02"
+      },
+      {
+        "symbol": "WUSDT",
+        "premierJour": "2024-04-03"
+      },
+      {
+        "symbol": "TNSRUSDT",
+        "premierJour": "2024-04-08"
+      },
+      {
+        "symbol": "SAGAUSDT",
+        "premierJour": "2024-04-09"
+      },
+      {
+        "symbol": "TAOUSDT",
+        "premierJour": "2024-04-11"
+      },
+      {
+        "symbol": "REZUSDT",
+        "premierJour": "2024-04-30"
+      },
+      {
+        "symbol": "BBUSDT",
+        "premierJour": "2024-05-13"
+      },
+      {
+        "symbol": "NOTUSDT",
+        "premierJour": "2024-05-16"
+      },
+      {
+        "symbol": "IOUSDT",
+        "premierJour": "2024-06-11"
+      },
+      {
+        "symbol": "ZKUSDT",
+        "premierJour": "2024-06-17"
+      },
+      {
+        "symbol": "LISTAUSDT",
+        "premierJour": "2024-06-20"
+      },
+      {
+        "symbol": "ZROUSDT",
+        "premierJour": "2024-06-20"
+      },
+      {
+        "symbol": "GUSDT",
+        "premierJour": "2024-07-19"
+      },
+      {
+        "symbol": "BANANAUSDT",
+        "premierJour": "2024-07-20"
+      },
+      {
+        "symbol": "RENDERUSDT",
+        "premierJour": "2024-07-26"
+      },
+      {
+        "symbol": "DOGSUSDT",
+        "premierJour": "2024-08-26"
+      },
+      {
+        "symbol": "POLUSDT",
+        "premierJour": "2024-09-13"
+      },
+      {
+        "symbol": "1MBABYDOGEUSDT",
+        "premierJour": "2024-09-16"
+      },
+      {
+        "symbol": "NEIROUSDT",
+        "premierJour": "2024-09-16"
+      },
+      {
+        "symbol": "TURBOUSDT",
+        "premierJour": "2024-09-16"
+      },
+      {
+        "symbol": "CATIUSDT",
+        "premierJour": "2024-09-20"
+      },
+      {
+        "symbol": "HMSTRUSDT",
+        "premierJour": "2024-09-26"
+      },
+      {
+        "symbol": "EIGENUSDT",
+        "premierJour": "2024-10-01"
+      },
+      {
+        "symbol": "SCRUSDT",
+        "premierJour": "2024-10-11"
+      },
+      {
+        "symbol": "LUMIAUSDT",
+        "premierJour": "2024-10-18"
+      },
+      {
+        "symbol": "KAIAUSDT",
+        "premierJour": "2024-10-31"
+      },
+      {
+        "symbol": "CETUSUSDT",
+        "premierJour": "2024-11-06"
+      },
+      {
+        "symbol": "COWUSDT",
+        "premierJour": "2024-11-06"
+      },
+      {
+        "symbol": "ACTUSDT",
+        "premierJour": "2024-11-11"
+      },
+      {
+        "symbol": "PNUTUSDT",
+        "premierJour": "2024-11-11"
+      },
+      {
+        "symbol": "USUALUSDT",
+        "premierJour": "2024-11-19"
+      },
+      {
+        "symbol": "THEUSDT",
+        "premierJour": "2024-11-27"
+      },
+      {
+        "symbol": "ORCAUSDT",
+        "premierJour": "2024-12-06"
+      },
+      {
+        "symbol": "MOVEUSDT",
+        "premierJour": "2024-12-09"
+      },
+      {
+        "symbol": "MEUSDT",
+        "premierJour": "2024-12-10"
+      },
+      {
+        "symbol": "VELODROMEUSDT",
+        "premierJour": "2024-12-13"
+      },
+      {
+        "symbol": "VANAUSDT",
+        "premierJour": "2024-12-16"
+      },
+      {
+        "symbol": "1000CATUSDT",
+        "premierJour": "2024-12-17"
+      },
+      {
+        "symbol": "PENGUUSDT",
+        "premierJour": "2024-12-17"
+      },
+      {
+        "symbol": "BIOUSDT",
+        "premierJour": "2025-01-03"
+      },
+      {
+        "symbol": "AIXBTUSDT",
+        "premierJour": "2025-01-10"
+      },
+      {
+        "symbol": "CGPTUSDT",
+        "premierJour": "2025-01-10"
+      },
+      {
+        "symbol": "COOKIEUSDT",
+        "premierJour": "2025-01-10"
+      },
+      {
+        "symbol": "SUSDT",
+        "premierJour": "2025-01-16"
+      },
+      {
+        "symbol": "SOLVUSDT",
+        "premierJour": "2025-01-17"
+      },
+      {
+        "symbol": "TRUMPUSDT",
+        "premierJour": "2025-01-19"
+      },
+      {
+        "symbol": "ANIMEUSDT",
+        "premierJour": "2025-01-23"
+      },
+      {
+        "symbol": "BERAUSDT",
+        "premierJour": "2025-02-06"
+      },
+      {
+        "symbol": "1000CHEEMSUSDT",
+        "premierJour": "2025-02-09"
+      },
+      {
+        "symbol": "TSTUSDT",
+        "premierJour": "2025-02-09"
+      },
+      {
+        "symbol": "LAYERUSDT",
+        "premierJour": "2025-02-11"
+      },
+      {
+        "symbol": "HEIUSDT",
+        "premierJour": "2025-02-13"
+      },
+      {
+        "symbol": "KAITOUSDT",
+        "premierJour": "2025-02-20"
+      },
+      {
+        "symbol": "SHELLUSDT",
+        "premierJour": "2025-02-27"
+      },
+      {
+        "symbol": "REDUSDT",
+        "premierJour": "2025-02-28"
+      },
+      {
+        "symbol": "GPSUSDT",
+        "premierJour": "2025-03-04"
+      },
+      {
+        "symbol": "EPICUSDT",
+        "premierJour": "2025-03-13"
+      },
+      {
+        "symbol": "BMTUSDT",
+        "premierJour": "2025-03-18"
+      },
+      {
+        "symbol": "FORMUSDT",
+        "premierJour": "2025-03-19"
+      },
+      {
+        "symbol": "NILUSDT",
+        "premierJour": "2025-03-24"
+      },
+      {
+        "symbol": "PARTIUSDT",
+        "premierJour": "2025-03-25"
+      },
+      {
+        "symbol": "BANANAS31USDT",
+        "premierJour": "2025-03-27"
+      },
+      {
+        "symbol": "BROCCOLI714USDT",
+        "premierJour": "2025-03-27"
+      },
+      {
+        "symbol": "MUBARAKUSDT",
+        "premierJour": "2025-03-27"
+      },
+      {
+        "symbol": "TUTUSDT",
+        "premierJour": "2025-03-27"
+      },
+      {
+        "symbol": "GUNUSDT",
+        "premierJour": "2025-03-31"
+      },
+      {
+        "symbol": "BABYUSDT",
+        "premierJour": "2025-04-10"
+      },
+      {
+        "symbol": "BIGTIMEUSDT",
+        "premierJour": "2025-04-11"
+      },
+      {
+        "symbol": "ONDOUSDT",
+        "premierJour": "2025-04-11"
+      },
+      {
+        "symbol": "VIRTUALUSDT",
+        "premierJour": "2025-04-11"
+      },
+      {
+        "symbol": "KERNELUSDT",
+        "premierJour": "2025-04-14"
+      },
+      {
+        "symbol": "WCTUSDT",
+        "premierJour": "2025-04-15"
+      },
+      {
+        "symbol": "HYPERUSDT",
+        "premierJour": "2025-04-22"
+      },
+      {
+        "symbol": "INITUSDT",
+        "premierJour": "2025-04-24"
+      },
+      {
+        "symbol": "SIGNUSDT",
+        "premierJour": "2025-04-28"
+      },
+      {
+        "symbol": "STOUSDT",
+        "premierJour": "2025-05-02"
+      },
+      {
+        "symbol": "KMNOUSDT",
+        "premierJour": "2025-05-06"
+      },
+      {
+        "symbol": "SYRUPUSDT",
+        "premierJour": "2025-05-06"
+      },
+      {
+        "symbol": "SXTUSDT",
+        "premierJour": "2025-05-08"
+      },
+      {
+        "symbol": "NXPCUSDT",
+        "premierJour": "2025-05-15"
+      },
+      {
+        "symbol": "AWEUSDT",
+        "premierJour": "2025-05-21"
+      },
+      {
+        "symbol": "HAEDALUSDT",
+        "premierJour": "2025-05-21"
+      },
+      {
+        "symbol": "HUMAUSDT",
+        "premierJour": "2025-05-26"
+      },
+      {
+        "symbol": "AUSDT",
+        "premierJour": "2025-05-28"
+      },
+      {
+        "symbol": "SOPHUSDT",
+        "premierJour": "2025-05-28"
+      },
+      {
+        "symbol": "RESOLVUSDT",
+        "premierJour": "2025-06-11"
+      },
+      {
+        "symbol": "HOMEUSDT",
+        "premierJour": "2025-06-12"
+      },
+      {
+        "symbol": "SPKUSDT",
+        "premierJour": "2025-06-17"
+      },
+      {
+        "symbol": "NEWTUSDT",
+        "premierJour": "2025-06-24"
+      },
+      {
+        "symbol": "SAHARAUSDT",
+        "premierJour": "2025-06-26"
+      }
+    ]
+  },
+  "fenetre": {
+    "id": "jamais-vue-cotations-2023-2025",
+    "timeframe": "4h",
+    "dureeMs": 14400000,
+    "debutParCellule": "00:00:00 UTC du premierJour de la cellule (sur la grille 4h) : chaque cellule commence à sa cotation",
+    "finExclue": "2026-10-09T00:00:00Z",
+    "grille": "multiples de 4 h depuis l'epoch UTC",
+    "bougiesAttendues": "par cellule : (finExclue − open de la première bougie servie) / 4 h ; les créneaux du jour de cotation antérieurs à la première bougie servie ne comptent pas comme manquants",
+    "bougiesMinimales": 2400,
+    "bougiesMinimalesNote": "cellule indisponible sous 2 400 bougies (400 jours : 300 d'amorce puis au moins 2 100 décisions, 1 050 par moitié) ; satisfait par construction pour le pool (la plus jeune cotation, SAHARA le 2025-06-26, compte au plus 2 820 créneaux avant finExclue)",
+    "warmupBougies": 300,
+    "evaluation": "fills mesurés à partir de l'open de la 301e bougie de la cellule (debutEvaluationMs = open de l'indice 300) ; décisions à partir de la clôture de la 300e (indice 299) ; une position née pendant le warmup ne produit aucune entrée",
+    "moities": "frontière au milieu des décisions évaluées de la cellule (indices 299 à n−2) ; un trade est rangé selon l'open de son fill d'entrée ; les métriques d'equity d'une moitié se calculent sur les points de clôture de la moitié (pic du drawdown repris au premier point ; premier rendement depuis le dernier point précédent)",
+    "fenetresInegales": "de 2 820 bougies au plus (cotation de juin 2025) à 7 160 environ (juillet 2023) ; chaque cellule est mesurée sur sa propre fenêtre, le regroupement ne pondère pas par la longueur"
+  },
+  "donnees": {
+    "bougies": "ouvertes à partir du début de la cellule et clôturées au plus tard à finExclue (bougie en formation exclue)",
+    "toleranceBordsH": 24,
+    "tolerances": "la première bougie servie ouvre au plus 24 h après le début de la cellule (00:00 UTC du jour de cotation), la dernière clôture au plus 24 h avant finExclue",
+    "partMaxBougiesManquantes": 0.01,
+    "bougiesEcartees": "une kline servie à OHLCV ou volume taker non fini ou incohérent (prix ≤ 0, volume < 0, taker < 0 ou > volume, high/low incohérents, closeTime ≠ open + 4 h − 1 ms) est écartée, datée et comptée comme manquante ; une bougie à volume nul est valide",
+    "serieInexploitable": "cellule indisponible si la série est vide, hors grille, non strictement croissante, hors tolérances de bord, plus courte que bougiesMinimales, ou s'il manque plus de 1 % des bougies attendues (écartées comprises) ; HTTP 400 « symbole invalide » (code −1121) : cellule indisponible",
+    "pagination": "pages de 1 000 klines de startTime à endTime = finExclue − 1 ms ; une page vide clôt la série ; une page courte la clôt seulement si sa dernière bougie est la dernière attendue, sinon la suite est redemandée",
+    "reprises": {
+      "tentativesParPage": 5,
+      "attentesS": [
+        1,
+        2,
+        4,
+        8,
+        16
+      ],
+      "statutsRepris": "erreur réseau (délai dépassé compris), HTTP 418, 429 et 5xx ; attente Retry-After si l'en-tête est servi"
+    },
+    "delaiRequeteS": 30,
+    "debit": "au plus 4 800 points de poids Binance par minute (en-tête x-mbx-used-weight-1m) : au-delà, attente de la minute suivante",
+    "parallelisme": "au plus 4 symboles téléchargés en parallèle ; cache gzip scripts/.cache-klines/axis-v4/ (hors dépôt), empreinte SHA-256 des bougies et des bougies écartées, revérifiée à la relecture",
+    "erreursAcquisition": "toute série est acquise et validée avant le premier calcul ; une erreur autre que « données invalides » arrête le run avant toute mesure"
+  },
+  "mesures": {
+    "execution": "runBacktest, une jambe longue par stratégie : entrée = position croise 0,5 à la hausse ; sortie = position < 0,5 ; décision à la clôture, fill à l'open suivant ; position ouverte liquidée au dernier close (fin-donnees). Trois stratégies par cellule : v4 (adxEntree 25), v2 (adxEntree 0), EMA 200 seule",
+    "coutsParCotePct": [
+      {
+        "id": "x1-central",
+        "frais": 0.05,
+        "slippage": 0.02
+      },
+      {
+        "id": "x2",
+        "frais": 0.1,
+        "slippage": 0.04
+      },
+      {
+        "id": "x3",
+        "frais": 0.15,
+        "slippage": 0.06
+      }
+    ],
+    "expectancyNette": "moyenne des pnl nets par trade en % de la taille (pnlPct), trade fin-données compris ; regroupée = sur tous les trades de toutes les cellules disponibles",
+    "equity": "points d'equity du moteur (capital réalisé + PnL latent à chaque clôture, point initial compris) ; drawdown max = max(pic − equity) en cotation sur les points de la fenêtre évaluée",
+    "sharpe": "par cellule et par stratégie, coûts x1 : rendements r_t = equity_t / equity_{t−1} − 1 sur les points dont le temps est ≥ debutEvaluationMs (premier rendement depuis le dernier point antérieur) ; Sharpe = moyenne(r) / écart-type(r, n−1) × √2191,5 (bougies 4h par an) ; indéfini si moins de deux rendements ou écart-type nul",
+    "comparable": "cellule disponible dont le Sharpe de la v2 est défini (sur la fenêtre, ou sur la moitié considérée) ; un Sharpe v4 indéfini (aucune variation d'equity : aucun trade) compte comme NON supérieur — la cellule reste dans le dénominateur. Plus strict que le test v3 (où les deux Sharpe devaient être définis) parce qu'un filtre d'entrée peut supprimer tous les trades d'une cellule perdante pour la v2",
+    "parCellule": "pour chaque stratégie et chaque coût : trades, clos par règle, fin-données, expectancy nette, PnL net total (cotation et % du capital), taux de gagnants, profit factor, drawdown max (cotation et % du capital), RoMaD, Sharpe (x1), exposition, durée moyenne, MAE moyenne ; pour la v4 : entrées de la v2 refusées par le filtre (décisions évaluées où la v2 entre avec ADX 14 < 25) et part des trades de la v2 conservés",
+    "timing": {
+      "statut": "DESCRIPTIF (aucun effet sur le verdict) : la question du test est l'écart v4 − v2, pas le timing des entrées, déjà jugé en 4h sur 2017-2024",
+      "statistique": "rendement log brut capté : somme, sur les décisions évaluées i, de position × ln(open[i+2]/open[i+1]) (dernière décision : ln(close[n−1]/open[n−1])) ; pour v4, v2 et EMA 200",
+      "nul": "décalage circulaire commun à toutes les cellules disponibles (même k, calculé sur la plus courte fenêtre), tirages 1999, graine 20261009, générateur mulberry32, fractionMin 0,1, fractionMax 0,9, p unilatérale (1 + #≥observé) / (tirages + 1)"
+    },
+    "controlesBloquants": [
+      "position de campagne (sortie prixSignal via le registre, adxEntree 25 puis 0) = recalcul direct depuis les fonctions exportées de stratAxis (votes, EMA de tendance, ADX 14, positionsAxis sur la tendance complétée du filtre, fin = n−2) à chaque bougie ; série « stop » du chart entièrement indéfinie pour les deux réglages (stopAtr 0)",
+      "v2 de la campagne (adxEntree 0) = positionsAxis de la v2 livrée (tendance seule), à chaque bougie (le réglage 0 rend la v2 exacte)",
+      "filtre sur les données réelles : aucune entrée de la v4 (passage 0 → 1 décidé à la bougie i) sans ADX 14 ≥ 25 ni sans condition d'achat de la v2 vraie à la bougie i ; marqueurs du chart aux bougies et dans le sens des changements de position, étiquettes « Achat » et « Vente » (jamais « Stop »), infobulle d'achat de la v4 nommant « ADX 14 » et celle de la v2 ne le nommant pas (sur ce que le chart émet : les 120 signaux les plus récents et les 10 dernières étiquettes)",
+      "causalité sur les données réelles : position calculée sur trois préfixes (40 %, 70 %, 90 % de la série) identique à celle de la série complète jusqu'à l'avant-dernière bougie du préfixe",
+      "coûts x1 : chronologie des décisions du moteur (entrées, sorties par règle, position fin-données) identique aux changements de position nés après le warmup ; chronologie des fills identique à tous les niveaux de coût et sans coût",
+      "statistique de timing observée = somme des ln(prixSortie/prixEntree) d'une exécution sans frais ni slippage (écart ≤ 1e-9)",
+      "Sharpe recalculé par une seconde méthode (depuis les trades et les closes, sans passer par l'equity du moteur) sur trois cellules : écart ≤ 1e-9",
+      "en cas d'écart : arrêt sans verdict ; le message et la trace ne nomment que la cellule et le contrôle, sans aucune valeur mesurée ; diagnostic ensuite sur données déjà vues ou synthétiques"
+    ]
+  },
+  "criteres": {
+    "minPartCellulesDisponibles": 0.75,
+    "minCellulesComparables": 80,
+    "minTradesClosRegroupesV4": 100,
+    "partMinP2": 0.6,
+    "partMinP3": 0.5,
+    "P1": "viabilité de la v4 : expectancy nette regroupée > 0 aux coûts x1 ET x3 (2 blocs) ; au moins 100 trades clos regroupés, sinon « insuffisant »",
+    "P2": "amélioration : part des cellules comparables où le Sharpe (x1) de la v4 est STRICTEMENT supérieur à celui de la v2 ≥ 60 % (1 bloc) ; égalité ou Sharpe v4 indéfini = non battue",
+    "P3": "stabilité : la même part, calculée sur chaque moitié de la fenêtre évaluée de chaque cellule (Sharpe de la moitié), > 50 % dans CHAQUE moitié (2 blocs) ; au moins 80 cellules comparables par moitié, sinon « insuffisant »",
+    "dependance": "sous l'hypothèse d'absence d'effet, la part attendue est 50 %. Les cellules partagent le facteur de marché crypto : un test des signes supposant l'indépendance serait trop optimiste (quelques épisodes communs déplacent toutes les cellules à la fois). Le critère est donc une taille d'effet fixée d'avance (marge de 10 points pour P2 ; majorité dans chaque moitié pour P3), pas une p-valeur ; le p du test des signes est rapporté à titre descriptif avec cette réserve. En exploration (151 alts vues), la part valait 62,3 % sur la fenêtre et 52,3 % puis 60,9 % par moitié : le seuil de 60 % est au niveau de la mesure en échantillon, une dégradation hors échantillon même modérée fera échouer P2",
+    "verdict": {
+      "FAVORABLE": "les 5 blocs tenus",
+      "DEFAVORABLE": "au moins un bloc mesuré en échec : expectancy ≤ 0 avec assez de trades, part < 60 % sur la fenêtre, ou part ≤ 50 % dans une moitié, avec assez de cellules comparables",
+      "NON_CONCLUANT": "aucun échec mesuré, mais moins de 75 % des cellules du pool disponibles (93 sur 123), moins de 80 cellules comparables (fenêtre ou moitié), ou moins de 100 trades clos regroupés pour la v4"
+    },
+    "selectionApresResultats": false,
+    "ecartRegleExploration": true,
+    "executionUnique": "une seule exécution, par « bun scripts/valider-axis-v4.ts --campagne » (tout autre argument est refusé ; l'option --essai ne lit que les 8 symboles déjà vus, à partir du 2023-07-01, mêmes mesures, sorties hors dépôt ; l'option --banc rejoue les chemins de verdict sur des résultats synthétiques sans lire aucune donnée ; ni l'une ni l'autre n'a de valeur probante) ; le runner refuse de partir si le code figé diffère de versions.codeAuFigeageSha256, si l'arbre des paquets mesurés diffère de versions.arbreCode ou si des fichiers mesurés ne sont pas commités ; une interruption technique avant le verdict est journalisée (cause, correctif, revue) avant toute relance ; aucun résultat partiel n'est affiché pendant le calcul",
+    "labelAutomatiqueStrategieValidee": false
+  },
+  "descriptif": {
+    "regle": "aucun effet sur le verdict, aucune sélection",
+    "couts": "x2 pour les trois stratégies",
+    "parts": "parts de cellules comparables où la v4 bat la v2 : drawdown max plus faible, PnL net total ≥, RoMaD supérieur, expectancy par trade supérieure ; mêmes parts pour v4 contre EMA 200 et v2 contre EMA 200 (Sharpe, PnL, drawdown)",
+    "pnlMoyen": "PnL net total moyen par cellule disponible, en % du capital, pour v4, v2 et EMA 200 (x1 et x3) ; expectancy nette regroupée de la v2 et de l'EMA 200 (la v2 n'est pas jugée ici : son test reste celui de 2017-2024)",
+    "testDesSignes": "p unilatérale binomiale de la part P2 (cellules indépendantes supposées : optimiste, voir criteres.dependance)",
+    "filtre": "entrées de la v2 refusées par le filtre (ADX 14 < 25 à la décision d'entrée), regroupées ; part des trades clos de la v2 conservés par la v4 ; cellules où la v4 n'a aucun trade (Sharpe indéfini, comptées non supérieures)",
+    "exposition": "part des décisions évaluées en position, par stratégie",
+    "timing": "p du décalage circulaire commun pour v4, v2 et EMA 200 (mesures.timing)",
+    "parAnnee": "trades et PnL net x1 par année civile d'entrée, par stratégie",
+    "parAnneeDeCotation": "parts P2 et PnL moyen par année de cotation des cellules (2023, 2024, 2025)",
+    "achatConservation": "variation du prix entre l'open de la première bougie évaluée et le dernier close, médiane et moyenne sur les cellules",
+    "supplementaires": "autres sorties du runner, descriptives et sans effet sur le verdict : frais totaux par stratégie et par coût ; médianes par cellule (PnL net, drawdown, Sharpe, trades clos) ; Sharpe aux coûts x2 et x3 par cellule ; somme des PnL en %, gagnants ; timing par cellule et par stratégie (médiane et quantile 95 % du nul) ; le p du test des signes n'est rapporté que sur la fenêtre, pas par moitié"
+  },
+  "suites": {
+    "independantesDuVerdict": "le paramètre `adxEntree` (0 = sans filtre) existe quel que soit le verdict : c'est un fait du calcul, pas une promesse ; `textesAxis` reçoit l'unité, le réglage du stop ET celui du filtre",
+    "FAVORABLE": {
+      "application": "le défaut du chart devient adxEntree = 25 (la v4 testée) : les ▲ deviennent ceux du filtre (moins nombreux, parfois plus tardifs), les ▼ gardent leur règle ; l'infobulle 4h ajoute la mesure ci-dessous ; dans les autres unités, la mention « non mesuré en {u} » ; documentation, README et BUILD-CONTRACT reprennent la mesure, la comparaison à la v2 et à l'EMA 200, l'écart à la règle de l'exploration et les limites ; merge dans main et déploiement Vercel, autorisés par le propriétaire",
+      "infobulle4hAdx25": "{texteBase} ; filtre ADX 14 ≥ 25 à l'entrée : sur données jamais vues ({nCellules} alts 4h cotées de 2023 à 2025, suivies jusqu'en 2026), rendement ajusté du risque (Sharpe) meilleur que sans filtre sur {pSharpe} % des actifs, drawdown max plus faible sur {pDd} %, PnL total moyen {pnlV4} % contre {pnlV2} % sans filtre — mesure passée, pas une promesse",
+      "infobulleAutreUniteAdx25": "{texteUnite} ; filtre ADX 14 ≥ 25 à l'entrée non mesuré en {u}"
+    },
+    "DEFAVORABLE": {
+      "application": "le défaut du chart reste adxEntree = 0 (v2 exacte, signaux inchangés) ; le réglage reste disponible et son infobulle dit l'échec ; ces données sont consommées : aucune autre variante n'y sera jugée ; documentation mise à jour ; merge et déploiement autorisés par le propriétaire (l'outil livré ne change pas de défaut)",
+      "infobulleFiltreActif": "{texteBase} ; filtre ADX 14 ≥ {k} à l'entrée actif : test du 9 octobre 2026 échoué sur données jamais vues ({nCellules} alts 4h cotées 2023-2025 : {raisons}) — pas une amélioration validée",
+      "raisons": {
+        "P1": "expectancy nette ≤ 0 aux coûts x1 ou x3",
+        "P2": "Sharpe meilleur que sans filtre sur {pSharpe} % des actifs seulement",
+        "P3": "amélioration absente dans une moitié de la période ({p1} % puis {p2} %)",
+        "jonction": " ; "
+      }
+    },
+    "NON_CONCLUANT": {
+      "application": "comme DEFAVORABLE, avec la formulation ci-dessous ; pas d'autre tentative sans décision explicite du propriétaire",
+      "infobulleFiltreActif": "{texteBase} ; filtre ADX 14 ≥ {k} à l'entrée actif : test du 9 octobre 2026 non concluant sur données jamais vues ({raison}) — non mesuré",
+      "raisons": {
+        "cellules": "{n} cellules disponibles sur {total}",
+        "comparables": "{n} cellules comparables",
+        "trades": "{n} trades clos",
+        "moitie": "{n} cellules comparables dans une moitié"
+      }
+    },
+    "communes": {
+      "sansFiltre": "{texteBase} ; sans filtre ADX (réglage) : signaux de la v2 testée",
+      "reglageHorsTest": "{texteBase} ; filtre ADX 14 ≥ {k} à l'entrée : réglage hors du test du 9 octobre 2026 (≥ 25 mesuré) — non mesuré",
+      "ordreDesMentions": "dans l'infobulle des signaux, la mention du filtre ADX précède celle du stop (filtre d'entrée puis règle de sortie) ; avec le filtre flux actif, sa réserve garde la priorité et les deux mentions s'y ajoutent dans le même ordre",
+      "placeholders": "{nCellules} = cellules disponibles ; {pSharpe}, {pDd} = parts en % entières des cellules comparables ; {pnlV4}, {pnlV2} = PnL net total moyen par cellule en % du capital, une décimale, signe explicite ; {p1}, {p2} = parts par moitié ; {k} = réglage ; {texteBase} = texte de l'unité (4h : formulation actuelle ; autres : formulation du test des unités) ; {texteUnite} idem ; {u} = unité du chart ; formats de nombres : point décimal, comme les infobulles existantes",
+      "testCroise": "apps/web/src/chart/indicators.axisAdx.test.ts compare les textes du chart au résultat de cette campagne (empreinte SHA-256 du résultat épinglée), comme pour le test du stop",
+      "sansFiltreApplication": "le texte sansFiltre ne s'applique que si le défaut du chart devient 25 (verdict FAVORABLE) : il décrit alors le réglage 0 choisi par l'utilisateur. En DEFAVORABLE ou NON_CONCLUANT, le défaut reste 0 et les textes à adxEntree = 0 (4h et toutes les unités, avec ou sans stop) restent identiques au caractère près aux textes d'avant le test (texteBase de chaque unité) ; le runner vérifie au démarrage que textesAxis(« 4h », 0, 0) vaut le texteBase 4h"
+    }
+  },
+  "repetitionTechnique": {
+    "objet": "option --essai : même code, mêmes mesures, sur les 8 symboles DÉJÀ VUS (cache E-<symbole>, même dossier), chaque cellule commençant au 2023-07-01 (premierJour fictif, pour éprouver le découpage par cellule) jusqu'à finExclue, pour éprouver le runner, ses contrôles, le téléchargement et les règles de verdict avant l'exécution ; sorties dans /tmp, hors dépôt, sans valeur probante. Banc des chemins de verdict sur résultats synthétiques (FAVORABLE, chaque échec, chaque insuffisance), chemins d'arrêt (copie cassée du calcul, hash, figeage, fichiers non commités)",
+    "debutInclus": "2023-07-01",
+    "symboles": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "XRPUSDT",
+      "SOLUSDT",
+      "BNBUSDT",
+      "ADAUSDT",
+      "LINKUSDT",
+      "DOGEUSDT"
+    ]
+  },
+  "versions": {
+    "baseCommit": "db5689b88d465bf37a4370197c948bf8d7c08dbb",
+    "commitDeFigeage": "commit local sur baseCommit, avant la campagne : ce manifeste, le runner, le journal de revue, le filtre dans stratAxis (paramètre adxEntree, défaut 0 au figeage, mention « test en cours ») et ses tests ; le résultat reporte son SHA-1",
+    "arbreCode": {
+      "dossiers": [
+        "packages/indicators/src",
+        "packages/backtest/src",
+        "packages/types/src"
+      ],
+      "fichiers": 247,
+      "sha256": "b1703fb8cf8fd6514326485021ef1169114036d5a28bcfc1abf7b25f1c218a38"
+    },
+    "codeAuFigeageSha256": {
+      "packages/indicators/src/strategy/stratAxis.ts": "f6e1e3429fefd5ebce7dc46fb13b3bee034279f6050fe86fdb42aaaa23e0121b",
+      "packages/indicators/src/utils.ts": "693259721a342f3adf0c897b5e279a9f6e9eb81bdb6d134449c3d19723c5266b",
+      "packages/indicators/src/utils-fabrique-strategie.ts": "d43cff07ce064260ef4895ac20d156a689821d9d6893e66743d692bfdb526605",
+      "packages/indicators/src/engine.ts": "fec8501639cca8e4afef677ec2426c310b408aad3868218cba6abff39da79470",
+      "packages/indicators/src/momentum/rsi.ts": "5c9b93ec36578152a1dde9ea139064f56ed7a2a997531c300b59d1c6a934ec7a",
+      "packages/indicators/src/trend/adx.ts": "c1704f2e876995c75d54fa572a9f691b944d107cf179fdc024b5ec0629fba6df",
+      "packages/indicators/src/trend/macd.ts": "ad8b1a85f0b344d0c390408cfd18288bfaeea92e66700f9f14b38e61ff39ebfc",
+      "packages/indicators/src/trend/supertrend.ts": "6401a4632aa4647c93c484b2da374c51590dc89acf197ee1e3352a1ff839b469",
+      "packages/indicators/src/volume/cmf.ts": "7e4a05cc6463cc94572be7f4c250ad81d71917f15962478ee8679339ff3f88a5",
+      "packages/indicators/src/trend/ema.ts": "b1546985251fe40c1e20d6869a18bbf9af69f92dcfa99c1480b731ca94b0107a",
+      "packages/indicators/src/registry.ts": "edf081a34bc36cc71c4d1b6aa24c47baaf7025836775665e59b9a7f217e6e507",
+      "packages/indicators/src/index.ts": "434bafab9343da78716366192ed5fe31e01be1fbb49e1d63fbd5f018dfb82cca",
+      "packages/indicators/src/timeframes.ts": "46f5435a7601a724f9f7a782570bc30d44e1a8789e188ae2e244c8748d5d11dd",
+      "packages/backtest/src/engine.ts": "4b1baadc37494b10537818259bc94e0c7b334794d272b3efbc295b2af8011d9d",
+      "packages/backtest/src/types.ts": "572e8128ba2513cbb59b366a624aac7c2f7d24e23fdca4e63202ed54355c5633",
+      "packages/types/src/index.ts": "402fcf8cc9b2541a7537b38217b1558b3165627db3f3dcba891efbea2679f09d"
+    },
+    "codeFigeNote": "graphe d'import du signal (stratAxis et ses cœurs), du moteur d'indicateurs, du rejeu, du moteur de backtest et de ses dépendances (dont timeframes.ts, ajouté à la demande de la revue, constat m2), des fonctions du registre qu'il appelle et du point d'entrée du paquet : 16 fichiers, plus l'empreinte de l'arbre hors tests de packages/{indicators,backtest,types}/src ; le runner n'y figure pas (il épingle le SHA-256 de ce manifeste) : son SHA-256 est consigné dans le journal de revue et reporté dans le résultat",
+    "revue": "revue indépendante avant exécution : scripts/axis/journal-revue-v4-2026-10-09.md",
+    "pnpmLockSha256": "130d4fb62f5223486552e31137f28d4901e098bf7a78325b943f30fc6beac062",
+    "bun": "1.4.2"
+  }
+}

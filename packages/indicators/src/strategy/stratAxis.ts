@@ -132,6 +132,20 @@
  * 1 500, aucun écart. `amorceBougies` = 1500 : le chart remonte jusque-là
  * quand AXIS est actif ; en deçà (source à sec, historique court, alertes sur
  * un buffer plus court), l'infobulle des signaux le dit.
+ *
+ * FILTRE ADX À L'ENTRÉE (v4, 9 octobre 2026). Réglage `adxEntree` : quand il
+ * est > 0, l'achat exige en plus ADX 14 ≥ adxEntree à la clôture de décision
+ * (le même ADX que le vote DMI ; ADX indéfini = condition fausse) ; la
+ * condition d'achat ainsi complétée est celle que l'armement observe, les
+ * ventes ne changent pas. 0 = sans filtre, la v2 exacte. Le seuil 25 vient de
+ * l'exploration des entrées sur données déjà vues (scripts/explorer-axis-v4.ts,
+ * 13 variantes, 151 alts + 8 grandes cryptos 4h) : aucune variante n'y passe
+ * la règle pré-écrite (adx-25 : Sharpe meilleur que la v2 sur 62 % des alts,
+ * mais sur 2 grandes cryptos sur 8 au lieu des 5 exigées). Le propriétaire a
+ * décidé de la tester quand même sur des données jamais vues, l'écart à la
+ * règle déclaré dans le protocole (scripts/axis/manifeste-v4-2026-10-09.json,
+ * figé avant tout téléchargement) ; en attendant le verdict, le défaut reste 0
+ * et l'infobulle d'un filtre actif dit « test en cours ».
  */
 
 import type { Candle, IndicatorDef, LabelAnnotation, MarqueurAnnotation, Timeframe } from "@axiom/types";
@@ -158,6 +172,10 @@ export const ATR_STOP_PERIODE = 14;
  * longue (aucun écart mesuré sur 8 séries 4h 2017-2026 ; 60 % de fenêtres en écart à 500).
  */
 export const AMORCE_AXIS = 1500;
+/** Période de l'ADX du filtre d'entrée : celui du vote DMI (adxOf(candles, 14)). */
+export const ADX_ENTREE_PERIODE = 14;
+/** Seuil d'ADX à l'entrée soumis au test du 9 octobre 2026 ; tout autre réglage > 0 est hors test. */
+export const ADX_ENTREE_TESTE = 25;
 
 const signe = (a: number, b: number): number => (a > b ? 1 : a < b ? -1 : 0);
 
@@ -470,16 +488,24 @@ const suffixeStop = (stopAtr: number): string =>
       ? ` ; stop suiveur ${STOP_ATR_TESTE} × ATR ${ATR_STOP_PERIODE} actif : test du 8 octobre 2026 échoué sur données jamais vues (151 alts 4h, 2023-2026 : Sharpe meilleur que sans stop sur 41 % des actifs seulement ; amélioration absente dans une moitié de la période (37 % puis 51 %)) — pas une amélioration validée`
       : ` ; stop suiveur ${stopAtr} × ATR ${ATR_STOP_PERIODE} : réglage hors du test du 8 octobre 2026 (${STOP_ATR_TESTE} × ATR ${ATR_STOP_PERIODE} mesuré) — non mesuré`;
 
+// Filtre ADX à l'entrée (v4) : test du 9 octobre 2026 en cours sur données jamais vues
+// (scripts/axis/manifeste-v4-2026-10-09.json). Tant qu'il n'a pas rendu son verdict, tout
+// filtre actif est « non mesuré » ; les suites du manifeste remplaceront cette mention.
+const suffixeAdx = (adxEntree: number): string =>
+  adxEntree > 0 ? ` ; filtre ADX ${ADX_ENTREE_PERIODE} ≥ ${adxEntree} à l'entrée : non mesuré (test du 9 octobre 2026 en cours)` : "";
+
 /**
  * Textes des infobulles selon l'unité du chart (4h ou unité absente : ceux des tests 4h)
- * et le réglage du stop (`stopAtr` > 0 : mention ajoutée aux signaux ; 0 : textes inchangés).
+ * et les réglages hors des textes de base : filtre ADX à l'entrée (`adxEntree` > 0) puis
+ * stop (`stopAtr` > 0), chacun ajoutant sa mention aux signaux ; à 0, textes inchangés.
  */
 export function textesAxis(
   u: Timeframe | undefined,
-  stopAtr = 0
+  stopAtr = 0,
+  adxEntree = 0
 ): { signaux: string; fortAchat: string; forteVente: string; qualification: string } {
   const t = textesUnite(u);
-  return stopAtr > 0 ? { ...t, signaux: t.signaux + suffixeStop(stopAtr) } : t;
+  return stopAtr > 0 || adxEntree > 0 ? { ...t, signaux: t.signaux + suffixeAdx(adxEntree) + suffixeStop(stopAtr) } : t;
 }
 
 function textesUnite(u: Timeframe | undefined): { signaux: string; fortAchat: string; forteVente: string; qualification: string } {
@@ -550,6 +576,7 @@ export const stratAxis: IndicatorDef = {
     { key: "seuilOi", name: "OI significatif si |Δ| ≥ (%)", type: "number", default: 2, min: 0.1, max: 100 },
     { key: "filtreFlux", name: "N'acheter que sur flux fort", type: "boolean", default: false },
     { key: "stopAtr", name: "Stop suiveur (× ATR 14, 0 = sans)", type: "number", default: 0, min: 0, max: 20 },
+    { key: "adxEntree", name: "Achat si ADX 14 ≥ (0 = sans)", type: "number", default: 0, min: 0, max: 100 },
   ],
   outputs: [
     { key: "prixSignal", name: "Prix d'achat", style: "line" },
@@ -568,9 +595,13 @@ export const stratAxis: IndicatorDef = {
     const force = (i: number, sens: number) => forceFlux(flux[i] ?? {}, sens, seuilRvol, seuilOi);
     const filtre = params.filtreFlux === true;
     const stopAtr = Number(params.stopAtr ?? 0);
+    const adxEntree = Number(params.adxEntree ?? 0);
+    // Même ADX que le vote DMI ; calculé seulement si le filtre est actif (défaut intact).
+    const adx = adxEntree > 0 ? adxOf(candles, ADX_ENTREE_PERIODE).adx : undefined;
+    const adxSuffisant = (i: number): boolean => adx === undefined || (adx[i] ?? -Infinity) >= adxEntree;
     const { pos, stop, raisons } = positionsStopAxis(
       score,
-      tendance.map((t, i) => (t === undefined ? undefined : (closes[i] ?? t) > t && (!filtre || force(i, 1).fort))),
+      tendance.map((t, i) => (t === undefined ? undefined : (closes[i] ?? t) > t && (!filtre || force(i, 1).fort) && adxSuffisant(i))),
       closes,
       rma(trueRange(candles), ATR_STOP_PERIODE),
       Number(params.seuil ?? 5),
@@ -589,8 +620,8 @@ export const stratAxis: IndicatorDef = {
     }
 
     const noms = [`EMA ${params.emaRapide}/${params.emaLente}`, "Supertrend", "DMI", "MACD", "RSI", "CMF"];
-    const textes = textesAxis(ctx.timeframe, stopAtr);
-    const reserve = filtre ? RESERVE_FILTRE + suffixeStop(stopAtr) : textes.signaux;
+    const textes = textesAxis(ctx.timeframe, stopAtr, adxEntree);
+    const reserve = filtre ? RESERVE_FILTRE + suffixeAdx(adxEntree) + suffixeStop(stopAtr) : textes.signaux;
     // Placée avant la couche flux : la fin de l'infobulle (« ; qualification) — statut »)
     // reste celle que les tests croisés comparent aux formulations figées des campagnes.
     const amorce = texteAmorce(n);
@@ -617,6 +648,8 @@ export const stratAxis: IndicatorDef = {
       const sortie = parStop
         ? `close sous le stop suiveur (${niveau === undefined ? "n.d." : prix(niveau)}) ; ${resultat} depuis l'achat (hors frais)`
         : `${resultat} depuis l'achat (hors frais)`;
+      // Filtre actif : la valeur d'ADX qui a laissé passer l'achat (toujours définie à un achat).
+      const entree = `close au-dessus de l'EMA ${params.emaTendance}${adx === undefined ? "" : `, ADX ${ADX_ENTREE_PERIODE} ${(adx[idx] ?? 0).toFixed(1)} ≥ ${adxEntree}`}`;
       marqueurs.push({
         idx,
         valeur,
@@ -626,7 +659,7 @@ export const stratAxis: IndicatorDef = {
         info:
           `AXIS ${achat ? "achat" : parStop ? "stop" : "vente"}${fort} — score ${s > 0 ? "+" : ""}${s}/6 : ` +
           `${noms.map((nom, w) => `${nom} ${fleche(v[w] ?? 0)}`).join(", ")} ; ` +
-          `${achat ? `close au-dessus de l'EMA ${params.emaTendance}` : sortie}${amorce} ; ` +
+          `${achat ? entree : sortie}${amorce} ; ` +
           `flux ${qualite} (${texteFlux(flux[idx] ?? {}, oiBougies)} ; ${textes.qualification}) — ${reserve}`,
       });
       if (k >= recents.length - MAX_LABELS_SORTIE) {

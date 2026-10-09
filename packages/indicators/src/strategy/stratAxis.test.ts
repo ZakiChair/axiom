@@ -41,6 +41,8 @@ import { supertrendOf } from "../trend/supertrend";
 import { cmfOf } from "../volume/cmf";
 import fixtureRaw from "../golden/fixture-ohlcv.json";
 import {
+  ADX_ENTREE_PERIODE,
+  ADX_ENTREE_TESTE,
   AMORCE_AXIS,
   ATR_STOP_PERIODE,
   MAX_GROS_AXIS,
@@ -97,7 +99,7 @@ const grosDe = (res: ReturnType<typeof computeIndicator>) =>
 const sens = (a: number, b: number): number => Math.sign(a - b) + 0;
 
 describe("stratAxis — contrat", () => {
-  it("strategy/overlay enregistrée, quinze inputs bornés, deux sorties prix, toute unité de temps, sans spec de fabrique", () => {
+  it("strategy/overlay enregistrée, seize inputs bornés, deux sorties prix, toute unité de temps, sans spec de fabrique", () => {
     expect(getIndicator("stratAxis")).toBe(stratAxis);
     expect(stratAxis.name).toBe("AXIS");
     expect(stratAxis.category).toBe("strategy");
@@ -118,11 +120,16 @@ describe("stratAxis — contrat", () => {
       ["seuilOi", 2, 0.1, 100],
       ["filtreFlux", false, undefined, undefined],
       ["stopAtr", 0, 0, 20],
+      ["adxEntree", 0, 0, 100],
     ]);
     expect(stratAxis.inputs.find((i) => i.key === "filtreFlux")?.type).toBe("boolean");
-    // Stop suiveur (v3) : dernier réglage, défaut 0 au figeage (v2 exacte) tant que le test
-    // sur données jamais vues n'a pas rendu son verdict (scripts/axis/manifeste-v3-2026-10-08.json).
-    expect(stratAxis.inputs.at(-1)).toEqual({ key: "stopAtr", name: "Stop suiveur (× ATR 14, 0 = sans)", type: "number", default: 0, min: 0, max: 20 });
+    // Stop suiveur (v3) : défaut 0 après le verdict DÉFAVORABLE du 8 octobre 2026 (v2 exacte).
+    expect(stratAxis.inputs.at(-2)).toEqual({ key: "stopAtr", name: "Stop suiveur (× ATR 14, 0 = sans)", type: "number", default: 0, min: 0, max: 20 });
+    // Filtre ADX à l'entrée (v4) : dernier réglage, défaut 0 au figeage (v2 exacte) tant que le test
+    // sur données jamais vues n'a pas rendu son verdict (scripts/axis/manifeste-v4-2026-10-09.json).
+    expect(stratAxis.inputs.at(-1)).toEqual({ key: "adxEntree", name: "Achat si ADX 14 ≥ (0 = sans)", type: "number", default: 0, min: 0, max: 100 });
+    expect(ADX_ENTREE_PERIODE).toBe(14);
+    expect(ADX_ENTREE_TESTE).toBe(25);
     expect(stratAxis.outputs).toEqual([
       { key: "prixSignal", name: "Prix d'achat", style: "line" },
       { key: "stop", name: "Stop suiveur", style: "line" },
@@ -983,6 +990,137 @@ describe("stop suiveur (v3)", () => {
     it("le chart transmet le réglage : infobulle 1h avec stop 3", () => {
       const r = computeIndicator(stratAxis, candles, { ...EMA50, stopAtr: 3 }, undefined, "1h");
       expect(r.annotations?.marqueurs?.[0]?.info?.endsWith(`non mesurée en 1h) — ${textesAxis("1h", 3).signaux}`)).toBe(true);
+    });
+  });
+});
+
+describe("filtre ADX à l'entrée (v4, 9 octobre 2026)", () => {
+  // Texte d'attente du figeage (scripts/axis/manifeste-v4-2026-10-09.json) : les suites du test le remplaceront.
+  const enCours = (k: number): string => ` ; filtre ADX 14 ≥ ${k} à l'entrée : non mesuré (test du 9 octobre 2026 en cours)`;
+  const SUFFIXE_STOP_3 =
+    " ; stop suiveur 3 × ATR 14 actif : test du 8 octobre 2026 échoué sur données jamais vues (151 alts 4h, 2023-2026 : Sharpe meilleur que sans stop sur 41 % des actifs seulement ; amélioration absente dans une moitié de la période (37 % puis 51 %)) — pas une amélioration validée";
+  const u: undefined = undefined;
+  const adx = adxOf(candles, ADX_ENTREE_PERIODE).adx;
+  /** Position « long/plat » recalculée : positionsAxis sur la tendance complétée du filtre (ADX indéfini = faux). */
+  const recalcul = (emaTendance: number, k: number): Array<number | undefined> => {
+    const score = votesAxis(candles, DEFAUTS).map((v) => v?.reduce((a, b) => a + b, 0));
+    const closes = closeOf(candles);
+    const auDessus = ema(closes, emaTendance).map((t, i) => (t === undefined ? undefined : closes[i]! > t && (adx[i] ?? -Infinity) >= k));
+    return positionsAxis(score, auDessus, 5, 4, candles.length - 2);
+  };
+  const positionChart = (params: Record<string, number | boolean>): number[] =>
+    (computeIndicator(stratAxis, candles, params).series.prixSignal ?? []).map((p) => (p === undefined ? 0 : 1));
+
+  it("adxEntree 0 : le paramètre explicite et son absence donnent le même résultat ; aucun texte ne mentionne le filtre", () => {
+    for (const params of [EMA50, {}, { ...EMA50, seuil: 4 }, { ...EMA50, filtreFlux: true }, { ...EMA50, stopAtr: 3 }]) {
+      expect(computeIndicator(stratAxis, candles, { ...params, adxEntree: 0 })).toEqual(computeIndicator(stratAxis, candles, params));
+    }
+    const res = computeIndicator(stratAxis, candles, EMA50);
+    expect(res.annotations?.marqueurs?.every((m) => !m.info?.includes("ADX 14"))).toBe(true);
+    expect(resume(candles, { ...EMA50, adxEntree: 0 })).toBe("60▲ 88▼ 107▲ 139▼ 280▲");
+  });
+
+  it("fixture dorée, EMA 50 : ADX 21,6 / 20,6 / 25,0 aux achats de la v2 → à 25, les achats 60 et 107 attendent 73 et 112, 280 passe ; ventes inchangées", () => {
+    expect([60, 107, 280].map((i) => adx[i]!.toFixed(2))).toEqual(["21.63", "20.64", "25.01"]);
+    expect(resume(candles, { ...EMA50, adxEntree: ADX_ENTREE_TESTE })).toBe("73▲ 88▼ 112▲ 139▼ 280▲");
+    expect(adx[73]!).toBeGreaterThanOrEqual(25);
+    expect(adx[112]!).toBeGreaterThanOrEqual(25);
+    // Entre deux, la condition d'achat de la v2 est vraie mais l'ADX manque : 60, 70-72 puis 107-111.
+    for (const i of [60, 70, 71, 72, 107, 108, 109, 110, 111]) expect(adx[i]!, `i=${i}`).toBeLessThan(25);
+    // Un seuil que la v2 satisfait déjà ne change rien ; un seuil jamais atteint supprime tout achat.
+    expect(resume(candles, { ...EMA50, adxEntree: 20 })).toBe("60▲ 88▼ 107▲ 139▼ 280▲");
+    expect(resume(candles, { ...EMA50, adxEntree: 30 })).toBe("76▲ 88▼ 287▲");
+    expect(Math.max(...adx.filter((x): x is number => x !== undefined))).toBeLessThan(80);
+    expect(resume(candles, { ...EMA50, adxEntree: 80 })).toBe("");
+    expect(resume(candles, { adxEntree: ADX_ENTREE_TESTE })).toBe("");
+  });
+
+  it("recoupement : la position du chart = positionsAxis sur la tendance complétée du filtre, à chaque bougie", () => {
+    for (const [emaTendance, k] of [[50, 25], [50, 30], [50, 20], [200, 25], [50, 80]] as const) {
+      const attendu = recalcul(emaTendance, k).map((p) => (p === 1 ? 1 : 0));
+      expect(positionChart({ emaTendance, adxEntree: k }), `EMA ${emaTendance}, ADX ≥ ${k}`).toEqual(attendu);
+    }
+    // Sans filtre : positionsAxis sur la tendance seule (la v2 exacte).
+    const score = votesAxis(candles, DEFAUTS).map((v) => v?.reduce((a, b) => a + b, 0));
+    const closes = closeOf(candles);
+    const auDessus = ema(closes, 50).map((t, i) => (t === undefined ? undefined : closes[i]! > t));
+    expect(positionChart({ ...EMA50, adxEntree: 0 })).toEqual(positionsAxis(score, auDessus, 5, 4, candles.length - 2).map((p) => (p === 1 ? 1 : 0)));
+  });
+
+  it("armement : une condition d'achat refusée par l'ADX arme comme une condition fausse ; le stop se combine au filtre", () => {
+    // Après la vente 88, l'achat de la v2 revient à 107 ; refusé par l'ADX jusqu'à 111, il arme et passe à 112.
+    const pos = recalcul(50, 25);
+    expect(pos.slice(106, 114)).toEqual([0, 0, 0, 0, 0, 0, 1, 1]);
+    const avecStop = computeIndicator(stratAxis, candles, { ...EMA50, adxEntree: 25, stopAtr: 3 });
+    const signaux = (avecStop.annotations?.marqueurs ?? []).filter((m) => m.couleur !== "--accent").map((m) => `${m.idx}${m.forme === "triangleHaut" ? "▲" : "▼"}`);
+    // Les ▲ sont ceux du filtre, les ▼ ceux du stop (139 avancée à 137 comme sans filtre).
+    expect(signaux).toEqual(["73▲", "88▼", "112▲", "137▼", "280▲"]);
+    expect(avecStop.annotations?.labels?.map((l) => l.texte.split(" ")[0])).toEqual(["Achat", "Vente", "Achat", "Stop", "Achat"]);
+  });
+
+  it("infobulles : l'achat nomme l'ADX qui l'a laissé passer, le suffixe « test en cours » ferme chaque signal, les ▼ gardent leurs textes", () => {
+    const res = computeIndicator(stratAxis, candles, { ...EMA50, adxEntree: ADX_ENTREE_TESTE });
+    const marqueurs = (res.annotations?.marqueurs ?? []).filter((m) => m.couleur !== "--accent");
+    expect(marqueurs[0]).toEqual({
+      idx: 73, valeur: candles[73]!.low, forme: "triangleHaut", couleur: "--up", cible: "prix",
+      info:
+        "AXIS achat fort — score +6/6 : EMA 20/50 ▲, Supertrend ▲, DMI ▲, MACD ▲, RSI ▲, CMF ▲ ; " +
+        `close au-dessus de l'EMA 50, ADX 14 ${adx[73]!.toFixed(1)} ≥ 25${AMORCE} ; ${fluxVolume("fort", "1.5")} — ${RESERVE}${enCours(25)}`,
+    });
+    expect(adx[73]!.toFixed(1)).toBe("25.2");
+    expect(marqueurs[1]?.info).toBe(
+      `AXIS vente — score -4/6 : EMA 20/50 ▲, Supertrend ▼, DMI ▼, MACD ▼, RSI ▼, CMF ▼ ; -2.24 % depuis l'achat (hors frais)${AMORCE} ; ` +
+        `${fluxVolume("ordinaire", "1.1")} — ${RESERVE}${enCours(25)}`
+    );
+    expect((candles[88]!.close / candles[73]!.close - 1) * 100).toBeCloseTo(-2.24, 2);
+    for (const m of marqueurs) expect(m.info?.endsWith(enCours(25))).toBe(true);
+    expect(res.annotations?.labels?.map((l) => l.texte)).toEqual(["Achat fort", "Vente -2.24 %", "Achat", "Vente -3.03 %", "Achat"]);
+    // Les forts achats / fortes ventes ne portent ni l'ADX ni le suffixe.
+    for (const m of grosDe(res)) expect(m.info).not.toContain("ADX 14");
+    // Filtre flux : sa réserve garde la priorité, le suffixe du filtre ADX puis celui du stop s'y ajoutent.
+    const r = computeIndicator(stratAxis, candles, { ...EMA50, filtreFlux: true, adxEntree: 25, stopAtr: 3 });
+    expect(r.annotations?.marqueurs?.[0]?.info?.endsWith(` — ${RESERVE_FILTRE}${enCours(25)}${SUFFIXE_STOP_3}`)).toBe(true);
+  });
+
+  it("anti-repaint et causalité avec adxEntree 25 : un préfixe ou un futur altéré ne change jamais le passé", () => {
+    const params = { ...EMA50, adxEntree: ADX_ENTREE_TESTE };
+    const res = computeIndicator(stratAxis, candles, params);
+    const marqueurs = res.annotations?.marqueurs ?? [];
+    // L'achat 73 n'est décidé qu'une fois la bougie 74 ouverte.
+    expect(computeIndicator(stratAxis, candles.slice(0, 74), params).annotations?.marqueurs?.map((m) => m.idx) ?? []).toEqual([]);
+    expect(computeIndicator(stratAxis, candles.slice(0, 75), params).annotations?.marqueurs?.map((m) => m.idx)).toEqual([73]);
+    for (const k of [73, 88, 112, 139, 253, 280]) {
+      const prefixe = computeIndicator(stratAxis, candles.slice(0, k + 1), params);
+      expect(prefixe.series.prixSignal?.slice(0, k), `préfixe ${k}`).toEqual(res.series.prixSignal?.slice(0, k));
+      expect(commeFixture(prefixe.annotations?.marqueurs, k + 1)).toEqual(marqueurs.filter((m) => m.idx < k));
+      const alterees = candles.map((c, i) => (i <= k ? c : { ...c, high: 1e12 + i, low: 1, close: 1e12 - i, volume: 1e12 }));
+      const futur = computeIndicator(stratAxis, alterees, params);
+      expect(futur.series.prixSignal?.slice(0, k + 1), `futur ${k}`).toEqual(res.series.prixSignal?.slice(0, k + 1));
+      expect((futur.annotations?.marqueurs ?? []).filter((m) => m.idx <= k)).toEqual(marqueurs.filter((m) => m.idx <= k));
+    }
+  });
+
+  describe("textesAxis(u, stopAtr, adxEntree)", () => {
+    it("adxEntree 0 : identique aux appels précédents, dans toutes les unités, avec ou sans stop", () => {
+      for (const tf of [u, "4h", "1h", "1d", "1w", "3M", "15s"] as const) {
+        expect(textesAxis(tf, 0, 0)).toEqual(textesAxis(tf));
+        expect(textesAxis(tf, 3, 0)).toEqual(textesAxis(tf, 3));
+      }
+    });
+
+    it("adxEntree > 0 : texte de base + suffixe d'attente (avant le stop) ; fortAchat, forteVente, qualification inchangés", () => {
+      expect(textesAxis(u, 0, 25)).toEqual({ signaux: `${RESERVE}${enCours(25)}`, fortAchat: MESURE_FORT_ACHAT, forteVente: MESURE_FORTE_VENTE, qualification: QUALIFICATION });
+      expect(textesAxis("4h", 0, 25)).toEqual(textesAxis(u, 0, 25));
+      expect(textesAxis(u, 3, 25).signaux).toBe(`${RESERVE}${enCours(25)}${SUFFIXE_STOP_3}`);
+      expect(textesAxis("1h", 0, 30)).toEqual({ ...textesAxis("1h"), signaux: textesAxis("1h").signaux + enCours(30) });
+      expect(textesAxis("3M", 0, 25).signaux).toBe(
+        "en 3M : non mesuré (historique trop court pour l'EMA 200 et l'amorce) — lecture indicative, jamais une promesse" + enCours(25)
+      );
+    });
+
+    it("le chart transmet le réglage : infobulle 1h avec filtre 25", () => {
+      const r = computeIndicator(stratAxis, candles, { ...EMA50, adxEntree: 25 }, undefined, "1h");
+      expect(r.annotations?.marqueurs?.[0]?.info?.endsWith(`non mesurée en 1h) — ${textesAxis("1h", 0, 25).signaux}`)).toBe(true);
     });
   });
 });

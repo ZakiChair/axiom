@@ -144,8 +144,16 @@
  * mais sur 2 grandes cryptos sur 8 au lieu des 5 exigées). Le propriétaire a
  * décidé de la tester quand même sur des données jamais vues, l'écart à la
  * règle déclaré dans le protocole (scripts/axis/manifeste-v4-2026-10-09.json,
- * figé avant tout téléchargement) ; en attendant le verdict, le défaut reste 0
- * et l'infobulle d'un filtre actif dit « test en cours ».
+ * figé avant tout téléchargement). Le test (123 paires USDT cotées 2023-07 →
+ * 2025-06, 4h, suivies jusqu'au 2026-10-09, scripts/axis/rapport-v4-2026-10-09.md)
+ * a rendu un verdict DÉFAVORABLE : la v4 perd à elle seule (expectancy nette
+ * −1,8 % par trade à x1, −2,1 % à x3, sur 2 515 trades clos ; PnL moyen −3,7 %
+ * contre −4,9 % sans filtre) ; Sharpe meilleur que la v2 sur 62,6 % des
+ * cellules mais 54,5 % puis 48,8 % par moitié ; le filtre refuse 54 % des entrées de la v2
+ * et garde 82 % de ses trades. Suites appliquées : le défaut reste 0 (signaux
+ * et textes de la v2 inchangés) ; le réglage reste disponible et l'infobulle
+ * d'un filtre actif dit l'échec (≥ 25) ou « hors du test » (autre seuil). Ces
+ * données sont consommées.
  */
 
 import type { Candle, IndicatorDef, LabelAnnotation, MarqueurAnnotation, Timeframe } from "@axiom/types";
@@ -488,11 +496,18 @@ const suffixeStop = (stopAtr: number): string =>
       ? ` ; stop suiveur ${STOP_ATR_TESTE} × ATR ${ATR_STOP_PERIODE} actif : test du 8 octobre 2026 échoué sur données jamais vues (151 alts 4h, 2023-2026 : Sharpe meilleur que sans stop sur 41 % des actifs seulement ; amélioration absente dans une moitié de la période (37 % puis 51 %)) — pas une amélioration validée`
       : ` ; stop suiveur ${stopAtr} × ATR ${ATR_STOP_PERIODE} : réglage hors du test du 8 octobre 2026 (${STOP_ATR_TESTE} × ATR ${ATR_STOP_PERIODE} mesuré) — non mesuré`;
 
-// Filtre ADX à l'entrée (v4) : test du 9 octobre 2026 en cours sur données jamais vues
-// (scripts/axis/manifeste-v4-2026-10-09.json). Tant qu'il n'a pas rendu son verdict, tout
-// filtre actif est « non mesuré » ; les suites du manifeste remplaceront cette mention.
+// Test du filtre ADX à l'entrée du 9 octobre 2026 sur données jamais vues (123 paires USDT
+// cotées 2023-2025, 4h, scripts/axis/rapport-v4-2026-10-09.md) : verdict DÉFAVORABLE.
+// Formulations des suites du manifeste v4 (suites.DEFAVORABLE.infobulleFiltreActif,
+// communes.reglageHorsTest), chiffres du résultat ; le test croisé
+// apps/web/src/chart/indicators.axisAdx.test.ts les compare au résultat. Sans filtre (0, le
+// défaut), les textes d'avant le test restent inchangés.
 const suffixeAdx = (adxEntree: number): string =>
-  adxEntree > 0 ? ` ; filtre ADX ${ADX_ENTREE_PERIODE} ≥ ${adxEntree} à l'entrée : non mesuré (test du 9 octobre 2026 en cours)` : "";
+  adxEntree <= 0
+    ? ""
+    : adxEntree === ADX_ENTREE_TESTE
+      ? ` ; filtre ADX ${ADX_ENTREE_PERIODE} ≥ ${ADX_ENTREE_TESTE} à l'entrée actif : test du 9 octobre 2026 échoué sur données jamais vues (123 alts 4h cotées 2023-2025 : expectancy nette ≤ 0 aux coûts x1 ou x3 ; amélioration absente dans une moitié de la période (54 % puis 48 %)) — pas une amélioration validée`
+      : ` ; filtre ADX ${ADX_ENTREE_PERIODE} ≥ ${adxEntree} à l'entrée : réglage hors du test du 9 octobre 2026 (≥ ${ADX_ENTREE_TESTE} mesuré) — non mesuré`;
 
 /**
  * Textes des infobulles selon l'unité du chart (4h ou unité absente : ceux des tests 4h)

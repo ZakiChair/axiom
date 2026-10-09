@@ -207,6 +207,19 @@ remonte désormais à **1 500 bougies** de lui-même quand AXIS est actif, et
 l'infobulle dit « amorce courte » tant que l'historique n'y arrive pas
 (source plus courte, alertes). Le daemon évalue ses alertes 1 min sur la
 même profondeur.
+**Test du 9 octobre 2026 sur données jamais vues** (123 paires USDT cotées
+entre juillet 2023 et juin 2025, 4h, suivies jusqu'en octobre 2026,
+protocole figé avant téléchargement, exécution unique) : un **filtre ADX
+optionnel** à l'entrée (réglage `adxEntree`, achat seulement si ADX 14 ≥ k,
+défaut 0 = sans) a été testé à k = 25 — le seul candidat de l'exploration sur
+données vues, qui n'avait pourtant pas passé la règle pré-écrite (écart
+déclaré dans le protocole). Il refuse 54 % des entrées de la v2, garde 82 %
+de ses trades et améliore le rendement ajusté du risque sur 62,6 % des
+actifs, mais **perd à lui seul** sur ce pool (−1,8 % par trade après frais,
+−3,7 % par actif contre −4,9 % sans filtre) et l'avantage disparaît en
+seconde moitié (48,8 %) — verdict **DÉFAVORABLE**. Le défaut reste donc sans
+filtre ; le réglage reste disponible et l'infobulle d'un filtre actif dit cet
+échec, chiffres à l'appui. Ces 123 paires sont consommées.
 [Méthode, réglages, limites et backtests](docs/axis-2026-10-07.md).
 
 ### Historique des décisions et nouveaux indicateurs

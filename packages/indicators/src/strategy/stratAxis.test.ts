@@ -995,8 +995,12 @@ describe("stop suiveur (v3)", () => {
 });
 
 describe("filtre ADX à l'entrée (v4, 9 octobre 2026)", () => {
-  // Texte d'attente du figeage (scripts/axis/manifeste-v4-2026-10-09.json) : les suites du test le remplaceront.
-  const enCours = (k: number): string => ` ; filtre ADX 14 ≥ ${k} à l'entrée : non mesuré (test du 9 octobre 2026 en cours)`;
+  // Suites du manifeste v4 après le verdict DÉFAVORABLE (scripts/axis/resultat-v4-2026-10-09.json,
+  // champ formulations) : seuil testé (25) → l'échec chiffré ; autre seuil → « hors du test ».
+  const SUFFIXE_25 =
+    " ; filtre ADX 14 ≥ 25 à l'entrée actif : test du 9 octobre 2026 échoué sur données jamais vues (123 alts 4h cotées 2023-2025 : expectancy nette ≤ 0 aux coûts x1 ou x3 ; amélioration absente dans une moitié de la période (54 % puis 48 %)) — pas une amélioration validée";
+  const horsTest = (k: number): string => ` ; filtre ADX 14 ≥ ${k} à l'entrée : réglage hors du test du 9 octobre 2026 (≥ 25 mesuré) — non mesuré`;
+  const suffixe = (k: number): string => (k === 25 ? SUFFIXE_25 : horsTest(k));
   const SUFFIXE_STOP_3 =
     " ; stop suiveur 3 × ATR 14 actif : test du 8 octobre 2026 échoué sur données jamais vues (151 alts 4h, 2023-2026 : Sharpe meilleur que sans stop sur 41 % des actifs seulement ; amélioration absente dans une moitié de la période (37 % puis 51 %)) — pas une amélioration validée";
   const u: undefined = undefined;
@@ -1058,28 +1062,28 @@ describe("filtre ADX à l'entrée (v4, 9 octobre 2026)", () => {
     expect(avecStop.annotations?.labels?.map((l) => l.texte.split(" ")[0])).toEqual(["Achat", "Vente", "Achat", "Stop", "Achat"]);
   });
 
-  it("infobulles : l'achat nomme l'ADX qui l'a laissé passer, le suffixe « test en cours » ferme chaque signal, les ▼ gardent leurs textes", () => {
+  it("infobulles : l'achat nomme l'ADX qui l'a laissé passer, le suffixe d'échec du test ferme chaque signal, les ▼ gardent leurs textes", () => {
     const res = computeIndicator(stratAxis, candles, { ...EMA50, adxEntree: ADX_ENTREE_TESTE });
     const marqueurs = (res.annotations?.marqueurs ?? []).filter((m) => m.couleur !== "--accent");
     expect(marqueurs[0]).toEqual({
       idx: 73, valeur: candles[73]!.low, forme: "triangleHaut", couleur: "--up", cible: "prix",
       info:
         "AXIS achat fort — score +6/6 : EMA 20/50 ▲, Supertrend ▲, DMI ▲, MACD ▲, RSI ▲, CMF ▲ ; " +
-        `close au-dessus de l'EMA 50, ADX 14 ${adx[73]!.toFixed(1)} ≥ 25${AMORCE} ; ${fluxVolume("fort", "1.5")} — ${RESERVE}${enCours(25)}`,
+        `close au-dessus de l'EMA 50, ADX 14 ${adx[73]!.toFixed(1)} ≥ 25${AMORCE} ; ${fluxVolume("fort", "1.5")} — ${RESERVE}${suffixe(25)}`,
     });
     expect(adx[73]!.toFixed(1)).toBe("25.2");
     expect(marqueurs[1]?.info).toBe(
       `AXIS vente — score -4/6 : EMA 20/50 ▲, Supertrend ▼, DMI ▼, MACD ▼, RSI ▼, CMF ▼ ; -2.24 % depuis l'achat (hors frais)${AMORCE} ; ` +
-        `${fluxVolume("ordinaire", "1.1")} — ${RESERVE}${enCours(25)}`
+        `${fluxVolume("ordinaire", "1.1")} — ${RESERVE}${suffixe(25)}`
     );
     expect((candles[88]!.close / candles[73]!.close - 1) * 100).toBeCloseTo(-2.24, 2);
-    for (const m of marqueurs) expect(m.info?.endsWith(enCours(25))).toBe(true);
+    for (const m of marqueurs) expect(m.info?.endsWith(suffixe(25))).toBe(true);
     expect(res.annotations?.labels?.map((l) => l.texte)).toEqual(["Achat fort", "Vente -2.24 %", "Achat", "Vente -3.03 %", "Achat"]);
     // Les forts achats / fortes ventes ne portent ni l'ADX ni le suffixe.
     for (const m of grosDe(res)) expect(m.info).not.toContain("ADX 14");
     // Filtre flux : sa réserve garde la priorité, le suffixe du filtre ADX puis celui du stop s'y ajoutent.
     const r = computeIndicator(stratAxis, candles, { ...EMA50, filtreFlux: true, adxEntree: 25, stopAtr: 3 });
-    expect(r.annotations?.marqueurs?.[0]?.info?.endsWith(` — ${RESERVE_FILTRE}${enCours(25)}${SUFFIXE_STOP_3}`)).toBe(true);
+    expect(r.annotations?.marqueurs?.[0]?.info?.endsWith(` — ${RESERVE_FILTRE}${suffixe(25)}${SUFFIXE_STOP_3}`)).toBe(true);
   });
 
   it("anti-repaint et causalité avec adxEntree 25 : un préfixe ou un futur altéré ne change jamais le passé", () => {
@@ -1108,14 +1112,18 @@ describe("filtre ADX à l'entrée (v4, 9 octobre 2026)", () => {
       }
     });
 
-    it("adxEntree > 0 : texte de base + suffixe d'attente (avant le stop) ; fortAchat, forteVente, qualification inchangés", () => {
-      expect(textesAxis(u, 0, 25)).toEqual({ signaux: `${RESERVE}${enCours(25)}`, fortAchat: MESURE_FORT_ACHAT, forteVente: MESURE_FORTE_VENTE, qualification: QUALIFICATION });
+    it("adxEntree > 0 : texte de base + échec chiffré (25) ou « hors du test » (autre seuil), avant le stop ; fortAchat, forteVente, qualification inchangés", () => {
+      expect(textesAxis(u, 0, 25)).toEqual({ signaux: `${RESERVE}${suffixe(25)}`, fortAchat: MESURE_FORT_ACHAT, forteVente: MESURE_FORTE_VENTE, qualification: QUALIFICATION });
       expect(textesAxis("4h", 0, 25)).toEqual(textesAxis(u, 0, 25));
-      expect(textesAxis(u, 3, 25).signaux).toBe(`${RESERVE}${enCours(25)}${SUFFIXE_STOP_3}`);
-      expect(textesAxis("1h", 0, 30)).toEqual({ ...textesAxis("1h"), signaux: textesAxis("1h").signaux + enCours(30) });
+      expect(textesAxis(u, 3, 25).signaux).toBe(`${RESERVE}${suffixe(25)}${SUFFIXE_STOP_3}`);
+      expect(textesAxis("1h", 0, 30)).toEqual({ ...textesAxis("1h"), signaux: textesAxis("1h").signaux + suffixe(30) });
       expect(textesAxis("3M", 0, 25).signaux).toBe(
-        "en 3M : non mesuré (historique trop court pour l'EMA 200 et l'amorce) — lecture indicative, jamais une promesse" + enCours(25)
+        "en 3M : non mesuré (historique trop court pour l'EMA 200 et l'amorce) — lecture indicative, jamais une promesse" + suffixe(25)
       );
+      // Seuil sans zéro inutile, hors du test ; le seuil testé est nommé.
+      expect(textesAxis(u, 0, 22.5).signaux).toBe(`${RESERVE}${horsTest(22.5)}`);
+      expect(horsTest(40)).toContain("(≥ 25 mesuré) — non mesuré");
+      expect(suffixe(25)).not.toContain("en cours");
     });
 
     it("le chart transmet le réglage : infobulle 1h avec filtre 25", () => {

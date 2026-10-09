@@ -436,3 +436,41 @@ remarques r5-r6 et à la ligne `HASH_MANIFESTE` : c'est le cas, vérifié ci-des
 - Commit de figeage : son SHA-1 ne peut pas figurer ici (le journal en fait
   partie) ; le résultat de la campagne le reporte (`code.commitFigeage`) et la
   documentation le cite.
+
+## Après l'exécution (orchestrateur)
+
+- Commit de figeage : `15cf8d0157a695e89f4b681ef6604e095bf2ab51` (ce journal, le
+  manifeste, le runner, `stratAxis.ts` et ses tests). `git show
+  15cf8d0:scripts/valider-axis-v4.ts | sha256sum` redonne `deb9893e…9a5b` et
+  `git show 15cf8d0:scripts/axis/manifeste-v4-2026-10-09.json | sha256sum` redonne
+  `694c9aaf…d36f` : le code exécuté est celui du figeage (r4).
+- Campagne unique : `bun scripts/valider-axis-v4.ts --campagne`, 2026-10-09
+  09:52:33 → 09:53:08 UTC (35 s), HEAD `15cf8d0`, arbre de travail propre sur les
+  chemins mesurés (`code.cheminsFigesCommites` = true), code identique au figeage
+  (`code.identiqueAuFigeage` = true, arbre 247 fichiers `b1703fb8…`), aucune trace
+  d'arrêt (`arret-v4-*.json` absent de `scripts/axis/`), aucune relance.
+- Données : 123 cellules sur 123 disponibles (minimum 93), longueurs de 2 817
+  (SAHARAUSDT) à 7 162 bougies (PENDLEUSDT), 14 bougies manquantes et 3 écartées
+  au total ; caches `H-*` : 123 fichiers dans `scripts/.cache-klines/axis-v4/`
+  (hors dépôt).
+- Contrôles bloquants : tous passés sur les 123 cellules (seconde méthode du Sharpe
+  sur PENDLE, ARKM et WLD, les trois premières de l'ordre du manifeste).
+- Verdict pré-déclaré : **DÉFAVORABLE**. P1 x1 : expectancy nette −1,780 % par trade
+  sur 2 515 trades clos (échec) ; P1 x3 : −2,057 % (échec) ; P2 : Sharpe v4 > v2 sur
+  77 cellules sur 123 (62,6 %, tenu) ; P3 moitié 1 : 67/123 (54,5 %, tenu) ; P3
+  moitié 2 : 60/123 (48,8 %, échec). Descriptif : drawdown plus faible sur 95/123
+  (77,2 %), PnL moyen −3,7 % contre −4,9 %, 1 654 entrées de la v2 sur 3 087 refusées
+  par le filtre (53,6 %), 2 515 trades clos conservés sur 3 075 (81,8 %), exposition
+  21,6 % contre 25,8 %, test des signes p = 0,0033 (optimiste, dépendance),
+  achat-conservation médian −87 %.
+- Empreintes : `scripts/axis/resultat-v4-2026-10-09.json`
+  `251f020d10a90205ef9c7f963a808336124eb338bca1d455a4c1201a73e4a5db` (épinglée dans
+  `apps/web/src/chart/indicators.axisAdx.test.ts`), `scripts/axis/rapport-v4-2026-10-09.md`
+  `fef8bb362ddc79723448cf50bdaf6773fdf314ab5c61ef1294a9a61cb0b876b8`.
+- Suites appliquées (DEFAVORABLE, manifeste `suites`) : défaut `adxEntree` conservé
+  à 0 (v2 exacte, textes à 0 inchangés au caractère près) ; `suffixeAdx` de
+  `stratAxis.ts` porte l'`infobulleFiltreActif` chiffrée à 25 et le
+  `reglageHorsTest` aux autres seuils ; test croisé
+  `apps/web/src/chart/indicators.axisAdx.test.ts` (nom annoncé par `testCroise`,
+  r6) ; les 123 paires du pool sont consommées : aucune autre variante n'y sera
+  jugée.

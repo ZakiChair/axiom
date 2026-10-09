@@ -1611,6 +1611,47 @@ dépendance ni ordre réel. Trois changements de `@axiom/types` :
   remplacer — n'affecte que les alertes évaluées onglet fermé (1 min ou
   héritées). Signaux et textes sur série longue inchangés au caractère près ;
   screener (200 klines) inchangé.
+- **Filtre ADX à l'entrée et test v4** (même demande du 2026-10-09, lot B ;
+  la faiblesse visée était la sélection des entrées : la v2 achète dès six
+  votes ≥ 5 au-dessus de l'EMA 200, y compris en tendance molle, le test v3
+  ayant montré que les sorties n'amélioraient pas le rendement ajusté du
+  risque). Nouveau réglage `adxEntree` (16e input, défaut 0 = la v2 exacte,
+  vérifiée identique au caractère près) : achat seulement si ADX 14 ≥ k à la
+  clôture de décision (le même ADX que le vote DMI ; ADX indéfini = faux), la
+  condition d'achat ainsi complétée étant celle que l'armement observe ;
+  ventes inchangées ; l'infobulle d'achat nomme la valeur d'ADX ;
+  `textesAxis(u, stopAtr, adxEntree)` (mention du filtre avant celle du stop) ;
+  `ADX_ENTREE_PERIODE` et `ADX_ENTREE_TESTE` exportés. Exploration sur les
+  seules données déjà vues (`scripts/explorer-axis-v4.ts`, 151 alts du test v3
+  et 8 grandes cryptos 4h, 13 variantes d'entrée à sorties inchangées, règle
+  pré-écrite dans l'en-tête du script) : **aucune variante retenue** — adx-25
+  première sur les alts (Sharpe > v2 sur 62,3 %, moitiés tenues) mais 2
+  grandes cryptos sur 8 au lieu des 5 exigées ; le propriétaire a décidé de la
+  tester quand même sur le pool jamais vu, l'écart à la règle déclaré dans le
+  manifeste (`historique.choixV4`, `criteres.ecartRegleExploration`, limite).
+  Pool sondé par dates de cotation seulement (open time de la première kline
+  journalière, aucun prix gardé). Protocole figé avant téléchargement
+  (`scripts/axis/manifeste-v4-2026-10-09.json`, figé à 2026-10-09T09:48:50Z,
+  hash épinglé dans `scripts/valider-axis-v4.ts`, 16 fichiers de code et
+  l'arbre des trois paquets vérifiés), revue indépendante
+  (`scripts/axis/journal-revue-v4-2026-10-09.md` : aucun bloquant ni majeur,
+  trois mineurs appliqués), répétition sur les symboles vus (Sharpe v4 > v2 sur
+  4/8) consignée sans modification, commit de figeage `15cf8d0`. Exécution
+  unique le 2026-10-09 (09:52-09:53 UTC) sur **123 paires USDT jamais lues**
+  (cotées 2023-07 → 2025-06, chaque cellule de sa cotation au 2026-10-09
+  exclu, 2 817 à 7 162 bougies), 123/123 cellules, contrôles bloquants
+  passés : verdict **DÉFAVORABLE** (`scripts/axis/rapport-v4-2026-10-09.md`)
+  — P1 échoue (2 515 trades clos, −1,78 % par trade à ×1, −2,06 % à ×3 : la v4
+  perd à elle seule sur ce pool, dont l'achat-conservation a perdu 87 % en
+  médiane), P2 tenu (Sharpe v4 > v2 sur 77/123, 62,6 %), P3 échoue en seconde
+  moitié (54,5 % puis 48,8 %). Le filtre refuse 53,6 % des entrées de la v2,
+  garde 81,8 % de ses trades, réduit le drawdown sur 77,2 % des actifs et perd
+  moins (PnL moyen −3,7 % contre −4,9 %), sans rendre la stratégie viable ni
+  stable. Suites du manifeste appliquées : défaut conservé à 0 (signaux et
+  textes de la v2 inchangés), infobulle à adxEntree 25 = échec chiffré des
+  suites DÉFAVORABLE, autre seuil = « hors du test », test croisé
+  `apps/web/src/chart/indicators.axisAdx.test.ts` (empreinte du résultat
+  épinglée). Ces données sont consommées.
 - **Unité de temps au calcul** : `CalcContext.timeframe` (nouveau champ
   facultatif de `@axiom/types`), rempli par `computeIndicator` (paramètre
   facultatif après `aux`) quand l'appelant connaît l'unité, c'est-à-dire le
@@ -1681,9 +1722,22 @@ paginé, fusion avec le flux) ; les tests croisés des infobulles figées
 (`indicators.axisUnites.test.ts`, `indicators.axisStop.test.ts`) passent
 sans modification. Budget : **1 193 086 / 356 453** (+592 / +170), marge gzip
 **3 547 octets**.
+Après le filtre ADX à l'entrée (v4, 9 octobre) : `pnpm check` réussi — typage
+des 8 projets ; indicateurs 1 010 tests (dont 81 pour AXIS : équivalence
+exacte de la v2 à `adxEntree` 0, achats retardés de la fixture, recoupement du
+chart avec `positionsAxis`, combinaison avec le stop, causalité, textes après
+verdict), alertes 122, backtest 129, pacte 120, web 420 fichiers /
+5 951 tests (dont 11 qui recoupent au caractère près les infobulles du
+filtre avec le résultat de la campagne v4, empreinte épinglée), daemon
+785 tests (Bun 1.4.2) ; `tsc --strict` propre sur
+`scripts/valider-axis-v4.ts` avant et après le figeage (`HASH_MANIFESTE`
+déclaré `string`) et sur `scripts/explorer-axis-v4.ts` ; banc des chemins de
+verdict 39 vérifications. Budget : **1 193 835 / 356 648** (+749 / +195),
+marge gzip **3 352 octets**.
 Usage, limites et tests :
 [`docs/axis-2026-10-07.md`](docs/axis-2026-10-07.md),
 [`scripts/axis/rapport-v2-2026-10-07.md`](scripts/axis/rapport-v2-2026-10-07.md),
 [`scripts/axis/rapport-flux-2026-10-08.md`](scripts/axis/rapport-flux-2026-10-08.md),
-[`scripts/axis/rapport-ut-2026-10-08.md`](scripts/axis/rapport-ut-2026-10-08.md)
-et [`scripts/axis/rapport-v3-2026-10-08.md`](scripts/axis/rapport-v3-2026-10-08.md).
+[`scripts/axis/rapport-ut-2026-10-08.md`](scripts/axis/rapport-ut-2026-10-08.md),
+[`scripts/axis/rapport-v3-2026-10-08.md`](scripts/axis/rapport-v3-2026-10-08.md)
+et [`scripts/axis/rapport-v4-2026-10-09.md`](scripts/axis/rapport-v4-2026-10-09.md).

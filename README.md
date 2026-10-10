@@ -220,6 +220,18 @@ actifs, mais **perd à lui seul** sur ce pool (−1,8 % par trade après frais,
 seconde moitié (48,8 %) — verdict **DÉFAVORABLE**. Le défaut reste donc sans
 filtre ; le réglage reste disponible et l'infobulle d'un filtre actif dit cet
 échec, chiffres à l'appui. Ces 123 paires sont consommées.
+**Garde-fou de régime BTC (10 octobre 2026)** : un réglage `regimeBtc`
+(défaut désormais 100) n'autorise l'achat que lorsque la référence du chart
+(BTC par défaut) clôture au-dessus de sa propre EMA 100 — référence absente
+→ signaux de la v2, infobulle explicite. **Test unique sur données jamais
+vues** (139 paires USDT spot KuCoin cotées 2019-2024, 4h, suivies jusqu'en
+octobre 2026, protocole figé avant téléchargement, exécution unique) :
+verdict **FAVORABLE** — Sharpe meilleur que sans garde-fou sur 75 % des
+actifs, drawdown médian 18,3 % contre 21,9 %, expectancy nette +4,6 %
+contre +3,3 % par trade après frais (x1 et x3) — le gain vient de ne pas
+acheter d'alts quand BTC est sous sa tendance, sur un pool où
+l'achat-conservation perd 96 % en médiane : mesure passée, pas une promesse,
+et les cellules partagent le même facteur de marché.
 **Alertes et backtest (9 octobre 2026)** : AXIS expose deux sorties calculées
 mais jamais tracées — **État** (1 acheté, 0 à plat) et **Score** (−6 à +6) —
 sélectionnables dans une alerte de seuil d'indicateur (achat : État ≥ 1,

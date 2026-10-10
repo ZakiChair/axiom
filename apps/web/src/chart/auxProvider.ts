@@ -142,13 +142,15 @@ const ERROR_TTL_MS = 30_000;
 /** Profondeur d'historique demandée aux fournisseurs (90 jours). */
 const LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000;
 /**
- * Profondeur d'un fetch `refClose` en UN appel (patron cbprem/derivatives). Un niveau :
+ * Profondeur d'un fetch `refClose` (patron cbprem/derivatives, DEUX appels). Un niveau :
  * `binanceAdapter.fetchKlines` sans borne temporelle rend les `limit` bougies les plus
- * RÉCENTES (atteint `now` sans pagination), 720 couvrant la vue initiale (backfill 500).
- * Au-delà (scroll historique) les bougies plus anciennes restent `undefined` (LOCF sans
- * antériorité) — dégradation gracieuse cohérente avec la clé sans composante de plage.
+ * RÉCENTES (atteint `now` sans pagination) ; la seconde page repart de la plus ancienne
+ * (`endTime` = son open − 1 ms) et est fusionnée sans doublon. 1 500 couvre l'amorce
+ * d'AXIS (`amorceBougies` = 1500 : garde-fou de régime v5) ; au-delà (scroll historique)
+ * les bougies plus anciennes restent `undefined` (LOCF sans antériorité) — dégradation
+ * gracieuse cohérente avec la clé sans composante de plage.
  */
-const REFCLOSE_LIMIT = 720;
+const REFCLOSE_LIMIT = 1500;
 /** Intervalle d'agrégation Coinalyze pour OI/funding (cf. COINALYZE_INTERVALS). */
 const COINALYZE_INTERVAL = "1hour";
 /** Durée du bucket `COINALYZE_INTERVAL`, en ms. */
@@ -475,9 +477,19 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe, e
       // autres séries de la requête.
       if (timeframeToFapiInterval(timeframe) === undefined) return [];
       try {
-        const candles = await binanceAdapter.fetchKlines(symbol, timeframe, {
-          limit: REFCLOSE_LIMIT,
-        });
+        // Binance plafonne à 1 000 klines par appel : une seconde page part de la plus
+        // ancienne reçue pour couvrir l'amorce AXIS (1 500) en une seule entrée de cache.
+        const recentes = await binanceAdapter.fetchKlines(symbol, timeframe, { limit: Math.min(1000, REFCLOSE_LIMIT) });
+        let candles = recentes;
+        if (recentes.length < REFCLOSE_LIMIT && recentes.length > 0) {
+          const plusAncienne = recentes[0]!.time;
+          const anciennes = await binanceAdapter.fetchKlines(symbol, timeframe, {
+            limit: Math.min(1000, REFCLOSE_LIMIT - recentes.length),
+            endTime: plusAncienne - 1,
+          });
+          const vues = new Set(recentes.map((c) => c.time));
+          candles = [...anciennes.filter((c) => !vues.has(c.time)), ...recentes];
+        }
         return toPoints(candles.map((c) => ({ time: c.time, value: c.close })));
       } catch {
         return [];

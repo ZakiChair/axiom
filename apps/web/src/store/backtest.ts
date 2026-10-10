@@ -144,8 +144,9 @@ export const CATALOGUE_OPERANDES: OperandeSpec[] = [
   indLen("adx", "adx", "ADX", 14),
   indFixe("psar", "psar", "PSAR", { step: 0.02, max: 0.2 }),
   // Sorties masquées d'AXIS (jamais tracées sur le chart) : état et score de la
-  // stratégie, aux défauts — donc la v2 exacte mesurée en 4h.
-  indFixe("stratAxis", "etat", "AXIS (état : 1 acheté, 0 à plat)", {}),
+  // stratégie, aux défauts — le garde-fou de régime (défaut 100 depuis le verdict
+  // FAVORABLE du 10 octobre 2026) n'est pas appliqué dans le BT : pas de référence.
+  indFixe("stratAxis", "etat", "AXIS (état : 1 acheté, 0 à plat ; garde-fou de régime non appliqué dans le BT : pas de référence)", {}),
   indFixe("stratAxis", "score", "AXIS (score −6 à +6)", {}),
 ];
 
@@ -261,7 +262,7 @@ const psarDefaut = (): Operande => ({
   params: { step: 0.02, max: 0.2 },
   output: "psar",
 });
-/** État masqué d'AXIS aux défauts (1 acheté, 0 à plat) — la v2 exacte. */
+/** État masqué d'AXIS aux défauts (1 acheté, 0 à plat) — garde-fou non appliqué sans référence : v2. */
 const axisEtat = (): Operande => ({
   type: "indicateur",
   indicateurId: "stratAxis",
@@ -449,7 +450,11 @@ export const BUILTIN_STRATEGIES: StrategiePreset[] = [
    * unités (`scripts/axis/rapport-ut-2026-10-08.md`). Le 4h n'est qu'un défaut
    * de commodité — mesure passée, pas une promesse. `stopPct`, `targetPct` et
    * `risquePct` restent à la main de l'utilisateur : le stop suiveur interne
-   * (`stopAtr`) a échoué son test v3, il n'est pas pré-réglé ici.
+   * (`stopAtr`) a échoué son test v3, il n'est pas pré-réglé ici. Le garde-fou
+   * de régime BTC (défaut 100 depuis le verdict FAVORABLE du 10 octobre 2026,
+   * `scripts/axis/rapport-v5-2026-10-10.md`) n'est pas appliqué dans le
+   * backtest : le moteur ne sert pas de série de référence (`refClose`),
+   * l'indicateur retombe alors sur la condition de la v2.
    */
   {
     id: "builtin:axis",

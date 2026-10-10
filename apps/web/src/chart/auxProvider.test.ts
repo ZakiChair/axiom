@@ -825,11 +825,36 @@ describe("AuxProvider — séries strictes du lot C", () => {
     const r = { exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const,
       ids: ["refClose" as const, "refCloseStrict" as const], candleTimes: [H, 2 * H, 3 * H] };
     await new Promise<void>((resolve) => { let restants = 2; p.getAligned(r, () => { if (--restants === 0) resolve(); }); });
-    expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(fetcher).toHaveBeenCalledWith("ETHUSDT", "1h", { limit: 720 });
+    // Deux appels (pages de 1 000) pour couvrir l'amorce AXIS (1 500 bougies) : la seconde
+    // page repart de la plus ancienne reçue et est fusionnée sans doublon.
+    // Deux appels (Binance plafonne à 1 000 par page) pour couvrir l'amorce AXIS
+    // (1 500 bougies) : la seconde page repart de la plus ancienne reçue.
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenNthCalledWith(1, "ETHUSDT", "1h", { limit: 1000 });
+    expect(fetcher).toHaveBeenNthCalledWith(2, "ETHUSDT", "1h", { limit: 1000, endTime: H - 1 });
     expect(p.getAligned(r, () => {})).toEqual({ status: "ready", aux: {
       refClose: [100, 100, 120], refCloseStrict: [100, undefined, 120],
     } });
+  });
+
+  it("refClose : la source complète (≥ 1 500 bougies) couvre l'amorce en deux pages fusionnées", async () => {
+    const page1 = Array.from({ length: 1000 }, (_v, i) => ({
+      time: 501 * H + i * H, open: 100, high: 100, low: 100, close: 100 + i, volume: 1,
+    }));
+    const page2 = Array.from({ length: 501 }, (_v, i) => ({
+      time: i * H, open: 50, high: 50, low: 50, close: 50 + i, volume: 1,
+    }));
+    const fetcher = vi.spyOn(binanceAdapter, "fetchKlines")
+      .mockResolvedValueOnce(page1)
+      .mockResolvedValueOnce(page2);
+    const p = new AuxProvider();
+    const r = { exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const,
+      ids: ["refClose" as const], candleTimes: [0, 500 * H, 1000 * H, 1500 * H] };
+    await new Promise<void>((resolve) => p.getAligned(r, resolve));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenNthCalledWith(2, "ETHUSDT", "1h", { limit: 500, endTime: 501 * H - 1 });
+    // 1 501 points fusionnés, triés, sans doublon : LOCF exact (à 1000·H : page 1, indice 499).
+    expect(p.getAligned(r, () => {})).toEqual({ status: "ready", aux: { refClose: [50, 550, 100 + 499, 100 + 999] } });
   });
 
   it("funding strict : expire à la borne exclusive et une venue en échec n'efface pas les autres", async () => {

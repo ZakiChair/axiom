@@ -1690,6 +1690,28 @@ dépendance ni ordre réel. Quatre changements de `@axiom/types` :
   `defStrategie` — `etatsStrategie("stratAxis")` et
   `scripts/valider-strategies.ts` la rejouent (clôture-à-clôture hors frais),
   `positionAxis` étant identique à `calc().series.etat` élément par élément.
+- **Garde-fou de régime BTC (v5, 10 octobre 2026)** : réglage `regimeBtc` —
+  quand il est > 0, l'achat exige en plus que la série `refClose` (aux
+  facultative ; BTC du chart, alignée par ouverture en LOCF) clôture au-dessus
+  de sa propre EMA de `regimeBtc` bougies, calculée depuis la première valeur
+  définie (`emaDepuisPremiereDefinie` — l'`ema` du dépôt compterait les
+  indéfinies pour 0 dans l'amorce). Référence ou EMA indéfinie → garde-fou NON
+  appliqué (condition de la v2) : alertes, fenêtre BT, screener et rejeu
+  commun n'ont pas de référence. Variante `btc-ema100` retenue par la règle
+  pré-écrite de l'exploration sur données vues (Sharpe > v2 sur 77,5 % des
+  151 alts, 6/7 majors, `scripts/explorer-axis-v5.ts`, SANS VALEUR PROBANTE) ;
+  test unique sur données jamais vues — 139 paires USDT spot KuCoin cotées
+  2019-2024, 4h, suivies au 2026-10-10, manifeste
+  `scripts/axis/manifeste-v5-2026-10-10.json` figé puis commité (`c7c8b3d`),
+  contrôles croisés à 0 écart — verdict **FAVORABLE**
+  (`scripts/axis/rapport-v5-2026-10-10.md`) : les 5 blocs tenus, expectancy
+  regroupée 4,58 % contre 3,29 % (x1) et 4,30 % contre 3,00 % (x3), Sharpe
+  meilleur sur 75,5 % des cellules (64,0 % puis 70,5 % par moitié), DD médian
+  18,3 % contre 21,9 %, 23 % des entrées v2 refusées, achat-conservation −96 %
+  médian sur ce pool. Suites appliquées : défaut devenu 100 ; infobulle =
+  mesure en 4h, « non mesuré en {u} » ailleurs, « sans garde-fou » à 0, « hors
+  du test » aux autres périodes ; `refClose` du chart portée à l'amorce
+  (1 500 bougies, deux appels fusionnés). Ces données sont consommées.
 - Chargement initial : AXIS coûte ~800 octets gzip, la couche flux ~1 200 de
   plus, les infobulles par unité ~1 000 de plus. Sur le modèle de BT et SIG, les commandes EQS, WHALE et MARKS vivent
   dans `commands/windowPanels.ts` (EQS : bascule identique ; WHALE et MARKS :
@@ -1764,10 +1786,21 @@ alertes 142 (dont 3 de tir aux signaux de la fixture), backtest 143, pacte
 « vide », jetons — et 3 sur le preset `builtin:axis` et `runBacktest` de la
 fixture), daemon 785 tests (Bun 1.3.11). Budget : **1 194 813 / 355 849**
 (+978 / −799), marge gzip **4 151 octets**.
+Après le garde-fou de régime (v5, 10 octobre, suites du verdict FAVORABLE) :
+`pnpm check` réussi — typage des 8 projets ; indicateurs dont stratAxis.test
+(contrat défaut 100, `emaDepuisPremiereDefinie`, équivalence à 0, cas
+référence croissante/décroissante/indéfinie/partielle, armement, causalité,
+textes à chaque réglage), web dont `indicators.axisRegime.test.ts` (empreinte
+du résultat épinglée, formulations FAVORABLE comparées au résultat) et
+`auxProvider.test.ts` (deux pages `refClose` fusionnées, 1 500 bougies),
+alertes 142, backtest, pacte 120, daemon — comptes exacts dans le rapport de
+suite ; `tsc --strict` du runner v5 figé signalant sa garde pré-verdict si
+littéraux disjoints (fichier figé, non retouché).
 Usage, limites et tests :
 [`docs/axis-2026-10-07.md`](docs/axis-2026-10-07.md),
 [`scripts/axis/rapport-v2-2026-10-07.md`](scripts/axis/rapport-v2-2026-10-07.md),
 [`scripts/axis/rapport-flux-2026-10-08.md`](scripts/axis/rapport-flux-2026-10-08.md),
 [`scripts/axis/rapport-ut-2026-10-08.md`](scripts/axis/rapport-ut-2026-10-08.md),
 [`scripts/axis/rapport-v3-2026-10-08.md`](scripts/axis/rapport-v3-2026-10-08.md)
-et [`scripts/axis/rapport-v4-2026-10-09.md`](scripts/axis/rapport-v4-2026-10-09.md).
+[`scripts/axis/rapport-v4-2026-10-09.md`](scripts/axis/rapport-v4-2026-10-09.md)
+et [`scripts/axis/rapport-v5-2026-10-10.md`](scripts/axis/rapport-v5-2026-10-10.md).

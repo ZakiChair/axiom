@@ -40,7 +40,7 @@ const fixture = JSON.parse(
   readFileSync(new URL("../../../../packages/indicators/src/golden/fixture-ohlcv.json", import.meta.url), "utf8")
 ) as Candle[];
 const infos = (timeframe: Timeframe | undefined, stopAtr: number) =>
-  (computeIndicator(axis, fixture, { emaTendance: 50, stopAtr }, undefined, timeframe).annotations?.marqueurs ?? []).map(
+  (computeIndicator(axis, fixture, { emaTendance: 50, regimeBtc: 0, stopAtr }, undefined, timeframe).annotations?.marqueurs ?? []).map(
     (m) => m.info ?? ""
   );
 
@@ -48,7 +48,9 @@ const infos = (timeframe: Timeframe | undefined, stopAtr: number) =>
 const remplir = (modele: string, texteBase: string, k: number): string =>
   modele.replace("{texteBase}", texteBase).replace("{k}", String(k));
 // Le 4h n'est pas une clé du test des unités (déjà testé) : sa base est le texteBase du résultat v3.
-const signauxBase = (u: string): string => (u === "4h" ? v3.formulations.texteBase : ut.formulations[u]!.signaux);
+// À regimeBtc 0, la suite commune v5 ajoute « sans garde-fou » entre le texte de base et le suffixe v3.
+const SANS_REGIME = " ; sans garde-fou de régime (réglage) : signaux de la v2 testée";
+const signauxBase = (u: string): string => (u === "4h" ? v3.formulations.texteBase : ut.formulations[u]!.signaux) + SANS_REGIME;
 
 describe("AXIS — infobulles du stop suiveur (test v3, DÉFAVORABLE)", () => {
   it("résultat de la campagne : fichier figé, campagne réelle, verdict DÉFAVORABLE", () => {
@@ -65,8 +67,8 @@ describe("AXIS — infobulles du stop suiveur (test v3, DÉFAVORABLE)", () => {
 
   it("4h et unité absente, stopAtr 3 : l'échec chiffré du résultat, au caractère près", () => {
     for (const u of ["4h", undefined] as const) {
-      const attendu = v3.formulations.infobulle4hStop3;
-      expect(attendu.startsWith(`${v3.formulations.texteBase} ; stop suiveur 3 × ATR 14 actif : `)).toBe(true);
+      const attendu = `${v3.formulations.texteBase}${SANS_REGIME}${v3.formulations.infobulle4hStop3.slice(v3.formulations.texteBase.length)}`;
+      expect(attendu.startsWith(`${v3.formulations.texteBase}${SANS_REGIME} ; stop suiveur 3 × ATR 14 actif : `)).toBe(true);
       for (const info of infos(u, 3)) expect(info.endsWith(` — ${attendu}`)).toBe(true);
     }
   });
@@ -85,8 +87,8 @@ describe("AXIS — infobulles du stop suiveur (test v3, DÉFAVORABLE)", () => {
 
   it("stopAtr 0 (le défaut, conservé après le verdict) : textes et calcul identiques au caractère près", () => {
     for (const u of [undefined, "4h", "1h"] as const) {
-      const avecZero = computeIndicator(axis, fixture, { emaTendance: 50, stopAtr: 0 }, undefined, u);
-      const sans = computeIndicator(axis, fixture, { emaTendance: 50 }, undefined, u);
+      const avecZero = computeIndicator(axis, fixture, { emaTendance: 50, stopAtr: 0, regimeBtc: 0 }, undefined, u);
+      const sans = computeIndicator(axis, fixture, { emaTendance: 50, regimeBtc: 0 }, undefined, u);
       expect(JSON.stringify(avecZero)).toBe(JSON.stringify(sans));
       // La formulation « sans stop (réglage) » n'existe qu'en cas de FAVORABLE (manifeste, suites.communes) :
       // DÉFAVORABLE ⇒ elle n'apparaît nulle part.
@@ -95,19 +97,19 @@ describe("AXIS — infobulles du stop suiveur (test v3, DÉFAVORABLE)", () => {
   });
 
   it("autre multiplicateur (2.5) : « réglage hors du test », chiffres du résultat", () => {
-    const attendu = remplir(v3.formulations.reglageHorsTest, v3.formulations.texteBase, 2.5);
+    const attendu = remplir(v3.formulations.reglageHorsTest, signauxBase("4h"), 2.5);
     expect(attendu).toContain("2.5 × ATR 14 : réglage hors du test du 8 octobre 2026 (3 × ATR 14 mesuré)");
     for (const info of infos(undefined, 2.5)) expect(info.endsWith(` — ${attendu}`)).toBe(true);
   });
 
   it("la sortie par stop du chart porte l'étiquette « Stop » et nomme le niveau franchi", () => {
-    const r = computeIndicator(axis, fixture, { emaTendance: 50, stopAtr: 3 }, undefined, "4h");
+    const r = computeIndicator(axis, fixture, { emaTendance: 50, regimeBtc: 0, stopAtr: 3 }, undefined, "4h");
     const stop = (r.annotations?.marqueurs ?? []).find((m) => m.idx === 137);
     expect(stop?.info?.startsWith("AXIS stop fort — score")).toBe(true);
     expect(stop?.info).toContain("close sous le stop suiveur (61016.78)");
     expect(r.annotations?.labels?.some((l) => l.texte.startsWith("Stop fort "))).toBe(true);
     // Sans stop, aucune étiquette « Stop ».
-    const r0 = computeIndicator(axis, fixture, { emaTendance: 50 }, undefined, "4h");
+    const r0 = computeIndicator(axis, fixture, { emaTendance: 50, regimeBtc: 0 }, undefined, "4h");
     expect(r0.annotations?.labels?.some((l) => l.texte.startsWith("Stop")) ?? false).toBe(false);
   });
 });

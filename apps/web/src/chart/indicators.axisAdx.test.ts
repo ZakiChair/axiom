@@ -47,7 +47,7 @@ const fixture = JSON.parse(
   readFileSync(new URL("../../../../packages/indicators/src/golden/fixture-ohlcv.json", import.meta.url), "utf8")
 ) as Candle[];
 const marqueurs = (timeframe: Timeframe | undefined, params: Record<string, number>) =>
-  (computeIndicator(axis, fixture, { emaTendance: 50, ...params }, undefined, timeframe).annotations?.marqueurs ?? []).filter(
+  (computeIndicator(axis, fixture, { emaTendance: 50, regimeBtc: 0, ...params }, undefined, timeframe).annotations?.marqueurs ?? []).filter(
     (m) => m.couleur !== "--accent"
   );
 const infos = (timeframe: Timeframe | undefined, adxEntree: number, stopAtr = 0) =>
@@ -57,7 +57,9 @@ const infos = (timeframe: Timeframe | undefined, adxEntree: number, stopAtr = 0)
 const remplir = (modele: string, texteBase: string, k: number): string =>
   modele.replace("{texteBase}", texteBase).replace("{k}", String(k));
 // Le 4h n'est pas une clé du test des unités (déjà testé) : sa base est le texteBase du résultat v4.
-const signauxBase = (u: string): string => (u === "4h" ? v4.formulations.texteBase : ut.formulations[u]!.signaux);
+// À regimeBtc 0, la suite commune v5 ajoute « sans garde-fou » entre le texte de base et les suffixes v4/v3.
+const SANS_REGIME = " ; sans garde-fou de régime (réglage) : signaux de la v2 testée";
+const signauxBase = (u: string): string => (u === "4h" ? v4.formulations.texteBase : ut.formulations[u]!.signaux) + SANS_REGIME;
 
 describe("AXIS — infobulles du filtre ADX à l'entrée (test v4, DÉFAVORABLE)", () => {
   it("résultat de la campagne : fichier figé, campagne réelle, 123 cellules, verdict DÉFAVORABLE", () => {
@@ -78,8 +80,8 @@ describe("AXIS — infobulles du filtre ADX à l'entrée (test v4, DÉFAVORABLE)
 
   it("4h et unité absente, adxEntree 25 : l'échec chiffré du résultat, au caractère près", () => {
     for (const u of ["4h", undefined] as const) {
-      const attendu = v4.formulations.infobulle4hAdx25;
-      expect(attendu.startsWith(`${v4.formulations.texteBase} ; filtre ADX 14 ≥ 25 à l'entrée actif : `)).toBe(true);
+      const attendu = `${v4.formulations.texteBase}${SANS_REGIME}${v4.formulations.infobulle4hAdx25.slice(v4.formulations.texteBase.length)}`;
+      expect(attendu.startsWith(`${v4.formulations.texteBase}${SANS_REGIME} ; filtre ADX 14 ≥ 25 à l'entrée actif : `)).toBe(true);
       const textes = infos(u, 25);
       expect(textes.length).toBeGreaterThan(0);
       for (const info of textes) expect(info.endsWith(` — ${attendu}`)).toBe(true);
@@ -100,27 +102,29 @@ describe("AXIS — infobulles du filtre ADX à l'entrée (test v4, DÉFAVORABLE)
 
   it("adxEntree 0 (le défaut, conservé après le verdict) : textes et calcul identiques au caractère près", () => {
     for (const u of [undefined, "4h", "1h"] as const) {
-      const avecZero = computeIndicator(axis, fixture, { emaTendance: 50, adxEntree: 0 }, undefined, u);
-      const sans = computeIndicator(axis, fixture, { emaTendance: 50 }, undefined, u);
+      const avecZero = computeIndicator(axis, fixture, { emaTendance: 50, adxEntree: 0, regimeBtc: 0 }, undefined, u);
+      const sans = computeIndicator(axis, fixture, { emaTendance: 50, regimeBtc: 0 }, undefined, u);
       expect(JSON.stringify(avecZero)).toBe(JSON.stringify(sans));
       // La formulation « sans filtre ADX (réglage) » n'existe qu'en cas de FAVORABLE (manifeste, suites.communes) :
       // DÉFAVORABLE ⇒ elle n'apparaît nulle part, et aucune infobulle ne nomme le filtre.
       for (const info of infos(u, 0)) {
         expect(info).not.toContain("sans filtre ADX (réglage)");
         expect(info).not.toContain("filtre ADX");
+        // regimeBtc 0 = le réglage choisi : la suite commune le dit.
+        expect(info).toContain("sans garde-fou de régime (réglage)");
       }
     }
     expect(axis.inputs.find((i) => i.key === "adxEntree")?.default).toBe(0);
   });
 
   it("autre seuil (30) : « réglage hors du test », chiffres du résultat", () => {
-    const attendu = remplir(v4.formulations.reglageHorsTest, v4.formulations.texteBase, 30);
+    const attendu = remplir(v4.formulations.reglageHorsTest, signauxBase("4h"), 30);
     expect(attendu).toContain("filtre ADX 14 ≥ 30 à l'entrée : réglage hors du test du 9 octobre 2026 (≥ 25 mesuré)");
     for (const info of infos(undefined, 30)) expect(info.endsWith(` — ${attendu}`)).toBe(true);
   });
 
   it("filtre 25 et stop 3 ensemble : la mention du filtre précède celle du stop (ordre des suites)", () => {
-    const attendu = `${v4.formulations.infobulle4hAdx25}${v3.formulations.infobulle4hStop3.slice(v3.formulations.texteBase.length)}`;
+    const attendu = `${v4.formulations.texteBase}${SANS_REGIME}${v4.formulations.infobulle4hAdx25.slice(v4.formulations.texteBase.length)}${v3.formulations.infobulle4hStop3.slice(v3.formulations.texteBase.length)}`;
     expect(attendu).toContain("à l'entrée actif : test du 9 octobre 2026 échoué");
     expect(attendu).toContain(" ; stop suiveur 3 × ATR 14 actif : test du 8 octobre 2026 échoué");
     const textes = infos("4h", 25, 3);

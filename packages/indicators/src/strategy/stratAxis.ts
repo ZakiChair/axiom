@@ -177,11 +177,26 @@
  * sienne. Exploration sur données déjà vues (scripts/explorer-axis-v5.ts,
  * scripts/axis/rapport-explo-v5-2026-10-09.md — SANS VALEUR PROBANTE) :
  * `btc-ema100` retenue par la règle pré-écrite (Sharpe > v2 sur 77,5 % des
- * 151 alts, > 50 % dans chaque moitié, 6/7 majors). Réglage soumis au test du
- * 10 octobre 2026 sur données jamais vues (pool KuCoin spot USDT, manifeste
- * scripts/axis/manifeste-v5-2026-10-10.json) : TEST EN COURS — l'infobulle le
- * dit (« non mesuré ») tant que le verdict n'est pas rendu. Mesures passées,
- * jamais une promesse.
+ * 151 alts, > 50 % dans chaque moitié, 6/7 majors, aucun écart à la règle).
+ * Test unique sur données jamais vues (protocole figé
+ * scripts/axis/manifeste-v5-2026-10-10.json, commit c7c8b3d ; exécution du
+ * 10 octobre 2026, 00:11-00:18 UTC ; rapport scripts/axis/rapport-v5-2026-10-10.md)
+ * sur 139 paires USDT spot KuCoin cotées 2019-2024, 4h, suivies au 2026-10-10 :
+ * verdict FAVORABLE — les 5 blocs tenus. Expectancy nette regroupée 4,58 %
+ * contre 3,29 % par trade à x1, 4,30 % contre 3,00 % à x3 (P1, relatif) ;
+ * Sharpe meilleur que la v2 sur 75,5 % des cellules (P2 ≥ 60 %) et 64,0 % puis
+ * 70,5 % par moitié (P3 > 50 %) ; drawdown médian 18,3 % contre 21,9 % ; le
+ * garde-fou refuse 23 % des entrées de la v2 et conserve 86,5 % de ses trades
+ * clos ; exposition 20,9 % contre 23,7 %. Lecture sans enjoliver dans le
+ * rapport et docs/axis : le pool achète-conserve à −96 % médian, les cellules
+ * partagent le facteur BTC que le garde-fou lit, indépendance en temps nulle.
+ * Suites appliquées : le défaut du chart est devenu regimeBtc = 100 (les
+ * réglages 0 et autres restent disponibles, leurs infobulles le disent) ; les
+ * contextes sans série de référence (alertes, fenêtre BT, screener, rejeu
+ * commun) ne l'appliquent pas — condition de la v2, l'infobulle le dit —
+ * un lot ultérieur devra les servir ; la profondeur de `refClose` du chart a
+ * été portée à l'amorce (1 500 bougies). Ces données sont consommées :
+ * aucune autre variante n'y sera jugée. Mesures passées, jamais une promesse.
  */
 
 import type { CalcContext, Candle, IndicatorDef, LabelAnnotation, MarqueurAnnotation, Timeframe } from "@axiom/types";
@@ -542,15 +557,22 @@ const suffixeAdx = (adxEntree: number): string =>
       ? ` ; filtre ADX ${ADX_ENTREE_PERIODE} ≥ ${ADX_ENTREE_TESTE} à l'entrée actif : test du 9 octobre 2026 échoué sur données jamais vues (123 alts 4h cotées 2023-2025 : expectancy nette ≤ 0 aux coûts x1 ou x3 ; amélioration absente dans une moitié de la période (54 % puis 48 %)) — pas une amélioration validée`
       : ` ; filtre ADX ${ADX_ENTREE_PERIODE} ≥ ${adxEntree} à l'entrée : réglage hors du test du 9 octobre 2026 (≥ ${ADX_ENTREE_TESTE} mesuré) — non mesuré`;
 
-// Garde-fou de régime BTC (v5) : test du 10 octobre 2026 en cours sur données jamais
-// vues (pool KuCoin spot USDT, manifeste-v5-2026-10-10.json). L'infobulle d'un réglage
-// actif dit « non mesuré (test en cours) » ; après le verdict, le texte est remplacé
-// par la formulation de ses suites (comme les tests v3 et v4).
-const suffixeRegime = (regimeBtc: number): string =>
+// Test du garde-fou de régime BTC du 10 octobre 2026 sur données jamais vues (139
+// paires USDT spot KuCoin 4h cotées 2019-2024, scripts/axis/rapport-v5-2026-10-10.md) :
+// verdict FAVORABLE — le réglage mesuré (EMA 100 de la référence BTC) est devenu le
+// défaut. Formulations des suites du manifeste v5 (suites.FAVORABLE, communes
+// sansGardeFou/reglageHorsTest), chiffres du résultat ; le test croisé
+// apps/web/src/chart/indicators.axisRegime.test.ts les compare au résultat. Le défaut
+// 100 a la mention mesurée en 4h (unité du test), « non mesuré en {u} » ailleurs ; le
+// réglage 0 dit « sans garde-fou : signaux de la v2 testée » ; tout autre réglage > 0
+// est hors test. Ordre : régime, puis ADX, puis stop.
+const suffixeRegime = (u: Timeframe | undefined, regimeBtc: number): string =>
   regimeBtc <= 0
-    ? ""
+    ? " ; sans garde-fou de régime (réglage) : signaux de la v2 testée"
     : regimeBtc === REGIME_TESTE
-      ? ` ; garde-fou de régime BTC (référence > EMA ${REGIME_TESTE}) actif : non mesuré (test du 10 octobre 2026 en cours)`
+      ? u === undefined || u === "4h"
+        ? " ; garde-fou de régime BTC (référence > EMA 100) : sur données jamais vues (139 paires USDT KuCoin 4h cotées 2019-2024, suivies jusqu'en 2026), Sharpe meilleur que sans garde-fou sur 75 % des actifs, drawdown max plus faible sur 79 %, expectancy nette +4.6 % contre +3.3 % par trade (gagnante en absolu aux coûts x1 et x3) — mesure passée, pas une promesse"
+        : ` ; garde-fou de régime BTC (référence > EMA ${REGIME_TESTE}) non mesuré en ${u}`
       : ` ; garde-fou de régime (référence > EMA ${regimeBtc}) : réglage hors du test du 10 octobre 2026 (EMA ${REGIME_TESTE} mesurée) — non mesuré`;
 
 /**
@@ -563,12 +585,10 @@ export function textesAxis(
   u: Timeframe | undefined,
   stopAtr = 0,
   adxEntree = 0,
-  regimeBtc = 0
+  regimeBtc = REGIME_TESTE
 ): { signaux: string; fortAchat: string; forteVente: string; qualification: string } {
   const t = textesUnite(u);
-  return stopAtr > 0 || adxEntree > 0 || regimeBtc > 0
-    ? { ...t, signaux: t.signaux + suffixeRegime(regimeBtc) + suffixeAdx(adxEntree) + suffixeStop(stopAtr) }
-    : t;
+  return { ...t, signaux: t.signaux + suffixeRegime(u, regimeBtc) + suffixeAdx(adxEntree) + suffixeStop(stopAtr) };
 }
 
 function textesUnite(u: Timeframe | undefined): { signaux: string; fortAchat: string; forteVente: string; qualification: string } {
@@ -740,7 +760,7 @@ export const stratAxis: IndicatorDef = {
     { key: "filtreFlux", name: "N'acheter que sur flux fort", type: "boolean", default: false },
     { key: "stopAtr", name: "Stop suiveur (× ATR 14, 0 = sans)", type: "number", default: 0, min: 0, max: 20 },
     { key: "adxEntree", name: "Achat si ADX 14 ≥ (0 = sans)", type: "number", default: 0, min: 0, max: 100 },
-    { key: "regimeBtc", name: "Garde-fou de régime : référence > EMA (bougies, 0 = sans)", type: "number", default: 0, min: 0, max: 1000 },
+    { key: "regimeBtc", name: "Garde-fou de régime : référence > EMA (bougies, 0 = sans)", type: "number", default: REGIME_TESTE, min: 0, max: 1000 },
   ],
   outputs: [
     { key: "prixSignal", name: "Prix d'achat", style: "line" },
@@ -773,7 +793,7 @@ export const stratAxis: IndicatorDef = {
 
     const noms = [`EMA ${params.emaRapide}/${params.emaLente}`, "Supertrend", "DMI", "MACD", "RSI", "CMF"];
     const textes = textesAxis(ctx.timeframe, stopAtr, adxEntree, regime);
-    const reserve = filtre ? RESERVE_FILTRE + suffixeRegime(regime) + suffixeAdx(adxEntree) + suffixeStop(stopAtr) : textes.signaux;
+    const reserve = filtre ? RESERVE_FILTRE + suffixeRegime(ctx.timeframe, regime) + suffixeAdx(adxEntree) + suffixeStop(stopAtr) : textes.signaux;
     // Placée avant la couche flux : la fin de l'infobulle (« ; qualification) — statut »)
     // reste celle que les tests croisés comparent aux formulations figées des campagnes.
     const amorce = texteAmorce(n);

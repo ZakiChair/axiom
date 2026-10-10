@@ -155,3 +155,43 @@ deux tests web adaptés (`indicators.aux.test.ts`, `indicatorUsability.test.ts`)
 Exécution unique ensuite : `bun scripts/valider-axis-v5.ts --campagne`, sur le
 commit de figeage, après 2026-10-10T00:00:00Z. Le présent journal sera complété
 après l'exécution (section « Après l'exécution »).
+
+## Après l'exécution (10 octobre 2026, 00:11 → 00:30 UTC)
+
+- Exécution unique : `bun scripts/valider-axis-v5.ts --campagne` sur le commit de
+  figeage `c7c8b3df8e376b54298903e01850f11596a9e188`, arbre propre, de 00:11:48 à
+  00:18:24 UTC (396 s). Le runner a vérifié le manifeste (hash épinglé), rejoué le
+  banc (38 vérifications), téléchargé la référence Binance BTCUSDT (20 029 bougies,
+  2017-08-17 → 2026-10-09 20:00) et l'a trouvée identique au cache de l'exploration
+  sur la période commune, puis les 141 cellules KuCoin ; `identiqueAuFigeage: true`,
+  `cheminsFigesCommites: true`, aucun avertissement, aucun arrêt de contrôle.
+- Résultat : `scripts/axis/resultat-v5-2026-10-10.json` (SHA-256
+  `321c84d1583d0fed321ff48d6d04b3d38ae567c9b8c8a25f80c1019deb9a8bcc`), rapport
+  `scripts/axis/rapport-v5-2026-10-10.md`. 139 cellules disponibles sur 141 (BSV-USDT
+  et ETN-USDT indisponibles : 441 et 2 142 créneaux manquants, au-delà des 2 %) ;
+  139 comparables sur la fenêtre et sur chaque moitié ; 5 293 trades clos v5.
+- Verdict pré-déclaré : **FAVORABLE**, les 5 blocs tenus — P1 x1 4,583 % > 3,287 %,
+  P1 x3 4,295 % > 3,001 % ; P2 105/139 = 75,5 % ; P3 89/139 = 64,0 % puis 98/139 =
+  70,5 %. Descriptifs lus par le réviseur dans le rapport : viabilité absolue vraie
+  pour la v5 et la v2 ; drawdown plus faible sur 111/139 ; PnL moyen 17,5 % contre
+  14,5 % ; exposition 20,9 % contre 23,7 % ; 1 411 entrées de la v2 refusées (23,0 %),
+  86,5 % des trades clos conservés ; LOCF 0,001 % (grilles identiques) ;
+  achat-conservation médian −96,0 % ; l'avantage tient dans chaque cohorte de cotation
+  (44/55, 18/20, 18/27, 25/37). Les parts de la v5 sur ce pool (75,5 %, 64,0 %,
+  70,5 %) sont du même ordre que celles de l'exploration (77,5 %, 58,3 %, 72,2 %) :
+  aucune dégradation hors échantillon.
+- Suites appliquées conformément à `suites.FAVORABLE` et `suites.communes` :
+  défaut du chart `regimeBtc = 100` ; formulations du résultat recopiées au caractère
+  près dans `stratAxis.ts` (4h : mesure remplie ; autres unités : « non mesuré en
+  {u} » ; 0 : « sans garde-fou de régime (réglage) : signaux de la v2 testée » ;
+  autre période : « hors du test ») ; mention « non appliqué (référence
+  indisponible) » dans les contextes sans référence ; test croisé
+  `apps/web/src/chart/indicators.axisRegime.test.ts` (empreinte du résultat
+  épinglée) ; profondeur de `refClose` du chart portée à 1 500 bougies (deux appels
+  paginés) ; docs/axis, BUILD-CONTRACT, README mis à jour. `pnpm check` réussi :
+  indicateurs 1 675, alertes 142, backtest 143, pacte 120, web 5 970, daemon 785 ;
+  budget 1 196 472 / 356 428 (marge gzip 3 572).
+- Reste à faire (annoncé dans le manifeste, hors de cette campagne) : servir la
+  référence aux alertes et à la fenêtre BT, qui calculent encore la v2.
+- Ces 141 paires sont consommées : aucune autre variante n'y sera jugée sans
+  décision explicite du propriétaire.

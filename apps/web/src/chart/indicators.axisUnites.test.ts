@@ -21,6 +21,14 @@ const resultat = JSON.parse(brut) as {
   formulations: Record<string, Formulations>;
 };
 const axis = getIndicator("stratAxis") as IndicatorDef;
+// Mention du défaut regimeBtc = 100 (verdict FAVORABLE du 10 octobre 2026) : mesurée en 4h,
+// « non mesuré en {u} » ailleurs. Texte du résultat figé, comme le test croisé axisRegime.
+const v5 = JSON.parse(readFileSync(new URL("../../../../scripts/axis/resultat-v5-2026-10-10.json", import.meta.url), "utf8")) as {
+  formulations: { infobulle4hRegime100: string; texteBase: string };
+};
+const REGIME_4H = v5.formulations.infobulle4hRegime100.slice(v5.formulations.texteBase.length);
+const REGIME = (unite: string): string =>
+  unite === "4h" ? REGIME_4H : ` ; garde-fou de régime BTC (référence > EMA 100) non mesuré en ${unite}`;
 
 // Fixture dorée partagée (300 bougies) : avec une EMA de tendance 50, achat à 60 et vente à 88
 // (packages/indicators/src/strategy/stratAxis.test.ts).
@@ -59,7 +67,7 @@ describe("AXIS — infobulles par unité de temps", () => {
 
   it.each(Object.entries(resultat.formulations))("%s : textes du runner au caractère près", (unite, f) => {
     const t = infobulles(unite as Timeframe);
-    const signal = ` ; ${f.qualification}) — ${f.signaux}`;
+    const signal = ` ; ${f.qualification}) — ${f.signaux}${REGIME(unite as string)}`;
     expect(fin(t.achat, signal)).toBe(signal);
     expect(fin(t.vente, signal)).toBe(signal);
     expect(fin(t.fortAchat, ` — ${f.fortAchat}`)).toBe(` — ${f.fortAchat}`);
@@ -67,14 +75,15 @@ describe("AXIS — infobulles par unité de temps", () => {
     // Sans delta taker, la population n'est pas celle des tests : garde inchangée.
     expect(fin(t.sansTaker, " — couche flux non mesurée")).toBe(" — couche flux non mesurée");
     // Le filtre flux est hors des tests dans toutes les unités.
-    expect(fin(infobulles(unite as Timeframe, { filtreFlux: true }).vente, ` — ${RESERVE_FILTRE}`)).toBe(` — ${RESERVE_FILTRE}`);
+    expect(fin(infobulles(unite as Timeframe, { filtreFlux: true }).vente, ` — ${RESERVE_FILTRE}${REGIME(unite as string)}`)).toBe(` — ${RESERVE_FILTRE}${REGIME(unite as string)}`);
   });
 
   it("4h et unité absente : formulations des tests 4h, inchangées", () => {
     const sans = infobulles(undefined);
     expect(infobulles("4h")).toEqual(sans);
     expect(sans.achat.endsWith(
-      "(données jamais vues, 8 octobre 2026)) — test réussi sur données jamais vues (crypto 4h, 2017-2024), pas mieux qu'une EMA 200 seule sur 3/4 actifs — mesure passée, pas une promesse"
+      "(données jamais vues, 8 octobre 2026)) — test réussi sur données jamais vues (crypto 4h, 2017-2024), pas mieux qu'une EMA 200 seule sur 3/4 actifs — mesure passée, pas une promesse" +
+        REGIME_4H
     )).toBe(true);
     expect(sans.fortAchat.endsWith(
       "(BNB/ADA/LINK/DOGE 4h, 2017-2026), +1.61 % en moyenne sur les 12 bougies suivantes (51 % de hausses, p ≤ 0.0005) — mesure passée, pas une promesse"
@@ -83,7 +92,7 @@ describe("AXIS — infobulles par unité de temps", () => {
 
   it.each(["5s", "15s"] as const)("%s (aucune source câblée) : « non mesuré » générique", (unite) => {
     const t = infobulles(unite);
-    const signal = ` ; qualification descriptive, non mesurée en ${unite}) — en ${unite} : non mesuré — lecture indicative, jamais une promesse`;
+    const signal = ` ; qualification descriptive, non mesurée en ${unite}) — en ${unite} : non mesuré — lecture indicative, jamais une promesse${REGIME(unite)}`;
     expect(fin(t.achat, signal)).toBe(signal);
     expect(fin(t.fortAchat, ` — couche flux non mesurée en ${unite}`)).toBe(` — couche flux non mesurée en ${unite}`);
     expect(fin(t.forteVente, ` — couche flux non mesurée en ${unite}`)).toBe(` — couche flux non mesurée en ${unite}`);

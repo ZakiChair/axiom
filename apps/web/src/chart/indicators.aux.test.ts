@@ -11,7 +11,7 @@
  * Def réelle utilisée : `openInterest` (packages/indicators/src/derivatives),
  * `aux: ["oi"]`, `pane: "separate"`, aucun input (donc `shortName` de base =
  * "Open Interest", sans paramètres affichés). Pour les séries FACULTATIVES
- * (`auxFacultatives`, jamais requises) : `stratAxis`, `auxFacultatives: ["oi"]`.
+ * (`auxFacultatives`, jamais requises) : `stratAxis`, `auxFacultatives: ["oi", "refClose"]`.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Chart } from "klinecharts";
@@ -232,7 +232,7 @@ describe("ChartIndicators — séries auxiliaires facultatives (auxFacultatives)
       const { indicators, chart } = makeIndicators();
       indicators.setMarket("BTCUSDT", "1h");
       indicators.sync([axis], sinus, "binance");
-      expect(spy.mock.calls[0]![0].ids).toEqual(["oi"]);
+      expect(spy.mock.calls[0]![0].ids).toEqual(["oi", "refClose"]);
       const [config] = chart.createIndicator.mock.calls[0]!;
       expect(config.shortName).toBe("AXIS (50)");
       expect(statutIndicateur(chart as unknown as Chart, "axis-1")).toBeNull();
@@ -256,12 +256,13 @@ describe("ChartIndicators — séries auxiliaires facultatives (auxFacultatives)
     expect(lus.every((info) => /OI \+\d+\.\d % sur 6 b\./.test(info))).toBe(true);
   });
 
-  it("contexte qui ne peut pas servir la série (symbole hors perp USDT) : aucun fetch, def complet et utilisable", () => {
+  it("contexte qui ne peut pas servir l'OI (symbole hors perp USDT) : oi non demandée, refClose oui, def complet et utilisable", () => {
     const spy = vi.spyOn(auxProvider, "getAligned");
     const { indicators, chart } = makeIndicators();
     indicators.setMarket("BTC/USD", "1h");
     indicators.sync([axis], sinus, "kraken");
-    expect(spy).not.toHaveBeenCalled();
+    // oi est hors contexte ; refClose (garde-fou de régime, référence du chart) reste servie.
+    expect(spy.mock.calls[0]![0].ids).toEqual(["refClose"]);
     const [config] = chart.createIndicator.mock.calls[0]!;
     expect(config.shortName).toBe("AXIS (50)");
     expect(statutIndicateur(chart as unknown as Chart, "axis-1")).toBeNull();

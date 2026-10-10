@@ -48,7 +48,9 @@ import {
   MAX_GROS_AXIS,
   MAX_LABELS_GROS,
   MAX_SIGNAUX_AXIS,
+  REGIME_TESTE,
   SEUIL_DELTA_AXIS,
+  emaDepuisPremiereDefinie,
   episodesAxis,
   fluxAxis,
   forceFlux,
@@ -100,7 +102,7 @@ const grosDe = (res: ReturnType<typeof computeIndicator>) =>
 const sens = (a: number, b: number): number => Math.sign(a - b) + 0;
 
 describe("stratAxis — contrat", () => {
-  it("strategy/overlay enregistrée, seize inputs bornés, quatre sorties dont deux masquées, spec enregistrée hors fabrique", () => {
+  it("strategy/overlay enregistrée, dix-sept inputs bornés, quatre sorties dont deux masquées, spec enregistrée hors fabrique", () => {
     expect(getIndicator("stratAxis")).toBe(stratAxis);
     expect(stratAxis.name).toBe("AXIS");
     expect(stratAxis.category).toBe("strategy");
@@ -122,15 +124,20 @@ describe("stratAxis — contrat", () => {
       ["filtreFlux", false, undefined, undefined],
       ["stopAtr", 0, 0, 20],
       ["adxEntree", 0, 0, 100],
+      ["regimeBtc", 0, 0, 1000],
     ]);
     expect(stratAxis.inputs.find((i) => i.key === "filtreFlux")?.type).toBe("boolean");
     // Stop suiveur (v3) : défaut 0 après le verdict DÉFAVORABLE du 8 octobre 2026 (v2 exacte).
-    expect(stratAxis.inputs.at(-2)).toEqual({ key: "stopAtr", name: "Stop suiveur (× ATR 14, 0 = sans)", type: "number", default: 0, min: 0, max: 20 });
-    // Filtre ADX à l'entrée (v4) : dernier réglage, défaut 0 au figeage (v2 exacte) tant que le test
-    // sur données jamais vues n'a pas rendu son verdict (scripts/axis/manifeste-v4-2026-10-09.json).
-    expect(stratAxis.inputs.at(-1)).toEqual({ key: "adxEntree", name: "Achat si ADX 14 ≥ (0 = sans)", type: "number", default: 0, min: 0, max: 100 });
+    expect(stratAxis.inputs.at(-3)).toEqual({ key: "stopAtr", name: "Stop suiveur (× ATR 14, 0 = sans)", type: "number", default: 0, min: 0, max: 20 });
+    // Filtre ADX à l'entrée (v4) : défaut 0 après le verdict DÉFAVORABLE du 9 octobre 2026.
+    expect(stratAxis.inputs.at(-2)).toEqual({ key: "adxEntree", name: "Achat si ADX 14 ≥ (0 = sans)", type: "number", default: 0, min: 0, max: 100 });
+    // Garde-fou de régime BTC (v5) : dernier réglage, défaut 0 au figeage (v2 exacte) tant
+    // que le test sur données jamais vues n'a pas rendu son verdict
+    // (scripts/axis/manifeste-v5-2026-10-10.json).
+    expect(stratAxis.inputs.at(-1)).toEqual({ key: "regimeBtc", name: "Garde-fou de régime : référence > EMA (bougies, 0 = sans)", type: "number", default: 0, min: 0, max: 1000 });
     expect(ADX_ENTREE_PERIODE).toBe(14);
     expect(ADX_ENTREE_TESTE).toBe(25);
+    expect(REGIME_TESTE).toBe(100);
     expect(stratAxis.outputs).toEqual([
       { key: "prixSignal", name: "Prix d'achat", style: "line" },
       { key: "stop", name: "Stop suiveur", style: "line" },
@@ -143,9 +150,10 @@ describe("stratAxis — contrat", () => {
     // 9 octobre 2026 : aucun écart avec la série longue à 1500, 60 % de fenêtres en écart à 500).
     expect(AMORCE_AXIS).toBe(1500);
     expect(stratAxis.amorceBougies).toBe(AMORCE_AXIS);
-    // L'OI enrichit la couche flux sans jamais conditionner AXIS : facultative, jamais requise
-    // (une série `aux` rendrait AXIS inutilisable hors perp USDT et l'écarterait des alertes).
-    expect(stratAxis.auxFacultatives).toEqual(["oi"]);
+    // L'OI enrichit la couche flux et `refClose` porte le garde-fou de régime, sans
+    // jamais conditionner AXIS : facultatives, jamais requises (une série `aux`
+    // rendrait AXIS inutilisable hors perp USDT et l'écarterait des alertes).
+    expect(stratAxis.auxFacultatives).toEqual(["oi", "refClose"]);
     expect(stratAxis.aux).toBeUndefined();
     // Aucune unité requise : le propriétaire demande (7 octobre 2026) qu'AXIS
     // fonctionne sur toute unité de temps. Test réussi en 4h ; échoué ou non
@@ -1257,5 +1265,180 @@ describe("stratAxis — sorties masquées et rejeu commun (9 octobre 2026)", () 
     expect(computeIndicator(stratAxis, fausse, EMA50).annotations).toBeUndefined();
     const ancienne = candles.slice(0, 61).map((c, i) => (i === 59 ? { ...c, closed: true } : c));
     expect(computeIndicator(stratAxis, ancienne, EMA50).annotations).toBeUndefined();
+  });
+});
+
+describe("garde-fou de régime BTC (v5, 10 octobre 2026)", () => {
+  const V5 = { ...EMA50, regimeBtc: REGIME_TESTE };
+  /** Référence synthétique alignée sur la fixture : croissante, décroissante ou absente. */
+  const refCroissante = candles.map((_, i) => 1000 + i * 10);
+  const refDecroissante = candles.map((_, i) => 100000 - i * 10);
+  const refIndefinie: Array<number | undefined> = candles.map(() => undefined);
+  const posV2 = computeIndicator(stratAxis, candles, EMA50).series.etat ?? [];
+
+  const achats = (res: ReturnType<typeof computeIndicator>) =>
+    (res.annotations?.marqueurs ?? []).filter((m) => m.couleur !== "--accent" && m.info?.startsWith("AXIS achat"));
+  /** Signaux ▲/▼ d'un résultat calculé AVEC la référence (resume n'injecte pas d'aux). */
+  const resumeAux = (params: Record<string, number | boolean>, ref: Array<number | undefined>) => {
+    const res = computeIndicator(stratAxis, candles, params, { refClose: ref });
+    return (res.annotations?.marqueurs ?? [])
+      .filter((m) => m.couleur !== "--accent")
+      .map((m) => `${m.idx}${m.forme === "triangleHaut" ? "▲" : "▼"}`)
+      .join(" ");
+  };
+
+  describe("emaDepuisPremiereDefinie", () => {
+    it("préfixe indéfini : amorce à la première valeur définie, égal à ema sur le suffixe", () => {
+      const valeurs: Array<number | undefined> = [undefined, undefined, undefined, 10, 11, 12, 13, 14, 15];
+      const e = emaDepuisPremiereDefinie(valeurs, 3);
+      expect(e.slice(0, 3).every((v) => v === undefined)).toBe(true);
+      expect(e.slice(3)).toEqual(ema([10, 11, 12, 13, 14, 15], 3));
+      // ema() du dépôt compte les indéfinies pour 0 dans l'amorce : différent.
+      expect(ema(valeurs as number[], 3)[4]).not.toBe(e[4]);
+    });
+    it("tout indéfini → tout indéfini ; sans indéfini → égal à ema", () => {
+      expect(emaDepuisPremiereDefinie([undefined, undefined], 2).every((v) => v === undefined)).toBe(true);
+      expect(emaDepuisPremiereDefinie([1, 2, 3, 4, 5, 6, 7, 8], 5)).toEqual(ema([1, 2, 3, 4, 5, 6, 7, 8], 5));
+      expect(emaDepuisPremiereDefinie([], 3)).toEqual([]);
+    });
+  });
+
+  describe("regimeBtc 0 : la v2 exacte", () => {
+    it("calc() identique au caractère près avec et sans aux.refClose, paramètre explicite ou absent", () => {
+      for (const params of [EMA50, { ...EMA50, regimeBtc: 0 }, { ...EMA50, stopAtr: 3, adxEntree: 25, filtreFlux: true, regimeBtc: 0 }]) {
+        const sans = computeIndicator(stratAxis, candles, params);
+        const avec = computeIndicator(stratAxis, candles, params, { refClose: refCroissante });
+        expect(JSON.stringify(avec)).toBe(JSON.stringify(sans));
+      }
+    });
+    it("etatsStrategie (sans aux) = v2 ; positionAxis avec ctx aux = calc().series.etat", () => {
+      const etatChart = computeIndicator(stratAxis, candles, V5, { refClose: refCroissante }).series.etat;
+      const ctx = buildCalcContext(candles, "close");
+      ctx.aux = { refClose: refCroissante };
+      expect(positionAxis(candles, V5, ctx)).toEqual(etatChart);
+      expect(etatsStrategie("stratAxis", candles, EMA50)).toEqual(posV2);
+      expect(etatsStrategie("stratAxis", candles, V5)).toEqual(posV2);
+    });
+  });
+
+  it("(a) référence toujours au-dessus de son EMA : positions de la v2, infobulle d'achat nommant « EMA 100 »", () => {
+    const r = computeIndicator(stratAxis, candles, V5, { refClose: refCroissante });
+    expect(r.series.etat).toEqual(posV2);
+    expect(resumeAux(V5, refCroissante)).toBe("60▲ 88▼ 107▲ 139▼ 280▲");
+    const infos = achats(r).map((m) => m.info ?? "");
+    // À 60, l'EMA 100 de la référence n'est pas encore définie (amorce à i=99) : non appliqué.
+    expect(infos[0]).toContain("garde-fou de régime non appliqué (référence indisponible)");
+    expect(infos[0]).not.toContain("référence 30");
+    // Aux achats appliqués : la référence est nommée au-dessus de son EMA.
+    for (const info of infos.slice(1)) {
+      expect(info).toContain("> EMA 100 ");
+      expect(info).toContain("référence ");
+    }
+  });
+
+  it("(b) référence toujours sous son EMA : entrées refusées après l'amorce de l'EMA", () => {
+    // regimeBtc 100 : l'EMA de la référence amorce à i=99 → l'achat de 60 est « non appliqué »,
+    // les achats de 107 et 280 sont refusés.
+    const r = computeIndicator(stratAxis, candles, V5, { refClose: refDecroissante });
+    expect(r.series.etat?.slice(0, 62)).toEqual(posV2.slice(0, 62));
+    expect(r.series.etat?.[107]).toBe(0);
+    expect(r.series.etat?.[280]).toBe(0);
+    expect(resumeAux(V5, refDecroissante)).toBe("60▲ 88▼");
+    // EMA courte (30, hors du test) : appliquée dès i=29 → aucun achat, pas même celui de 60.
+    const r30 = computeIndicator(stratAxis, candles, { ...EMA50, regimeBtc: 30 }, { refClose: refDecroissante });
+    expect(r30.series.etat?.every((v) => v !== 1)).toBe(true);
+    expect((r30.annotations?.marqueurs ?? []).filter((m) => m.couleur !== "--accent")).toEqual([]);
+  });
+
+  it("(c) référence entièrement indéfinie : positions de la v2, « non appliqué » sur chaque achat", () => {
+    const r = computeIndicator(stratAxis, candles, V5, { refClose: refIndefinie });
+    expect(r.series.etat).toEqual(posV2);
+    expect(achats(r).length).toBe(3);
+    for (const m of achats(r)) {
+      expect(m.info).toContain("garde-fou de régime non appliqué (référence indisponible)");
+    }
+  });
+
+  it("(d) référence définie à partir de f seulement : avant f non appliqué, après f appliqué (achat refusé)", () => {
+    // ref décroissante définie à partir de f = 90 : avant 90 non appliqué (achat de 60 inchangé) ;
+    // à 107 l'EMA 100 n'est pas encore définie (amorce à 189) → non appliqué, achat conservé
+    // (et sa vente de 139 suit) ; à 280, appliqué et faux → achat refusé.
+    const f = 90;
+    const refPartielle = candles.map((_c, i) => (i < f ? undefined : 5000 - i));
+    const r = computeIndicator(stratAxis, candles, V5, { refClose: refPartielle });
+    expect(resumeAux(V5, refPartielle)).toBe("60▲ 88▼ 107▲ 139▼");
+    expect(r.series.etat?.slice(0, 280)).toEqual(posV2.slice(0, 280));
+    expect(r.series.etat?.[280]).toBe(0);
+    expect(r.series.etat?.at(-1)).toBe(0);
+    const infos = achats(r).map((m) => m.info ?? "");
+    expect(infos.every((x) => x.includes("non appliqué") || x.includes("> EMA 100"))).toBe(true);
+    expect(infos[0]).toContain("non appliqué");
+    expect(infos[1]).toContain("non appliqué");
+  });
+
+  it("armement : une condition refusée par le garde-fou arme comme une condition fausse", () => {
+    // Référence décroissante jusqu'à 200 puis croissante : l'achat de la v2 à 107 est refusé
+    // (garde-fou appliqué, faux) ; quand la référence repasse au-dessus de son EMA, l'entrée
+    // a lieu si la condition de la v2 est toujours vraie — sinon le prochain achat admissible.
+    const ref = candles.map((_c, i) => (i < 200 ? 20000 - i * 30 : (i - 200) * 100));
+    const r = computeIndicator(stratAxis, candles, { ...EMA50, regimeBtc: 30 }, { refClose: ref });
+    const v2 = posV2;
+    // Refusé là où le garde-fou est faux ; une entrée plus tardive n'arrive que si la
+    // condition complète est redevenue fausse puis vraie (l'armement n'est pas sauté).
+    const entrees = r.annotations?.marqueurs?.filter((m) => m.couleur !== "--accent" && m.info?.startsWith("AXIS achat")).map((m) => m.idx) ?? [];
+    expect(entrees).not.toContain(107);
+    expect(entrees).not.toContain(60);
+    expect(entrees.length).toBeGreaterThanOrEqual(0);
+    expect(JSON.stringify(v2)).not.toBe(JSON.stringify(r.series.etat));
+  });
+
+  it("causalité : un préfixe ou un futur de la référence altéré ne change jamais le passé", () => {
+    const aux = { refClose: refCroissante };
+    const complet = computeIndicator(stratAxis, candles, V5, aux);
+    const pos = complet.series.etat ?? [];
+    for (const k of [107, 200, 280]) {
+      const prefixe = computeIndicator(stratAxis, candles.slice(0, k + 1), V5, { refClose: refCroissante.slice(0, k + 1) });
+      expect(prefixe.series.etat?.slice(0, k), `préfixe ${k}`).toEqual(pos.slice(0, k));
+      // Futur de la référence altéré : le passé (bougie k comprise) ne bouge pas.
+      const refAlteree = refCroissante.map((v, i) => (i <= k ? v : 0));
+      const futur = computeIndicator(stratAxis, candles, V5, { refClose: refAlteree });
+      expect(futur.series.etat?.slice(0, k + 1), `futur ${k}`).toEqual(pos.slice(0, k + 1));
+    }
+    // Une aux plus courte que la série (dernières bougies sans référence) : non appliqué là.
+    const refTronquee: Array<number | undefined> = refCroissante.slice(0, 200);
+    refTronquee.length = candles.length; // undefined au-delà de 199
+    const tronquee = computeIndicator(stratAxis, candles, V5, { refClose: refTronquee });
+    expect(tronquee.series.etat?.slice(0, 199)).toEqual(pos.slice(0, 199));
+  });
+
+  describe("textesAxis(u, stopAtr, adxEntree, regimeBtc)", () => {
+    const u = undefined;
+    const regime = (k: number) => ` ; garde-fou de régime${k === REGIME_TESTE ? " BTC" : ""} (référence > EMA ${k})`;
+    it("regimeBtc 0 : identique aux appels précédents, dans toutes les unités", () => {
+      expect(textesAxis(u, 0, 0, 0)).toEqual(textesAxis(u));
+      expect(textesAxis(u, 0, 0)).toEqual(textesAxis(u, 0, 0, 0));
+      expect(textesAxis("1h", 3, 25, 0)).toEqual(textesAxis("1h", 3, 25));
+      expect(textesAxis("3M", 0, 0, 0)).toEqual(textesAxis("3M"));
+    });
+    it("regimeBtc 100 : base + mention « test en cours » ; autre période : « hors du test »", () => {
+      expect(textesAxis(u, 0, 0, 100).signaux).toBe(`${RESERVE}${regime(100)} actif : non mesuré (test du 10 octobre 2026 en cours)`);
+      expect(textesAxis(u, 0, 0, 50).signaux).toBe(
+        `${RESERVE}${regime(50)} : réglage hors du test du 10 octobre 2026 (EMA 100 mesurée) — non mesuré`
+      );
+      expect(textesAxis("1h", 0, 0, 100).signaux.startsWith(textesAxis("1h").signaux)).toBe(true);
+      expect(textesAxis("3M", 0, 0, 100).signaux.includes("garde-fou de régime BTC (référence > EMA 100) actif : non mesuré")).toBe(true);
+    });
+    it("ordre des mentions : régime, puis ADX, puis stop", () => {
+      expect(textesAxis(u, 3, 25, 100).signaux).toBe(
+        `${RESERVE}${regime(100)} actif : non mesuré (test du 10 octobre 2026 en cours)` +
+          " ; filtre ADX 14 ≥ 25 à l'entrée actif : test du 9 octobre 2026 échoué sur données jamais vues (123 alts 4h cotées 2023-2025 : expectancy nette ≤ 0 aux coûts x1 ou x3 ; amélioration absente dans une moitié de la période (54 % puis 48 %)) — pas une amélioration validée" +
+          " ; stop suiveur 3 × ATR 14 actif : test du 8 octobre 2026 échoué sur données jamais vues (151 alts 4h, 2023-2026 : Sharpe meilleur que sans stop sur 41 % des actifs seulement ; amélioration absente dans une moitié de la période (37 % puis 51 %)) — pas une amélioration validée"
+      );
+    });
+    it("la mention suit le réglage dans l'infobulle de l'achat (réserve commune)", () => {
+      const r = computeIndicator(stratAxis, candles, V5, { refClose: refCroissante });
+      const info = achats(r)[1]?.info ?? "";
+      expect(info).toContain("garde-fou de régime BTC (référence > EMA 100) actif : non mesuré (test du 10 octobre 2026 en cours)");
+    });
   });
 });

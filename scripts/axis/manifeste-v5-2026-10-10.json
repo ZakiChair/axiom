@@ -1,0 +1,1264 @@
+{
+  "schema": "axiom-axis-v5-backtest-v1",
+  "figeLeUtc": "2026-10-10T00:06:58Z",
+  "objet": "Test de la v5 d'AXIS (garde-fou de régime BTC : achat seulement si la référence BTC clôture au-dessus de sa propre EMA 100, ajouté à la condition d'achat de la v2 ; sorties inchangées, sans stop) contre la v2 livrée et contre l'EMA 200 seule, sur des paires USDT spot KuCoin jamais lues par aucune campagne et jamais cotées en USDT spot sur Binance, 4h, de leur cotation au 2026-10-10 exclu.",
+  "historique": {
+    "v2": "scripts/axis/manifeste-v2-2026-10-07.json : signaux AXIS v2 FAVORABLES en 4h sur BTC/ETH/XRP/SOL 2017-2024 (21 blocs sur 21, timing p = 0,0005) ; pas mieux qu'une EMA 200 seule en PnL total sur 3 actifs sur 4 ; limites écrites : « taille fixe, aucun stop, aucune gestion du risque »",
+    "flux": "scripts/axis/manifeste-flux-2026-10-08.json : forts achats FAVORABLES en 4h sur BNB/ADA/LINK/DOGE 2017-2026 (+1,61 % à 12 bougies, p ≤ 0,0005) ; fortes ventes sans suite ; qualification « fort » sans avantage",
+    "ut": "scripts/axis/manifeste-ut-2026-10-08.json : aucune des treize autres unités ne passe sur 42 alts jamais vues",
+    "v3": "scripts/axis/manifeste-v3-2026-10-08.json : stop suiveur 3 × ATR 14, verdict DÉFAVORABLE sur 151 alts 4h 2023-2026 (Sharpe meilleur que sans stop sur 41 % des cellules, 37 % puis 51 % par moitié ; drawdown plus faible sur 82 %, PnL moyen +3,8 % contre +6,4 %) ; défaut resté sans stop ; ces 151 paires sont consommées",
+    "amorce": "9 octobre 2026 (commit f106f4b) : fidélité d'affichage — le chart remonte à 1 500 bougies quand AXIS est actif (sur 500, 60 % des fenêtres montraient un signal absent ou en trop par rapport à la série longue mesurée) ; aucun changement du calcul",
+    "phase1": "9 octobre 2026 (commit ef5c513) : sorties masquées `etat`/`score`, bougie dite clôturée décidée, fenêtre BT et alertes, spec enregistrée pour le rejeu commun — aucun signal par défaut modifié.",
+    "faiblesseVisee": "le facteur de marché : la v2 achète un alt au-dessus de SA propre EMA 200 même quand BTC — le marché — est sous la sienne ; les rapports v3 et v4 montrent que les cellules partagent un même facteur (2025 perdante pour toutes les stratégies long/plat, paires jeunes en baisse).",
+    "explorationV5": {
+      "script": "scripts/explorer-axis-v5.ts (commit 18ef8b3 ; rapport scripts/axis/rapport-explo-v5-2026-10-09.md — SANS VALEUR PROBANTE ; sorties brutes /tmp/axis-v5-explo/, hors dépôt)",
+      "donnees": "UNIQUEMENT des données déjà vues : panel A = les 151 alts du test v3 (re-téléchargées 2023-07 → 2026-10-08, 4h, vérifiées par hash contre le résultat v3 commité), panel de confirmation B = les 8 grandes cryptos (BTC, ETH, XRP, SOL, BNB, ADA, LINK, DOGE ; historique complet → 2026-10-08 ; témoin v2 reproduit à la décimale) ; warmup 300 bougies ; même moteur, mêmes coûts que ce test",
+      "grille": "la v2 (référence) + 6 garde-fous de régime BTC sur la série de référence alignée LOCF (R) : BTC > EMA 200/100/400 de R, pente de l'EMA 200 de R sur 50 bougies, entrée ET sortie « régime » (R ≤ EMA 200 de R), BTC lui-même en position AXIS ; entrée = condition de la v2 ET garde-fou vrai, lecture absente = garde-fou faux",
+      "regle": "pré-écrite dans l'en-tête du script avant la première exécution, identique à celle de l'exploration v4 : éligibilité = expectancy nette regroupée x3 > 0 sur le panel A ET au moins 50 % des trades clos de la v2 ; métrique = part des cellules comparables du panel A où le Sharpe par bougie (x1) bat STRICTEMENT la v2 ; classement par cette part, puis trades clos, puis ordre de grille ; retenue si et seulement si part ≥ 60 % sur la fenêtre du panel A, > 50 % dans chaque moitié, ET Sharpe > v2 sur au moins 5 des 7 grandes cryptos du panel B hors BTC",
+      "resultat": "les six garde-fous battent la v2 en Sharpe sur 67 à 78 % des 151 alts ; btc-ema100 retenue : première du classement, 117/151 = 77,5 % sur la fenêtre, moitiés 88/151 = 58,3 % et 109/151 = 72,2 %, 6/7 majors ; expectancy 2,10 % contre 1,52 % par trade à x1, drawdown médian 13,8 % contre 15,4 %, 91 % des trades clos conservés (5 718 contre 6 278) ; la métrique descriptive (expectancy par trade > v2) coïncide : 124/151, 6/7",
+      "lecture": "le garde-fou retire des entrées (9 % des trades clos en exploration) et en retarde d'autres en filtrant les entrées pendant les régimes où BTC clôture sous sa propre EMA 100 ; mesures en échantillon, après sélection parmi 6 variantes : optimistes"
+    },
+    "choixV5": "btc-ema100 — achat si score ≥ 5 ET close > EMA 200 (de la cellule) ET référence BTC > EMA 100 (de la référence) à la clôture de décision, la condition complète étant celle que l'armement observe ; sortie inchangée (score ≤ −4). Première du classement ET conforme à la règle pré-écrite : aucun écart à la règle (contrairement à la v4).",
+    "repetitionAvantFigeage": "bun scripts/valider-axis-v5.ts --essai, avant le figeage (10 octobre 2026, ~00:05 UTC), sur les 8 symboles déjà vus du cache de l'exploration (scripts/.cache-klines/axis-v5/, aucun téléchargement), cellules du 2023-07-01 au 2026-10-08 exclu, référence BTC = la série BTCUSDT du même cache : 8/8 cellules, contrôles bloquants passés (recalcul direct, garde-fou vrai à chaque entrée v5, v2 identique avec et sans aux, alignement 0 % de reports, causalité, seconde méthode du Sharpe sur 3 cellules) ; BTC rapportée à titre descriptif et exclue des parts (7 comparables hors BTC) ; Sharpe v5 > v2 sur 6/7 cellules, par moitié 4/7 puis 5/7 ; expectancy nette regroupée 4,258 % (x1) et 3,970 % (x3) contre 3,721 % et 3,434 % pour la v2 ; 319 trades clos v5 contre 339 v2 (94 % conservés) ; 43 entrées de la v2 refusées par le garde-fou ; 56,0 % des décisions évaluées avec référence > EMA 100 ; verdict NON_CONCLUANT comme attendu (7 < 80 comparables). Sans valeur probante (données vues) ; cette lecture n'a conduit à AUCUNE modification du signal, de la métrique, des critères ni des suites : le test unique tranche, quel que soit son sens.",
+    "parametresNonAjustes": "entrées de la v2 (score ≥ 5, close > EMA 200, armement), sortie par score ≤ −4, EMA 20/50, Supertrend 10 ×3, ADX 14 ≥ 20 pour le vote DMI, MACD 12/26/9, RSI 14, CMF 20, stopAtr 0, adxEntree 0 ; période de l'EMA de référence 100 (choix de l'exploration, parmi 100/200/400) : inchangés"
+  },
+  "statutIndependance": "Les symboles du pool sont des paires USDT spot de KuCoin dont l'actif de base n'a été lu par aucune campagne du dépôt (union des symboles de tous les manifestes et résultats AXIS, de valider-strategies et de l'univers TOP 10 : 329 bases) et n'est pas coté en USDT spot sur Binance le 9 octobre 2026 (720 actifs de base d'exchangeInfo, renommages connus compris). Indépendance en ACTIFS entière. Indépendance en TEMPS nulle : la période 2019-2026 a été lue sur 159 autres séries (exploration v5) et les campagnes antérieures ; la place (KuCoin) n'a jamais été lue. La référence BTC (Binance Spot BTCUSDT 4h) est une série déjà vue, relue à l'identique (contrôle d'égalité avec le cache de l'exploration sur la période commune).",
+  "limitesConnues": [
+    "une seule unité (4h) et un seul marché de cellules (KuCoin spot) ; fenêtres de 27 à 90 mois selon la cotation ; régimes : fin de hausse 2021, baisse 2022, reprise 2023, hausse 2024, 2025-2026",
+    "paires encore cotées le 9 octobre 2026 (biais de survie : les paires radiées n'y sont pas) ; pool fait pour partie de petites capitalisations et de mèmes (règle mécanique, aucune exclusion au cas par cas) ; liquidité moindre que Binance : bougies 4h sans transaction possibles (volume nul : CMF neutre), écartées ou absentes selon les règles de données",
+    "KuCoin n'est pas une source de l'application : le test mesure la règle d'AXIS sur des séries que le chart ne montre pas ; la référence BTC est celle que le chart utilise (`refClose`, Binance Spot BTCUSDT), pas BTC-USDT KuCoin",
+    "la référence est ALIGNÉE par heure d'ouverture (report de la dernière bougie BTC ouverte au plus tard à l'ouverture de la bougie de la cellule) ; l'EMA 100 de la référence est calculée sur la série alignée depuis sa première valeur définie — la grille 4h KuCoin est attendue identique à celle de Binance (part des reports consignée)",
+    "le garde-fou retire des entrées (9 % des trades clos en exploration) et en retarde d'autres : une cellule où la v5 n'a aucune variation d'equity a un Sharpe indéfini, compté comme NON supérieur à la v2 — jamais écarté de la part",
+    "fenêtres inégales : moitiés propres à chaque cellule (frontière au milieu de ses décisions évaluées), pas des dates communes",
+    "même facteur de marché entre les cellules (et c'est précisément lui que le garde-fou lit) : les parts de cellules ne sont pas des épreuves indépendantes (criteres.dependance)",
+    "taille fixe (1 000 USDT sur 10 000) ; critères ordinaux (v5 contre v2), pas des niveaux absolus ; la viabilité absolue est rapportée, dite dans l'infobulle, mais n'est pas un bloc du verdict (voir criteres.raisonP1)",
+    "la période de l'EMA de référence (100) a été choisie parmi trois (100/200/400) après lecture des données vues ; la règle pré-écrite de l'exploration l'a retenue sans écart ; sélection en échantillon que le test unique contrôle sans l'éliminer",
+    "indépendance en temps nulle (statutIndependance)",
+    "hors du chart, les contextes sans série de référence (alertes, fenêtre BT, screener, rejeu commun) n'appliquent pas le garde-fou : la condition redevient celle de la v2 et le texte le dit (« référence indisponible ») ; un verdict FAVORABLE exigera un lot ultérieur pour servir la référence à ces contextes et pour porter la profondeur de `refClose` du chart à l'amorce (1 500 bougies)"
+  ],
+  "signal": {
+    "indicateur": "stratAxis",
+    "version": "v5",
+    "params": {
+      "seuil": 5,
+      "seuilVente": 4,
+      "emaTendance": 200,
+      "emaRapide": 20,
+      "emaLente": 50,
+      "stPeriode": 10,
+      "stMult": 3,
+      "seuilAdx": 20,
+      "stopAtr": 0,
+      "adxEntree": 0,
+      "regimeBtc": 100
+    },
+    "paramsV2": {
+      "seuil": 5,
+      "seuilVente": 4,
+      "emaTendance": 200,
+      "emaRapide": 20,
+      "emaLente": 50,
+      "stPeriode": 10,
+      "stMult": 3,
+      "seuilAdx": 20,
+      "stopAtr": 0,
+      "adxEntree": 0,
+      "regimeBtc": 0
+    },
+    "adxPeriode": 14,
+    "reference": "série aux `refClose` = close de Binance Spot BTCUSDT 4h, alignée par `alignAux(times, points)` (ouverture, LOCF) — exactement le pont du chart",
+    "coeursFixes": "DMI/ADX 14 de Wilder, MACD 12/26/9, RSI 14, CMF 20, EMA 20/50/200, Supertrend 10 ×3 ; EMA 100 de la référence alignée, calculée depuis sa première valeur définie (`emaDepuisPremiereDefinie`)",
+    "entree": "score ≥ 5 ET close > EMA 200 ET garde-fou vrai à la clôture de décision, où garde-fou = référence[i] > EMA 100(référence)[i] quand les deux sont définies ; quand la référence ou son EMA est indéfinie à la bougie i, le garde-fou n'est PAS appliqué (condition de la v2) et l'infobulle le dit — dans cette campagne la référence couvre toutes les cellules (BTCUSDT depuis 2017), le cas ne se présente qu'au chart ; la condition complète est celle que l'armement observe",
+    "sortie": "inchangée : score ≤ −4 ; aucun stop ; aucune vente à découvert",
+    "position": "1 quand la sortie masquée `etat` du chart vaut 1 (calcul du chart avec `aux.refClose`), 0 sinon",
+    "reglage": "paramètre `regimeBtc` (période de l'EMA de la référence), 0 = sans garde-fou : la v2 exacte ; au figeage, le défaut du chart est 0 ; la campagne mesure 100 contre 0",
+    "referenceEma200": "EMA 200 seule, long/plat : entrée = close croise l'EMA 200 à la hausse, sortie = close < EMA 200, même moteur, mêmes coûts, mêmes bornes — descriptif"
+  },
+  "marche": {
+    "type": "spot",
+    "source": "KuCoin Spot",
+    "endpoint": "https://api.kucoin.com/api/v1/market/candles",
+    "champs": "[time (s), open, close, high, low, volume (base), turnover (cotation)] — ATTENTION close en 3e position ; type=4hour ; startAt/endAt en secondes, startAt inclus, endAt borne de clôture exclue ; ordre décroissant ; pages de 1 500 au plus ; pas de volume taker (buyVolume/sellVolume absents : couche flux « n.d. », cœur inchangé)",
+    "referenceBtc": "https://data-api.binance.vision/api/v3/klines (ou api.binance.com si joignable), BTCUSDT 4h, du 2017-08-17 au finExclue, mêmes règles de pagination que la v4",
+    "funding": "non applicable",
+    "tailleFixeQuote": 1000,
+    "capitalInitialQuote": 10000
+  },
+  "symboles": {
+    "regle": "toutes les paires USDT spot de KuCoin en statut `enableTrading` le 9 octobre 2026 dont la première bougie journalière (sonde par horodatage seulement, aucun prix gardé) ouvre au plus tard le 2024-07-01, moins les stablecoins, les jetons emballés/stakés, les jetons à levier, les actions tokénisées et fiat, les actifs de base déjà lus par une campagne (329 bases) et les actifs de base cotés en USDT spot sur Binance (720, renommages compris)",
+    "nombre": 141,
+    "parAnneeDeCotation": {
+      "2017": 1,
+      "2018": 2,
+      "2019": 4,
+      "2020": 12,
+      "2021": 38,
+      "2022": 20,
+      "2023": 27,
+      "2024": 37
+    },
+    "liste": [
+      {
+        "symbol": "KCS-USDT",
+        "premierJour": "2017-10-23"
+      },
+      {
+        "symbol": "TEL-USDT",
+        "premierJour": "2018-01-29"
+      },
+      {
+        "symbol": "BSV-USDT",
+        "premierJour": "2018-11-18"
+      },
+      {
+        "symbol": "MTV-USDT",
+        "premierJour": "2019-04-09"
+      },
+      {
+        "symbol": "ETN-USDT",
+        "premierJour": "2019-07-10"
+      },
+      {
+        "symbol": "VSYS-USDT",
+        "premierJour": "2019-09-05"
+      },
+      {
+        "symbol": "DAG-USDT",
+        "premierJour": "2019-11-18"
+      },
+      {
+        "symbol": "SENSO-USDT",
+        "premierJour": "2020-03-20"
+      },
+      {
+        "symbol": "XDB-USDT",
+        "premierJour": "2020-04-07"
+      },
+      {
+        "symbol": "KPOL-USDT",
+        "premierJour": "2020-04-10"
+      },
+      {
+        "symbol": "CRO-USDT",
+        "premierJour": "2020-07-02"
+      },
+      {
+        "symbol": "MLK-USDT",
+        "premierJour": "2020-08-06"
+      },
+      {
+        "symbol": "SUKU-USDT",
+        "premierJour": "2020-08-13"
+      },
+      {
+        "symbol": "EWT-USDT",
+        "premierJour": "2020-08-26"
+      },
+      {
+        "symbol": "ALEPH-USDT",
+        "premierJour": "2020-09-08"
+      },
+      {
+        "symbol": "VELO-USDT",
+        "premierJour": "2020-09-17"
+      },
+      {
+        "symbol": "UOS-USDT",
+        "premierJour": "2020-09-23"
+      },
+      {
+        "symbol": "NIM-USDT",
+        "premierJour": "2020-09-25"
+      },
+      {
+        "symbol": "SHR-USDT",
+        "premierJour": "2020-11-13"
+      },
+      {
+        "symbol": "HTR-USDT",
+        "premierJour": "2021-01-04"
+      },
+      {
+        "symbol": "KLV-USDT",
+        "premierJour": "2021-02-05"
+      },
+      {
+        "symbol": "DAO-USDT",
+        "premierJour": "2021-02-09"
+      },
+      {
+        "symbol": "ORAI-USDT",
+        "premierJour": "2021-02-23"
+      },
+      {
+        "symbol": "KRL-USDT",
+        "premierJour": "2021-03-16"
+      },
+      {
+        "symbol": "ORBS-USDT",
+        "premierJour": "2021-03-26"
+      },
+      {
+        "symbol": "BOSON-USDT",
+        "premierJour": "2021-04-09"
+      },
+      {
+        "symbol": "HAI-USDT",
+        "premierJour": "2021-04-22"
+      },
+      {
+        "symbol": "GHX-USDT",
+        "premierJour": "2021-04-29"
+      },
+      {
+        "symbol": "TOWER-USDT",
+        "premierJour": "2021-04-30"
+      },
+      {
+        "symbol": "XDC-USDT",
+        "premierJour": "2021-05-07"
+      },
+      {
+        "symbol": "ELA-USDT",
+        "premierJour": "2021-05-13"
+      },
+      {
+        "symbol": "TLOS-USDT",
+        "premierJour": "2021-05-17"
+      },
+      {
+        "symbol": "ELON-USDT",
+        "premierJour": "2021-05-28"
+      },
+      {
+        "symbol": "GMEE-USDT",
+        "premierJour": "2021-06-09"
+      },
+      {
+        "symbol": "XAVA-USDT",
+        "premierJour": "2021-06-10"
+      },
+      {
+        "symbol": "NFT-USDT",
+        "premierJour": "2021-06-11"
+      },
+      {
+        "symbol": "AIOZ-USDT",
+        "premierJour": "2021-06-16"
+      },
+      {
+        "symbol": "SOUL-USDT",
+        "premierJour": "2021-07-07"
+      },
+      {
+        "symbol": "ERG-USDT",
+        "premierJour": "2021-08-05"
+      },
+      {
+        "symbol": "XCH-USDT",
+        "premierJour": "2021-08-06"
+      },
+      {
+        "symbol": "XPR-USDT",
+        "premierJour": "2021-08-24"
+      },
+      {
+        "symbol": "WILD-USDT",
+        "premierJour": "2021-08-31"
+      },
+      {
+        "symbol": "XYO-USDT",
+        "premierJour": "2021-09-09"
+      },
+      {
+        "symbol": "XPRT-USDT",
+        "premierJour": "2021-09-14"
+      },
+      {
+        "symbol": "DMTR-USDT",
+        "premierJour": "2021-09-22"
+      },
+      {
+        "symbol": "P2P-USDT",
+        "premierJour": "2021-09-27"
+      },
+      {
+        "symbol": "NAKA-USDT",
+        "premierJour": "2021-10-15"
+      },
+      {
+        "symbol": "CPOOL-USDT",
+        "premierJour": "2021-10-28"
+      },
+      {
+        "symbol": "CERE-USDT",
+        "premierJour": "2021-11-08"
+      },
+      {
+        "symbol": "NUM-USDT",
+        "premierJour": "2021-11-18"
+      },
+      {
+        "symbol": "TRADE-USDT",
+        "premierJour": "2021-11-19"
+      },
+      {
+        "symbol": "GODS-USDT",
+        "premierJour": "2021-11-29"
+      },
+      {
+        "symbol": "VR-USDT",
+        "premierJour": "2021-12-02"
+      },
+      {
+        "symbol": "CREDI-USDT",
+        "premierJour": "2021-12-09"
+      },
+      {
+        "symbol": "TRVL-USDT",
+        "premierJour": "2021-12-09"
+      },
+      {
+        "symbol": "HEART-USDT",
+        "premierJour": "2021-12-13"
+      },
+      {
+        "symbol": "CWEB-USDT",
+        "premierJour": "2021-12-30"
+      },
+      {
+        "symbol": "REVU-USDT",
+        "premierJour": "2022-01-07"
+      },
+      {
+        "symbol": "CTC-USDT",
+        "premierJour": "2022-01-13"
+      },
+      {
+        "symbol": "BNC-USDT",
+        "premierJour": "2022-03-31"
+      },
+      {
+        "symbol": "XCN-USDT",
+        "premierJour": "2022-04-02"
+      },
+      {
+        "symbol": "NYM-USDT",
+        "premierJour": "2022-04-15"
+      },
+      {
+        "symbol": "SPA-USDT",
+        "premierJour": "2022-04-19"
+      },
+      {
+        "symbol": "SWFTC-USDT",
+        "premierJour": "2022-04-22"
+      },
+      {
+        "symbol": "AURORA-USDT",
+        "premierJour": "2022-04-25"
+      },
+      {
+        "symbol": "OVR-USDT",
+        "premierJour": "2022-04-28"
+      },
+      {
+        "symbol": "BRISE-USDT",
+        "premierJour": "2022-04-29"
+      },
+      {
+        "symbol": "AKT-USDT",
+        "premierJour": "2022-05-07"
+      },
+      {
+        "symbol": "CCD-USDT",
+        "premierJour": "2022-05-27"
+      },
+      {
+        "symbol": "WELL-USDT",
+        "premierJour": "2022-06-23"
+      },
+      {
+        "symbol": "FORT-USDT",
+        "premierJour": "2022-06-24"
+      },
+      {
+        "symbol": "CSPR-USDT",
+        "premierJour": "2022-06-29"
+      },
+      {
+        "symbol": "WEMIX-USDT",
+        "premierJour": "2022-06-30"
+      },
+      {
+        "symbol": "TT-USDT",
+        "premierJour": "2022-09-01"
+      },
+      {
+        "symbol": "POKT-USDT",
+        "premierJour": "2022-10-19"
+      },
+      {
+        "symbol": "AZERO-USDT",
+        "premierJour": "2022-11-15"
+      },
+      {
+        "symbol": "NAVI-USDT",
+        "premierJour": "2022-11-29"
+      },
+      {
+        "symbol": "BDX-USDT",
+        "premierJour": "2023-01-10"
+      },
+      {
+        "symbol": "FLR-USDT",
+        "premierJour": "2023-01-10"
+      },
+      {
+        "symbol": "TRAC-USDT",
+        "premierJour": "2023-02-10"
+      },
+      {
+        "symbol": "ACS-USDT",
+        "premierJour": "2023-02-15"
+      },
+      {
+        "symbol": "XRD-USDT",
+        "premierJour": "2023-03-08"
+      },
+      {
+        "symbol": "HMND-USDT",
+        "premierJour": "2023-03-30"
+      },
+      {
+        "symbol": "SD-USDT",
+        "premierJour": "2023-04-07"
+      },
+      {
+        "symbol": "AGI-USDT",
+        "premierJour": "2023-04-11"
+      },
+      {
+        "symbol": "OTK-USDT",
+        "premierJour": "2023-04-12"
+      },
+      {
+        "symbol": "BABYDOGE-USDT",
+        "premierJour": "2023-04-19"
+      },
+      {
+        "symbol": "PZP-USDT",
+        "premierJour": "2023-04-19"
+      },
+      {
+        "symbol": "LOCUS-USDT",
+        "premierJour": "2023-04-21"
+      },
+      {
+        "symbol": "ZPAY-USDT",
+        "premierJour": "2023-04-24"
+      },
+      {
+        "symbol": "KAS-USDT",
+        "premierJour": "2023-05-06"
+      },
+      {
+        "symbol": "TURBOS-USDT",
+        "premierJour": "2023-05-15"
+      },
+      {
+        "symbol": "LMWR-USDT",
+        "premierJour": "2023-05-16"
+      },
+      {
+        "symbol": "LADYS-USDT",
+        "premierJour": "2023-05-22"
+      },
+      {
+        "symbol": "OBI-USDT",
+        "premierJour": "2023-05-29"
+      },
+      {
+        "symbol": "LYX-USDT",
+        "premierJour": "2023-07-24"
+      },
+      {
+        "symbol": "TOKEN-USDT",
+        "premierJour": "2023-11-03"
+      },
+      {
+        "symbol": "SATS-USDT",
+        "premierJour": "2023-11-09"
+      },
+      {
+        "symbol": "RATS-USDT",
+        "premierJour": "2023-11-20"
+      },
+      {
+        "symbol": "FLIP-USDT",
+        "premierJour": "2023-11-23"
+      },
+      {
+        "symbol": "UQC-USDT",
+        "premierJour": "2023-11-24"
+      },
+      {
+        "symbol": "MNT-USDT",
+        "premierJour": "2023-11-30"
+      },
+      {
+        "symbol": "COQ-USDT",
+        "premierJour": "2023-12-18"
+      },
+      {
+        "symbol": "MYRO-USDT",
+        "premierJour": "2023-12-27"
+      },
+      {
+        "symbol": "ALEX-USDT",
+        "premierJour": "2024-01-05"
+      },
+      {
+        "symbol": "NEON-USDT",
+        "premierJour": "2024-01-15"
+      },
+      {
+        "symbol": "SAROS-USDT",
+        "premierJour": "2024-01-19"
+      },
+      {
+        "symbol": "GTAI-USDT",
+        "premierJour": "2024-01-25"
+      },
+      {
+        "symbol": "DEFI-USDT",
+        "premierJour": "2024-01-31"
+      },
+      {
+        "symbol": "ZETA-USDT",
+        "premierJour": "2024-02-01"
+      },
+      {
+        "symbol": "MAVIA-USDT",
+        "premierJour": "2024-02-06"
+      },
+      {
+        "symbol": "NAVX-USDT",
+        "premierJour": "2024-02-07"
+      },
+      {
+        "symbol": "BCUT-USDT",
+        "premierJour": "2024-02-20"
+      },
+      {
+        "symbol": "QORPO-USDT",
+        "premierJour": "2024-02-29"
+      },
+      {
+        "symbol": "NIBI-USDT",
+        "premierJour": "2024-03-12"
+      },
+      {
+        "symbol": "HTX-USDT",
+        "premierJour": "2024-03-14"
+      },
+      {
+        "symbol": "MPC-USDT",
+        "premierJour": "2024-03-19"
+      },
+      {
+        "symbol": "ZKJ-USDT",
+        "premierJour": "2024-03-19"
+      },
+      {
+        "symbol": "VENOM-USDT",
+        "premierJour": "2024-03-28"
+      },
+      {
+        "symbol": "MEW-USDT",
+        "premierJour": "2024-04-03"
+      },
+      {
+        "symbol": "ZEUS-USDT",
+        "premierJour": "2024-04-04"
+      },
+      {
+        "symbol": "TRUF-USDT",
+        "premierJour": "2024-04-09"
+      },
+      {
+        "symbol": "ESE-USDT",
+        "premierJour": "2024-04-11"
+      },
+      {
+        "symbol": "SQR-USDT",
+        "premierJour": "2024-04-11"
+      },
+      {
+        "symbol": "PRCL-USDT",
+        "premierJour": "2024-04-16"
+      },
+      {
+        "symbol": "DEGEN-USDT",
+        "premierJour": "2024-04-18"
+      },
+      {
+        "symbol": "MERL-USDT",
+        "premierJour": "2024-04-19"
+      },
+      {
+        "symbol": "VINU-USDT",
+        "premierJour": "2024-04-19"
+      },
+      {
+        "symbol": "SAFE-USDT",
+        "premierJour": "2024-04-23"
+      },
+      {
+        "symbol": "LL-USDT",
+        "premierJour": "2024-04-24"
+      },
+      {
+        "symbol": "RIO-USDT",
+        "premierJour": "2024-04-26"
+      },
+      {
+        "symbol": "MAPO-USDT",
+        "premierJour": "2024-04-28"
+      },
+      {
+        "symbol": "ZBCN-USDT",
+        "premierJour": "2024-05-02"
+      },
+      {
+        "symbol": "DRIFT-USDT",
+        "premierJour": "2024-05-16"
+      },
+      {
+        "symbol": "SQD-USDT",
+        "premierJour": "2024-05-17"
+      },
+      {
+        "symbol": "TAIKO-USDT",
+        "premierJour": "2024-06-05"
+      },
+      {
+        "symbol": "BRETT-USDT",
+        "premierJour": "2024-06-06"
+      },
+      {
+        "symbol": "ATH-USDT",
+        "premierJour": "2024-06-12"
+      },
+      {
+        "symbol": "ARTFI-USDT",
+        "premierJour": "2024-06-17"
+      },
+      {
+        "symbol": "OORT-USDT",
+        "premierJour": "2024-06-18"
+      },
+      {
+        "symbol": "BLAST-USDT",
+        "premierJour": "2024-06-26"
+      }
+    ],
+    "exclusionsNominatives": {
+      "stables": [
+        "USDC-USDT",
+        "PAXG-USDT",
+        "USDD-USDT",
+        "USTC-USDT",
+        "PYUSD-USDT",
+        "TUSD-USDT",
+        "USDE-USDT",
+        "USD1-USDT",
+        "XAUT-USDT",
+        "USDG-USDT",
+        "FRAX-USDT",
+        "USDS-USDT"
+      ],
+      "adosses": [
+        "WBTC-USDT"
+      ],
+      "levier": [
+        "SUP-USDT"
+      ],
+      "dejaVus": [
+        "AVA-USDT",
+        "ATOM-USDT",
+        "CHR-USDT",
+        "COTI-USDT",
+        "BNB-USDT",
+        "ALGO-USDT",
+        "XTZ-USDT",
+        "ZEC-USDT",
+        "ADA-USDT",
+        "ARPA-USDT",
+        "CHZ-USDT",
+        "WIN-USDT",
+        "ONE-USDT",
+        "LUNA-USDT",
+        "KSM-USDT",
+        "DASH-USDT",
+        "DGB-USDT",
+        "STX-USDT",
+        "COMP-USDT",
+        "JST-USDT",
+        "DIA-USDT",
+        "LINK-USDT",
+        "DOT-USDT",
+        "CKB-USDT",
+        "UMA-USDT",
+        "SUN-USDT",
+        "YFI-USDT",
+        "UNI-USDT",
+        "FIL-USDT",
+        "AAVE-USDT",
+        "LTC-USDT",
+        "QTUM-USDT",
+        "XLM-USDT",
+        "ETC-USDT",
+        "ETH-USDT",
+        "SNX-USDT",
+        "BTC-USDT",
+        "XRP-USDT",
+        "TRX-USDT",
+        "ONT-USDT",
+        "VET-USDT",
+        "NEO-USDT",
+        "BCH-USDT",
+        "ROSE-USDT",
+        "GRT-USDT",
+        "1INCH-USDT",
+        "API3-USDT",
+        "CRV-USDT",
+        "SUSHI-USDT",
+        "ZEN-USDT",
+        "THETA-USDT",
+        "QNT-USDT",
+        "BAT-USDT",
+        "DOGE-USDT",
+        "CAKE-USDT",
+        "MASK-USDT",
+        "PHA-USDT",
+        "GAS-USDT",
+        "AVAX-USDT",
+        "ENJ-USDT",
+        "MANA-USDT",
+        "IOST-USDT",
+        "ANKR-USDT",
+        "SAND-USDT",
+        "FLUX-USDT",
+        "ZIL-USDT",
+        "DODO-USDT",
+        "PUNDIX-USDT",
+        "SHIB-USDT",
+        "ICP-USDT",
+        "CELO-USDT",
+        "OGN-USDT",
+        "PROM-USDT",
+        "LPT-USDT",
+        "NEAR-USDT",
+        "AXS-USDT",
+        "SOL-USDT",
+        "SLP-USDT",
+        "MTL-USDT",
+        "IOTX-USDT",
+        "GALA-USDT",
+        "REQ-USDT",
+        "QI-USDT",
+        "MOVR-USDT",
+        "WOO-USDT",
+        "YGG-USDT",
+        "SKL-USDT",
+        "NMR-USDT",
+        "TRB-USDT",
+        "DYDX-USDT",
+        "GTC-USDT",
+        "RLC-USDT",
+        "EGLD-USDT",
+        "HBAR-USDT",
+        "FLOW-USDT",
+        "CTSI-USDT",
+        "ALICE-USDT",
+        "ILV-USDT",
+        "BAND-USDT",
+        "FTT-USDT",
+        "TLM-USDT",
+        "DEXE-USDT",
+        "RUNE-USDT",
+        "C98-USDT",
+        "AGLD-USDT",
+        "INJ-USDT",
+        "AR-USDT",
+        "JASMY-USDT",
+        "SUPER-USDT",
+        "ENS-USDT",
+        "TWT-USDT",
+        "ADX-USDT",
+        "GLM-USDT",
+        "KAVA-USDT",
+        "RSR-USDT",
+        "IMX-USDT",
+        "XEC-USDT",
+        "PEOPLE-USDT",
+        "IOTA-USDT",
+        "GLMR-USDT",
+        "ASTR-USDT",
+        "CVX-USDT",
+        "AMP-USDT",
+        "XNO-USDT",
+        "TFUEL-USDT",
+        "METIS-USDT",
+        "APE-USDT",
+        "GMT-USDT",
+        "BICO-USDT",
+        "CFX-USDT",
+        "ALPINE-USDT",
+        "CELR-USDT",
+        "KNC-USDT",
+        "MBL-USDT",
+        "DUSK-USDT",
+        "ACH-USDT",
+        "LUNC-USDT",
+        "OP-USDT",
+        "LDO-USDT",
+        "FIDA-USDT",
+        "GMX-USDT",
+        "APT-USDT",
+        "OSMO-USDT",
+        "MAGIC-USDT",
+        "RPL-USDT",
+        "BLUR-USDT",
+        "AXL-USDT",
+        "FLOKI-USDT",
+        "SSV-USDT",
+        "FET-USDT",
+        "SYN-USDT",
+        "MINA-USDT",
+        "LQTY-USDT",
+        "ID-USDT",
+        "ARB-USDT",
+        "CGPT-USDT",
+        "STRAX-USDT",
+        "SUI-USDT",
+        "PEPE-USDT",
+        "CETUS-USDT",
+        "EDU-USDT",
+        "ORDI-USDT",
+        "MAV-USDT",
+        "PENDLE-USDT",
+        "WLD-USDT",
+        "SEI-USDT",
+        "BIGTIME-USDT",
+        "ARKM-USDT",
+        "TIA-USDT",
+        "CYBER-USDT",
+        "MEME-USDT",
+        "POL-USDT",
+        "PYTH-USDT",
+        "DCR-USDT",
+        "ZRX-USDT",
+        "LSK-USDT",
+        "BONK-USDT",
+        "AUCTION-USDT",
+        "JTO-USDT",
+        "POLYX-USDT",
+        "TAO-USDT",
+        "RAY-USDT",
+        "XAI-USDT",
+        "ORCA-USDT",
+        "ACE-USDT",
+        "MANTA-USDT",
+        "ONDO-USDT",
+        "WIF-USDT",
+        "ALT-USDT",
+        "JUP-USDT",
+        "DYM-USDT",
+        "PIXEL-USDT",
+        "STRK-USDT",
+        "PORTAL-USDT",
+        "AEVO-USDT",
+        "BOME-USDT",
+        "ETHFI-USDT",
+        "ENA-USDT",
+        "TNSR-USDT",
+        "REZ-USDT",
+        "KMNO-USDT",
+        "BB-USDT",
+        "NOT-USDT",
+        "IO-USDT",
+        "COOKIE-USDT",
+        "ZK-USDT",
+        "ZRO-USDT",
+        "LISTA-USDT",
+        "BANANA-USDT",
+        "RENDER-USDT",
+        "DOGS-USDT",
+        "CATI-USDT",
+        "TURBO-USDT",
+        "HMSTR-USDT",
+        "EIGEN-USDT",
+        "SCR-USDT",
+        "KAIA-USDT",
+        "ACT-USDT",
+        "COW-USDT",
+        "CVC-USDT",
+        "PNUT-USDT",
+        "SYRUP-USDT",
+        "LUMIA-USDT",
+        "VIRTUAL-USDT",
+        "MOVE-USDT",
+        "ME-USDT",
+        "USUAL-USDT",
+        "PENGU-USDT",
+        "AIXBT-USDT",
+        "BIO-USDT",
+        "VANA-USDT",
+        "GPS-USDT",
+        "SOLV-USDT",
+        "TRUMP-USDT",
+        "ANIME-USDT",
+        "VTHO-USDT",
+        "BERA-USDT",
+        "LAYER-USDT",
+        "RONIN-USDT",
+        "KAITO-USDT",
+        "SHELL-USDT",
+        "HEI-USDT",
+        "MUBARAK-USDT",
+        "BMT-USDT",
+        "TUT-USDT",
+        "EPIC-USDT",
+        "NIL-USDT",
+        "PARTI-USDT",
+        "GUN-USDT",
+        "STO-USDT",
+        "KERNEL-USDT",
+        "BABY-USDT",
+        "WCT-USDT",
+        "HYPER-USDT",
+        "INIT-USDT",
+        "HAEDAL-USDT",
+        "SIGN-USDT",
+        "SXT-USDT",
+        "NXPC-USDT",
+        "AWE-USDT",
+        "HUMA-USDT",
+        "SOPH-USDT",
+        "HOME-USDT",
+        "RESOLV-USDT",
+        "SPK-USDT",
+        "NEWT-USDT",
+        "SAHARA-USDT",
+        "AI-USDT"
+      ],
+      "binance": [
+        "XMR-USDT",
+        "WAN-USDT",
+        "BTT-USDT",
+        "WAVES-USDT",
+        "LRC-USDT",
+        "PYR-USDT",
+        "POLS-USDT",
+        "CFG-USDT",
+        "STORJ-USDT",
+        "ATA-USDT",
+        "POND-USDT",
+        "HNT-USDT",
+        "STG-USDT",
+        "T-USDT",
+        "EUL-USDT",
+        "GRAM-USDT",
+        "HFT-USDT",
+        "HIGH-USDT",
+        "BLZ-USDT",
+        "DENT-USDT",
+        "NFP-USDT",
+        "W-USDT",
+        "AERO-USDT",
+        "G-USDT",
+        "SKY-USDT",
+        "MORPHO-USDT",
+        "F-USDT",
+        "HYPE-USDT",
+        "PLUME-USDT",
+        "S-USDT",
+        "D-USDT",
+        "DATA-USDT",
+        "WAL-USDT",
+        "DOLO-USDT",
+        "A-USDT",
+        "LA-USDT",
+        "C-USDT",
+        "PUMP-USDT",
+        "ERA-USDT",
+        "TREE-USDT",
+        "TOWNS-USDT",
+        "PROVE-USDT",
+        "SAPIEN-USDT",
+        "WLFI-USDT",
+        "SOMI-USDT",
+        "OPEN-USDT",
+        "AVNT-USDT",
+        "LINEA-USDT",
+        "HOLO-USDT",
+        "ZKC-USDT",
+        "BARD-USDT",
+        "0G-USDT",
+        "ASTER-USDT",
+        "XPL-USDT",
+        "MIRA-USDT",
+        "FF-USDT",
+        "EDEN-USDT",
+        "2Z-USDT",
+        "GIGGLE-USDT",
+        "ENSO-USDT",
+        "NOM-USDT",
+        "YB-USDT",
+        "ZBT-USDT",
+        "TURTLE-USDT",
+        "MET-USDT",
+        "KITE-USDT",
+        "MMT-USDT",
+        "ALLO-USDT",
+        "NIGHT-USDT",
+        "ZKP-USDT",
+        "LIT-USDT",
+        "BREV-USDT",
+        "BNRENSHENG-USDT",
+        "FUN-USDT",
+        "FOGO-USDT",
+        "SENT-USDT",
+        "ZAMA-USDT",
+        "ESP-USDT",
+        "ROBO-USDT",
+        "MANTRA-USDT",
+        "KAT-USDT",
+        "CHIP-USDT",
+        "PROS-USDT",
+        "MEGA-USDT",
+        "GENIUS-USDT",
+        "U-USDT",
+        "RE-USDT",
+        "BANK-USDT",
+        "NIULAI-USDT",
+        "MARSCOIN-USDT",
+        "PNT-USDT"
+      ]
+    },
+    "sonde": "/tmp/axis-v5-pool/pool-candidat-kucoin.json, 9 octobre 2026 ; recopié dans le manifeste"
+  },
+  "fenetre": {
+    "id": "jamais-vue-kucoin-cotations-2019-2024",
+    "timeframe": "4h",
+    "dureeMs": 14400000,
+    "debutParCellule": "open de la première bougie 4h servie par KuCoin (≥ premierJour 00:00 UTC)",
+    "finExclue": "2026-10-10T00:00:00Z",
+    "grille": "multiples de 4 h depuis l'epoch UTC",
+    "bougiesAttendues": "par cellule : (finExclue − open de la première bougie servie) / 4 h ; les créneaux antérieurs à la première bougie servie ne comptent pas comme manquants",
+    "bougiesMinimales": 2400,
+    "bougiesMinimalesNote": "cellule indisponible sous 2 400 bougies (400 jours : 300 d'amorce puis au moins 2 100 décisions, 1 050 par moitié) ; satisfait par construction pour le pool (la plus jeune cotation, juin 2024, compte au moins ~4 900 créneaux avant finExclue)",
+    "warmupBougies": 300,
+    "evaluation": "fills mesurés à partir de l'open de la 301e bougie de la cellule (debutEvaluationMs = open de l'indice 300) ; décisions à partir de la clôture de la 300e (indice 299) ; une position née pendant le warmup ne produit aucune entrée",
+    "moities": "frontière au milieu des décisions évaluées de la cellule (indices 299 à n−2) ; un trade est rangé selon l'open de son fill d'entrée ; les métriques d'equity d'une moitié se calculent sur les points de clôture de la moitié (pic du drawdown repris au premier point ; premier rendement depuis le dernier point précédent)",
+    "fenetresInegales": "de ~4 900 bougies (cotation de juin 2024) à ~15 000 (2019) ; chaque cellule est mesurée sur sa propre fenêtre, le regroupement ne pondère pas par la longueur"
+  },
+  "donnees": {
+    "bougies": "ouvertes à partir du début de la cellule et clôturées au plus tard à finExclue (endAt borne de clôture exclue : une bougie en formation n'est jamais servie)",
+    "toleranceBordsH": 24,
+    "tolerances": "la première bougie servie ouvre au plus 24 h après le début de la cellule (00:00 UTC du jour de cotation), la dernière clôture au plus 24 h avant finExclue",
+    "partMaxBougiesManquantes": 0.02,
+    "bougiesEcartees": "une kline servie à OHLCV non fini, prix ≤ 0, volume < 0, high < max(open, close), low > min(open, close) ou time hors grille est écartée, datée et comptée comme manquante ; une bougie à volume nul est valide (KuCoin omet les bougies sans transaction : elles figurent aux créneaux manquants, pas aux écartées)",
+    "serieInexploitable": "cellule indisponible si la série est vide, hors grille, non strictement croissante, hors tolérances de bord, plus courte que bougiesMinimales, ou s'il manque plus de 2 % des bougies attendues (écartées comprises)",
+    "pagination": "pages de 1 500 bougies au plus par endAt décroissant depuis finExclue jusqu'à une page vide ou entièrement antérieure au premierJour ; startAt = premierJour 00:00 UTC",
+    "reprises": {
+      "tentativesParPage": 5,
+      "attentesS": [
+        1,
+        2,
+        4,
+        8,
+        16
+      ],
+      "statutsRepris": "erreur réseau (délai dépassé compris), HTTP 429 et 5xx ; attente Retry-After si l'en-tête est servi"
+    },
+    "delaiRequeteS": 30,
+    "debit": "au plus 25 requêtes par tranche de 3 s",
+    "parallelisme": "au plus 2 symboles téléchargés en parallèle ; cache gzip scripts/.cache-klines/axis-v5-kucoin/ (hors dépôt), empreinte SHA-256 des bougies et des bougies écartées, revérifiée à la relecture",
+    "referenceBtc": "BTCUSDT Binance 4h, mêmes règles que v4, cache scripts/.cache-klines/axis-v5-kucoin/REF-BTCUSDT.json.gz ; contrôle bloquant : ses bougies de 2023-07-01 à 2026-10-08 exclu sont identiques à celles du cache de l'exploration v5 (scripts/.cache-klines/axis-v5/, BTCUSDT) ; au plus 1 % de créneaux manquants",
+    "erreursAcquisition": "toute série est acquise et validée avant le premier calcul ; une erreur autre que « données invalides » arrête le run avant toute mesure"
+  },
+  "mesures": {
+    "execution": "runBacktest, une jambe longue par stratégie : entrée = position croise 0,5 à la hausse ; sortie = position < 0,5 ; décision à la clôture, fill à l'open suivant ; position ouverte liquidée au dernier close (fin-donnees). Trois stratégies par cellule : v5 (regimeBtc 100, avec aux.refClose), v2 (regimeBtc 0, identique avec et sans aux), EMA 200 seule",
+    "coutsParCotePct": [
+      {
+        "id": "x1-central",
+        "frais": 0.05,
+        "slippage": 0.02
+      },
+      {
+        "id": "x2",
+        "frais": 0.1,
+        "slippage": 0.04
+      },
+      {
+        "id": "x3",
+        "frais": 0.15,
+        "slippage": 0.06
+      }
+    ],
+    "expectancyNette": "moyenne des pnl nets par trade en % de la taille (pnlPct), trade fin-données compris ; regroupée = sur tous les trades de toutes les cellules disponibles",
+    "equity": "points d'equity du moteur (capital réalisé + PnL latent à chaque clôture, point initial compris) ; drawdown max = max(pic − equity) en cotation sur les points de la fenêtre évaluée",
+    "sharpe": "par cellule et par stratégie, coûts x1 : rendements r_t = equity_t / equity_{t−1} − 1 sur les points dont le temps est ≥ debutEvaluationMs (premier rendement depuis le dernier point antérieur) ; Sharpe = moyenne(r) / écart-type(r, n−1) × √2191,5 (bougies 4h par an) ; indéfini si moins de deux rendements ou écart-type nul",
+    "comparable": "cellule disponible dont le Sharpe de la v2 est défini (sur la fenêtre, ou sur la moitié considérée) ; un Sharpe v5 indéfini (aucune variation d'equity : aucun trade) compte comme NON supérieur — la cellule reste dans le dénominateur. Même convention que le test v4",
+    "parCellule": "pour chaque stratégie et chaque coût : trades, clos par règle, fin-données, expectancy nette, PnL net total (cotation et % du capital), taux de gagnants, profit factor, drawdown max (cotation et % du capital), RoMaD, Sharpe (x1), exposition, durée moyenne, MAE moyenne ; pour la v5 : entrées de la v2 refusées par le garde-fou (référence ≤ EMA 100 à la décision d'entrée), part des trades clos de la v2 conservés, part des décisions évaluées où la référence est au-dessus de son EMA 100",
+    "timing": {
+      "statut": "DESCRIPTIF (aucun effet sur le verdict) : la question du test est l'écart v5 − v2, pas le timing des entrées, déjà jugé en 4h sur 2017-2024",
+      "statistique": "rendement log brut capté : somme, sur les décisions évaluées i, de position × ln(open[i+2]/open[i+1]) (dernière décision : ln(close[n−1]/open[n−1])) ; pour v5, v2 et EMA 200",
+      "nul": "décalage circulaire commun à toutes les cellules disponibles (même k, calculé sur la plus courte fenêtre), tirages 1999, graine 20261010, générateur mulberry32, fractionMin 0,1, fractionMax 0,9, p unilatérale (1 + #≥observé) / (tirages + 1)"
+    },
+    "controlesBloquants": [
+      "position de campagne (sortie masquée `etat` du registre, regimeBtc 100 puis 0, `aux.refClose` fournie) = recalcul direct depuis les fonctions exportées de stratAxis (votes, EMA de tendance, référence alignée par `alignAux`, EMA 100 de la référence depuis sa première valeur définie, positionsAxis sur la tendance complétée, fin = n−2 : les bougies du cache n'ont pas de champ `closed`) à chaque bougie ; série « stop » du chart entièrement indéfinie pour les deux réglages (stopAtr 0)",
+      "v2 de la campagne (regimeBtc 0) = positionsAxis de la v2 livrée (tendance seule), à chaque bougie ; calcul à regimeBtc 0 identique au caractère près (JSON) avec et sans `aux.refClose`",
+      "garde-fou sur les données réelles : aucune entrée de la v5 (0 → 1 décidé à la bougie i) sans référence > EMA 100 ni sans condition d'achat de la v2 vraie à la bougie i ; référence et EMA définies à toutes les décisions évaluées (sinon arrêt : le cas « non appliqué » ne doit pas se présenter dans la campagne) ; marqueurs du chart aux bougies et dans le sens des changements de position, étiquettes « Achat »/« Vente », infobulle d'achat de la v5 nommant « EMA 100 » de la référence et celle de la v2 ne la nommant pas",
+      "alignement : pour chaque bougie, l'heure de la bougie BTC retenue est ≤ l'heure de la cellule et aucune bougie BTC d'heure intermédiaire n'existe ; part des reports consignée",
+      "causalité sur trois préfixes (40 %, 70 %, 90 % de la série) : position ET garde-fou identiques à la série complète jusqu'à l'avant-dernière bougie du préfixe (aux tronquée de même)",
+      "coûts x1 : chronologie des décisions du moteur (entrées, sorties par règle, position fin-données) identique aux changements de position nés après le warmup ; chronologie des fills identique à tous les niveaux de coût et sans coût",
+      "statistique de timing observée = somme des ln(prixSortie/prixEntree) d'une exécution sans frais ni slippage (écart ≤ 1e-9)",
+      "Sharpe recalculé par une seconde méthode (depuis les trades et les closes, sans passer par l'equity du moteur) sur trois cellules : écart ≤ 1e-9",
+      "en cas d'écart : arrêt sans verdict ; le message et la trace ne nomment que la cellule et le contrôle, sans aucune valeur mesurée ; diagnostic ensuite sur données déjà vues ou synthétiques"
+    ]
+  },
+  "criteres": {
+    "minPartCellulesDisponibles": 0.75,
+    "minCellulesComparables": 80,
+    "minTradesClosRegroupesV5": 100,
+    "partMinP2": 0.6,
+    "partMinP3": 0.5,
+    "P1": "amélioration de l'espérance : expectancy nette regroupée de la v5 STRICTEMENT supérieure à celle de la v2 aux coûts x1 ET x3 (2 blocs) ; au moins 100 trades clos regroupés pour la v5, sinon « insuffisant »",
+    "raisonP1": "la question du test est l'écart v5 − v2 (le garde-fou rend-il AXIS plus précis ?), pas la viabilité absolue, qui dépend de la dérive du pool (la v4 a échoué P1 sur un pool dont l'achat-conservation perdait 87 % en médiane, sans que P1 dise rien du filtre). La viabilité absolue (expectancy v5 > 0 aux deux coûts) est mesurée, rapportée et écrite dans l'infobulle quel que soit le verdict.",
+    "P2": "amélioration ajustée du risque : part des cellules comparables où le Sharpe (x1) de la v5 est STRICTEMENT supérieur à celui de la v2 ≥ 60 % (1 bloc) ; égalité ou Sharpe v5 indéfini = non battue",
+    "P3": "stabilité : la même part sur chaque moitié de la fenêtre évaluée de chaque cellule > 50 % dans CHAQUE moitié (2 blocs) ; au moins 80 cellules comparables par moitié, sinon « insuffisant »",
+    "dependance": "sous l'hypothèse d'absence d'effet, la part attendue est 50 %. Les cellules partagent le facteur de marché crypto : un test des signes supposant l'indépendance serait trop optimiste (quelques épisodes communs déplacent toutes les cellules à la fois). Le critère est donc une taille d'effet fixée d'avance (marge de 10 points pour P2 ; majorité dans chaque moitié pour P3), pas une p-valeur ; le p du test des signes est rapporté à titre descriptif avec cette réserve. En exploration (151 alts vues), la part valait 77,5 % sur la fenêtre et 58,3 % puis 72,2 % par moitié : le seuil de 60 % laisse 17 points de marge sur la fenêtre, mais la première moitié de l'exploration (58,3 %) montre que P3 est le bloc le plus exposé.",
+    "verdict": {
+      "FAVORABLE": "les 5 blocs tenus",
+      "DEFAVORABLE": "au moins un bloc mesuré en échec : expectancy nette regroupée de la v5 ≤ celle de la v2 avec assez de trades, part < 60 % sur la fenêtre, ou part ≤ 50 % dans une moitié, avec assez de cellules comparables",
+      "NON_CONCLUANT": "aucun échec mesuré, mais moins de 75 % des cellules du pool disponibles (106 sur 141), moins de 80 cellules comparables (fenêtre ou moitié), ou moins de 100 trades clos regroupés pour la v5"
+    },
+    "selectionApresResultats": false,
+    "ecartRegleExploration": false,
+    "executionUnique": "une seule exécution, par « bun scripts/valider-axis-v5.ts --campagne », après 2026-10-10T00:00:00Z (finExclue) : le runner refuse avant toute donnée si l'heure courante est antérieure (tout autre argument est refusé ; l'option --essai ne lit que les 8 symboles déjà vus du cache de l'exploration, cellules 2023-07-01 → 2026-10-08, mêmes mesures, sorties hors dépôt ; l'option --banc rejoue les chemins de verdict sur des résultats synthétiques sans lire aucune donnée ; ni l'une ni l'autre n'a de valeur probante) ; le runner refuse de partir si le code figé diffère de versions.codeAuFigeageSha256, si l'arbre des paquets mesurés diffère de versions.arbreCode ou si des fichiers mesurés ne sont pas commités ; une interruption technique avant le verdict est journalisée (cause, correctif, revue) avant toute relance ; aucun résultat partiel n'est affiché pendant le calcul",
+    "labelAutomatiqueStrategieValidee": false
+  },
+  "descriptif": {
+    "regle": "aucun effet sur le verdict, aucune sélection",
+    "couts": "x2 pour les trois stratégies",
+    "parts": "parts de cellules comparables où la v5 bat la v2 : drawdown max plus faible, PnL net total ≥, RoMaD supérieur, expectancy par trade supérieure ; mêmes parts pour v5 contre EMA 200 et v2 contre EMA 200 (Sharpe, PnL, drawdown)",
+    "pnlMoyen": "PnL net total moyen par cellule disponible, en % du capital, pour v5, v2 et EMA 200 (x1 et x3) ; expectancy nette regroupée de la v2 et de l'EMA 200 (la v2 n'est pas jugée ici : son test reste celui de 2017-2024)",
+    "viabiliteAbsolue": "expectancy nette regroupée > 0 à x1 et x3, pour la v5 et pour la v2 — rapportée et écrite dans l'infobulle quel que soit le verdict, sans être un bloc",
+    "gardeFou": "entrées de la v2 refusées par le garde-fou (référence ≤ EMA 100 à la décision), regroupées ; trades clos de la v2 conservés par la v5 ; part des décisions évaluées où la référence est au-dessus de son EMA 100",
+    "testDesSignes": "p unilatérale binomiale de la part P2 (cellules indépendantes supposées : optimiste, voir criteres.dependance)",
+    "exposition": "part des décisions évaluées en position, par stratégie",
+    "timing": "p du décalage circulaire commun pour v5, v2 et EMA 200 (mesures.timing)",
+    "parAnnee": "trades et PnL net x1 par année civile d'entrée, par stratégie",
+    "parAnneeDeCotation": "parts P2 et PnL moyen par année de cotation des cellules (2019-2021, 2022, 2023, 2024)",
+    "achatConservation": "variation du prix entre l'open de la première bougie évaluée et le dernier close, médiane et moyenne sur les cellules",
+    "alignement": "part des bougies de la cellule dont la référence est reportée par LOCF (heure BTC < heure de la cellule)",
+    "supplementaires": "autres sorties du runner, descriptives et sans effet sur le verdict : frais totaux par stratégie et par coût ; médianes par cellule (PnL net, drawdown, Sharpe, trades clos) ; Sharpe aux coûts x2 et x3 par cellule ; somme des PnL en %, gagnants ; timing par cellule et par stratégie (médiane et quantile 95 % du nul) ; le p du test des signes n'est rapporté que sur la fenêtre, pas par moitié"
+  },
+  "suites": {
+    "independantesDuVerdict": "le paramètre `regimeBtc` (0 = sans garde-fou) existe quel que soit le verdict ; `textesAxis` reçoit l'unité, le réglage du stop, celui du filtre ADX ET celui du garde-fou ; la mention « référence indisponible : garde-fou non appliqué » existe quel que soit le verdict",
+    "FAVORABLE": {
+      "application": "le défaut du chart devient regimeBtc = 100 ; les ▲ deviennent ceux du garde-fou, les ▼ gardent leur règle ; l'infobulle 4h ajoute la mesure ci-dessous ; autres unités : « non mesuré en {u} » ; les contextes sans référence (alertes, BT, screener, rejeu commun) disent « référence indisponible : garde-fou non appliqué (signaux de la v2) » ; lot ultérieur (hors de cette campagne) : servir `refClose` aux alertes et au BT, et porter la profondeur de `refClose` du chart à 1 500 bougies ; documentation, README, BUILD-CONTRACT mis à jour ; merge et déploiement autorisés par le propriétaire",
+      "infobulle4hRegime100": "{texteBase} ; garde-fou de régime BTC (référence > EMA 100) : sur données jamais vues ({nCellules} paires USDT KuCoin 4h cotées 2019-2024, suivies jusqu'en 2026), Sharpe meilleur que sans garde-fou sur {pSharpe} % des actifs, drawdown max plus faible sur {pDd} %, expectancy nette {expV5} % contre {expV2} % par trade ({viabilite}) — mesure passée, pas une promesse",
+      "infobulleAutreUniteRegime100": "{texteUnite} ; garde-fou de régime BTC (référence > EMA 100) non mesuré en {u}",
+      "viabilite": {
+        "vraie": "gagnante en absolu aux coûts x1 et x3",
+        "fausse": "mais perdante en absolu sur ce pool, comme la v2"
+      }
+    },
+    "DEFAVORABLE": {
+      "application": "comme la v4 : le défaut du chart reste regimeBtc = 0 (v2 exacte, signaux inchangés) ; le réglage reste disponible et son infobulle dit l'échec ; ces données sont consommées : aucune autre variante n'y sera jugée ; documentation mise à jour ; merge et déploiement autorisés par le propriétaire (l'outil livré ne change pas de défaut)",
+      "infobulleGardeFouActif": "{texteBase} ; garde-fou de régime (référence > EMA {k}) actif : test du 10 octobre 2026 échoué sur données jamais vues ({nCellules} paires USDT KuCoin 4h cotées 2019-2024 : {raisons}) — pas une amélioration validée",
+      "raisons": {
+        "P1": "expectancy nette pas meilleure que sans garde-fou ({expV5} % contre {expV2} % par trade)",
+        "P2": "Sharpe meilleur que sans garde-fou sur {pSharpe} % des actifs seulement",
+        "P3": "amélioration absente dans une moitié de la période ({p1} % puis {p2} %)",
+        "jonction": " ; "
+      }
+    },
+    "NON_CONCLUANT": {
+      "application": "comme la v4 (DEFAVORABLE), avec la formulation ci-dessous ; pas d'autre tentative sans décision explicite du propriétaire",
+      "infobulleGardeFouActif": "{texteBase} ; garde-fou de régime (référence > EMA {k}) actif : test du 10 octobre 2026 non concluant sur données jamais vues ({raison}) — non mesuré",
+      "raisons": {
+        "cellules": "{n} cellules disponibles sur {total}",
+        "comparables": "{n} cellules comparables",
+        "trades": "{n} trades clos",
+        "moitie": "{n} cellules comparables dans une moitié"
+      }
+    },
+    "communes": {
+      "sansGardeFou": "{texteBase} ; sans garde-fou de régime (réglage) : signaux de la v2 testée",
+      "reglageHorsTest": "{texteBase} ; garde-fou de régime (référence > EMA {k}) : réglage hors du test du 10 octobre 2026 (EMA 100 mesurée) — non mesuré",
+      "referenceIndisponible": "garde-fou de régime non appliqué (référence indisponible)",
+      "ordreDesMentions": "garde-fou de régime, puis filtre ADX, puis stop ; avec le filtre flux actif, sa réserve garde la priorité et les mentions s'y ajoutent dans le même ordre",
+      "placeholders": "{nCellules} = cellules disponibles ; {pSharpe}, {pDd} = parts en % entières des cellules comparables ; {expV5}, {expV2} = expectancy nette regroupée par trade en %, une décimale, signe explicite ; {p1}, {p2} = parts par moitié ; {viabilite} = formulation de la viabilité absolue ; {k} = réglage ; {texteBase} = texte de l'unité (4h : formulation actuelle ; autres : formulation du test des unités) ; {texteUnite} idem ; {u} = unité du chart ; formats de nombres : point décimal, comme les infobulles existantes",
+      "testCroise": "apps/web/src/chart/indicators.axisRegime.test.ts compare les textes du chart au résultat de cette campagne (empreinte SHA-256 du résultat épinglée), comme pour les tests du stop et du filtre ADX",
+      "sansGardeFouApplication": "le texte sansGardeFou ne s'applique qu'en FAVORABLE (il décrit alors le réglage 0 choisi par l'utilisateur). En DEFAVORABLE ou NON_CONCLUANT, le défaut reste 0 et les textes à regimeBtc = 0 (4h et toutes les unités, avec ou sans filtre/stop) restent identiques au caractère près aux textes d'avant le test (texteBase de chaque unité) ; le runner vérifie au démarrage que textesAxis(« 4h », 0, 0, 0) vaut le texteBase 4h"
+    },
+    "avantVerdict": "{texteBase} ; garde-fou de régime BTC (référence > EMA 100) actif : non mesuré (test du 10 octobre 2026 en cours)"
+  },
+  "repetitionTechnique": {
+    "objet": "option --essai : même code, mêmes mesures, sur les 8 symboles DÉJÀ VUS (cache de l'exploration scripts/.cache-klines/axis-v5/, aucun téléchargement), chaque cellule commençant au 2023-07-01 jusqu'au 2026-10-08 exclu ; la référence BTC est la série BTCUSDT du même cache ; BTC rapportée à titre descriptif (garde-fou ≡ base) et exclue des parts ; sorties dans /tmp/axis-v5-essai/, hors dépôt, sans valeur probante. Banc des chemins de verdict sur résultats synthétiques (FAVORABLE, chaque échec, chaque insuffisance), chemins d'arrêt (copie cassée du calcul, hash, figeage, fichiers non commités)",
+    "debutInclus": "2023-07-01",
+    "finExclue": "2026-10-08",
+    "cache": "scripts/.cache-klines/axis-v5/",
+    "referenceBtc": "BTCUSDT du même cache",
+    "symboles": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "XRPUSDT",
+      "SOLUSDT",
+      "BNBUSDT",
+      "ADAUSDT",
+      "LINKUSDT",
+      "DOGEUSDT"
+    ]
+  },
+  "versions": {
+    "baseCommit": "18ef8b3ffea1c755fd176ec0d28d50351ab61564",
+    "commitDeFigeage": "commit local sur baseCommit, avant la campagne : ce manifeste, le runner, le journal de revue, le garde-fou dans stratAxis (paramètre regimeBtc, défaut 0 au figeage, mention « test en cours ») et ses tests ; le résultat reporte son SHA-1",
+    "arbreCode": {
+      "dossiers": [
+        "packages/indicators/src",
+        "packages/backtest/src",
+        "packages/types/src"
+      ],
+      "fichiers": 247,
+      "sha256": "53c042dcc40bb4deff5cdd82f546bbecfb77d4a4283945093497b46c17b20ceb"
+    },
+    "codeAuFigeageSha256": {
+      "packages/indicators/src/strategy/stratAxis.ts": "a47c56d7782388edaaafa1d576613f561a38adfe703d64dff1a1e67f54f63220",
+      "packages/indicators/src/utils.ts": "693259721a342f3adf0c897b5e279a9f6e9eb81bdb6d134449c3d19723c5266b",
+      "packages/indicators/src/utils-fabrique-strategie.ts": "8d177aa5599a6e7bd02c73f5556e9f79f121a8935352c6383c79e01dda47a715",
+      "packages/indicators/src/engine.ts": "fec8501639cca8e4afef677ec2426c310b408aad3868218cba6abff39da79470",
+      "packages/indicators/src/momentum/rsi.ts": "5c9b93ec36578152a1dde9ea139064f56ed7a2a997531c300b59d1c6a934ec7a",
+      "packages/indicators/src/trend/adx.ts": "c1704f2e876995c75d54fa572a9f691b944d107cf179fdc024b5ec0629fba6df",
+      "packages/indicators/src/trend/macd.ts": "ad8b1a85f0b344d0c390408cfd18288bfaeea92e66700f9f14b38e61ff39ebfc",
+      "packages/indicators/src/trend/supertrend.ts": "6401a4632aa4647c93c484b2da374c51590dc89acf197ee1e3352a1ff839b469",
+      "packages/indicators/src/volume/cmf.ts": "7e4a05cc6463cc94572be7f4c250ad81d71917f15962478ee8679339ff3f88a5",
+      "packages/indicators/src/trend/ema.ts": "b1546985251fe40c1e20d6869a18bbf9af69f92dcfa99c1480b731ca94b0107a",
+      "packages/indicators/src/registry.ts": "edf081a34bc36cc71c4d1b6aa24c47baaf7025836775665e59b9a7f217e6e507",
+      "packages/indicators/src/index.ts": "434bafab9343da78716366192ed5fe31e01be1fbb49e1d63fbd5f018dfb82cca",
+      "packages/indicators/src/timeframes.ts": "46f5435a7601a724f9f7a782570bc30d44e1a8789e188ae2e244c8748d5d11dd",
+      "packages/indicators/src/utils-aux.ts": "3d4b5a35611d67ce772803eb9d5e3e92ef8ee25eeee11e31dda39643a070bd2e",
+      "packages/backtest/src/engine.ts": "4b1baadc37494b10537818259bc94e0c7b334794d272b3efbc295b2af8011d9d",
+      "packages/backtest/src/types.ts": "572e8128ba2513cbb59b366a624aac7c2f7d24e23fdca4e63202ed54355c5633",
+      "packages/types/src/index.ts": "9c3a9866cb0a78e067c1eed54b95455c2ec5bd90348978e8933a4cbac6e5bea0"
+    },
+    "pnpmLockSha256": "130d4fb62f5223486552e31137f28d4901e098bf7a78325b943f30fc6beac062",
+    "bun": "1.3.11"
+  }
+}

@@ -299,16 +299,18 @@ describe("raisonUnusableIndicateur", () => {
 describe("séries auxiliaires facultatives (auxFacultatives)", () => {
   const axis = def("stratAxis");
 
-  it("AXIS déclare l'OI facultatif : utilisable partout, l'OI n'est servi que sur un perp USDT", () => {
-    expect(axis.auxFacultatives).toEqual(["oi"]);
+  it("AXIS déclare l'OI et refClose facultatifs : utilisable partout, l'OI n'est servi que sur un perp USDT", () => {
+    expect(axis.auxFacultatives).toEqual(["oi", "refClose"]);
     expect(raisonUnusableIndicateur(axis, binanceBtc)).toBeNull();
-    expect(auxFacultativesServies(axis, binanceBtc)).toEqual(["oi"]);
+    // refClose (niveau du symbole de référence, garde-fou de régime v5) est servie partout ;
+    // oi reste réservée aux symboles USDT-compatibles.
+    expect(auxFacultativesServies(axis, binanceBtc)).toEqual(["oi", "refClose"]);
     const kraken: ContexteIndicateur = { exchange: "kraken", symbol: "BTC/USD", timeframe: "1d" };
     expect(raisonUnusableIndicateur(axis, kraken)).toBeNull();
-    expect(auxFacultativesServies(axis, kraken)).toEqual([]);
+    expect(auxFacultativesServies(axis, kraken)).toEqual(["refClose"]);
     const action: ContexteIndicateur = { exchange: "twelvedata", symbol: "AAPL", timeframe: "1d" };
     expect(raisonUnusableIndicateur(axis, action)).toBeNull();
-    expect(auxFacultativesServies(axis, action)).toEqual([]);
+    expect(auxFacultativesServies(axis, action)).toEqual(["refClose"]);
   });
 
   it("applique par série les mêmes règles que pour les séries requises", () => {

@@ -158,6 +158,30 @@
  * et textes de la v2 inchangés) ; le réglage reste disponible et l'infobulle
  * d'un filtre actif dit l'échec (≥ 25) ou « hors du test » (autre seuil). Ces
  * données sont consommées.
+ *
+ * GARDE-FOU DE RÉGIME BTC (v5, 10 octobre 2026). Réglage `regimeBtc` : quand
+ * il est > 0, l'achat exige en plus que la référence du chart (série aux
+ * `refClose`, FACULTATIVE : close du symbole de référence — BTC par défaut —
+ * alignée par ouverture, LOCF) clôture au-dessus de sa propre EMA de
+ * `regimeBtc` bougies, EMA calculée sur la série alignée depuis sa première
+ * valeur définie (`emaDepuisPremiereDefinie` : l'`ema` du dépôt amorce sur les
+ * premières valeurs en comptant les indéfinies pour 0, ce qui fausserait une
+ * référence partiellement couverte). Référence ou EMA indéfinie à la bougie =
+ * garde-fou NON appliqué (condition de la v2) : alertes, fenêtre BT,
+ * screener et rejeu commun n'ont pas de référence. La condition d'achat ainsi
+ * complétée est celle que l'armement observe ; les ventes ne changent pas.
+ * 0 = sans garde-fou, la v2 exacte. Motif : les rapports v3 et v4 montrent que
+ * les cellules partagent un même facteur de marché (2025 perdante pour toutes
+ * les stratégies long/plat, paires jeunes en baisse) ; la v2 achète un alt
+ * au-dessus de SA propre EMA 200 même quand BTC — le marché — est sous la
+ * sienne. Exploration sur données déjà vues (scripts/explorer-axis-v5.ts,
+ * scripts/axis/rapport-explo-v5-2026-10-09.md — SANS VALEUR PROBANTE) :
+ * `btc-ema100` retenue par la règle pré-écrite (Sharpe > v2 sur 77,5 % des
+ * 151 alts, > 50 % dans chaque moitié, 6/7 majors). Réglage soumis au test du
+ * 10 octobre 2026 sur données jamais vues (pool KuCoin spot USDT, manifeste
+ * scripts/axis/manifeste-v5-2026-10-10.json) : TEST EN COURS — l'infobulle le
+ * dit (« non mesuré ») tant que le verdict n'est pas rendu. Mesures passées,
+ * jamais une promesse.
  */
 
 import type { CalcContext, Candle, IndicatorDef, LabelAnnotation, MarqueurAnnotation, Timeframe } from "@axiom/types";
@@ -188,6 +212,8 @@ export const AMORCE_AXIS = 1500;
 export const ADX_ENTREE_PERIODE = 14;
 /** Seuil d'ADX à l'entrée soumis au test du 9 octobre 2026 ; tout autre réglage > 0 est hors test. */
 export const ADX_ENTREE_TESTE = 25;
+/** Période de l'EMA de référence du garde-fou de régime soumise au test du 10 octobre 2026 ; tout autre réglage > 0 est hors test. */
+export const REGIME_TESTE = 100;
 
 const signe = (a: number, b: number): number => (a > b ? 1 : a < b ? -1 : 0);
 
@@ -516,18 +542,33 @@ const suffixeAdx = (adxEntree: number): string =>
       ? ` ; filtre ADX ${ADX_ENTREE_PERIODE} ≥ ${ADX_ENTREE_TESTE} à l'entrée actif : test du 9 octobre 2026 échoué sur données jamais vues (123 alts 4h cotées 2023-2025 : expectancy nette ≤ 0 aux coûts x1 ou x3 ; amélioration absente dans une moitié de la période (54 % puis 48 %)) — pas une amélioration validée`
       : ` ; filtre ADX ${ADX_ENTREE_PERIODE} ≥ ${adxEntree} à l'entrée : réglage hors du test du 9 octobre 2026 (≥ ${ADX_ENTREE_TESTE} mesuré) — non mesuré`;
 
+// Garde-fou de régime BTC (v5) : test du 10 octobre 2026 en cours sur données jamais
+// vues (pool KuCoin spot USDT, manifeste-v5-2026-10-10.json). L'infobulle d'un réglage
+// actif dit « non mesuré (test en cours) » ; après le verdict, le texte est remplacé
+// par la formulation de ses suites (comme les tests v3 et v4).
+const suffixeRegime = (regimeBtc: number): string =>
+  regimeBtc <= 0
+    ? ""
+    : regimeBtc === REGIME_TESTE
+      ? ` ; garde-fou de régime BTC (référence > EMA ${REGIME_TESTE}) actif : non mesuré (test du 10 octobre 2026 en cours)`
+      : ` ; garde-fou de régime (référence > EMA ${regimeBtc}) : réglage hors du test du 10 octobre 2026 (EMA ${REGIME_TESTE} mesurée) — non mesuré`;
+
 /**
  * Textes des infobulles selon l'unité du chart (4h ou unité absente : ceux des tests 4h)
- * et les réglages hors des textes de base : filtre ADX à l'entrée (`adxEntree` > 0) puis
- * stop (`stopAtr` > 0), chacun ajoutant sa mention aux signaux ; à 0, textes inchangés.
+ * et les réglages hors des textes de base : garde-fou de régime (`regimeBtc` > 0), puis
+ * filtre ADX à l'entrée (`adxEntree` > 0), puis stop (`stopAtr` > 0), chacun ajoutant
+ * sa mention aux signaux dans cet ordre ; à 0, textes inchangés.
  */
 export function textesAxis(
   u: Timeframe | undefined,
   stopAtr = 0,
-  adxEntree = 0
+  adxEntree = 0,
+  regimeBtc = 0
 ): { signaux: string; fortAchat: string; forteVente: string; qualification: string } {
   const t = textesUnite(u);
-  return stopAtr > 0 || adxEntree > 0 ? { ...t, signaux: t.signaux + suffixeAdx(adxEntree) + suffixeStop(stopAtr) } : t;
+  return stopAtr > 0 || adxEntree > 0 || regimeBtc > 0
+    ? { ...t, signaux: t.signaux + suffixeRegime(regimeBtc) + suffixeAdx(adxEntree) + suffixeStop(stopAtr) }
+    : t;
 }
 
 function textesUnite(u: Timeframe | undefined): { signaux: string; fortAchat: string; forteVente: string; qualification: string } {
@@ -574,12 +615,32 @@ export const texteAmorce = (n: number): string =>
     : "";
 
 /**
+ * EMA amorcée sur la première valeur DÉFINIE de `valeurs` : l'`ema` du dépôt
+ * amorce sur les `length` premières valeurs en comptant les indéfinies pour 0 —
+ * sur une référence partiellement couverte (`refClose` du chart : ~720 bougies
+ * servies sur 1 500 de cellule), l'amorce doit partir de la première valeur
+ * connue. `undefined` avant le premier indice défini ; tout indéfini → tout
+ * indéfini ; sans valeur indéfinie, strictement égal à `ema`. PURE.
+ */
+export function emaDepuisPremiereDefinie(
+  valeurs: Array<number | undefined>,
+  length: number
+): Array<number | undefined> {
+  const f = valeurs.findIndex((v) => v !== undefined);
+  if (f === -1) return valeurs.map(() => undefined);
+  const suite = ema(valeurs.slice(f) as number[], length);
+  return valeurs.map((_, i) => (i < f ? undefined : suite[i - f]));
+}
+
+/**
  * Cœur commun à `calc` et au rejeu `positionAxis` : votes → score → tendance
- * complétée du filtre flux (`filtreFlux`) et du filtre ADX (`adxEntree`) →
- * positions et stop de `positionsStopAxis`. `fin`, borne des décisions, vaut
- * n−1 quand la source dit la dernière bougie clôturée (`closed === true` :
- * runtime des alertes, flux des sources qui posent le drapeau), n−2 sinon —
- * la bougie en formation n'est jamais lue (anti-repaint).
+ * complétée du filtre flux (`filtreFlux`), du filtre ADX (`adxEntree`) et du
+ * garde-fou de régime (`regimeBtc` > 0 : référence `refClose` > son EMA, sinon
+ * non appliqué) → positions et stop de `positionsStopAxis`. `fin`, borne des
+ * décisions, vaut n−1 quand la source dit la dernière bougie clôturée
+ * (`closed === true` : runtime des alertes, flux des sources qui posent le
+ * drapeau), n−2 sinon — la bougie en formation n'est jamais lue
+ * (anti-repaint).
  */
 function coeurAxis(
   candles: Candle[],
@@ -590,6 +651,9 @@ function coeurAxis(
   score: Array<number | undefined>;
   flux: FluxBougie[];
   adx: Array<number | undefined> | undefined;
+  ref: Array<number | undefined> | undefined;
+  emaRef: Array<number | undefined> | undefined;
+  regime: number;
   pos: Array<number | undefined>;
   stop: Array<number | undefined>;
   raisons: Map<number, RaisonSortieAxis>;
@@ -611,9 +675,16 @@ function coeurAxis(
   // Même ADX que le vote DMI ; calculé seulement si le filtre est actif (défaut intact).
   const adx = adxEntree > 0 ? adxOf(candles, ADX_ENTREE_PERIODE).adx : undefined;
   const adxSuffisant = (i: number): boolean => adx === undefined || (adx[i] ?? -Infinity) >= adxEntree;
+  // Garde-fou de régime (v5) : la série aux `refClose` est facultative ; référence
+  // ou EMA indéfinie à la bougie = garde-fou NON appliqué (condition de la v2).
+  const regime = Number(params.regimeBtc ?? 0);
+  const ref = regime > 0 ? ctx.aux?.refClose : undefined;
+  const emaRef = ref === undefined ? undefined : emaDepuisPremiereDefinie(ref, regime);
+  const regimeVrai = (i: number): boolean =>
+    regime <= 0 || ref?.[i] === undefined || emaRef?.[i] === undefined || ref[i]! > emaRef[i]!;
   const { pos, stop, raisons } = positionsStopAxis(
     score,
-    tendance.map((t, i) => (t === undefined ? undefined : (closes[i] ?? t) > t && (!filtre || force(i, 1).fort) && adxSuffisant(i))),
+    tendance.map((t, i) => (t === undefined ? undefined : (closes[i] ?? t) > t && (!filtre || force(i, 1).fort) && adxSuffisant(i) && regimeVrai(i))),
     closes,
     rma(trueRange(candles), ATR_STOP_PERIODE),
     Number(params.seuil ?? 5),
@@ -621,7 +692,7 @@ function coeurAxis(
     fin,
     stopAtr
   );
-  return { votes, score, flux, adx, pos, stop, raisons, fin };
+  return { votes, score, flux, adx, ref, emaRef, regime, pos, stop, raisons, fin };
 }
 
 /**
@@ -646,9 +717,11 @@ export const stratAxis: IndicatorDef = {
   name: "AXIS",
   category: "strategy",
   pane: "overlay",
-  // Facultative : sans OI (symbole hors perp USDT, fetch en échec), la couche flux lit
-  // volume et delta seuls ; les signaux du cœur ne dépendent de rien d'auxiliaire.
-  auxFacultatives: ["oi"],
+  // Facultatives : sans OI (symbole hors perp USDT, fetch en échec), la couche flux lit
+  // volume et delta seuls ; sans `refClose` (contexte sans référence : alertes,
+  // fenêtre BT, screener, fetch en échec), le garde-fou de régime n'est pas appliqué.
+  // Les signaux du cœur ne dépendent de rien d'auxiliaire.
+  auxFacultatives: ["oi", "refClose"],
   amorceBougies: AMORCE_AXIS,
   inputs: [
     { key: "seuil", name: "Achat si score ≥", type: "number", default: 5, min: 1, max: 6 },
@@ -667,6 +740,7 @@ export const stratAxis: IndicatorDef = {
     { key: "filtreFlux", name: "N'acheter que sur flux fort", type: "boolean", default: false },
     { key: "stopAtr", name: "Stop suiveur (× ATR 14, 0 = sans)", type: "number", default: 0, min: 0, max: 20 },
     { key: "adxEntree", name: "Achat si ADX 14 ≥ (0 = sans)", type: "number", default: 0, min: 0, max: 100 },
+    { key: "regimeBtc", name: "Garde-fou de régime : référence > EMA (bougies, 0 = sans)", type: "number", default: 0, min: 0, max: 1000 },
   ],
   outputs: [
     { key: "prixSignal", name: "Prix d'achat", style: "line" },
@@ -679,7 +753,7 @@ export const stratAxis: IndicatorDef = {
   ],
   calc(candles, params, ctx) {
     const n = candles.length;
-    const { votes, score, flux, adx, pos, stop, raisons, fin } = coeurAxis(candles, params, ctx);
+    const { votes, score, flux, adx, ref, emaRef, regime, pos, stop, raisons, fin } = coeurAxis(candles, params, ctx);
     const seuilRvol = Number(params.seuilRvol ?? 1.5);
     const seuilOi = Number(params.seuilOi ?? 2);
     const oiBougies = Number(params.oiBougies ?? 6);
@@ -698,8 +772,8 @@ export const stratAxis: IndicatorDef = {
     }
 
     const noms = [`EMA ${params.emaRapide}/${params.emaLente}`, "Supertrend", "DMI", "MACD", "RSI", "CMF"];
-    const textes = textesAxis(ctx.timeframe, stopAtr, adxEntree);
-    const reserve = filtre ? RESERVE_FILTRE + suffixeAdx(adxEntree) + suffixeStop(stopAtr) : textes.signaux;
+    const textes = textesAxis(ctx.timeframe, stopAtr, adxEntree, regime);
+    const reserve = filtre ? RESERVE_FILTRE + suffixeRegime(regime) + suffixeAdx(adxEntree) + suffixeStop(stopAtr) : textes.signaux;
     // Placée avant la couche flux : la fin de l'infobulle (« ; qualification) — statut »)
     // reste celle que les tests croisés comparent aux formulations figées des campagnes.
     const amorce = texteAmorce(n);
@@ -727,7 +801,16 @@ export const stratAxis: IndicatorDef = {
         ? `close sous le stop suiveur (${niveau === undefined ? "n.d." : prix(niveau)}) ; ${resultat} depuis l'achat (hors frais)`
         : `${resultat} depuis l'achat (hors frais)`;
       // Filtre actif : la valeur d'ADX qui a laissé passer l'achat (toujours définie à un achat).
-      const entree = `close au-dessus de l'EMA ${params.emaTendance}${adx === undefined ? "" : `, ADX ${ADX_ENTREE_PERIODE} ${(adx[idx] ?? 0).toFixed(1)} ≥ ${adxEntree}`}`;
+      // Garde-fou actif, après la mention ADX : la référence au-dessus de son EMA si le
+      // garde-fou était appliqué, sinon la mention « non appliqué » (suites.communes v5).
+      const entree =
+        `close au-dessus de l'EMA ${params.emaTendance}` +
+        (adx === undefined ? "" : `, ADX ${ADX_ENTREE_PERIODE} ${(adx[idx] ?? 0).toFixed(1)} ≥ ${adxEntree}`) +
+        (regime > 0
+          ? ref?.[idx] !== undefined && emaRef?.[idx] !== undefined
+            ? `, référence ${prix(ref[idx]!)} > EMA ${regime} ${prix(emaRef[idx]!)}`
+            : ", garde-fou de régime non appliqué (référence indisponible)"
+          : "");
       marqueurs.push({
         idx,
         valeur,

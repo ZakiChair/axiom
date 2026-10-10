@@ -9,8 +9,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AlertDef } from "@axiom/alerts";
 import type { Candle } from "@axiom/types";
 
-const { executerScreenerMock, subscribeTickersMock, daemonSupporteMock, detectDaemonMock, urlDaemonMock, chargerFluxMock, chargerOnchainMock, coinalyzeFundingMock, coinalyzeHistoryMock } =
+const { executerScreenerMock, subscribeTickersMock, daemonSupporteMock, detectDaemonMock, urlDaemonMock, chargerFluxMock, chargerOnchainMock, coinalyzeFundingMock, coinalyzeHistoryMock, auxRecus, getAlignedMock } =
   vi.hoisted(() => ({
+    auxRecus: [] as unknown[],
+    getAlignedMock: vi.fn((_req: unknown, _cb: () => void): unknown => ({ status: "ready", aux: {} })),
     executerScreenerMock: vi.fn(),
     subscribeTickersMock: vi.fn((..._args: unknown[]) => () => {}),
     daemonSupporteMock: vi.fn(() => false),
@@ -21,6 +23,19 @@ const { executerScreenerMock, subscribeTickersMock, daemonSupporteMock, detectDa
     coinalyzeFundingMock: vi.fn(async () => ({ rate: 0 })),
     coinalyzeHistoryMock: vi.fn(async () => []),
   }));
+vi.mock("@axiom/alerts", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@axiom/alerts")>();
+  return {
+    ...original,
+    evaluerAlertes: vi.fn((lot: unknown, ctx: { aux?: unknown }) => {
+      auxRecus.push(ctx.aux);
+      return original.evaluerAlertes(lot as Parameters<typeof original.evaluerAlertes>[0], ctx as Parameters<typeof original.evaluerAlertes>[1]);
+    }),
+  };
+});
+vi.mock("../chart/auxProvider", () => ({
+  auxProvider: { getAligned: getAlignedMock },
+}));
 vi.mock("../data/ticker", async (importOriginal) => {
   const original = await importOriginal<typeof import("../data/ticker")>();
   return { ...original, subscribeTickers: subscribeTickersMock };
@@ -96,6 +111,9 @@ beforeEach(() => {
   chargerOnchainMock.mockImplementation(() => new Promise(() => {}));
   coinalyzeFundingMock.mockClear();
   coinalyzeHistoryMock.mockClear();
+  auxRecus.length = 0;
+  getAlignedMock.mockReset();
+  getAlignedMock.mockImplementation((_req: unknown, _cb: () => void): unknown => ({ status: "ready", aux: {} }));
 });
 
 describe("alerte lente de flux sans panneau ouvert", () => {
@@ -913,5 +931,76 @@ describe("alertes de preset : pas de garde de visibilité, état de scan observa
       expect(presetAlertsStore.getState().alertes[0]?.derniereErreur).toContain("réseau HS");
     });
     expect(presetAlertsStore.getState().alertes[0]?.dernierScanTs).toBeGreaterThan(0);
+  });
+});
+
+describe("référence du garde-fou de régime dans les alertes web (10 octobre 2026)", () => {
+  const maintenant = Date.now();
+  const cloturees = (n: number) => Array.from({ length: n }, (_v, i) => bougie(maintenant - (n - i) * 60_000, 100 + i, true));
+  const axisDef: AlertDef = {
+    id: "axis-regime",
+    symbol: "BTCUSDT",
+    source: "binance",
+    condition: { type: "indicateur-seuil", indicateurId: "stratAxis", params: {}, output: "etat", comparateur: ">=", valeur: 1 },
+    actif: true,
+    declenchements: [],
+  };
+  const rsiDef: AlertDef = {
+    ...axisDef,
+    id: "rsi",
+    condition: { type: "indicateur-seuil", indicateurId: "rsi", params: {}, output: "rsi", comparateur: ">", valeur: 70 },
+  };
+
+  it("une alerte AXIS demande la référence ; l'évaluation reçoit ctx.aux.refClose aligné", () => {
+    const ref = Array(60).fill(42);
+    getAlignedMock.mockReturnValue({ status: "ready", aux: { refClose: ref } });
+    alertsStore.setState({ defs: [axisDef], journal: [] });
+    marketStore.setState({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1m", candles: cloturees(2) });
+    stop = demarrerAlertes();
+    getAlignedMock.mockClear();
+    // Nouvelle clôture POSTÉRIEURE : évaluation avec la référence alignée par le provider.
+    marketStore.setState({ candles: [...cloturees(2), bougie(maintenant, 103, true)] });
+    expect(getAlignedMock).toHaveBeenCalled();
+    const reqDernier = getAlignedMock.mock.calls.at(-1)![0] as { ids: string[]; candleTimes: number[] };
+    expect(reqDernier.ids).toEqual(["refClose"]);
+    expect(reqDernier.candleTimes.length).toBe(3);
+    expect(auxRecus.at(-1)).toEqual({ refClose: ref });
+  });
+
+  it("une alerte RSI ne demande pas la référence", () => {
+    alertsStore.setState({ defs: [rsiDef], journal: [] });
+    marketStore.setState({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1m", candles: cloturees(2) });
+    stop = demarrerAlertes();
+    getAlignedMock.mockClear();
+    marketStore.setState({ candles: [...cloturees(2), bougie(maintenant, 103, true)] });
+    expect(getAlignedMock).not.toHaveBeenCalled();
+  });
+
+  it("référence en échec → évaluation sans aux (condition de la v2)", () => {
+    getAlignedMock.mockReturnValue({ status: "error", message: "réseau" });
+    alertsStore.setState({ defs: [axisDef], journal: [] });
+    marketStore.setState({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1m", candles: cloturees(2) });
+    stop = demarrerAlertes();
+    auxRecus.length = 0;
+    marketStore.setState({ candles: [...cloturees(2), bougie(maintenant, 103, true)] });
+    expect(auxRecus.at(-1)).toBeUndefined();
+  });
+
+  it("référence en vol → une seule évaluation, à l'arrivée de la série", () => {
+    let onReady: (() => void) | undefined;
+    const ref = Array(60).fill(7);
+    getAlignedMock.mockImplementation((_req: unknown, cb: () => void) => {
+      onReady = cb;
+      return { status: "pending" };
+    });
+    alertsStore.setState({ defs: [axisDef], journal: [] });
+    marketStore.setState({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1m", candles: cloturees(2) });
+    stop = demarrerAlertes();
+    auxRecus.length = 0;
+    marketStore.setState({ candles: [...cloturees(2), bougie(maintenant, 103, true)] });
+    expect(auxRecus).toHaveLength(0); // pas d'évaluation avant la référence
+    getAlignedMock.mockReturnValue({ status: "ready", aux: { refClose: ref } });
+    onReady!();
+    expect(auxRecus.at(-1)).toEqual({ refClose: ref });
   });
 });

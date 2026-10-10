@@ -12,7 +12,7 @@
  * (horodatages ms epoch, borné).
  */
 
-import type { Candle, ExchangeId, Timeframe } from "@axiom/types";
+import type { AuxSeries, Candle, ExchangeId, Timeframe } from "@axiom/types";
 
 /** Sens d'un franchissement / croisement. */
 export type SensCroisement = "hausse" | "baisse" | "les-deux";
@@ -300,6 +300,13 @@ export interface ContexteAlerte {
    * tableau vide → un vrai « aucun mouvement » (ré-arme la condition).
    */
   whaleMouvements?: MouvementWhaleCtx[];
+  /**
+   * Séries auxiliaires FACULTATIVES déjà alignées sur `ctx.candles` (ex. `refClose`
+   * pour le garde-fou de régime d'AXIS), fournies par l'appelant ; le moteur reste
+   * pur et ne fetch jamais. Absentes = les indicateurs calculent sans aux (AXIS :
+   * garde-fou non appliqué, condition de la v2).
+   */
+  aux?: AuxSeries;
   /** Instantané lent global injecté par le loader commun des flux. */
   fluxCapitaux?: InstantaneFluxCapitauxCtx;
 }

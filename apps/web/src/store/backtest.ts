@@ -27,6 +27,9 @@ import type {
 } from "@axiom/backtest";
 import { raisonTimeframeBacktest } from "@axiom/backtest";
 import { marketStore } from "./market";
+import { alignAux, getIndicator } from "@axiom/indicators";
+import { binanceAdapter } from "../data/binance";
+import { refSymbolStore } from "./refSymbol";
 import {
   accumulerKlines,
   BACKTEST_TIMEFRAMES,
@@ -50,6 +53,59 @@ export { BACKTEST_TIMEFRAMES, SEUIL_PROFONDEUR_BT };
 const STORAGE_KEY = "axiom:backtest:v1";
 /** Minimum de bougies pour un run exploitable (amorce indicateurs + trades). */
 export const MIN_BOUGIES = 30;
+
+// ─────────────────────────── Référence du garde-fou de régime (AXIS) ───────────────────────────
+
+/** Vrai si une règle de la stratégie lit un indicateur déclarant `refClose` facultative. */
+export function strategieVeutRefClose(config: ConfigRun): boolean {
+  const ops: Operande[] = [];
+  for (const c of [...config.reglesEntree, ...config.reglesSortie]) {
+    if (c.type === "comparaison") ops.push(c.gauche, c.droite);
+    else ops.push(c.a, c.b);
+  }
+  return ops.some(
+    (op) => op.type === "indicateur" && getIndicator(op.indicateurId)?.auxFacultatives?.includes("refClose") === true
+  );
+}
+
+/**
+ * Charge le close du symbole de référence (refSymbolStore) à l'intervalle du run,
+ * paginé vers le passé depuis la dernière bougie jusqu'à couvrir la première —
+ * même schéma que le fetch `refClose` du chart (`auxProvider`) : pages de 1 000
+ * klines spot Binance, `endTime` = open de la plus ancienne − 1 ms, fusion sans
+ * doublon, puis alignement par ouverture (`alignAux`). Source à sec ou erreur
+ * réseau → `undefined` (le run continue sans référence et la note le dit).
+ */
+async function chargerRefCloseBacktest(
+  tf: ConfigRun["tf"],
+  candleTimes: number[],
+): Promise<{ refClose: Array<number | undefined>; symbole: string; bougies: number } | undefined> {
+  const symbole = refSymbolStore.getState().refSymbol;
+  const premiereBougie = candleTimes[0];
+  const derniereBougie = candleTimes[candleTimes.length - 1];
+  if (premiereBougie === undefined || derniereBougie === undefined) return undefined;
+  const vues = new Map<number, number>();
+  try {
+    const pas = dureeTimeframeMs(tf);
+    // `endTime` côté Binance borne par clôture ; partir de la clôture de la
+    // dernière bougie du run la couvre (et tolère la bougie encore ouverte).
+    let endTime: number | undefined = pas === null ? derniereBougie : derniereBougie + pas - 1;
+    // Au plus 50 pages de 1 000 : la profondeur maximale d'un run BT (50 000 bougies).
+    for (let page = 0; page < 50 && endTime !== undefined && endTime >= premiereBougie; page++) {
+      const lot = await binanceAdapter.fetchKlines(symbole, tf, { limit: 1000, endTime });
+      if (lot.length === 0) break;
+      for (const c of lot) if (Number.isFinite(c.close)) vues.set(c.time, c.close);
+      const plusAncienne = lot[0]!.time;
+      if (plusAncienne <= premiereBougie || lot.length < 1000) break;
+      endTime = plusAncienne - 1;
+    }
+  } catch {
+    return undefined;
+  }
+  if (vues.size === 0) return undefined;
+  const points = [...vues.entries()].sort((a, b) => a[0] - b[0]).map(([time, value]) => ({ time, value }));
+  return { refClose: alignAux(candleTimes, points), symbole, bougies: points.length };
+}
 
 // ─────────────────────────── Plages temporelles ───────────────────────────
 
@@ -144,9 +200,9 @@ export const CATALOGUE_OPERANDES: OperandeSpec[] = [
   indLen("adx", "adx", "ADX", 14),
   indFixe("psar", "psar", "PSAR", { step: 0.02, max: 0.2 }),
   // Sorties masquées d'AXIS (jamais tracées sur le chart) : état et score de la
-  // stratégie, aux défauts — le garde-fou de régime (défaut 100 depuis le verdict
-  // FAVORABLE du 10 octobre 2026) n'est pas appliqué dans le BT : pas de référence.
-  indFixe("stratAxis", "etat", "AXIS (état : 1 acheté, 0 à plat ; garde-fou de régime non appliqué dans le BT : pas de référence)", {}),
+  // stratégie, aux défauts — le garde-fou de régime (défaut 100) s'applique dans
+  // le BT : la fenêtre charge la série de référence (`chargerRefCloseBacktest`).
+  indFixe("stratAxis", "etat", "AXIS (état : 1 acheté, 0 à plat)", {}),
   indFixe("stratAxis", "score", "AXIS (score −6 à +6)", {}),
 ];
 
@@ -452,9 +508,10 @@ export const BUILTIN_STRATEGIES: StrategiePreset[] = [
    * `risquePct` restent à la main de l'utilisateur : le stop suiveur interne
    * (`stopAtr`) a échoué son test v3, il n'est pas pré-réglé ici. Le garde-fou
    * de régime BTC (défaut 100 depuis le verdict FAVORABLE du 10 octobre 2026,
-   * `scripts/axis/rapport-v5-2026-10-10.md`) n'est pas appliqué dans le
-   * backtest : le moteur ne sert pas de série de référence (`refClose`),
-   * l'indicateur retombe alors sur la condition de la v2.
+   * `scripts/axis/rapport-v5-2026-10-10.md`) s'applique dans le backtest : la
+   * fenêtre charge la série de référence du chart (`refClose`, symbole
+   * `refSymbolStore`) sur la fenêtre du run ; sans elle (échec réseau), la
+   * condition retombe sur la v2 et la note du run le dit.
    */
   {
     id: "builtin:axis",
@@ -830,14 +887,32 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
       }
       if (runId !== currentRunId) return;
 
+      // Référence du garde-fou de régime (AXIS, défaut 100 depuis le 10 octobre 2026) :
+      // si une règle lit un indicateur déclarant `refClose`, la série est chargée sur
+      // la fenêtre du run et alignée par ouverture ; échec réseau → run sans aux,
+      // note explicite (positions de la v2).
+      let aux: ParamsBacktest["aux"];
+      let noteRef: string | null = null;
+      if (strategieVeutRefClose(config)) {
+        const ref = await chargerRefCloseBacktest(config.tf, candles.map((c) => c.time));
+        if (runId !== currentRunId) return;
+        if (ref === undefined) {
+          noteRef = "référence BTC indisponible : garde-fou de régime non appliqué (signaux de la v2)";
+        } else {
+          aux = { refClose: ref.refClose };
+          noteRef = `référence ${ref.symbole} chargée (${ref.bougies} bougies)`;
+        }
+      }
+
       const profondeurFaible = candles.length < SEUIL_PROFONDEUR_BT;
       const noteBase = `${candles.length} bougies · ${config.symbol} ${config.tf} · ${config.modeFunding === "binance-reel" ? "Binance perp" : "Binance spot"}`;
       set({
         phase: "calcul",
         nbBougiesChargees: candles.length,
-        note: profondeurFaible
-          ? `${noteBase} · profondeur faible (< ${SEUIL_PROFONDEUR_BT}) — « Charger 2 ans 1d » recommandé`
-          : noteBase,
+        note:
+          (profondeurFaible
+            ? `${noteBase} · profondeur faible (< ${SEUIL_PROFONDEUR_BT}) — « Charger 2 ans 1d » recommandé`
+            : noteBase) + (noteRef === null ? "" : ` · ${noteRef}`),
         couvertureFunding: historiqueFunding?.couverture ?? null,
       });
 
@@ -892,6 +967,7 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
       };
       const params: ParamsBacktest = {
         timeframe: config.tf,
+        ...(aux !== undefined ? { aux } : {}),
         fraisPct: config.fraisPct,
         slippagePct: config.slippagePct,
         capitalInitial: config.capitalInitial,

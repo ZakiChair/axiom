@@ -1712,6 +1712,15 @@ dépendance ni ordre réel. Quatre changements de `@axiom/types` :
   mesure en 4h, « non mesuré en {u} » ailleurs, « sans garde-fou » à 0, « hors
   du test » aux autres périodes ; `refClose` du chart portée à l'amorce
   (1 500 bougies, deux appels fusionnés). Ces données sont consommées.
+  Le même jour, la référence a été servie hors du chart : `ParamsBacktest.aux`
+  et `ContexteAlerte.aux` (champs facultatifs d'`@axiom/types` portés par les
+  deux moteurs, qui restent purs et ne fetch jamais) ; la fenêtre BT charge
+  `refSymbol` paginé sur la fenêtre du run (note « référence chargée » /
+  « indisponible → v2 ») et le runtime des alertes web réutilise
+  `auxProvider` (même clé de cache `refClose:{refSymbol}:{tf}`, même fetch,
+  une seule évaluation par clôture après l'arrivée de la série, échec → v2).
+  Le daemon (alertes 1 min héritées), le screener et le rejeu commun
+  (`valider-strategies.ts`) restent SANS référence — condition de la v2.
 - Chargement initial : AXIS coûte ~800 octets gzip, la couche flux ~1 200 de
   plus, les infobulles par unité ~1 000 de plus. Sur le modèle de BT et SIG, les commandes EQS, WHALE et MARKS vivent
   dans `commands/windowPanels.ts` (EQS : bascule identique ; WHALE et MARKS :
@@ -1787,7 +1796,11 @@ alertes 142 (dont 3 de tir aux signaux de la fixture), backtest 143, pacte
 fixture), daemon 785 tests (Bun 1.3.11). Budget : **1 194 813 / 355 849**
 (+978 / −799), marge gzip **4 151 octets**.
 Après le garde-fou de régime (v5, 10 octobre, suites du verdict FAVORABLE) :
-`pnpm check` réussi — typage des 8 projets ; indicateurs dont stratAxis.test
+`pnpm check` réussi — typage des 8 projets ; backtest 145 (dont `engine.aux.test.ts`), alerts 144 (dont
+les cas `aux.refClose` de `engine.axis.test.ts`), web dont
+`backtest-indicateurs.test.ts` (aux transporté au worker, note, pas de fetch
+sans `refClose`) et `runtime.test.ts` (alerte AXIS → référence, RSI → non) ;
+indicateurs dont stratAxis.test
 (contrat défaut 100, `emaDepuisPremiereDefinie`, équivalence à 0, cas
 référence croissante/décroissante/indéfinie/partielle, armement, causalité,
 textes à chaque réglage), web dont `indicators.axisRegime.test.ts` (empreinte

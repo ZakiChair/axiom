@@ -95,3 +95,43 @@ describe("indicateur-seuil sur stratAxis.etat (sortie masquée, bougies clôtur�
     expect(declenchements(vente, 49)).toEqual(ventes);
   });
 });
+
+describe("ContexteAlerte.aux — référence du garde-fou de régime (10 octobre 2026)", () => {
+  const achat: Condition = {
+    type: "indicateur-seuil",
+    indicateurId: "stratAxis",
+    params: PARAMS, // regimeBtc omis → défaut 100
+    output: "etat",
+    comparateur: ">=",
+    valeur: 1,
+  };
+  /** Même pilote avec ctx.aux. */
+  function declenchementsAux(condition: Condition, aux: { refClose: Array<number | undefined> }, premierIndice: number): number[] {
+    let courante: AlertDef = {
+      id: "axis", symbol: "BTCUSDT", source: "binance", condition, actif: true, declenchements: [],
+    };
+    const tires: number[] = [];
+    for (let i = premierIndice; i < candles.length; i++) {
+      const tranche = candles.slice(0, i + 1);
+      const res = evaluerAlertes([courante], {
+        maintenant: i,
+        dernierPrix: candles[i]!.close,
+        candles: tranche,
+        aux: { refClose: aux.refClose.slice(0, i + 1) },
+      });
+      if (res.defs[0]) courante = res.defs[0];
+      if (res.declenchements.length > 0) tires.push(i);
+    }
+    return tires;
+  }
+
+  it("référence toujours sous son EMA → le garde-fou refuse les entrées post-amorce (seul l'achat de 60, avant l'EMA, passe)", () => {
+    const dessous = candles.map((_c, i) => 5000 - i);
+    expect(declenchementsAux(achat, { refClose: dessous }, 49)).toEqual([60]);
+  });
+
+  it("référence toujours au-dessus de son EMA → les mêmes achats que sans aux (60/107/280)", () => {
+    const dessus = candles.map((_c, i) => 1000 + i * 10);
+    expect(declenchementsAux(achat, { refClose: dessus }, 49)).toEqual([60, 107, 280]);
+  });
+});

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import type { Candle } from "@axiom/types";
 import { runBacktest, type Operande, type StrategieDef } from "@axiom/backtest";
 import { BUILTIN_STRATEGIES, CATALOGUE_OPERANDES, backtestStore, decrireOperande, specParId } from "./backtest";
+import { refSymbolStore } from "./refSymbol";
 
 afterEach(() => vi.unstubAllGlobals());
 describe("nouveaux opérandes du backtest", () => {
@@ -62,5 +63,99 @@ describe("opérandes et preset AXIS (sorties masquées, 9 octobre 2026)", () => 
     expect(r.trades.map((t) => t.tempsEntree)).toEqual([fixture[61]!.time, fixture[108]!.time, fixture[281]!.time]);
     expect(r.trades.map((t) => t.tempsSortie)).toEqual([fixture[89]!.time, fixture[140]!.time, fixture[299]!.time]);
     expect(r.trades).toHaveLength(3);
+  });
+});
+
+describe("référence du garde-fou de régime dans la fenêtre BT (10 octobre 2026)", () => {
+  const PAS_1D = 86_400_000;
+  const T0 = Date.now() - 120 * PAS_1D;
+  /** Kline REST brute : [openTime, open, high, low, close, volume, ...]. */
+  const kline = (t: number, c: number) => [t, String(c), String(c), String(c), String(c), "1", t + PAS_1D - 1, "0", 0, "0", "0"];
+  /** Sert des klines 1d à `stubFetch` : série ETHUSDT (cellule) / BTCUSDT (référence). */
+  const klinesPour = (url: string) => {
+    const u = new URL(url);
+    const symbol = u.searchParams.get("symbol");
+    const end = Number(u.searchParams.get("endTime") ?? Number.MAX_SAFE_INTEGER);
+    const rows: unknown[] = [];
+    for (let i = 0; i < 120; i++) {
+      const t = T0 + i * PAS_1D;
+      if (t <= end) rows.push(kline(t, symbol === "BTCUSDT" ? 40_000 + i * 100 : 100 + i));
+    }
+    return new Response(JSON.stringify(rows), { status: 200 });
+  };
+  let postes: unknown[] = [];
+  class FauxWorker {
+    onmessage: ((e: MessageEvent) => void) | null = null;
+    onerror: (() => void) | null = null;
+    postMessage(m: unknown): void { postes.push(m); }
+    terminate(): void {}
+  }
+  const regleAxis = () => [
+    { type: "comparaison" as const, gauche: { type: "indicateur" as const, indicateurId: "stratAxis", params: {}, output: "etat" }, comparateur: ">=" as const, droite: { type: "constante" as const, valeur: 1 } },
+  ];
+
+  afterEach(() => { postes = []; refSymbolStore.getState().setRefSymbol("BTCUSDT"); });
+
+  async function lancer(): Promise<unknown> {
+    backtestStore.getState().run();
+    await vi.waitFor(() => { expect(postes.length).toBeGreaterThan(0); }, { timeout: 10_000 });
+    return postes[0];
+  }
+
+  it("une règle AXIS déclenche le chargement de la référence : params.aux.refClose aligné sur les bougies du run, note « référence … chargée »", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("klines")) return klinesPour(u);
+      return new Response("ko", { status: 404 });
+    }));
+    vi.stubGlobal("Worker", FauxWorker);
+    backtestStore.setState({
+      symbol: "ETHUSDT", tf: "1d", plage: "3m", modeFunding: "aucun",
+      reglesEntree: regleAxis(),
+      reglesSortie: [{ type: "comparaison", gauche: { type: "indicateur", indicateurId: "stratAxis", params: {}, output: "etat" }, comparateur: "<=", droite: { type: "constante", valeur: 0 } }],
+    });
+    const req = await lancer() as { params: { aux?: { refClose?: Array<number | undefined> } }; candles: Candle[] };
+    expect(req.params.aux?.refClose).toBeDefined();
+    const ref = req.params.aux!.refClose!;
+    expect(ref.length).toBe(req.candles.length);
+    expect(ref.some((v) => v !== undefined)).toBe(true);
+    expect(backtestStore.getState().note).toContain("référence BTCUSDT chargée");
+  });
+
+  it("échec réseau de la référence → run sans aux et note « indisponible… v2 »", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("klines") && new URL(u).searchParams.get("symbol") === "BTCUSDT") throw new Error("réseau");
+      if (u.includes("klines")) return klinesPour(u);
+      return new Response("ko", { status: 404 });
+    }));
+    vi.stubGlobal("Worker", FauxWorker);
+    backtestStore.setState({
+      symbol: "ETHUSDT", tf: "1d", plage: "3m", modeFunding: "aucun",
+      reglesEntree: regleAxis(),
+      reglesSortie: [{ type: "comparaison", gauche: { type: "indicateur", indicateurId: "stratAxis", params: {}, output: "etat" }, comparateur: "<=", droite: { type: "constante", valeur: 0 } }],
+    });
+    const req = await lancer() as { params: { aux?: unknown } };
+    expect(req.params.aux).toBeUndefined();
+    expect(backtestStore.getState().note).toContain("garde-fou de régime non appliqué");
+  });
+
+  it("une stratégie sans indicateur à refClose ne fetch pas la référence", async () => {
+    const fetcher = vi.fn(async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("klines")) return klinesPour(u);
+      return new Response("ko", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("Worker", FauxWorker);
+    backtestStore.setState({
+      symbol: "ETHUSDT", tf: "1d", plage: "3m", modeFunding: "aucun",
+      reglesEntree: [{ type: "comparaison", gauche: { type: "indicateur", indicateurId: "rsi", params: {}, output: "rsi" }, comparateur: ">", droite: { type: "constante", valeur: 60 } }],
+      reglesSortie: [],
+    });
+    const req = await lancer() as { params: { aux?: unknown } };
+    expect(req.params.aux).toBeUndefined();
+    expect(fetcher.mock.calls.every(([u]) => !String(u).includes("symbol=BTCUSDT"))).toBe(true);
+    expect(backtestStore.getState().note ?? "").not.toContain("référence");
   });
 });

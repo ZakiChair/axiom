@@ -25,7 +25,7 @@
  * que lire des valeurs pré-calculées.
  */
 
-import type { Candle, IndicatorResult } from "@axiom/types";
+import type { AuxSeries, Candle, IndicatorResult } from "@axiom/types";
 import { computeIndicator, getIndicator, supportsIndicatorTimeframe, TIMEFRAME_REQUIS } from "@axiom/indicators";
 import type {
   ChampPrix,
@@ -125,6 +125,7 @@ function resoudreOperande(
   op: Operande,
   candles: Candle[],
   cache: Map<string, IndicatorResult>,
+  aux?: AuxSeries,
 ): Serie {
   const n = candles.length;
   if (op.type === "constante") {
@@ -144,7 +145,7 @@ function resoudreOperande(
   if (res === undefined) {
     const def = getIndicator(op.indicateurId);
     if (def === undefined) return new Array<number | undefined>(n).fill(undefined);
-    res = computeIndicator(def, candles, op.params);
+    res = computeIndicator(def, candles, op.params, aux);
     cache.set(cle, res);
   }
   const serie = res.series[op.output];
@@ -156,19 +157,20 @@ function compilerRegles(
   conditions: Condition[],
   candles: Candle[],
   cache: Map<string, IndicatorResult>,
+  aux?: AuxSeries,
 ): ConditionCompilee[] {
   return conditions.map((c) =>
     c.type === "comparaison"
       ? {
           type: "comparaison" as const,
-          gauche: resoudreOperande(c.gauche, candles, cache),
-          droite: resoudreOperande(c.droite, candles, cache),
+          gauche: resoudreOperande(c.gauche, candles, cache, aux),
+          droite: resoudreOperande(c.droite, candles, cache, aux),
           comparateur: c.comparateur,
         }
       : {
           type: "croisement" as const,
-          a: resoudreOperande(c.a, candles, cache),
-          b: resoudreOperande(c.b, candles, cache),
+          a: resoudreOperande(c.a, candles, cache, aux),
+          b: resoudreOperande(c.b, candles, cache, aux),
           sens: c.sens,
         },
   );
@@ -521,8 +523,8 @@ export function runBacktest(
     validerReglementsFunding(params.funding.reglements);
   }
   const cache = new Map<string, IndicatorResult>();
-  const entree = compilerRegles(strat.reglesEntree, candles, cache);
-  const sortie = compilerRegles(strat.reglesSortie, candles, cache);
+  const entree = compilerRegles(strat.reglesEntree, candles, cache, params.aux);
+  const sortie = compilerRegles(strat.reglesSortie, candles, cache, params.aux);
   const direction = strat.direction;
   // ATR pré-calculé si stopAtr (retenu même si stopPct est aussi défini).
   const serieAtr: Serie | null =
@@ -531,6 +533,7 @@ export function runBacktest(
           { type: "indicateur", indicateurId: "atr", params: { length: strat.stopAtr.length }, output: "atr" },
           candles,
           cache,
+          params.aux,
         )
       : null;
 

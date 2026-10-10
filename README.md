@@ -231,7 +231,9 @@ actifs, drawdown médian 18,3 % contre 21,9 %, expectancy nette +4,6 %
 contre +3,3 % par trade après frais (x1 et x3) — le gain vient de ne pas
 acheter d'alts quand BTC est sous sa tendance, sur un pool où
 l'achat-conservation perd 96 % en médiane : mesure passée, pas une promesse,
-et les cellules partagent le même facteur de marché.
+et les cellules partagent le même facteur de marché. Le garde-fou s'applique
+aussi dans la fenêtre BT et les alertes web (référence chargée à la volée) ;
+sans elle — daemon, screener, rejeu — les signaux restent ceux de la v2.
 **Alertes et backtest (9 octobre 2026)** : AXIS expose deux sorties calculées
 mais jamais tracées — **État** (1 acheté, 0 à plat) et **Score** (−6 à +6) —
 sélectionnables dans une alerte de seuil d'indicateur (achat : État ≥ 1,

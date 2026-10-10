@@ -17,7 +17,7 @@
  *    série), la première évaluation servant de calibrage.
  */
 
-import type { Candle, Timeframe } from "@axiom/types";
+import type { AuxSeries, Candle, Timeframe } from "@axiom/types";
 import { computeIndicator, getIndicator, supportsIndicatorTimeframe } from "@axiom/indicators";
 import { decrireCondition } from "./describe";
 import type {
@@ -208,7 +208,7 @@ function etatCondition(
       return { satisfaite: c.seuilPct >= 0 ? pct >= c.seuilPct : pct <= c.seuilPct, valeur: pct };
     }
     case "indicateur-seuil": {
-      const serie = calculerSortie(c.indicateurId, c.params, c.output, ctx.candles);
+      const serie = calculerSortie(c.indicateurId, c.params, c.output, ctx.candles, ctx.aux);
       if (!serie) return null;
       const courantExige = INDICATEURS_CONFIRMES.has(c.indicateurId);
       const v = courantExige ? serie[(ctx.candles?.length ?? 0) - 1] : derniereValeurDefinie(serie);
@@ -220,7 +220,7 @@ function etatCondition(
       if (!candles || candles.length === 0) return null;
       const idef = getIndicator(c.indicateurId);
       if (!idef) return null;
-      const res = computeIndicator(idef, candles, c.params);
+      const res = computeIndicator(idef, candles, c.params, ctx.aux);
       const a = res.series[c.outputA];
       const b = res.series[c.outputB];
       if (!a || !b) return null;
@@ -355,7 +355,7 @@ function evalIndicateurCroisement(
   if (!candles || candles.length === 0) return null;
   const idef = getIndicator(c.indicateurId);
   if (!idef) return null;
-  const res = computeIndicator(idef, candles, c.params);
+  const res = computeIndicator(idef, candles, c.params, ctx.aux);
   const a = res.series[c.outputA];
   const b = res.series[c.outputB];
   if (!a || !b) return null;
@@ -523,12 +523,13 @@ function calculerSortie(
   indicateurId: string,
   params: Record<string, number | boolean | string>,
   output: string,
-  candles: Candle[] | undefined
+  candles: Candle[] | undefined,
+  aux?: AuxSeries
 ): Array<number | undefined> | undefined {
   if (!candles || candles.length === 0) return undefined;
   const idef = getIndicator(indicateurId);
   if (!idef) return undefined;
-  const res = computeIndicator(idef, candles, params);
+  const res = computeIndicator(idef, candles, params, aux);
   return res.series[output];
 }
 

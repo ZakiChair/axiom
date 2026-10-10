@@ -14,7 +14,7 @@
  * composables sans introduire d'expressions arbitraires.
  */
 
-import type { Timeframe } from "@axiom/types";
+import type { AuxSeries, Timeframe } from "@axiom/types";
 
 /** Comparateur numérique (identique au screener/alerts). */
 export type Comparateur = ">" | ">=" | "<" | "<=";
@@ -133,6 +133,13 @@ export interface ParamsBacktest {
     modele: "perp-lineaire";
     reglements: readonly ReglementFunding[];
   };
+  /**
+   * Séries auxiliaires FACULTATIVES déjà alignées sur `candles` (ex. `refClose` pour le
+   * garde-fou de régime d'AXIS), fournies par l'appelant ; le moteur reste pur et ne
+   * fetch jamais. Absentes = les indicateurs calculent sans aux (AXIS : garde-fou non
+   * appliqué, condition de la v2).
+   */
+  aux?: AuxSeries;
   /**
    * Stops et objectifs évalués INTRABAR (high/low de chaque barre détenue) au lieu de la
    * clôture. Convention conservatrice : stop exécuté avant l'objectif si les deux sont

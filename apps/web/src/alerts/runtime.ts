@@ -51,6 +51,9 @@
 import { alerteActiveAuTemps, evaluerAlertes, prochaineEcheanceAlerte, typesDeDef, type AlertDef, type ContexteAlerte, type Declenchement, type MetriqueOnchainAlerte } from "@axiom/alerts";
 import type { Unsubscribe } from "@axiom/types";
 import { marketStore } from "../store/market";
+import { getIndicator } from "@axiom/indicators";
+import { auxProvider } from "../chart/auxProvider";
+import { refSymbolStore } from "../store/refSymbol";
 import { fluxLiqRetenu, liqEventsStore } from "../chart/liquidationMarkers";
 import { usdParMinute } from "../components/liquidationsWindow.util";
 import { alertsStore, pousserDefsDaemon } from "../store/alerts";
@@ -78,6 +81,24 @@ const COMPOSITE_THROTTLE_MS = 1_000;
 
 function defPorte(def: AlertDef, type: string): boolean {
   return typesDeDef(def).has(type);
+}
+
+/**
+ * Vrai si une def du lot vise un indicateur déclarant `refClose` facultative
+ * (garde-fou de régime d'AXIS, défaut 100 depuis le 10 octobre 2026) : la série
+ * de référence est alors demandée à `auxProvider` avant l'évaluation, alignée
+ * par ouverture sur les bougies clôturées — même clé de cache et même fetch que
+ * le chart (`refClose:{refSymbol}:{tf}`). Référence indisponible → évaluation
+ * sans aux (condition de la v2).
+ */
+function lotVeutRefClose(lot: AlertDef[]): boolean {
+  return lot.some((d) => {
+    const c = d.condition;
+    return (
+      (c.type === "indicateur-seuil" || c.type === "indicateur-croisement") &&
+      getIndicator(c.indicateurId)?.auxFacultatives?.includes("refClose") === true
+    );
+  });
 }
 
 /** Période de poll funding (ms) — lent, hors chemin chaud. */
@@ -296,12 +317,35 @@ function creerRuntime(): Unsubscribe {
       timeframeBougies: timeframe,
     });
     if (lot.length > 0) {
-      appliquerResultat(lot, {
+      const ctxBase: ContexteAlerte = {
         maintenant: Date.now(),
         dernierPrix: barreClose.close,
         prixPrecedent: avant?.close,
         candles: candlesCloturees,
-      });
+      };
+      if (!lotVeutRefClose(lot)) {
+        appliquerResultat(lot, ctxBase);
+      } else {
+        // Référence du garde-fou de régime : une seule évaluation par clôture,
+        // après l'arrivée de la série (échec → évaluation sans aux).
+        const req = {
+          exchange, symbol,
+          timeframe,
+          ids: ["refClose" as const],
+          candleTimes: candlesCloturees.map((c) => c.time),
+        };
+        const reeval = (): void => {
+          const a = auxProvider.getAligned(req, () => {});
+          appliquerResultat(lot, a.status === "ready" ? { ...ctxBase, aux: { refClose: a.aux.refClose } } : ctxBase);
+        };
+        const statut = auxProvider.getAligned(req, reeval);
+        if (statut.status === "ready") {
+          appliquerResultat(lot, { ...ctxBase, aux: { refClose: statut.aux.refClose } });
+        } else if (statut.status === "error") {
+          appliquerResultat(lot, ctxBase);
+        }
+        // pending : `reeval` évaluera la clôture à l'arrivée de la référence.
+      }
     }
     evaluerComposites(exchange, symbol);
   };

@@ -17,6 +17,7 @@ import {
   clampSize,
   detectSnapZone,
   snapGeometry,
+  libelleGroupeCouleur,
   MIN_WIDTH,
   MIN_HEIGHT,
   GROUP_PALETTE,
@@ -63,6 +64,9 @@ const POIGNEES: { id: PoigneeResize; className: string; dw: number; dh: number; 
 export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindowProps) {
   const mobile = useMobileLayout();
   const etat = useStore(windowManagerStore, (s) => s.windows[id]);
+  const symbolGroupe = useStore(windowManagerStore, (s) =>
+    etat?.groupColor ? s.groupSymbols[etat.groupColor] : undefined,
+  );
   const activeMobile = useStore(windowManagerStore, (s) => mobile ? fenetreMobileActive(s.windows) : null);
   const rootRef = useRef<HTMLDivElement>(null);
   const masqueeMobile = mobile && activeMobile !== id;
@@ -274,13 +278,27 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
           <span className="truncate text-xs font-medium text-text">{title}</span>
         </div>
         <div ref={groupeRef} className="relative flex shrink-0 items-center gap-1" data-no-drag>
+          {etat.groupColor && symbolGroupe && (
+            <span
+              className="rounded border border-border/70 bg-surface px-1 py-0.5 font-mono text-[9px] text-text-dim"
+              title={`Symbole synchronisé sur le groupe ${libelleGroupeCouleur(etat.groupColor) ?? ""}`}
+            >
+              {symbolGroupe}
+            </span>
+          )}
           <button
             type="button"
-            title="Couleur de groupe"
+            title={
+              etat.groupColor
+                ? `Groupe de liaison ${libelleGroupeCouleur(etat.groupColor)} (cliquer pour changer)`
+                : "Couleur de groupe (lier les fenêtres A / B / C)"
+            }
             onClick={() => setMenuGroupeOuvert((o) => !o)}
-            className="h-3.5 w-3.5 rounded-full border border-border"
+            className="flex h-4 min-w-[16px] items-center justify-center rounded-full border border-border px-1 text-[9px] font-bold leading-none text-bg"
             style={{ backgroundColor: etat.groupColor ? couleurAffichable(etat.groupColor) : "transparent" }}
-          />
+          >
+            {libelleGroupeCouleur(etat.groupColor) ?? ""}
+          </button>
           {menuGroupeOuvert && (
             <div className="axiom-window-groups absolute right-0 top-5 z-10 flex gap-1 rounded border border-border bg-surface p-1 shadow-xl">
               <button
@@ -290,21 +308,29 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
                   windowManagerStore.getState().setGroup(id, null);
                   setMenuGroupeOuvert(false);
                 }}
-                className="h-4 w-4 rounded-full border border-border"
-              />
-              {GROUP_PALETTE.map((couleur) => (
-                <button
-                  key={couleur}
-                  type="button"
-                  aria-label={`Groupe ${couleur}`}
-                  onClick={() => {
-                    windowManagerStore.getState().setGroup(id, couleur);
-                    setMenuGroupeOuvert(false);
-                  }}
-                  className="h-4 w-4 rounded-full"
-                  style={{ backgroundColor: couleurAffichable(couleur) }}
-                />
-              ))}
+                className="flex h-4 w-4 items-center justify-center rounded-full border border-border text-[9px] text-text-dim"
+              >
+                ×
+              </button>
+              {GROUP_PALETTE.map((couleur) => {
+                const lettre = libelleGroupeCouleur(couleur) ?? "";
+                return (
+                  <button
+                    key={couleur}
+                    type="button"
+                    aria-label={`Groupe ${couleur}`}
+                    title={`Groupe ${lettre}`}
+                    onClick={() => {
+                      windowManagerStore.getState().setGroup(id, couleur);
+                      setMenuGroupeOuvert(false);
+                    }}
+                    className="flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold leading-none text-bg"
+                    style={{ backgroundColor: couleurAffichable(couleur) }}
+                  >
+                    {lettre}
+                  </button>
+                );
+              })}
             </div>
           )}
           <button

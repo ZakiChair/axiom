@@ -86,6 +86,27 @@ export interface ContratToken {
   explorateurUrl: string | null;
 }
 
+export type NiveauRisqueAbi = "faible" | "modere" | "eleve" | "inconnu";
+
+export interface AnalyseAbiSensible {
+  /** Nombre total de fonctions déclarées dans l'ABI vérifiée. */
+  nbFonctions: number;
+  /** Fonction d'émission (mint / issue) exposée en écriture. */
+  peutMint: boolean;
+  /** Fonction de gel / liste noire (blacklist / freeze / ban) exposée en écriture. */
+  peutBlacklist: boolean;
+  /** Fonction permettant de modifier dynamiquement les taxes/frais de transfert. */
+  peutModifierTaxes: boolean;
+  /** Fonction permettant de mettre en pause les transferts ou le trading. */
+  peutPause: boolean;
+  /** Présence de primitives d'administration / propriété (Ownable / AccessControl). */
+  aControleProprietaire: boolean;
+  /** Liste dédoublonnée des noms de fonctions sensibles repérées dans l'ABI. */
+  fonctionsSensibles: string[];
+  /** Niveau de risque synthétique déduit de l'ABI. */
+  niveauRisqueAbi: NiveauRisqueAbi;
+}
+
 export interface InspectionContratEvm {
   adresse: string;
   chainId: number;
@@ -95,7 +116,19 @@ export interface InspectionContratEvm {
   estProxy: boolean;
   adresseImplementation: string | null;
   supplyBrute: string | null;
+  abiSensible?: AnalyseAbiSensible;
   observeLe: number;
+}
+
+export type ProfondeurLiquidite = "profonde" | "correcte" | "fine" | "illiquide" | "inconnue";
+
+export type TypeDivergenceFondamentale = "accumulation-fondamentale" | "surchauffe-low-float";
+
+export interface SignalDivergenceFondamentale {
+  type: TypeDivergenceFondamentale;
+  direction: "haussier" | "baissier";
+  libelle: string;
+  detail: string;
 }
 
 export interface PiliersPotentiel {
@@ -105,7 +138,7 @@ export interface PiliersPotentiel {
   tokenomics: number;
   /** 0–25 : TVL absolue, dynamique TVL 7j, liquidité / rotation du capital. */
   traction: number;
-  /** 0–25 : Contrat identifié, audits, architecture originale vs fork, vérification Etherscan. */
+  /** 0–25 : Contrat identifié, audits, architecture originale vs fork, vérification Etherscan + ABI. */
   securite: number;
 }
 
@@ -116,10 +149,12 @@ export interface EvaluationPotentiel {
   verdict: VerdictPotentiel;
   /** Points forts factuels justifiant le potentiel. */
   atouts: string[];
-  /** Risques ou angles morts identifiés (dilution, absence de revenus, contrat proxy…). */
+  /** Risques ou angles morts identifiés (dilution, absence de revenus, contrat proxy, ABI…). */
   risques: string[];
   /** Ratio Float en % (0–100) : MCap/FDV ou Circulating/Total Supply. */
   floatPct: number | null;
+  /** Multiple de dilution totale (Total/Circulating ou FDV/MCap, ex: 5.0x = 4x d'unlocks latents). */
+  pressionDilutionMultiple: number | null;
   /** Ratio Price-to-Fees annualisé (FDV ou MCap / Frais annualisés). */
   ratioPf: number | null;
   /** Ratio Price-to-Revenue annualisé (FDV ou MCap / Revenus annualisés). */
@@ -128,6 +163,12 @@ export interface EvaluationPotentiel {
   ratioFdvTvl: number | null;
   /** Part des frais captée en revenus par le protocole (%). */
   takeRatePct: number | null;
+  /** Rotation du capital 24h : Volume 24h / MCap en %. */
+  rotationVolMcapPct: number | null;
+  /** Qualification de la profondeur de liquidité (TVL + Volume 24h). */
+  profondeurLiquidite: ProfondeurLiquidite;
+  /** Signal de divergence fondamentale (Revenus vs Prix ou Surchauffe Low-Float). */
+  divergenceFondamentale: SignalDivergenceFondamentale | null;
 }
 
 export interface NouveauToken {
@@ -278,6 +319,223 @@ export function parserContratToken(
   };
 }
 
+// ─────────────────────────── Analyse ABI & Divergences Fondamentales (PUR) ───────────────────────────
+
+const ABI_VIDE: AnalyseAbiSensible = {
+  nbFonctions: 0,
+  peutMint: false,
+  peutBlacklist: false,
+  peutModifierTaxes: false,
+  peutPause: false,
+  aControleProprietaire: false,
+  fonctionsSensibles: [],
+  niveauRisqueAbi: "inconnu",
+};
+
+/**
+ * Inspecte le JSON d'ABI Etherscan (`getsourcecode`) pour détecter les fonctions sensibles
+ * d'écriture (`nonpayable` / `payable`) : émission (`mint`), gel d'adresses (`blacklist`/`freeze`),
+ * modification dynamique des taxes/frais (`setTax`/`setFee`), pause (`pause`), et contrôle admin.
+ * Fonction 100 % PURE et tolérante aux ABI absentes ou invalides.
+ */
+export function analyserFonctionsSensiblesAbi(rawAbi: string | null | undefined): AnalyseAbiSensible {
+  if (typeof rawAbi !== "string" || rawAbi.trim().length === 0) return ABI_VIDE;
+  const texte = rawAbi.trim();
+  if (!texte.startsWith("[")) return ABI_VIDE;
+
+  let entrees: unknown;
+  try {
+    entrees = JSON.parse(texte);
+  } catch {
+    return ABI_VIDE;
+  }
+  if (!Array.isArray(entrees)) return ABI_VIDE;
+
+  let nbFonctions = 0;
+  let peutMint = false;
+  let peutBlacklist = false;
+  let peutModifierTaxes = false;
+  let peutPause = false;
+  let aControleProprietaire = false;
+  const sensibles = new Set<string>();
+
+  for (const item of entrees) {
+    if (!item || typeof item !== "object") continue;
+    const fn = item as { type?: unknown; name?: unknown; stateMutability?: unknown; constant?: unknown };
+    if (fn.type !== "function" || typeof fn.name !== "string") continue;
+    const nom = fn.name.trim();
+    if (!nom) continue;
+    nbFonctions++;
+
+    // Ignore les fonctions purement en lecture (view / pure / constant).
+    const mut = typeof fn.stateMutability === "string" ? fn.stateMutability.toLowerCase() : "";
+    if (mut === "view" || mut === "pure" || fn.constant === true) continue;
+
+    const n = nom.toLowerCase();
+
+    if (/^(mint|mintto|batchmint|adminmint|issue|_mint)$/.test(n) || (n.startsWith("mint") && !n.includes("minted"))) {
+      peutMint = true;
+      sensibles.add(nom);
+    }
+    if (
+      n.includes("blacklist") ||
+      n.includes("blocklist") ||
+      n.includes("freeze") ||
+      /^(setbot|addbot|ban|banaddress|setisbot)$/.test(n)
+    ) {
+      peutBlacklist = true;
+      sensibles.add(nom);
+    }
+    if (
+      /^(set|update|change|modify).*(tax|fee|fees|slippage|marketingfee|liquidityfee|buytax|selltax)$/.test(n) ||
+      /^(setfee|setfees|settax|settaxes|setbuytax|setselltax)$/.test(n)
+    ) {
+      peutModifierTaxes = true;
+      sensibles.add(nom);
+    }
+    if (/^(pause|unpause|setpaused|settrading|enabletrading|opentrading|stoptrading)$/.test(n)) {
+      peutPause = true;
+      sensibles.add(nom);
+    }
+    if (
+      /^(transferownership|renounceownership|setowner|grantrole|revokerole|setadmin|setgovernance)$/.test(n)
+    ) {
+      aControleProprietaire = true;
+    }
+  }
+
+  if (nbFonctions === 0) return ABI_VIDE;
+
+  const niveauRisqueAbi: NiveauRisqueAbi =
+    peutBlacklist || peutModifierTaxes
+      ? "eleve"
+      : peutMint || peutPause
+        ? "modere"
+        : "faible";
+
+  return {
+    nbFonctions,
+    peutMint,
+    peutBlacklist,
+    peutModifierTaxes,
+    peutPause,
+    aControleProprietaire,
+    fonctionsSensibles: [...sensibles].slice(0, 10),
+    niveauRisqueAbi,
+  };
+}
+
+/** Qualifie la profondeur de liquidité à partir de la TVL et du volume 24h. PURE. */
+export function qualifierProfondeurLiquidite(
+  tvlUsd: number | null,
+  volume24hUsd: number | null,
+): ProfondeurLiquidite {
+  if (tvlUsd === null && volume24hUsd === null) return "inconnue";
+  const tvl = tvlUsd ?? 0;
+  const vol = volume24hUsd ?? 0;
+  if (tvl >= 25_000_000 || (tvl >= 10_000_000 && vol >= 5_000_000) || vol >= 25_000_000) {
+    return "profonde";
+  }
+  if (tvl >= 2_000_000 || vol >= 1_000_000) {
+    return "correcte";
+  }
+  if (tvl >= 200_000 || vol >= 100_000) {
+    return "fine";
+  }
+  return "illiquide";
+}
+
+/**
+ * Détecte une divergence fondamentale exploitable entre les flux on-chain (revenus/frais,
+ * multiples P/S & P/F, structure de float) et la dynamique récente du prix :
+ *  1. **Accumulation fondamentale (Haussier)** : protocole générant de vrais revenus/frais
+ *     avec un multiple raisonnable ou une croissance des flux, pendant que le prix stagne ou corrige.
+ *  2. **Surchauffe Low-Float (Baissier)** : token à faible offre circulante (< 25 %) dont le prix
+ *     s'emballe alors que la valorisation diluée (P/F, FDV/TVL) est déconnectée des flux réels.
+ * Fonction PURE.
+ */
+export function detecterDivergenceFondamentale(params: {
+  changePrix24hPct?: number | null;
+  changePrix7jPct?: number | null;
+  frais24hUsd: number | null;
+  frais30jUsd: number | null;
+  fraisChange7dPct: number | null;
+  revenus24hUsd: number | null;
+  revenus30jUsd: number | null;
+  revenusChange7dPct: number | null;
+  floatPct: number | null;
+  ratioPf: number | null;
+  ratioPs: number | null;
+  ratioFdvTvl: number | null;
+}): SignalDivergenceFondamentale | null {
+  const dp24 = params.changePrix24hPct ?? null;
+  const dp7 = params.changePrix7jPct ?? null;
+  const multipleRef = params.ratioPs ?? params.ratioPf;
+  const croissanceFlux = params.revenusChange7dPct ?? params.fraisChange7dPct;
+  const aFluxSolides =
+    (params.revenus24hUsd !== null && params.revenus24hUsd >= 1_000) ||
+    (params.frais24hUsd !== null && params.frais24hUsd >= 5_000) ||
+    (params.revenus30jUsd !== null && params.revenus30jUsd >= 30_000) ||
+    (params.frais30jUsd !== null && params.frais30jUsd >= 150_000);
+
+  // 1. Divergence haussière : revenus/frais solides + valorisation raisonnable ou croissance, mais prix en repli/retard.
+  const prixEnRetard =
+    (dp24 !== null && dp24 <= -1.5) ||
+    (dp7 !== null && dp7 <= 0) ||
+    (dp24 === null && dp7 === null && croissanceFlux !== null && croissanceFlux >= 20);
+  const fondamentalAttractif =
+    (multipleRef !== null && multipleRef > 0 && multipleRef <= 25) ||
+    (croissanceFlux !== null && croissanceFlux >= 15);
+
+  if (aFluxSolides && fondamentalAttractif && prixEnRetard) {
+    const details: string[] = [];
+    if (multipleRef !== null) {
+      details.push(`${params.ratioPs !== null ? "P/S" : "P/F"} ${multipleRef.toFixed(1)}x`);
+    }
+    if (croissanceFlux !== null && croissanceFlux > 0) {
+      details.push(`flux 7j +${croissanceFlux.toFixed(0)} %`);
+    }
+    if (dp24 !== null) {
+      details.push(`prix 24h ${dp24 >= 0 ? "+" : ""}${dp24.toFixed(1)} %`);
+    }
+    return {
+      type: "accumulation-fondamentale",
+      direction: "haussier",
+      libelle: "Accumulation Revenus vs Prix",
+      detail: `Cash-flow on-chain solide (${details.join(" · ")}) malgré un prix en retrait`,
+    };
+  }
+
+  // 2. Divergence baissière : Low-Float (< 25 %) + valorisation tendue / faibles revenus + hausse spéculative ou FDV disproportionnée.
+  const estLowFloat = params.floatPct !== null && params.floatPct > 0 && params.floatPct < 25;
+  const valoTendue =
+    (multipleRef !== null && multipleRef >= 80) ||
+    (params.ratioFdvTvl !== null && params.ratioFdvTvl >= 6) ||
+    !aFluxSolides;
+  const prixEnSurchauffe =
+    (dp24 !== null && dp24 >= 5) ||
+    (dp7 !== null && dp7 >= 12) ||
+    (dp24 === null && dp7 === null && params.floatPct !== null && params.floatPct < 15);
+
+  if (estLowFloat && valoTendue && prixEnSurchauffe) {
+    const details: string[] = [`Float ${params.floatPct!.toFixed(1)} %`];
+    if (params.ratioFdvTvl !== null && params.ratioFdvTvl >= 4) {
+      details.push(`FDV/TVL ${params.ratioFdvTvl.toFixed(1)}x`);
+    }
+    if (dp24 !== null && dp24 >= 5) {
+      details.push(`prix 24h +${dp24.toFixed(1)} %`);
+    }
+    return {
+      type: "surchauffe-low-float",
+      direction: "baissier",
+      libelle: "Surchauffe Low-Float",
+      detail: `Pression d'unlocks élevée (${details.join(" · ")}) face à des revenus limités`,
+    };
+  }
+
+  return null;
+}
+
 // ─────────────────────────── Moteur d'évaluation du potentiel (PUR) ───────────────────────────
 
 export interface EntreeEvaluationPotentiel {
@@ -287,6 +545,8 @@ export interface EntreeEvaluationPotentiel {
   circulatingSupply: number | null;
   totalSupply: number | null;
   maxSupply: number | null;
+  changePrix24hPct?: number | null;
+  changePrix7jPct?: number | null;
   tvlUsd: number | null;
   tvlChange7dPct: number | null;
   frais24hUsd: number | null;
@@ -543,8 +803,55 @@ export function evaluerPotentielToken(entree: EntreeEvaluationPotentiel): Evalua
       scoreSecurite -= 2;
       risques.push("Contrat Proxy (logique modifiable par l'admin)");
     }
+    const abi = entree.inspection.abiSensible;
+    if (abi) {
+      if (abi.peutBlacklist) {
+        scoreSecurite -= 4;
+        risques.push("ABI : fonction de gel/blacklist d'adresses détectée");
+      }
+      if (abi.peutModifierTaxes) {
+        scoreSecurite -= 4;
+        risques.push("ABI : fonction de modification dynamique des taxes/frais");
+      }
+      if (abi.peutMint) {
+        scoreSecurite -= 2;
+        risques.push("ABI : fonction d'émission (mint) exposée");
+      }
+      if (abi.peutPause) {
+        scoreSecurite -= 1;
+        risques.push("ABI : fonction de pause des transferts présente");
+      }
+      if (abi.nbFonctions > 0 && abi.niveauRisqueAbi === "faible") {
+        scoreSecurite += 2;
+        atouts.push(`ABI propre (${abi.nbFonctions} fonctions, sans blacklist/taxe dynamique)`);
+      }
+    }
   }
   scoreSecurite = borner(scoreSecurite, 0, 25);
+
+  const pressionDilutionMultiple =
+    floatPct !== null && floatPct > 0 ? Math.max(1, 100 / floatPct) : null;
+  const profondeurLiquidite = qualifierProfondeurLiquidite(entree.tvlUsd, entree.volume24hUsd);
+  const divergenceFondamentale = detecterDivergenceFondamentale({
+    changePrix24hPct: entree.changePrix24hPct,
+    changePrix7jPct: entree.changePrix7jPct,
+    frais24hUsd: entree.frais24hUsd,
+    frais30jUsd: entree.frais30jUsd,
+    fraisChange7dPct: entree.fraisChange7dPct,
+    revenus24hUsd: entree.revenus24hUsd,
+    revenus30jUsd: entree.revenus30jUsd,
+    revenusChange7dPct: entree.revenusChange7dPct,
+    floatPct,
+    ratioPf,
+    ratioPs,
+    ratioFdvTvl,
+  });
+
+  if (divergenceFondamentale?.type === "accumulation-fondamentale") {
+    atouts.push(divergenceFondamentale.libelle);
+  } else if (divergenceFondamentale?.type === "surchauffe-low-float") {
+    risques.push(divergenceFondamentale.libelle);
+  }
 
   const scoreTotal = scoreRevenus + scoreTokenomics + scoreTraction + scoreSecurite;
   const verdict: VerdictPotentiel =
@@ -568,10 +875,14 @@ export function evaluerPotentielToken(entree: EntreeEvaluationPotentiel): Evalua
     atouts,
     risques,
     floatPct,
+    pressionDilutionMultiple,
     ratioPf,
     ratioPs,
     ratioFdvTvl,
     takeRatePct,
+    rotationVolMcapPct: rotationVolMcap,
+    profondeurLiquidite,
+    divergenceFondamentale,
   };
 }
 
@@ -822,6 +1133,8 @@ export function assemblerNouveauxTokens(params: {
       circulatingSupply: cg?.circulatingSupply ?? null,
       totalSupply: cg?.totalSupply ?? null,
       maxSupply: cg?.maxSupply ?? null,
+      changePrix24hPct: cg?.change24hPct ?? null,
+      changePrix7jPct: cg?.change7dPct ?? null,
       tvlUsd,
       tvlChange7dPct,
       frais24hUsd,
@@ -899,11 +1212,13 @@ export function filtrerNouveauxTokens(
     chaine?: string;
     uniquementAvecContrat?: boolean;
     uniquementAvecRevenus?: boolean;
+    divergence?: "toutes" | TypeDivergenceFondamentale;
   },
 ): NouveauToken[] {
   const q = (filtres.recherche ?? "").trim().toLowerCase();
   const fenetre = filtres.fenetreJours ?? 180;
   const chaine = filtres.chaine && filtres.chaine !== "toutes" ? filtres.chaine.toLowerCase() : null;
+  const divergence = filtres.divergence && filtres.divergence !== "toutes" ? filtres.divergence : null;
 
   return tokens.filter((t) => {
     if (fenetre > 0) {
@@ -921,6 +1236,9 @@ export function filtrerNouveauxTokens(
       (t.revenus24hUsd === null || t.revenus24hUsd <= 0) &&
       (t.frais24hUsd === null || t.frais24hUsd <= 0)
     ) {
+      return false;
+    }
+    if (divergence !== null && t.evaluation.divergenceFondamentale?.type !== divergence) {
       return false;
     }
     if (q.length > 0) {
@@ -957,6 +1275,7 @@ export function parserInspectionEtherscan(
   const compilateur = chainePropre(first.CompilerVersion);
   const impl = chainePropre(first.Implementation);
   const estProxy = first.Proxy === "1" || impl !== null;
+  const abiSensible = verifie ? analyserFonctionsSensiblesAbi(abi) : ABI_VIDE;
 
   let supplyBrute: string | null = null;
   if (rawSupply && typeof rawSupply === "object") {
@@ -975,6 +1294,7 @@ export function parserInspectionEtherscan(
     estProxy,
     adresseImplementation: impl,
     supplyBrute,
+    abiSensible,
     observeLe: nowMs,
   };
 }

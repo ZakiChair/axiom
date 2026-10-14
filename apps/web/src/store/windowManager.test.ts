@@ -6,6 +6,7 @@ import {
   detectSnapZone,
   estNouvelle,
   grilleMosaique,
+  libelleGroupeCouleur,
   marquerVue,
   normaliserOrdreZ,
   snapGeometry,
@@ -1112,5 +1113,23 @@ describe("cascadeAll", () => {
     // 1ère fenêtre (z bas) -> cascade index 0 -> coin haut-gauche (marge 48px).
     expect({ x: d.x, y: d.y }).toEqual(cascadePosition(0, viewport, d.width, d.height));
     expect(d.width).toBe(largeurAvant);
+  });
+});
+
+describe("libelleGroupeCouleur et propagerSymboleAuGroupe", () => {
+  it("associe A, B, C aux couleurs de GROUP_PALETTE et propage le symbole aux fenêtres liées", () => {
+    expect(libelleGroupeCouleur(null)).toBeNull();
+    expect(libelleGroupeCouleur(GROUP_PALETTE[0])).toBe("A");
+    expect(libelleGroupeCouleur(GROUP_PALETTE[1])).toBe("B");
+    expect(libelleGroupeCouleur(GROUP_PALETTE[2])).toBe("C");
+
+    const wm = windowManagerStore.getState();
+    wm.openWindow("screener");
+    wm.openWindow("derivatives");
+    wm.setGroup("screener", GROUP_PALETTE[0]!);
+    wm.setGroup("derivatives", GROUP_PALETTE[0]!);
+    wm.propagerSymboleAuGroupe("screener", " aaveusdt ");
+
+    expect(windowManagerStore.getState().groupSymbols[GROUP_PALETTE[0]!]).toBe("AAVEUSDT");
   });
 });

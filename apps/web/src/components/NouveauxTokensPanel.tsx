@@ -20,13 +20,16 @@ import {
   type FenetreAncienneteJours,
   type InspectionContratEvm,
   type NouveauToken,
+  type TypeDivergenceFondamentale,
   type VerdictPotentiel,
 } from "../data/nouveauxTokens";
 import { fetchPairs } from "../data/pairs";
 import { formatPct, formatPrice, formatUsd, VALEUR_ABSENTE } from "../lib/format";
 import { navigateTo } from "../lib/navigation";
+import { alertePrixAuNiveau, alertsStore, arrondirNiveauAlerte } from "../store/alerts";
 import { etherscanKeyStore, getEtherscanKey } from "../store/etherscan";
 import { watchlistStore } from "../store/watchlist";
+import { windowManagerStore } from "../store/windowManager";
 import {
   Badge,
   BadgeFiabilite,
@@ -114,6 +117,7 @@ export function NouveauxTokensPanel() {
   const [chaine, setChaine] = useState<string>("toutes");
   const [uniquementAvecContrat, setUniquementAvecContrat] = useState<boolean>(false);
   const [uniquementAvecRevenus, setUniquementAvecRevenus] = useState<boolean>(false);
+  const [divergence, setDivergence] = useState<"toutes" | TypeDivergenceFondamentale>("toutes");
   const [recherche, setRecherche] = useState<string>("");
 
   // Tri de la table (défaut : score de potentiel décroissant)
@@ -138,6 +142,7 @@ export function NouveauxTokensPanel() {
   // Paires Binance connues pour ouverture directe sur le chart
   const [pairesBinance, setPairesBinance] = useState<Set<string> | null>(null);
   const [dernierAjoutWatchlist, setDernierAjoutWatchlist] = useState<string | null>(null);
+  const [derniereAlerteCreee, setDerniereAlerteCreee] = useState<string | null>(null);
 
   // Abonnement réactif à la clé Etherscan
   useStore(etherscanKeyStore, (s) => s.version);
@@ -216,6 +221,8 @@ export function NouveauxTokensPanel() {
           circulatingSupply: t.circulatingSupply,
           totalSupply: t.totalSupply,
           maxSupply: t.maxSupply,
+          changePrix24hPct: t.changePrix24hPct,
+          changePrix7jPct: t.changePrix7jPct,
           tvlUsd: t.tvlUsd,
           tvlChange7dPct: t.tvlChange7dPct,
           frais24hUsd: t.frais24hUsd,
@@ -241,8 +248,17 @@ export function NouveauxTokensPanel() {
         chaine,
         uniquementAvecContrat,
         uniquementAvecRevenus,
+        divergence,
       }),
-    [tokensEnrichis, recherche, fenetreJours, chaine, uniquementAvecContrat, uniquementAvecRevenus],
+    [
+      tokensEnrichis,
+      recherche,
+      fenetreJours,
+      chaine,
+      uniquementAvecContrat,
+      uniquementAvecRevenus,
+      divergence,
+    ],
   );
 
   // Sélection courante (par défaut le 1er token filtré)
@@ -373,6 +389,16 @@ export function NouveauxTokensPanel() {
                 </span>
               ) : (
                 <span>sans contrat publié</span>
+              )}
+              {t.evaluation.divergenceFondamentale && (
+                <Badge
+                  ton={t.evaluation.divergenceFondamentale.direction === "haussier" ? "up" : "warn"}
+                  title={t.evaluation.divergenceFondamentale.detail}
+                >
+                  {t.evaluation.divergenceFondamentale.type === "accumulation-fondamentale"
+                    ? "▲ Rev vs Prix"
+                    : "▼ Low-Float"}
+                </Badge>
               )}
             </div>
           </div>
@@ -602,6 +628,28 @@ export function NouveauxTokensPanel() {
             >
               Revenus &gt; 0
             </BoutonBascule>
+            <BoutonBascule
+              actif={divergence === "accumulation-fondamentale"}
+              onClick={() =>
+                setDivergence((d) =>
+                  d === "accumulation-fondamentale" ? "toutes" : "accumulation-fondamentale",
+                )
+              }
+              title="Filtrer les divergences haussières : revenus/frais solides malgré un prix en retrait"
+            >
+              ▲ Accumulation Rev/Prix
+            </BoutonBascule>
+            <BoutonBascule
+              actif={divergence === "surchauffe-low-float"}
+              onClick={() =>
+                setDivergence((d) =>
+                  d === "surchauffe-low-float" ? "toutes" : "surchauffe-low-float",
+                )
+              }
+              title="Filtrer les surchauffes spéculatives : Low-Float (< 25 %) et valorisation diluée tendue"
+            >
+              ▼ Surchauffe Low-Float
+            </BoutonBascule>
           </div>
         </div>
 
@@ -653,13 +701,46 @@ export function NouveauxTokensPanel() {
                 )
               }
               dernierAjoutWatchlist={dernierAjoutWatchlist}
+              derniereAlerteCreee={derniereAlerteCreee}
               onInspecterContrat={() => lancerInspectionSelection(tokenSelectionne)}
               onOuvrirChart={(paire) => {
+                windowManagerStore.getState().propagerSymboleAuGroupe("screener", paire);
+                windowManagerStore.getState().propagerSymboleAuGroupe("sect", paire);
                 navigateTo({ symbol: paire, exchange: "binance", source: "eqs" });
               }}
               onAjouterWatchlist={(paire) => {
                 watchlistStore.getState().add(paire);
                 setDernierAjoutWatchlist(paire);
+              }}
+              onCreerAlerte={(paire, prixActuel) => {
+                const direction =
+                  tokenSelectionne.evaluation.divergenceFondamentale?.direction === "baissier"
+                    ? "baisse"
+                    : "hausse";
+                if (prixActuel !== null && Number.isFinite(prixActuel) && prixActuel > 0) {
+                  const cible = arrondirNiveauAlerte(
+                    prixActuel * (direction === "hausse" ? 1.03 : 0.97),
+                  );
+                  alertsStore
+                    .getState()
+                    .ajouter(
+                      alertePrixAuNiveau(
+                        paire,
+                        "binance",
+                        cible,
+                        direction,
+                        `${tokenSelectionne.symbole} (${tokenSelectionne.evaluation.scoreTotal}/100) — suivi radar EQS`,
+                      ),
+                    );
+                } else {
+                  alertsStore.getState().ajouter({
+                    symbol: paire,
+                    source: "binance",
+                    condition: { type: "variation-pct", fenetreMs: 3_600_000, seuilPct: 3 },
+                    message: `${tokenSelectionne.symbole} (${tokenSelectionne.evaluation.scoreTotal}/100) — impulsion 1h`,
+                  });
+                }
+                setDerniereAlerteCreee(paire);
               }}
             />
           )}
@@ -780,15 +861,25 @@ function BarrePilier({
 }
 
 function ResumeInspectionEvm({ inspection }: { inspection: InspectionContratEvm }) {
+  const abi = inspection.abiSensible;
+  const tonRisqueAbi: TonBadge =
+    abi?.niveauRisqueAbi === "eleve"
+      ? "down"
+      : abi?.niveauRisqueAbi === "modere"
+        ? "warn"
+        : abi?.niveauRisqueAbi === "faible"
+          ? "up"
+          : "neutre";
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-1.5">
         <Badge ton={inspection.verifie ? "up" : "down"}>
           {inspection.verifie ? "Code source vérifié" : "Code NON vérifié"}
         </Badge>
-        {inspection.estProxy && (
-          <Badge ton="warn">
-            Proxy modifiable
+        {inspection.estProxy && <Badge ton="warn">Proxy modifiable</Badge>}
+        {abi && abi.nbFonctions > 0 && (
+          <Badge ton={tonRisqueAbi}>
+            ABI : risque {abi.niveauRisqueAbi} ({abi.nbFonctions} fn)
           </Badge>
         )}
         {inspection.nomContrat && (
@@ -800,6 +891,29 @@ function ResumeInspectionEvm({ inspection }: { inspection: InspectionContratEvm 
           (chainId {inspection.chainId} · {inspection.adresse})
         </span>
       </div>
+      {abi && abi.nbFonctions > 0 && (
+        <div className="flex flex-wrap items-center gap-1 text-[10px]">
+          <span className="text-text-dim">Privilèges ABI :</span>
+          <Badge ton={abi.peutMint ? "warn" : "neutre"}>
+            {abi.peutMint ? "⚠ mint() actif" : "sans mint()"}
+          </Badge>
+          <Badge ton={abi.peutBlacklist ? "down" : "neutre"}>
+            {abi.peutBlacklist ? "⚠ blacklist/freeze" : "sans blacklist"}
+          </Badge>
+          <Badge ton={abi.peutModifierTaxes ? "down" : "neutre"}>
+            {abi.peutModifierTaxes ? "⚠ taxes modifiables" : "sans taxe dynamique"}
+          </Badge>
+          <Badge ton={abi.peutPause ? "warn" : "neutre"}>
+            {abi.peutPause ? "⚠ pause()" : "sans pause"}
+          </Badge>
+          {abi.aControleProprietaire && <Badge ton="accent">Ownable / Roles</Badge>}
+          {abi.fonctionsSensibles.length > 0 && (
+            <span className="font-mono text-[10px] text-text-dim">
+              [{abi.fonctionsSensibles.join(", ")}]
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex flex-wrap gap-x-4 gap-y-0.5 font-mono text-[10px] text-text-dim">
         {inspection.compilateur && <span>Compilateur : {inspection.compilateur}</span>}
         {inspection.adresseImplementation && (
@@ -817,18 +931,22 @@ function CarteEvaluationDetaillee({
   paireChart,
   inspectionEnCours,
   dernierAjoutWatchlist,
+  derniereAlerteCreee,
   onInspecterContrat,
   onOuvrirChart,
   onAjouterWatchlist,
+  onCreerAlerte,
 }: {
   token: NouveauToken;
   inspection: InspectionContratEvm | null;
   paireChart: string | null;
   inspectionEnCours: boolean;
   dernierAjoutWatchlist: string | null;
+  derniereAlerteCreee: string | null;
   onInspecterContrat: () => void;
   onOuvrirChart: (paire: string) => void;
   onAjouterWatchlist: (paire: string) => void;
+  onCreerAlerte: (paire: string, prixActuel: number | null) => void;
 }) {
   const p: EvaluationPotentiel = token.evaluation;
 
@@ -888,6 +1006,15 @@ function CarteEvaluationDetaillee({
                 Listé il y a {token.ageJours === 0 ? "< 1" : token.ageJours} j
               </Badge>
             )}
+            {p.divergenceFondamentale && (
+              <Badge
+                ton={p.divergenceFondamentale.direction === "haussier" ? "up" : "warn"}
+                title={p.divergenceFondamentale.detail}
+              >
+                {p.divergenceFondamentale.direction === "haussier" ? "▲ " : "▼ "}
+                {p.divergenceFondamentale.libelle}
+              </Badge>
+            )}
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-text-dim">
             <span>Catégorie : {token.categorie}</span>
@@ -920,6 +1047,12 @@ function CarteEvaluationDetaillee({
               </Bouton>
               <Bouton onClick={() => onAjouterWatchlist(paireChart)}>
                 {dernierAjoutWatchlist === paireChart ? "✓ Watchlist" : "＋ Watchlist"}
+              </Bouton>
+              <Bouton
+                onClick={() => onCreerAlerte(paireChart, token.prixUsd)}
+                title="Créer une alerte automatique (±3 % autour du prix actuel) dans le centre d'alertes ALRT"
+              >
+                {derniereAlerteCreee === paireChart ? "✓ Alerte active" : "🔔 Alerte"}
               </Bouton>
             </>
           )}
@@ -1020,13 +1153,34 @@ function CarteEvaluationDetaillee({
           </div>
         </div>
         <div className="rounded bg-bg/70 px-2 py-1.5">
-          <div className="text-[10px] text-text-dim">Float · Vol 24h</div>
+          <div className="text-[10px] text-text-dim">Float · Pression Unlocks</div>
           <div className="font-mono text-[11px] text-text">
             {formatFloatPct(p.floatPct)}
             {" · "}
-            {token.volume24hUsd !== null ? formatUsd(token.volume24hUsd) : VALEUR_ABSENTE}
+            {p.pressionDilutionMultiple !== null
+              ? `${p.pressionDilutionMultiple.toFixed(1)}x total`
+              : VALEUR_ABSENTE}
           </div>
         </div>
+      </div>
+
+      {/* Liquidité & Rotation du capital */}
+      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 rounded bg-bg/50 px-2 py-1 text-[10px] text-text-dim">
+        <span>
+          Liquidité :{" "}
+          <strong className="font-mono text-text uppercase">{p.profondeurLiquidite}</strong>
+          {" · "}
+          Vol 24h :{" "}
+          <span className="font-mono text-text">
+            {token.volume24hUsd !== null ? formatUsd(token.volume24hUsd) : VALEUR_ABSENTE}
+          </span>
+          {" · "}
+          Rotation Vol/MCap :{" "}
+          <span className="font-mono text-text">{formatFloatPct(p.rotationVolMcapPct)}</span>
+        </span>
+        {p.divergenceFondamentale && (
+          <span className="font-mono text-accent">{p.divergenceFondamentale.detail}</span>
+        )}
       </div>
 
       {/* Atouts & Risques identifiés automatiquement */}

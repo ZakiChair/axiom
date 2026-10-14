@@ -212,6 +212,10 @@ import { cmfOf } from "../volume/cmf";
 export const MAX_SIGNAUX_AXIS = 120;
 /** Cap de marqueurs « fort achat / forte vente » (les plus récents). */
 export const MAX_GROS_AXIS = 60;
+/** Cap de marqueurs de retournement potentiel (les plus récents). */
+export const MAX_RETOURNEMENTS_AXIS = 40;
+/** Seuil de confiance par défaut (0–100) pour qualifier un retournement potentiel AXIS. */
+export const SEUIL_CONFIANCE_RETOURNEMENT_AXIS = 60;
 /** Étiquettes « Fort achat ×n / Forte vente ×n » : seuls les plus récents. */
 export const MAX_LABELS_GROS = 3;
 /** Part du volume que le delta taker doit atteindre pour donner un sens. */
@@ -888,6 +892,40 @@ export const stratAxis: IndicatorDef = {
       }
     });
 
+    if (Boolean(params.detecterRetournements)) {
+      const retournements = detecterRetournementsAxis(candles, params, ctx);
+      const exclus = new Set(signaux);
+      retournements
+        .filter((r) => !exclus.has(r.idx))
+        .slice(-MAX_RETOURNEMENTS_AXIS)
+        .forEach((r, k, recents) => {
+          const c = candles[r.idx] as Candle;
+          const achat = r.sens === "achat";
+          const valeur = achat ? c.low : c.high;
+          const couleur = achat ? "--up" : "--down";
+          marqueurs.push({
+            idx: r.idx,
+            valeur,
+            forme: achat ? "triangleHaut" : "triangleBas",
+            couleur,
+            cible: "prix",
+            info:
+              `AXIS ${r.resume} · entrée ${r.prixEntree.toFixed(2)} · invalidation ${r.stopInvalidation.toFixed(2)} · ` +
+              `cible 1R ${r.cible1R.toFixed(2)} / 2R ${r.cible2R.toFixed(2)}`,
+          });
+          if (k >= recents.length - MAX_LABELS_SORTIE) {
+            labels.push({
+              idx: r.idx,
+              valeur,
+              texte: `${achat ? "↺ Achat" : "↺ Vente"} ${r.scoreConfiance}%`,
+              couleur,
+              cible: "prix",
+              position: achat ? "dessous" : "dessus",
+            });
+          }
+        });
+    }
+
     return marqueurs.length > 0
       ? { series: { prixSignal, stop, etat: pos, score }, annotations: { marqueurs, labels } }
       : { series: { prixSignal, stop, etat: pos, score } };
@@ -909,3 +947,330 @@ enregistrerSpecStrategie({
     sortie: "AXIS : score ≤ −seuil de vente (ou stop suiveur si réglé)",
   }),
 });
+
+// ─────────────────────────── Détection haute précision des retournements (Achat / Vente) ───────────────────────────
+
+export interface ComposantesRetournementAxis {
+  /** Épuisement RSI 14 (sortie de survente/surachat avec crochet d'inflexion). */
+  epuisementRsi: boolean;
+  /** Divergence haussière ou baissière Prix vs RSI 14 / Histogramme MACD. */
+  divergence: boolean;
+  /** Décélération de l'histogramme MACD + inflexion du score de confluence AXIS. */
+  inflexionConfluence: boolean;
+  /** Rejet sur mèche d'absorption (≥ 30 % du range) ou avalement de clôture. */
+  rejetPrix: boolean;
+  /** Confirmation par le volume relatif (RVOL), le flux monétaire (CMF) ou le delta taker. */
+  absorptionFlux: boolean;
+}
+
+export interface RetournementPotentielAxis {
+  /** Indice de la bougie de retournement (toujours ≤ fin, anti-repaint). */
+  idx: number;
+  /** Sens du retournement détecté. */
+  sens: "achat" | "vente";
+  /** Score de précision / confiance sur 100 (≥ 60 = qualifié, ≥ 75 = haute précision). */
+  scoreConfiance: number;
+  /** Score de confluence AXIS (−6 à +6) à la bougie du retournement. */
+  scoreAxis: number;
+  /** Valeur du RSI 14 à la bougie du retournement. */
+  rsi: number;
+  /** Détail des 5 piliers validés. */
+  composantes: ComposantesRetournementAxis;
+  /** Prix d'entrée de référence (close de la bougie). */
+  prixEntree: number;
+  /** Niveau d'invalidation structurel (mèche ± 0.5 × ATR 14). */
+  stopInvalidation: number;
+  /** Cible 1R projetée à partir de la distance d'invalidation. */
+  cible1R: number;
+  /** Cible 2R projetée à partir de la distance d'invalidation. */
+  cible2R: number;
+  /** Synthèse lisible en français des signaux de retournement réunis. */
+  resume: string;
+}
+
+/**
+ * Détecte avec haute précision les retournements potentiels à l'ACHAT (creux d'épuisement)
+ * et à la VENTE (sommet d'euphorie / distribution) en combinant 5 dimensions :
+ *   1. Épuisement & crochet d'inflexion du RSI 14 (+25 pts)
+ *   2. Divergence Prix vs RSI 14 ou Histogramme MACD sur fenêtre glissante (+25 pts)
+ *   3. Décélération MACD & redressement/chute du score de confluence AXIS (+20 pts)
+ *   4. Structure de rejet sur bougie : mèche d'absorption ou avalement (+15 pts)
+ *   5. Absorption par le flux : RVOL, CMF 20 ou delta taker (+15 pts)
+ *
+ * Fonction 100 % PURE et causale (aucune lecture au-delà de `i`, respecte la borne
+ * anti-repaint `fin`).
+ */
+export function detecterRetournementsAxis(
+  candles: Candle[],
+  params: Record<string, number | boolean | string> = {},
+  ctx?: Partial<CalcContext>
+): RetournementPotentielAxis[] {
+  const n = candles.length;
+  if (n < 20) return [];
+  const fin = candles[n - 1]?.closed === true ? n - 1 : n - 2;
+  if (fin < 5) return [];
+
+  const closes = closeOf(candles);
+  const rsi = rsiOf(closes, 14);
+  const macd = macdOf(closes, 12, 26, 9);
+  const cmf = cmfOf(candles, 20);
+  const atr = rma(trueRange(candles), ATR_STOP_PERIODE);
+  const votes = votesAxis(candles, params);
+  const scores = votes.map((v) => v?.reduce((a, b) => a + b, 0));
+  const flux = fluxAxis(
+    candles,
+    ctx?.aux?.oi,
+    Number(params.rvolPeriode ?? 20),
+    Number(params.oiBougies ?? 6)
+  );
+
+  const seuilConfiance = Number(
+    params.seuilConfianceRetournement ?? SEUIL_CONFIANCE_RETOURNEMENT_AXIS
+  );
+  const reculDivergence = 14;
+  const resultats: RetournementPotentielAxis[] = [];
+  let dernierAchatIdx = -999;
+  let derniereVenteIdx = -999;
+
+  for (let i = 4; i <= fin; i++) {
+    const c = candles[i];
+    const prev = candles[i - 1];
+    const rs = rsi[i];
+    const rsPrev = rsi[i - 1];
+    const hist = macd.hist[i];
+    const histPrev = macd.hist[i - 1];
+    const sc = scores[i];
+    if (
+      c === undefined ||
+      prev === undefined ||
+      rs === undefined ||
+      rsPrev === undefined ||
+      hist === undefined ||
+      histPrev === undefined
+    ) {
+      continue;
+    }
+
+    const amplitude = c.high - c.low;
+    if (!Number.isFinite(amplitude) || amplitude <= 0) continue;
+
+    const corpsHaut = Math.max(c.open, c.close);
+    const corpsBas = Math.min(c.open, c.close);
+    const mecheBasseRatio = (corpsBas - c.low) / amplitude;
+    const mecheHauteRatio = (c.high - corpsHaut) / amplitude;
+    const posClotureDansRange = (c.close - c.low) / amplitude;
+
+    const rMin3 = Math.min(rsPrev, rsi[i - 2] ?? rsPrev, rsi[i - 3] ?? rsPrev);
+    const rMax3 = Math.max(rsPrev, rsi[i - 2] ?? rsPrev, rsi[i - 3] ?? rsPrev);
+
+    // Fenêtre de recul causale [max(0, i - reculDivergence) .. i - 2] pour chercher un pivot
+    const debutRecul = Math.max(0, i - reculDivergence);
+    let idxPlusBas = -1;
+    let minLow = Infinity;
+    let idxPlusHaut = -1;
+    let maxHigh = -Infinity;
+    for (let j = debutRecul; j <= i - 2; j++) {
+      const cj = candles[j];
+      if (!cj) continue;
+      if (cj.low < minLow) {
+        minLow = cj.low;
+        idxPlusBas = j;
+      }
+      if (cj.high > maxHigh) {
+        maxHigh = cj.high;
+        idxPlusHaut = j;
+      }
+    }
+
+    // Score AXIS min/max sur les 4 bougies précédentes
+    let minScore4 = sc ?? 0;
+    let maxScore4 = sc ?? 0;
+    for (let j = Math.max(0, i - 4); j < i; j++) {
+      const sj = scores[j];
+      if (sj !== undefined) {
+        if (sj < minScore4) minScore4 = sj;
+        if (sj > maxScore4) maxScore4 = sj;
+      }
+    }
+
+    const f = flux[i] ?? {};
+    const cmfCourant = cmf[i];
+    const cmfPrec = cmf[i - 1];
+    const atrCourant = atr[i] ?? amplitude;
+
+    // ── 1. Évaluation Retournement ACHAT (creux d'épuisement) ──
+    const epuisementAchat =
+      (rMin3 <= 36 && rs >= rsPrev + 2.2 && rs >= 28) ||
+      (rMin3 <= 42 && rs >= rsPrev + 4.0 && c.close > c.open);
+
+    const divergenceAchat =
+      idxPlusBas >= 0 &&
+      c.low <= minLow * 1.006 &&
+      ((rsi[idxPlusBas] !== undefined && rs >= rsi[idxPlusBas]! + 2.5 && rsPrev <= 48) ||
+        (macd.hist[idxPlusBas] !== undefined &&
+          macd.hist[idxPlusBas]! < 0 &&
+          hist > macd.hist[idxPlusBas]! &&
+          hist > histPrev));
+
+    const inflexionAchat =
+      hist > histPrev &&
+      (histPrev < 0 || (sc !== undefined && sc - minScore4 >= 2 && minScore4 <= -2));
+
+    const rejetAchat =
+      (mecheBasseRatio >= 0.3 && posClotureDansRange >= 0.5) ||
+      (c.close > c.open && prev.close < prev.open && c.close >= prev.open && posClotureDansRange >= 0.6);
+
+    const absorptionAchat =
+      (f.delta === undefined || f.delta > -SEUIL_DELTA_AXIS) &&
+      ((f.rvol !== undefined && f.rvol >= 1.15 && (c.close >= c.open || mecheBasseRatio >= 0.35)) ||
+        (f.delta !== undefined && f.delta >= 0.06) ||
+        (cmfCourant !== undefined && cmfPrec !== undefined && cmfCourant > cmfPrec + 0.03));
+
+    const scoreAchat =
+      (epuisementAchat ? 25 : 0) +
+      (divergenceAchat ? 25 : 0) +
+      (inflexionAchat ? 20 : 0) +
+      (rejetAchat ? 15 : 0) +
+      (absorptionAchat ? 15 : 0);
+
+    const structureBougieAchatValide =
+      posClotureDansRange >= 0.45 &&
+      (epuisementAchat || divergenceAchat) &&
+      (rejetAchat || inflexionAchat);
+
+    if (
+      scoreAchat >= seuilConfiance &&
+      structureBougieAchatValide &&
+      i - dernierAchatIdx >= 3
+    ) {
+      const stopInv = Math.min(c.low, prev.low) - 0.5 * atrCourant;
+      const risque = Math.max(c.close - stopInv, amplitude * 0.5);
+      const raisons: string[] = [];
+      if (epuisementAchat) raisons.push(`rebond RSI (${rs.toFixed(1)})`);
+      if (divergenceAchat) raisons.push("divergence haussière Prix/Momentum");
+      if (inflexionAchat) raisons.push("inflexion MACD/AXIS");
+      if (rejetAchat) raisons.push("rejet sur mèche basse / avalement");
+      if (absorptionAchat) raisons.push("absorption acheteuse sur volume");
+
+      resultats.push({
+        idx: i,
+        sens: "achat",
+        scoreConfiance: scoreAchat,
+        scoreAxis: sc ?? 0,
+        rsi: rs,
+        composantes: {
+          epuisementRsi: epuisementAchat,
+          divergence: divergenceAchat,
+          inflexionConfluence: inflexionAchat,
+          rejetPrix: rejetAchat,
+          absorptionFlux: absorptionAchat,
+        },
+        prixEntree: c.close,
+        stopInvalidation: stopInv,
+        cible1R: c.close + risque,
+        cible2R: c.close + 2 * risque,
+        resume: `Retournement ACHAT (${scoreAchat}/100) : ${raisons.join(" + ")}`,
+      });
+      dernierAchatIdx = i;
+      continue;
+    }
+
+    // ── 2. Évaluation Retournement VENTE (sommet d'euphorie / distribution) ──
+    const epuisementVente =
+      (rMax3 >= 64 && rs <= rsPrev - 2.2 && rs <= 72) ||
+      (rMax3 >= 58 && rs <= rsPrev - 4.0 && c.close < c.open);
+
+    const divergenceVente =
+      idxPlusHaut >= 0 &&
+      c.high >= maxHigh * 0.994 &&
+      ((rsi[idxPlusHaut] !== undefined && rs <= rsi[idxPlusHaut]! - 2.5 && rsPrev >= 52) ||
+        (macd.hist[idxPlusHaut] !== undefined &&
+          macd.hist[idxPlusHaut]! > 0 &&
+          hist < macd.hist[idxPlusHaut]! &&
+          hist < histPrev));
+
+    const inflexionVente =
+      hist < histPrev &&
+      (histPrev > 0 || (sc !== undefined && maxScore4 - sc >= 2 && maxScore4 >= 2));
+
+    const rejetVente =
+      (mecheHauteRatio >= 0.3 && posClotureDansRange <= 0.5) ||
+      (c.close < c.open && prev.close > prev.open && c.close <= prev.open && posClotureDansRange <= 0.4);
+
+    const absorptionVente =
+      (f.delta === undefined || f.delta < SEUIL_DELTA_AXIS) &&
+      ((f.rvol !== undefined && f.rvol >= 1.15 && (c.close <= c.open || mecheHauteRatio >= 0.35)) ||
+        (f.delta !== undefined && f.delta <= -0.06) ||
+        (cmfCourant !== undefined && cmfPrec !== undefined && cmfCourant < cmfPrec - 0.03));
+
+    const scoreVente =
+      (epuisementVente ? 25 : 0) +
+      (divergenceVente ? 25 : 0) +
+      (inflexionVente ? 20 : 0) +
+      (rejetVente ? 15 : 0) +
+      (absorptionVente ? 15 : 0);
+
+    const structureBougieVenteValide =
+      posClotureDansRange <= 0.55 &&
+      (epuisementVente || divergenceVente) &&
+      (rejetVente || inflexionVente);
+
+    if (
+      scoreVente >= seuilConfiance &&
+      structureBougieVenteValide &&
+      i - derniereVenteIdx >= 3
+    ) {
+      const stopInv = Math.max(c.high, prev.high) + 0.5 * atrCourant;
+      const risque = Math.max(stopInv - c.close, amplitude * 0.5);
+      const raisons: string[] = [];
+      if (epuisementVente) raisons.push(`repli RSI (${rs.toFixed(1)})`);
+      if (divergenceVente) raisons.push("divergence baissière Prix/Momentum");
+      if (inflexionVente) raisons.push("essoufflement MACD/AXIS");
+      if (rejetVente) raisons.push("rejet sur mèche haute / avalement");
+      if (absorptionVente) raisons.push("distribution vendeuse sur volume");
+
+      resultats.push({
+        idx: i,
+        sens: "vente",
+        scoreConfiance: scoreVente,
+        scoreAxis: sc ?? 0,
+        rsi: rs,
+        composantes: {
+          epuisementRsi: epuisementVente,
+          divergence: divergenceVente,
+          inflexionConfluence: inflexionVente,
+          rejetPrix: rejetVente,
+          absorptionFlux: absorptionVente,
+        },
+        prixEntree: c.close,
+        stopInvalidation: stopInv,
+        cible1R: Math.max(0, c.close - risque),
+        cible2R: Math.max(0, c.close - 2 * risque),
+        resume: `Retournement VENTE (${scoreVente}/100) : ${raisons.join(" + ")}`,
+      });
+      derniereVenteIdx = i;
+    }
+  }
+
+  return resultats;
+}
+
+/**
+ * Retourne le retournement potentiel AXIS le plus récent s'il s'est produit dans les
+ * `maxAgeBougies` dernières bougies évaluables (défaut 3 bougies avant `fin` incluse).
+ * Utile pour le screener de signaux EQS et les alertes temps réel. PURE.
+ */
+export function dernierRetournementAxis(
+  candles: Candle[],
+  maxAgeBougies = 3,
+  params: Record<string, number | boolean | string> = {},
+  ctx?: Partial<CalcContext>
+): RetournementPotentielAxis | null {
+  if (candles.length < 20) return null;
+  const fin = candles[candles.length - 1]?.closed === true ? candles.length - 1 : candles.length - 2;
+  const tous = detecterRetournementsAxis(candles, params, ctx);
+  const dernier = tous.at(-1);
+  if (!dernier) return null;
+  if (fin - dernier.idx > Math.max(0, maxAgeBougies)) return null;
+  return dernier;
+}

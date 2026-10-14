@@ -49,7 +49,10 @@ import {
   MAX_LABELS_GROS,
   MAX_SIGNAUX_AXIS,
   REGIME_TESTE,
+  SEUIL_CONFIANCE_RETOURNEMENT_AXIS,
   SEUIL_DELTA_AXIS,
+  dernierRetournementAxis,
+  detecterRetournementsAxis,
   emaDepuisPremiereDefinie,
   episodesAxis,
   fluxAxis,
@@ -1477,5 +1480,80 @@ describe("garde-fou de régime BTC (v5, 10 octobre 2026)", () => {
       expect(m.info).not.toContain(NON_APPLIQUE);
     }
     for (const m of v2.annotations?.marqueurs ?? []) expect(m.info).toContain(REGIME_FAVORABLE.slice(3));
+  });
+});
+
+describe("detecterRetournementsAxis — détection haute précision Achat / Vente", () => {
+  it("détecte des retournements potentiels à l'achat et à la vente sur la fixture dorée avec stop d'invalidation et cibles 1R/2R", () => {
+    const retournements = detecterRetournementsAxis(candles);
+    expect(retournements.length).toBeGreaterThan(0);
+
+    const achatsPotentiels = retournements.filter((r) => r.sens === "achat");
+    const ventesPotentielles = retournements.filter((r) => r.sens === "vente");
+    expect(achatsPotentiels.length).toBeGreaterThan(0);
+    expect(ventesPotentielles.length).toBeGreaterThan(0);
+
+    for (const r of retournements) {
+      expect(r.scoreConfiance).toBeGreaterThanOrEqual(SEUIL_CONFIANCE_RETOURNEMENT_AXIS);
+      expect(r.idx).toBeLessThanOrEqual(candles.length - 2); // anti-repaint : exclut la dernière bougie non clôturée
+      if (r.sens === "achat") {
+        expect(r.stopInvalidation).toBeLessThan(r.prixEntree);
+        expect(r.cible1R).toBeGreaterThan(r.prixEntree);
+        expect(r.cible2R).toBeGreaterThan(r.cible1R);
+        expect(r.resume).toContain("Retournement ACHAT");
+      } else {
+        expect(r.stopInvalidation).toBeGreaterThan(r.prixEntree);
+        expect(r.cible1R).toBeLessThan(r.prixEntree);
+        expect(r.cible2R).toBeLessThanOrEqual(r.cible1R);
+        expect(r.resume).toContain("Retournement VENTE");
+      }
+    }
+  });
+
+  it("est strictement causale (aucune fuite du futur) et applique un cooldown de 3 bougies entre signaux de même sens", () => {
+    const base = detecterRetournementsAxis(candles);
+    for (let k = 1; k < base.length; k++) {
+      const prev = base[k - 1]!;
+      const cur = base[k]!;
+      if (prev.sens === cur.sens) {
+        expect(cur.idx - prev.idx).toBeGreaterThanOrEqual(3);
+      }
+    }
+
+    // Tronquer ou corrompre les bougies futures > 180 ne change aucun retournement jusqu'à 180
+    const corrompues = candles.map((c, i) =>
+      i <= 180 ? c : { ...c, open: c.open * 3, high: c.high * 3, low: c.low * 3, close: c.close * 3 },
+    );
+    const surCorrompues = detecterRetournementsAxis(corrompues).filter((r) => r.idx <= 180);
+    expect(surCorrompues).toEqual(base.filter((r) => r.idx <= 180));
+  });
+
+  it("dernierRetournementAxis filtre selon l'âge maximal en bougies", () => {
+    const tous = detecterRetournementsAxis(candles);
+    const dernier = tous.at(-1)!;
+    const fin = candles.length - 2;
+    const age = fin - dernier.idx;
+
+    expect(dernierRetournementAxis(candles, age)).toEqual(dernier);
+    if (age > 0) {
+      expect(dernierRetournementAxis(candles, age - 1)).toBeNull();
+    }
+  });
+
+  it("stratAxis.calc annote les retournements quand detecterRetournements=true sans modifier le défaut", () => {
+    const defaut = computeIndicator(stratAxis, candles, EMA50);
+    const avecRetournements = computeIndicator(stratAxis, candles, {
+      ...EMA50,
+      detecterRetournements: true,
+    });
+    expect(avecRetournements.series).toEqual(defaut.series);
+    expect((avecRetournements.annotations?.marqueurs?.length ?? 0)).toBeGreaterThan(
+      defaut.annotations?.marqueurs?.length ?? 0,
+    );
+    expect(
+      avecRetournements.annotations?.marqueurs?.some((m) =>
+        m.info?.includes("Retournement ACHAT") || m.info?.includes("Retournement VENTE"),
+      ),
+    ).toBe(true);
   });
 });

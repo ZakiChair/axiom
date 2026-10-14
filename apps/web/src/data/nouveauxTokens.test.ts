@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   abregerAdresse,
+  analyserFonctionsSensiblesAbi,
   assemblerNouveauxTokens,
+  detecterDivergenceFondamentale,
   evaluerPotentielToken,
   filtrerNouveauxTokens,
   parserContratToken,
   parserFluxOverviewDefiLlama,
   parserInspectionEtherscan,
   parserMarchesCoinGecko,
+  qualifierProfondeurLiquidite,
   urlExterneSure,
 } from "./nouveauxTokens";
 
@@ -422,5 +425,74 @@ describe("nouveauxTokens — croisement DefiLlama + CoinGecko + Etherscan et fil
     });
 
     expect(evalHeterogene.takeRatePct).toBeNull();
+  });
+
+  it("analyse les fonctions sensibles d'une ABI Etherscan (mint, blacklist, taxes, pause, Ownable)", () => {
+    const abiRisquee = JSON.stringify([
+      { type: "function", name: "totalSupply", stateMutability: "view" },
+      { type: "function", name: "mint", stateMutability: "nonpayable" },
+      { type: "function", name: "setBlacklist", stateMutability: "nonpayable" },
+      { type: "function", name: "setBuyTax", stateMutability: "nonpayable" },
+      { type: "function", name: "pause", stateMutability: "nonpayable" },
+      { type: "function", name: "transferOwnership", stateMutability: "nonpayable" },
+    ]);
+    const res = analyserFonctionsSensiblesAbi(abiRisquee);
+    expect(res.nbFonctions).toBe(6);
+    expect(res.peutMint).toBe(true);
+    expect(res.peutBlacklist).toBe(true);
+    expect(res.peutModifierTaxes).toBe(true);
+    expect(res.peutPause).toBe(true);
+    expect(res.aControleProprietaire).toBe(true);
+    expect(res.niveauRisqueAbi).toBe("eleve");
+    expect(res.fonctionsSensibles).toEqual(["mint", "setBlacklist", "setBuyTax", "pause"]);
+
+    const abiPropre = JSON.stringify([
+      { type: "function", name: "totalSupply", stateMutability: "view" },
+      { type: "function", name: "transfer", stateMutability: "nonpayable" },
+      { type: "function", name: "approve", stateMutability: "nonpayable" },
+    ]);
+    const resPropre = analyserFonctionsSensiblesAbi(abiPropre);
+    expect(resPropre.nbFonctions).toBe(3);
+    expect(resPropre.niveauRisqueAbi).toBe("faible");
+    expect(resPropre.fonctionsSensibles).toHaveLength(0);
+  });
+
+  it("détecte les divergences fondamentales (Accumulation Revenus vs Prix & Surchauffe Low-Float)", () => {
+    const accum = detecterDivergenceFondamentale({
+      changePrix24hPct: -4.2,
+      changePrix7jPct: -8.5,
+      frais24hUsd: 80_000,
+      frais30jUsd: 2_100_000,
+      fraisChange7dPct: 18,
+      revenus24hUsd: 25_000,
+      revenus30jUsd: 650_000,
+      revenusChange7dPct: 22,
+      floatPct: 68,
+      ratioPf: 6.5,
+      ratioPs: 14.2,
+      ratioFdvTvl: 1.1,
+    });
+    expect(accum?.type).toBe("accumulation-fondamentale");
+    expect(accum?.direction).toBe("haussier");
+
+    const surchauffe = detecterDivergenceFondamentale({
+      changePrix24hPct: 14.5,
+      changePrix7jPct: 32,
+      frais24hUsd: 200,
+      frais30jUsd: 4_000,
+      fraisChange7dPct: -5,
+      revenus24hUsd: 0,
+      revenus30jUsd: 0,
+      revenusChange7dPct: null,
+      floatPct: 11.5,
+      ratioPf: 450,
+      ratioPs: null,
+      ratioFdvTvl: 18.4,
+    });
+    expect(surchauffe?.type).toBe("surchauffe-low-float");
+    expect(surchauffe?.direction).toBe("baissier");
+
+    expect(qualifierProfondeurLiquidite(40_000_000, 12_000_000)).toBe("profonde");
+    expect(qualifierProfondeurLiquidite(50_000, 10_000)).toBe("illiquide");
   });
 });

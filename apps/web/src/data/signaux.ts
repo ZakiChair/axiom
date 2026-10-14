@@ -20,7 +20,13 @@ export type DirectionSignal = "haussier" | "baissier";
 export type FiabiliteSignal = "fiable" | "échantillonné" | "heuristique" | "bruité";
 
 export interface SignalDetecte {
-  id: "quadrant" | "funding" | "divergence-rsi" | "positionnement";
+  id:
+    | "quadrant"
+    | "funding"
+    | "divergence-rsi"
+    | "positionnement"
+    | "divergence-fondamentale"
+    | "retournement-axis";
   direction: DirectionSignal;
   /** Libellé court (badge). */
   libelle: string;
@@ -304,6 +310,128 @@ export function signalPositionnement(lsFoule: number, lsTop: number): SignalDete
       "ratios Binance futures data, bruités (méthodologies comptes/positions différentes)",
     fiabilite: "bruité",
     poids: 1,
+  };
+}
+
+// ─────────────────────────── Divergence fondamentale (Revenus vs Prix / Low-Float) ───────────────────────────
+
+export interface EntreeDivergenceFondamentale {
+  deltaPrix24hPct: number;
+  revenus24hUsd: number | null;
+  frais24hUsd: number | null;
+  croissanceFlux7jPct: number | null;
+  ratioPs: number | null;
+  ratioPf: number | null;
+  floatPct: number | null;
+  ratioFdvTvl: number | null;
+}
+
+/**
+ * Détecte une divergence fondamentale entre les flux on-chain (DefiLlama/CoinGecko)
+ * et la variation de prix 24h :
+ *  - Haussier (« Accumulation revenus vs prix ») : cash-flow substantiel + multiple
+ *    modéré (P/S ou P/F ≤ 25x) ou croissance 7j ≥ +15 %, alors que le prix recule (≤ -1.5 %).
+ *  - Baissier (« Surchauffe low-float ») : float < 25 % + valorisation diluée tendue
+ *    (multiple ≥ 80x ou FDV/TVL ≥ 6x ou revenus faibles) pendant que le prix bondit (≥ +5 %).
+ * PURE.
+ */
+export function signalDivergenceFondamentale(
+  entree: EntreeDivergenceFondamentale,
+): SignalDetecte | null {
+  if (!Number.isFinite(entree.deltaPrix24hPct)) return null;
+  const multipleRef = entree.ratioPs ?? entree.ratioPf;
+  const aFluxSolides =
+    (entree.revenus24hUsd !== null && entree.revenus24hUsd >= 1_000) ||
+    (entree.frais24hUsd !== null && entree.frais24hUsd >= 5_000);
+
+  // 1. Accumulation fondamentale : flux solides + multiple raisonnable/croissance + repli du prix
+  if (
+    aFluxSolides &&
+    entree.deltaPrix24hPct <= -1.5 &&
+    ((multipleRef !== null && multipleRef > 0 && multipleRef <= 25) ||
+      (entree.croissanceFlux7jPct !== null && entree.croissanceFlux7jPct >= 15))
+  ) {
+    const morceaux: string[] = [`Prix 24h ${entree.deltaPrix24hPct.toFixed(1)} %`];
+    if (multipleRef !== null) {
+      morceaux.push(`${entree.ratioPs !== null ? "P/S" : "P/F"} ${multipleRef.toFixed(1)}x`);
+    }
+    if (entree.croissanceFlux7jPct !== null && entree.croissanceFlux7jPct > 0) {
+      morceaux.push(`flux 7j +${entree.croissanceFlux7jPct.toFixed(0)} %`);
+    }
+    return {
+      id: "divergence-fondamentale",
+      direction: "haussier",
+      libelle: "Accumulation revenus vs prix",
+      detail: `${morceaux.join(" · ")} — génération de revenus on-chain soutenue malgré le repli · croisement DefiLlama/CoinGecko`,
+      fiabilite: "échantillonné",
+      poids: 2,
+    };
+  }
+
+  // 2. Surchauffe spéculative Low-Float : faible circulation + hausse rapide + multiples tendus
+  const estLowFloat = entree.floatPct !== null && entree.floatPct > 0 && entree.floatPct < 25;
+  const valoTendue =
+    (multipleRef !== null && multipleRef >= 80) ||
+    (entree.ratioFdvTvl !== null && entree.ratioFdvTvl >= 6) ||
+    !aFluxSolides;
+
+  if (estLowFloat && valoTendue && entree.deltaPrix24hPct >= 5) {
+    const morceaux: string[] = [
+      `Float ${entree.floatPct!.toFixed(1)} %`,
+      `Prix 24h +${entree.deltaPrix24hPct.toFixed(1)} %`,
+    ];
+    if (entree.ratioFdvTvl !== null && entree.ratioFdvTvl >= 4) {
+      morceaux.push(`FDV/TVL ${entree.ratioFdvTvl.toFixed(1)}x`);
+    }
+    return {
+      id: "divergence-fondamentale",
+      direction: "baissier",
+      libelle: "Surchauffe low-float",
+      detail: `${morceaux.join(" · ")} — pression d'unlocks élevée face aux revenus · croisement DefiLlama/CoinGecko`,
+      fiabilite: "échantillonné",
+      poids: 2,
+    };
+  }
+
+  return null;
+}
+
+// ─────────────────────────── Retournement potentiel AXIS (Achat / Vente) ───────────────────────────
+
+export interface EntreeRetournementAxis {
+  sens: "achat" | "vente";
+  scoreConfiance: number;
+  rsi: number;
+  prixEntree: number;
+  stopInvalidation: number;
+  cible1R: number;
+  cible2R: number;
+  resume: string;
+}
+
+/**
+ * Transforme un retournement potentiel détecté par le moteur multi-piliers AXIS
+ * (épuisement RSI + divergence + inflexion MACD/score + mèche de rejet + absorption flux)
+ * en signal actionnable pour l'inbox EQS. PURE.
+ */
+export function signalRetournementAxis(
+  retournement: EntreeRetournementAxis | null | undefined,
+): SignalDetecte | null {
+  if (!retournement || retournement.scoreConfiance < 60) return null;
+  const achat = retournement.sens === "achat";
+  const hautePrecision = retournement.scoreConfiance >= 75;
+  return {
+    id: "retournement-axis",
+    direction: achat ? "haussier" : "baissier",
+    libelle: achat
+      ? `AXIS ↺ Achat (${retournement.scoreConfiance}%)`
+      : `AXIS ↺ Vente (${retournement.scoreConfiance}%)`,
+    detail:
+      `${retournement.resume} · entrée ${retournement.prixEntree.toFixed(4)} · ` +
+      `invalidation ${retournement.stopInvalidation.toFixed(4)} · ` +
+      `cibles 1R ${retournement.cible1R.toFixed(4)} / 2R ${retournement.cible2R.toFixed(4)}`,
+    fiabilite: hautePrecision ? "fiable" : "heuristique",
+    poids: hautePrecision ? 3 : 2,
   };
 }
 

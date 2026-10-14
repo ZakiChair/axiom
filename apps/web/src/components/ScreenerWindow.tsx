@@ -39,6 +39,7 @@ import {
   signauxStore,
   type SignauxRunState,
 } from "../store/signaux";
+import { alertePrixAuNiveau, alertsStore, arrondirNiveauAlerte } from "../store/alerts";
 import { presetAlertsStore } from "../store/presetAlerts";
 import type { LigneSignaux, SignalDetecte } from "../data/signaux";
 import { UNIVERS_VALIDATION } from "../data/validationSignaux";
@@ -235,7 +236,34 @@ function tonDirection(direction: SignalDetecte["direction"] | "mixte"): "up" | "
 
 /** Une ligne de l'inbox : en-tête (symbole, Δ24h, direction, score) + badges de signaux. */
 function LigneSetup({ ligne }: { ligne: LigneSignaux }) {
+  const [alerteCreee, setAlerteCreee] = useState(false);
   const fleche = ligne.direction === "haussier" ? "▲" : ligne.direction === "baissier" ? "▼" : "◆";
+  const creerAlerteSetup = () => {
+    const dir = ligne.direction === "baissier" ? "baisse" : "hausse";
+    const resumeSignaux = ligne.signaux.map((s) => s.libelle).join(" + ");
+    if (Number.isFinite(ligne.lastPrice) && ligne.lastPrice > 0) {
+      const cible = arrondirNiveauAlerte(ligne.lastPrice * (dir === "hausse" ? 1.02 : 0.98));
+      alertsStore
+        .getState()
+        .ajouter(
+          alertePrixAuNiveau(
+            ligne.symbol,
+            "binance",
+            cible,
+            dir,
+            `Setup EQS (${ligne.direction}, score ${ligne.score}) : ${resumeSignaux}`,
+          ),
+        );
+    } else {
+      alertsStore.getState().ajouter({
+        symbol: ligne.symbol,
+        source: "binance",
+        condition: { type: "variation-pct", fenetreMs: 3_600_000, seuilPct: 2.5 },
+        message: `Setup EQS (${ligne.direction}, score ${ligne.score}) : ${resumeSignaux}`,
+      });
+    }
+    setAlerteCreee(true);
+  };
   return (
     <div className="space-y-1.5 border-b border-border/50 px-3 py-2 last:border-b-0 hover:bg-surface">
       <div className="axiom-screener-ligne flex items-center gap-2">
@@ -262,6 +290,17 @@ function LigneSetup({ ligne }: { ligne: LigneSignaux }) {
         >
           {ligne.score}
         </span>
+        <button
+          type="button"
+          onClick={creerAlerteSetup}
+          aria-label={`Créer une alerte sur ${ligne.symbol}`}
+          className={`rounded px-1 text-[10px] transition ${
+            alerteCreee ? "text-up" : "text-text-dim hover:text-accent"
+          }`}
+          title="Créer une alerte prix (±2 %) dans ALRT"
+        >
+          {alerteCreee ? "✓" : "🔔"}
+        </button>
         <button
           type="button"
           onClick={() => ajouterAWatchlist(ligne.symbol)}

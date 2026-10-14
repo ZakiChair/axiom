@@ -346,3 +346,110 @@ export function tradeJournalDepuisCloture(p: PositionPaper, exec: ExecutionPaper
     tags: ["paper"],
   };
 }
+
+// ─────────────────────────── Discipline pré-trade PACTE (PUR) ───────────────────────────
+
+export interface EntreeDisciplinePacte {
+  direction: "long" | "short";
+  prixEntree: number | null;
+  montantUsd: number | null;
+  equityUsd: number;
+  sl: number | null;
+  tp: number | null;
+  theseRenseignee: boolean;
+  alignementConfirme: boolean;
+  seuilRisqueMaxPct?: number;
+}
+
+export interface EvaluationDisciplinePacte {
+  /** P — Plan & Thèse explicite renseignés. */
+  planOk: boolean;
+  /** A — Alignement multi-échelle / régime confirmé par l'opérateur. */
+  alignementOk: boolean;
+  /** C — Contrôle du risque : SL cohérent et perte max ≤ seuilRisqueMaxPct de l'équity. */
+  controleRisqueOk: boolean;
+  /** T — Take-Profit défini et R:R ≥ 1.5. */
+  targetRrOk: boolean;
+  /** E — Exécution encadrée : Stop-Loss valide dans le bon sens par rapport à l'entrée. */
+  invalidationOk: boolean;
+  /** Nombre de critères PACTE validés sur 5. */
+  scoreSur5: number;
+  /** Risque monétaire en $ à l'invalidation (frais inclus). */
+  risqueUsd: number | null;
+  /** Risque en % de l'équity. */
+  risqueEquityPct: number | null;
+  /** Ratio Rendement / Risque (R:R) brut si TP et SL sont cohérents. */
+  ratioRr: number | null;
+  /** Prêt pour exécution disciplinée (invalidationOk + controleRisqueOk + planOk). */
+  disciplineValidee: boolean;
+}
+
+/**
+ * Évalue la check-list pré-trade PACTE (Plan, Alignement, Contrôle du risque, Target R:R,
+ * Exécution/Invalidation) avant la soumission d'un ordre PAPER. Fonction 100 % PURE.
+ */
+export function evaluerDisciplinePacte(entree: EntreeDisciplinePacte): EvaluationDisciplinePacte {
+  const seuilPct = entree.seuilRisqueMaxPct ?? 2;
+  const prix =
+    entree.prixEntree !== null && Number.isFinite(entree.prixEntree) && entree.prixEntree > 0
+      ? entree.prixEntree
+      : null;
+  const montant =
+    entree.montantUsd !== null && Number.isFinite(entree.montantUsd) && entree.montantUsd > 0
+      ? entree.montantUsd
+      : null;
+  const sl = entree.sl !== null && Number.isFinite(entree.sl) && entree.sl > 0 ? entree.sl : null;
+  const tp = entree.tp !== null && Number.isFinite(entree.tp) && entree.tp > 0 ? entree.tp : null;
+
+  const invalidationOk =
+    prix !== null &&
+    sl !== null &&
+    (entree.direction === "long" ? sl < prix : sl > prix);
+
+  let risqueUsd: number | null = null;
+  let risqueEquityPct: number | null = null;
+  if (invalidationOk && prix !== null && sl !== null && montant !== null) {
+    const taille = montant / prix;
+    const perteBrute = Math.abs(prix - sl) * taille;
+    const fraisAllerRetour = (montant + taille * sl) * FRAIS_TAKER;
+    risqueUsd = perteBrute + fraisAllerRetour;
+    if (Number.isFinite(entree.equityUsd) && entree.equityUsd > 0) {
+      risqueEquityPct = (risqueUsd / entree.equityUsd) * 100;
+    }
+  }
+
+  let ratioRr: number | null = null;
+  if (invalidationOk && prix !== null && sl !== null && tp !== null) {
+    const tpCoherent = entree.direction === "long" ? tp > prix : tp < prix;
+    const distSl = Math.abs(prix - sl);
+    if (tpCoherent && distSl > 0) {
+      ratioRr = Math.abs(tp - prix) / distSl;
+    }
+  }
+
+  const planOk = entree.theseRenseignee;
+  const alignementOk = entree.alignementConfirme;
+  const controleRisqueOk =
+    invalidationOk && risqueEquityPct !== null && risqueEquityPct <= seuilPct;
+  const targetRrOk = ratioRr !== null && ratioRr >= 1.5;
+
+  const scoreSur5 =
+    (planOk ? 1 : 0) +
+    (alignementOk ? 1 : 0) +
+    (controleRisqueOk ? 1 : 0) +
+    (targetRrOk ? 1 : 0) +
+    (invalidationOk ? 1 : 0);
+
+  return {
+    planOk,
+    alignementOk,
+    controleRisqueOk,
+    targetRrOk,
+    invalidationOk,
+    scoreSur5,
+    risqueUsd,
+    risqueEquityPct,
+    ratioRr,
+    disciplineValidee: invalidationOk && controleRisqueOk && planOk,
+  };
+}

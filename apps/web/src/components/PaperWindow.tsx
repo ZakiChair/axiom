@@ -13,8 +13,17 @@ import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 import { clePrixPaper, paperStore, paperUiStore } from "../store/paper";
 import { paperOverlayStore } from "../chart/paperLignes";
-import { pnlLatent, FRAIS_TAKER, type ExecutionPaper, type OrdrePaper, type PositionPaper } from "../data/paper";
+import {
+  evaluerDisciplinePacte,
+  pnlLatent,
+  FRAIS_TAKER,
+  type ExecutionPaper,
+  type OrdrePaper,
+  type PositionPaper,
+} from "../data/paper";
+import { decisionDossiersStore } from "../store/decisionDossiers";
 import { marketStore } from "../store/market";
+import { windowManagerStore } from "../store/windowManager";
 import { EXCHANGE_IDS, type ExchangeId } from "@axiom/types";
 import { isTickerSource } from "../data/ticker";
 import { debutJourLocalMs } from "../store/portfolio";
@@ -115,19 +124,35 @@ export function PaperWindow() {
   const derniersPrix = useStore(paperStore, (s) => s.derniersPrix);
   const symbolChart = useStore(marketStore, (s) => s.symbol);
   const sourceChart = useStore(marketStore, (s) => s.exchange);
+  const groupColor = useStore(windowManagerStore, (s) => s.windows["paper"]?.groupColor ?? null);
+  const symbolGroupe = useStore(windowManagerStore, (s) =>
+    groupColor ? s.groupSymbols[groupColor] : undefined,
+  );
   const brouillon = useStore(paperUiStore, (s) => s.brouillon);
   // Overlay des lignes d'ordres/positions sur le chart maître (toggle éphémère, défaut ON).
   const overlayActif = useStore(paperOverlayStore, (s) => s.actif);
 
-  const [form, setForm] = useState<FormOrdre>(() => formInitial(symbolChart, sourceChart));
+  const [form, setForm] = useState<FormOrdre>(() => formInitial(symbolGroupe ?? symbolChart, sourceChart));
   const [erreurForm, setErreurForm] = useState<string | null>(null);
   const [editSolde, setEditSolde] = useState<string | null>(null);
   const [editTpSl, setEditTpSl] = useState<{ id: string; tp: string; sl: string } | null>(null);
+  // Check-list de discipline pré-trade PACTE + archivage optionnel en dossier de décision
+  const [theseTrade, setTheseTrade] = useState<string>("");
+  const [alignementConfirme, setAlignementConfirme] = useState<boolean>(false);
+  const [verrouPacte, setVerrouPacte] = useState<boolean>(false);
+  const [archiverDossier, setArchiverDossier] = useState<boolean>(false);
+  const [dernierDossierId, setDernierDossierId] = useState<string | null>(null);
 
   useEffect(() => {
     if (brouillon !== null) setForm((f) => ({ ...f, symbol: brouillon.symbol, source: brouillon.source,
       direction: brouillon.direction ?? f.direction }));
   }, [brouillon]);
+
+  useEffect(() => {
+    if (symbolGroupe && brouillon === null) {
+      setForm((f) => ({ ...f, symbol: symbolGroupe }));
+    }
+  }, [symbolGroupe, brouillon]);
 
   // Équity = solde + Σ PnL latents aux derniers prix connus (positions sans prix → 0, comptées).
   const { equity, latentTotal, sansPrix } = useMemo(() => {
@@ -155,6 +180,43 @@ export function PaperWindow() {
       ? montant / prixConversion
       : undefined;
 
+  const prixEntreeEstime = useMemo(() => {
+    if (form.type === "limit") {
+      const p = nombreOptionnel(form.prixLimite);
+      return p ?? prixConversion ?? null;
+    }
+    if (form.type === "stop") {
+      const p = nombreOptionnel(form.prixStop);
+      return p ?? prixConversion ?? null;
+    }
+    return prixConversion ?? null;
+  }, [form.type, form.prixLimite, form.prixStop, prixConversion]);
+
+  const pacte = useMemo(
+    () =>
+      evaluerDisciplinePacte({
+        direction: form.direction,
+        prixEntree: prixEntreeEstime,
+        montantUsd: Number.isFinite(montant) && montant > 0 ? montant : null,
+        equityUsd: equity,
+        sl: nombreOptionnel(form.sl) ?? null,
+        tp: nombreOptionnel(form.tp) ?? null,
+        theseRenseignee: theseTrade.trim().length > 0 || brouillon !== null,
+        alignementConfirme,
+      }),
+    [
+      form.direction,
+      prixEntreeEstime,
+      montant,
+      equity,
+      form.sl,
+      form.tp,
+      theseTrade,
+      brouillon,
+      alignementConfirme,
+    ],
+  );
+
   const placer = (): void => {
     const symbol = form.symbol.trim().toUpperCase();
     if (symbol === "") return setErreurForm("Symbole requis.");
@@ -175,10 +237,60 @@ export function PaperWindow() {
     }
     if (form.type === "limit" && prixLimite === null) return setErreurForm("Prix limite requis.");
     if (form.type === "stop" && prixStop === null) return setErreurForm("Prix de déclenchement requis.");
+    if (verrouPacte && !pacte.disciplineValidee) {
+      return setErreurForm(
+        "Verrou PACTE actif : renseignez une thèse, un Stop-Loss cohérent et un risque ≤ 2 % de l'équity.",
+      );
+    }
+
+    let decisionIds = brouillon !== null ? [brouillon.decisionId] : undefined;
+    if (archiverDossier && brouillon === null && prixEntreeEstime !== null && prixEntreeEstime > 0) {
+      const ts = Date.now();
+      const alertId = `pacte:${ts}`;
+      const message =
+        theseTrade.trim().length > 0
+          ? theseTrade.trim()
+          : `PACTE ${form.direction.toUpperCase()} ${symbol}`;
+      const creeId = decisionDossiersStore.getState().creerDepuisJournal({
+        alertId,
+        ts,
+        valeur: prixEntreeEstime,
+        message,
+        preuve: {
+          origine: {
+            alertId,
+            ts,
+            symbol,
+            source: form.source,
+            timeframe: null,
+            condition: {
+              type: "prix-croise",
+              niveau: prixEntreeEstime,
+              sens: form.direction === "long" ? "hausse" : "baisse",
+            },
+            valeur: prixEntreeEstime,
+            message,
+          },
+          contexte: { dernierPrix: prixEntreeEstime },
+        },
+      });
+      if (creeId) {
+        decisionDossiersStore.getState().modifier(creeId, {
+          these: theseTrade.trim() || `Entrée ${form.direction} sur ${symbol}`,
+          invalidation:
+            sl !== null
+              ? `SL @ ${formatUsd(sl)}${pacte.risqueUsd !== null ? ` (risque ${formatUsd(pacte.risqueUsd)})` : ""}`
+              : "Stop-Loss non défini à l'ouverture",
+        });
+        decisionIds = [creeId];
+        setDernierDossierId(creeId);
+      }
+    }
+
     paperStore.getState().placerOrdre({
       symbol,
       source: form.source,
-      ...(brouillon !== null ? { decisionIds: [brouillon.decisionId] } : {}),
+      ...(decisionIds !== undefined ? { decisionIds } : {}),
       direction: form.direction,
       type: form.type,
       prixLimite: form.type === "limit" ? prixLimite : null,
@@ -551,6 +663,82 @@ export function PaperWindow() {
               />
             </label>
           </div>
+
+          {/* Check-list de discipline pré-trade PACTE + liaison Dossier de décision */}
+          <div className="mt-2.5 rounded border border-border/80 bg-surface/40 p-2 text-[10px]">
+            <div className="flex flex-wrap items-center justify-between gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-semibold uppercase tracking-wider text-text">
+                  Discipline PACTE ({pacte.scoreSur5}/5)
+                </span>
+                <Badge ton={pacte.planOk ? "up" : "neutre"} title="P — Plan & thèse explicite renseignés">
+                  P·Plan
+                </Badge>
+                <Badge ton={pacte.alignementOk ? "up" : "neutre"} title="A — Alignement multi-échelle / régime confirmé">
+                  A·Régime
+                </Badge>
+                <Badge
+                  ton={pacte.controleRisqueOk ? "up" : pacte.risqueEquityPct !== null ? "down" : "neutre"}
+                  title="C — Contrôle du risque : perte à l'invalidation ≤ 2 % de l'équity"
+                >
+                  C·Risque{" "}
+                  {pacte.risqueEquityPct !== null ? `${pacte.risqueEquityPct.toFixed(2)}%` : "—"}
+                </Badge>
+                <Badge
+                  ton={pacte.targetRrOk ? "up" : pacte.ratioRr !== null ? "warn" : "neutre"}
+                  title="T — Target & ratio Rendement/Risque ≥ 1.5R"
+                >
+                  T·R:R {pacte.ratioRr !== null ? `${pacte.ratioRr.toFixed(2)}R` : "—"}
+                </Badge>
+                <Badge ton={pacte.invalidationOk ? "up" : "neutre"} title="E — Exécution encadrée par un Stop-Loss valide">
+                  E·Stop
+                </Badge>
+              </div>
+              <div className="flex flex-wrap items-center gap-1">
+                <BoutonBascule
+                  actif={alignementConfirme}
+                  onClick={() => setAlignementConfirme((v) => !v)}
+                  title="Confirmer l'alignement HTF (4H/1D) et du régime de marché"
+                >
+                  ✓ HTF aligné
+                </BoutonBascule>
+                <BoutonBascule
+                  actif={archiverDossier}
+                  onClick={() => setArchiverDossier((v) => !v)}
+                  title="Créer et lier automatiquement un dossier de décision figé (ALRT/Dossiers) à la soumission"
+                >
+                  Archiver dossier
+                </BoutonBascule>
+                <BoutonBascule
+                  actif={verrouPacte}
+                  onClick={() => setVerrouPacte((v) => !v)}
+                  title="Bloquer l'envoi d'ordre tant que Thèse + SL valide + Risque ≤ 2 % ne sont pas réunis"
+                >
+                  Verrou PACTE
+                </BoutonBascule>
+              </div>
+            </div>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <Input
+                className="min-w-[180px] flex-1"
+                value={theseTrade}
+                onChange={(e) => setTheseTrade(e.target.value)}
+                placeholder="Thèse pré-trade (catalyseur, structure, niveau d'invalidation)…"
+                aria-label="Thèse pré-trade PACTE"
+              />
+              {pacte.risqueUsd !== null && (
+                <span className="font-mono text-text-dim">
+                  Risque SL : <strong className="text-text">{formatUsd(pacte.risqueUsd)}</strong>
+                </span>
+              )}
+              {dernierDossierId !== null && (
+                <span className="font-mono text-accent" title="Dernier dossier de décision archivé">
+                  ✓ {dernierDossierId.slice(0, 18)}…
+                </span>
+              )}
+            </div>
+          </div>
+
           <div className="mt-2 flex items-center justify-between gap-2">
             <span className="text-[10px] tabular-nums text-text-dim">
               {unites !== undefined && prixConversion !== undefined

@@ -262,6 +262,7 @@ mirrorOpenState("screener", screenerStore);
  * source Binance + symbole + TF du run.
  */
 export function ouvrirDansChart(symbol: string): void {
+  windowManagerStore.getState().propagerSymboleAuGroupe("screener", symbol);
   navigateTo({
     symbol,
     exchange: "binance",

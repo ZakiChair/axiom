@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import { rMultiple } from "./expy";
 import {
   cloturerPosition,
+  evaluerDisciplinePacte,
   evaluerTick,
   evaluerTickDetaille,
   FRAIS_TAKER,
@@ -560,5 +561,53 @@ describe("risque initial PAPER vers EXPY", () => {
     expect(journal.stopInitial).toBe(100);
     expect(journal.note).toContain("stop initial inconnu");
     expect(rMultiple({ ...journal, id: "t1" })).toBeNull();
+  });
+});
+
+describe("evaluerDisciplinePacte — check-list pré-trade PACTE", () => {
+  it("valide un setup long discipliné (risque ≤ 2 %, R:R ≥ 1.5, SL < entrée, thèse présente)", () => {
+    const res = evaluerDisciplinePacte({
+      direction: "long",
+      prixEntree: 100,
+      montantUsd: 1_000, // 10 unités
+      equityUsd: 10_000,
+      sl: 98.5, // perte brute = 15 $, frais ≈ 0.9925 $ → risque ≈ 15.99 $ (0.16 % < 2 %)
+      tp: 103.5, // gain = 3.5 vs risque 1.5 → R:R ≈ 2.33
+      theseRenseignee: true,
+      alignementConfirme: true,
+    });
+    expect(res.scoreSur5).toBe(5);
+    expect(res.disciplineValidee).toBe(true);
+    expect(res.ratioRr).toBeCloseTo(3.5 / 1.5, 4);
+    expect(res.risqueEquityPct).toBeLessThan(2);
+  });
+
+  it("rejette un stop inversé ou un risque excessif (> 2 % de l'équity)", () => {
+    const stopInverse = evaluerDisciplinePacte({
+      direction: "long",
+      prixEntree: 100,
+      montantUsd: 1_000,
+      equityUsd: 10_000,
+      sl: 102, // SL au-dessus de l'entrée pour un long = invalide
+      tp: 105,
+      theseRenseignee: true,
+      alignementConfirme: true,
+    });
+    expect(stopInverse.invalidationOk).toBe(false);
+    expect(stopInverse.disciplineValidee).toBe(false);
+
+    const risqueTropEleve = evaluerDisciplinePacte({
+      direction: "short",
+      prixEntree: 100,
+      montantUsd: 5_000, // 50 unités
+      equityUsd: 10_000,
+      sl: 110, // perte brute = 500 $ (5 % > 2 %)
+      tp: 80,
+      theseRenseignee: true,
+      alignementConfirme: false,
+    });
+    expect(risqueTropEleve.invalidationOk).toBe(true);
+    expect(risqueTropEleve.controleRisqueOk).toBe(false);
+    expect(risqueTropEleve.disciplineValidee).toBe(false);
   });
 });

@@ -82,6 +82,35 @@ export function InstanceParamsEditor({
           {renderControl(input)}
         </label>
       ))}
+      {def.id === "stratAxis" && (
+        <div className="mt-1 flex flex-col gap-1.5 border-t border-neutral-800/80 pt-1.5">
+          <label className="flex items-center justify-between gap-2 text-xs text-amber-300/90">
+            <span className="truncate">Détecter les retournements (↺ Achat / Vente)</span>
+            <input
+              type="checkbox"
+              checked={Boolean(instance.params["detecterRetournements"] ?? false)}
+              onChange={(e) => set("detecterRetournements", e.target.checked)}
+              className="accent-accent"
+            />
+          </label>
+          {Boolean(instance.params["detecterRetournements"]) && (
+            <label className="flex items-center justify-between gap-2 text-xs text-neutral-300">
+              <span className="truncate">Confiance min. retournement (40–100 %)</span>
+              <Input
+                type="number"
+                value={Number(instance.params["seuilConfianceRetournement"] ?? 60)}
+                min={40}
+                max={100}
+                onChange={(e) => {
+                  const n = e.target.valueAsNumber;
+                  if (Number.isFinite(n)) set("seuilConfianceRetournement", n);
+                }}
+                className="w-20"
+              />
+            </label>
+          )}
+        </div>
+      )}
     </div>
   );
 }

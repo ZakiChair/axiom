@@ -17,3 +17,11 @@ export * from "./timeframes";
 export { rvolSeasonal } from "./volume/rvolSeasonal";
 export { downsideVariance } from "./volatility/downsideVariance";
 export { calculerDispersionFunding } from "./derivatives/fundingDispersion";
+export {
+  detecterRetournementsAxis,
+  dernierRetournementAxis,
+  SEUIL_CONFIANCE_RETOURNEMENT_AXIS,
+  MAX_RETOURNEMENTS_AXIS,
+  type RetournementPotentielAxis,
+  type ComposantesRetournementAxis,
+} from "./strategy/stratAxis";

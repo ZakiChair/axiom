@@ -34,7 +34,7 @@ import { macroOverlayStore, MACRO_OVERLAYS, type MacroOverlayId } from "./macro-
 import { uiSectionsStore } from "./ui-sections";
 import { themeStore, THEMES, type ThemeId } from "./theme";
 import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
-import { windowManagerStore, type EtatFenetre } from "./windowManager";
+import { GROUP_PALETTE, windowManagerStore, type EtatFenetre } from "./windowManager";
 import { SUPPORTED_TIMEFRAMES, supportedTimeframesFor, timeframeProche } from "../data/adapters";
 import { miroiterTravailPersonnel } from "../data/daemon";
 
@@ -377,3 +377,101 @@ export const workspacesStore = createStore<WorkspacesState>((set, get) => ({
 
 // Persistance interne : sauvegarde à chaque changement (basse fréquence).
 workspacesStore.subscribe((state) => sauvegarder(state));
+
+// ─────────────────────────── Presets métiers d'espaces de travail ───────────────────────────
+
+export interface PresetMetierWorkspace {
+  readonly id: string;
+  readonly nom: string;
+  readonly description: string;
+  readonly fenetres: readonly string[];
+  readonly groupeCouleurIdx: number;
+  readonly timeframe: Timeframe;
+  readonly orderflow: boolean;
+  readonly volumeProfile: boolean;
+  readonly revenue: boolean;
+  readonly macroOverlays: readonly MacroOverlayId[];
+}
+
+export const PRESETS_METIERS_WORKSPACES: readonly PresetMetierWorkspace[] = [
+  {
+    id: "preset-chasse-alpha",
+    nom: "Chasse Alpha & Contrats",
+    description: "EQS + SECT + DES liés sur groupe A · Revenus DeFi · 4h",
+    fenetres: ["screener", "sect", "derivatives"],
+    groupeCouleurIdx: 0,
+    timeframe: "4h",
+    orderflow: false,
+    volumeProfile: false,
+    revenue: true,
+    macroOverlays: [],
+  },
+  {
+    id: "preset-execution-pacte",
+    nom: "Exécution PACTE & Risque",
+    description: "PAPER + EXPY + SCEN liés sur groupe A · Profil de volume · 15m",
+    fenetres: ["paper", "expy", "scen"],
+    groupeCouleurIdx: 0,
+    timeframe: "15m",
+    orderflow: false,
+    volumeProfile: true,
+    revenue: false,
+    macroOverlays: [],
+  },
+  {
+    id: "preset-flux-derives",
+    nom: "Desk Flux & Dérivés",
+    description: "DES + DOM + LIQ liés sur groupe A · Orderflow + VP · 5m",
+    fenetres: ["derivatives", "dom", "liquidations"],
+    groupeCouleurIdx: 0,
+    timeframe: "5m",
+    orderflow: true,
+    volumeProfile: true,
+    revenue: false,
+    macroOverlays: [],
+  },
+  {
+    id: "preset-macro-souverain",
+    nom: "Macro & Souveraineté",
+    description: "ECO + RATE + NETLIQ + STBL liés sur groupe B · Overlays macro · 1d",
+    fenetres: ["eco", "macroRates", "netliq", "stablecoins"],
+    groupeCouleurIdx: 1,
+    timeframe: "1d",
+    orderflow: false,
+    volumeProfile: false,
+    revenue: false,
+    macroOverlays: ["m2", "stablecoins", "crypto-total"],
+  },
+];
+
+/**
+ * Applique un preset métier d'espace de travail : ouvre et dispose en mosaïque ses fenêtres,
+ * les lie sur le groupe de couleur désigné (A / B / C), active les couches utiles et
+ * l'enregistre comme workspace commutable.
+ */
+export function appliquerPresetMetier(presetId: string): boolean {
+  const preset = PRESETS_METIERS_WORKSPACES.find((p) => p.id === presetId);
+  if (!preset) return false;
+
+  const m = marketStore.getState();
+  m.setMarket({ exchange: "binance", symbol: m.symbol || "BTCUSDT", timeframe: preset.timeframe });
+  orderflowStore.getState().setEnabled(preset.orderflow);
+  volumeProfileStore.getState().setEnabled(preset.volumeProfile);
+  revenueStore.getState().setEnabled(preset.revenue);
+  macroOverlayStore.getState().setEnabled([...preset.macroOverlays]);
+
+  const wm = windowManagerStore.getState();
+  wm.closeAll();
+  const couleur = GROUP_PALETTE[preset.groupeCouleurIdx] ?? GROUP_PALETTE[0] ?? null;
+  for (const wid of preset.fenetres) {
+    wm.openWindow(wid);
+    wm.setGroup(wid, couleur);
+  }
+  if (couleur) {
+    wm.setGroupSymbol(couleur, marketStore.getState().symbol);
+  }
+  wm.tileOpenWindows();
+
+  workspacesStore.getState().saveAs(preset.nom);
+  return true;
+}

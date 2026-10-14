@@ -35,6 +35,8 @@ const MODULES_DIFFERES: Record<string, string> = {
   "chart/tradeMarkers": "marqueurs trades & notes — import() par la commande MARKS (commands/windowPanels), aussi chargé avec EcoWindow et BacktestWindow",
   "chart/ecoMarkers": "marqueurs éco — chargés avec EcoWindow (React.lazy), seule à les activer",
   "chart/depthHeat": "heatmap du carnet — import() par la commande BOOK (commands/windowPanels) et par ChartInstance à la première activation ; seul chart/depthHeatBascule reste au démarrage",
+  "chart/orderflow": "contrôleur orderflow/footprint/CVD — import() par ChartInstance à la première activation",
+  "data/eco": "calendrier économique (ForexFactory / FRED / FOMC) — import() par store/eco à la demande",
   "chart/rampesHeat": "rampes des heatmaps — partagées par chart/depthHeat et chart/liquidationHeat, tous deux différés",
   "data/depth": "carnet Binance (WS + agrégation) — chargé avec DomWindow (React.lazy) et chart/depthHeat",
 };

@@ -14,8 +14,9 @@
  */
 import { createStore } from "zustand/vanilla";
 import type { Candle, Timeframe } from "@axiom/types";
-import { computeIndicator, getIndicator } from "@axiom/indicators";
+import { computeIndicator, dernierRetournementAxis, getIndicator } from "@axiom/indicators";
 import { navigateTo } from "../lib/navigation";
+import { windowManagerStore } from "./windowManager";
 import {
   fetchGlobalLongShortAccountRatio,
   fetchOpenInterestHist,
@@ -34,13 +35,16 @@ import {
 import {
   agregerSignaux,
   selectionEchantillon,
+  signalDivergenceFondamentale,
   signalDivergenceRsi,
   signalFundingExtreme,
   signalPositionnement,
   signalQuadrantOiPrix,
+  signalRetournementAxis,
   SIGNAUX_CAP,
   type LigneSignaux,
 } from "../data/signaux";
+import { chargerNouveauxTokens, type NouveauToken } from "../data/nouveauxTokens";
 import {
   etudeEvenements,
   evenementsDivergenceRsi,
@@ -142,8 +146,11 @@ function serieRsi(candles: Candle[]): Array<number | undefined> {
   return result.series["rsi"] ?? [];
 }
 
-/** Évalue les 4 détecteurs d'un symbole à partir de ses fetchs (best-effort chacun). */
-async function evaluerSymbole(row: ScreenerRow): Promise<LigneSignaux | null> {
+/** Évalue les détecteurs d'un symbole à partir de ses fetchs (best-effort chacun). */
+async function evaluerSymbole(
+  row: ScreenerRow,
+  indexTokensFondamentaux: ReadonlyMap<string, NouveauToken>,
+): Promise<LigneSignaux | null> {
   const [fundingRes, oiRes, fouleRes, topRes, klinesRes] = await Promise.allSettled([
     histFunding(row.symbol),
     fetchOpenInterestHist(row.symbol, "1h", OI_HIST_LIMIT),
@@ -173,15 +180,41 @@ async function evaluerSymbole(row: ScreenerRow): Promise<LigneSignaux | null> {
   }
 
   let divergence = null;
+  let retournementAxis = null;
   if (klinesRes.status === "fulfilled" && klinesRes.value.length > 0) {
     const candles = klinesRes.value;
     divergence = signalDivergenceRsi(
       candles.map((c) => c.close),
       serieRsi(candles),
     );
+    retournementAxis = signalRetournementAxis(dernierRetournementAxis(candles, 3));
   }
 
-  return agregerSignaux(row, [funding, quadrant, positionnement, divergence]);
+  let divergenceFondamentale = null;
+  const baseAsset = row.symbol.replace(/(USDT|USDC)$/, "").toUpperCase();
+  const tokenFondamental = indexTokensFondamentaux.get(baseAsset);
+  if (tokenFondamental !== undefined) {
+    divergenceFondamentale = signalDivergenceFondamentale({
+      deltaPrix24hPct: row.priceChangePct24h,
+      revenus24hUsd: tokenFondamental.revenus24hUsd,
+      frais24hUsd: tokenFondamental.frais24hUsd,
+      croissanceFlux7jPct:
+        tokenFondamental.revenusChange7dPct ?? tokenFondamental.fraisChange7dPct,
+      ratioPs: tokenFondamental.evaluation.ratioPs,
+      ratioPf: tokenFondamental.evaluation.ratioPf,
+      floatPct: tokenFondamental.evaluation.floatPct,
+      ratioFdvTvl: tokenFondamental.evaluation.ratioFdvTvl,
+    });
+  }
+
+  return agregerSignaux(row, [
+    funding,
+    quadrant,
+    positionnement,
+    divergence,
+    retournementAxis,
+    divergenceFondamentale,
+  ]);
 }
 
 // ─────────────────────────── Validation historique (event study) ───────────────────────────
@@ -307,10 +340,23 @@ export const signauxStore = createStore<SignauxState>((set) => ({
       }
       set({ runState: "running", progress: { done: 0, total: echantillon.length } });
 
-      // 3. Détection par symbole (pool) — la progression avance au fil de l'eau.
+      // 3. Catalogue fondamental (best-effort, cache 10 min) + détection par symbole (pool).
+      const indexTokensFondamentaux = new Map<string, NouveauToken>();
+      const catFondamental = await chargerNouveauxTokens().catch(() => null);
+      if (catFondamental) {
+        for (const t of catFondamental.tokens) {
+          const sym = t.symbole.toUpperCase();
+          const existant = indexTokensFondamentaux.get(sym);
+          if (!existant || (t.tvlUsd ?? 0) > (existant.tvlUsd ?? 0)) {
+            indexTokensFondamentaux.set(sym, t);
+          }
+        }
+      }
+      if (runId !== currentRunId) return;
+
       const lignes = (
         await mapPool(echantillon, SIGNAUX_CONCURRENCY, async (row) => {
-          const ligne = await evaluerSymbole(row);
+          const ligne = await evaluerSymbole(row, indexTokensFondamentaux);
           if (runId === currentRunId) {
             set((s) => ({ progress: { done: s.progress.done + 1, total: s.progress.total } }));
           }
@@ -416,5 +462,6 @@ export const signauxStore = createStore<SignauxState>((set) => ({
  * la lecture affichée correspond ainsi à ce que montre le chart.
  */
 export function ouvrirSetupDansChart(symbol: string): void {
+  windowManagerStore.getState().propagerSymboleAuGroupe("screener", symbol);
   navigateTo({ symbol, exchange: "binance", timeframe: DIVERGENCE_TF, source: "eqs" });
 }

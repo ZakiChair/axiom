@@ -22,6 +22,17 @@ import { COMPARE_PALETTE } from "./compare";
  * existante (déjà choisie pour être lisible sur les 5 thèmes du terminal). */
 export const GROUP_PALETTE: readonly string[] = COMPARE_PALETTE;
 
+/**
+ * Retourne le libellé court (A, B, C…) associé à une couleur de `GROUP_PALETTE`,
+ * ou `null` si aucun groupe n'est assigné. Fonction PURE.
+ */
+export function libelleGroupeCouleur(color: string | null | undefined): string | null {
+  if (!color) return null;
+  const idx = GROUP_PALETTE.indexOf(color);
+  if (idx < 0) return "?";
+  return String.fromCharCode(65 + idx);
+}
+
 export type DisponibiliteVercel = "full" | "partial" | "unusable";
 
 /** Définition d'une fenêtre du registre. Le libellé du menu Fonctions vaut `title`
@@ -477,6 +488,8 @@ export interface WindowManagerState {
   toggleFocusMinimize: (id: string) => void;
   setGroup: (id: string, color: string | null) => void;
   setGroupSymbol: (color: string, symbol: string) => void;
+  /** Si la fenêtre `id` appartient à un groupe couleur, propage `symbol` à tout ce groupe. */
+  propagerSymboleAuGroupe: (id: string, symbol: string) => void;
   /** Applique une géométrie de snap Aero : sauvegarde la géométrie ACTUELLE dans
    * `preSnapGeometry` (pour restaurer plus tard en glissant l'en-tête), puis applique
    * la nouvelle géométrie. Remplace le couple moveWindow+resizeWindow pour un snap. */
@@ -764,6 +777,13 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
 
   setGroupSymbol: (color, symbol) => {
     set({ groupSymbols: { ...get().groupSymbols, [color]: symbol } });
+  },
+
+  propagerSymboleAuGroupe: (id, symbol) => {
+    const color = get().windows[id]?.groupColor;
+    const clean = symbol.trim().toUpperCase();
+    if (!color || clean.length === 0) return;
+    set({ groupSymbols: { ...get().groupSymbols, [color]: clean } });
   },
 
   snapWindow: (id, geometrie) => {

@@ -12,7 +12,7 @@
  */
 import { createStore } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
-import { chargerEvenementsEco, type EcoEvent, type EcoImpact } from "../data/eco";
+import type { EcoEvent, EcoImpact } from "../data/eco";
 import { windowManagerStore, mirrorOpenState } from "./windowManager";
 
 /** Impacts affichables (ordre des filtres, fort → faible). */
@@ -73,7 +73,8 @@ export const ecoStore = createStore<EcoState>((set, get) => ({
   refresh: (force = false) => {
     if (get().status === "loading") return; // pas de fetch concurrent
     set({ status: "loading", error: null, brideDebit: false });
-    chargerEvenementsEco({ force })
+    import("../data/eco")
+      .then(({ chargerEvenementsEco }) => chargerEvenementsEco({ force }))
       .then((r) => {
         set({
           events: r.events,

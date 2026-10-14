@@ -7,10 +7,12 @@ import {
   agregerSignaux,
   pivotsLocaux,
   selectionEchantillon,
+  signalDivergenceFondamentale,
   signalDivergenceRsi,
   signalFundingExtreme,
   signalPositionnement,
   signalQuadrantOiPrix,
+  signalRetournementAxis,
   type SignalDetecte,
 } from "./signaux";
 import type { ScreenerRow } from "./screener";
@@ -258,5 +260,96 @@ describe("selectionEchantillon — top liquides à perp ∪ watchlist", () => {
   it("respecte le plafond total (watchlist tronquée)", () => {
     const sel = selectionEchantillon(univers, ["WLUSDT", "CUSDT"], 2, 3);
     expect(sel).toHaveLength(3);
+  });
+});
+
+// ─────────────────────────── Divergence fondamentale ───────────────────────────
+
+describe("signalDivergenceFondamentale — Revenus vs Prix & Low-Float", () => {
+  it("détecte une accumulation fondamentale (revenus solides + P/S bas + repli du prix)", () => {
+    const s = signalDivergenceFondamentale({
+      deltaPrix24hPct: -3.8,
+      revenus24hUsd: 45_000,
+      frais24hUsd: 120_000,
+      croissanceFlux7jPct: 24,
+      ratioPs: 11.5,
+      ratioPf: 4.3,
+      floatPct: 72,
+      ratioFdvTvl: 1.2,
+    });
+    expect(s?.id).toBe("divergence-fondamentale");
+    expect(s?.direction).toBe("haussier");
+    expect(s?.libelle).toBe("Accumulation revenus vs prix");
+    expect(s?.poids).toBe(2);
+  });
+
+  it("détecte une surchauffe low-float (float < 25 %, hausse rapide, multiples tendus)", () => {
+    const s = signalDivergenceFondamentale({
+      deltaPrix24hPct: 9.2,
+      revenus24hUsd: 100,
+      frais24hUsd: 400,
+      croissanceFlux7jPct: null,
+      ratioPs: null,
+      ratioPf: 220,
+      floatPct: 12.4,
+      ratioFdvTvl: 14.0,
+    });
+    expect(s?.id).toBe("divergence-fondamentale");
+    expect(s?.direction).toBe("baissier");
+    expect(s?.libelle).toBe("Surchauffe low-float");
+    expect(s?.poids).toBe(2);
+  });
+});
+
+describe("signalRetournementAxis — conversion en signal EQS", () => {
+  it("convertit un retournement achat haute précision (≥ 75 %) en signal haussier de poids 3", () => {
+    const s = signalRetournementAxis({
+      sens: "achat",
+      scoreConfiance: 80,
+      rsi: 31.4,
+      prixEntree: 100,
+      stopInvalidation: 96,
+      cible1R: 104,
+      cible2R: 108,
+      resume: "Retournement ACHAT (80/100) : rebond RSI + divergence haussière",
+    });
+    expect(s?.id).toBe("retournement-axis");
+    expect(s?.direction).toBe("haussier");
+    expect(s?.libelle).toBe("AXIS ↺ Achat (80%)");
+    expect(s?.poids).toBe(3);
+    expect(s?.fiabilite).toBe("fiable");
+  });
+
+  it("convertit un retournement vente qualifié (65 %) en signal baissier de poids 2", () => {
+    const s = signalRetournementAxis({
+      sens: "vente",
+      scoreConfiance: 65,
+      rsi: 68.2,
+      prixEntree: 50,
+      stopInvalidation: 52,
+      cible1R: 48,
+      cible2R: 46,
+      resume: "Retournement VENTE (65/100) : repli RSI + rejet mèche haute",
+    });
+    expect(s?.id).toBe("retournement-axis");
+    expect(s?.direction).toBe("baissier");
+    expect(s?.libelle).toBe("AXIS ↺ Vente (65%)");
+    expect(s?.poids).toBe(2);
+  });
+
+  it("retourne null sous le seuil de 60 % ou si absent", () => {
+    expect(signalRetournementAxis(null)).toBeNull();
+    expect(
+      signalRetournementAxis({
+        sens: "achat",
+        scoreConfiance: 45,
+        rsi: 40,
+        prixEntree: 10,
+        stopInvalidation: 9,
+        cible1R: 11,
+        cible2R: 12,
+        resume: "Faible",
+      }),
+    ).toBeNull();
   });
 });

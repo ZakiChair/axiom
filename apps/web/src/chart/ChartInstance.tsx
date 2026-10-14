@@ -69,9 +69,12 @@ import { estReglable } from "./legendeReglable";
 import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
 import { PaneHeaders } from "./paneHeaders";
 import { OverlayLegend } from "./overlayLegend";
-import { OrderflowController, TICK_MIN_INTERVAL_MS } from "./orderflow";
+import type { OrderflowController } from "./orderflow";
 import { CompareController } from "./compare";
 import { VolumeProfileController } from "./volumeProfile";
+
+/** Débit max des mises à jour de rendu déclenchées par le flux live (~10 upd/s). */
+const TICK_MIN_INTERVAL_MS = 100;
 // Contrôleur de heatmap des liquidations : TYPE seulement ici — la classe est chargée à
 // la PREMIÈRE ACTIVATION (import() dynamique). Le chunk d'entrée n'embarque plus ~25 ko
 // de heatmap pour une couche éteinte par défaut (budget JS initial, cf. scripts/verifier-budget-build.mjs).
@@ -1000,15 +1003,28 @@ export function ChartInstance({
     // ── ORDERFLOW réservé au slot FOCUS (perf) ─────────────────────────────
     // Créé/détruit selon (ce slot est focus) ET (toggle Orderflow global actif). Lit le
     // buffer de CE slot (store injecté). Recréé au changement de focus/toggle, jamais par tick.
+    // Chargement PARESSEUX à la première activation (défaut OFF) pour préserver le budget initial.
     let orderflow: OrderflowController | null = null;
+    let chargementOrderflow: Promise<typeof import("./orderflow")> | null = null;
     const ensureOrderflow = (): void => {
       const { enabled, alerteCvdDemandee } = orderflowStore.getState();
       const want = chartLayoutStore.getState().focus === slot && (enabled || alerteCvdDemandee);
       if (want && !orderflow) {
-        orderflow = new OrderflowController(chart, container, canvas, symbol, store, replayAdapter);
-        orderflow.setAxisType(priceScaleStore.getState().type);
-        orderflow.setEnabled(true);
-        if (store.getState().candles.length > 0) orderflow.onCandles();
+        chargementOrderflow ??= import("./orderflow").catch((erreur: unknown) => {
+          chargementOrderflow = null;
+          throw erreur;
+        });
+        void chargementOrderflow
+          .then(({ OrderflowController }) => {
+            if (cancelled || orderflow !== null) return;
+            const { enabled: e2, alerteCvdDemandee: a2 } = orderflowStore.getState();
+            if (!(chartLayoutStore.getState().focus === slot && (e2 || a2))) return;
+            orderflow = new OrderflowController(chart, container, canvas, symbol, store, replayAdapter);
+            orderflow.setAxisType(priceScaleStore.getState().type);
+            orderflow.setEnabled(true);
+            if (store.getState().candles.length > 0) orderflow.onCandles();
+          })
+          .catch((erreur: unknown) => console.warn("[AXIOM] Orderflow : contrôleur non chargé", erreur));
       } else if (!want && orderflow) {
         orderflow.dispose();
         orderflow = null;

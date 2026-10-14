@@ -40,7 +40,13 @@ import { uiSectionsStore } from "./ui-sections";
 import { priceScaleStore } from "../chart/Chart";
 import { themeStore } from "../store/theme";
 import { windowManagerStore } from "./windowManager";
-import { workspacesStore, DEFAULT_WORKSPACE_ID, type WorkspaceContent } from "./workspaces";
+import {
+  workspacesStore,
+  DEFAULT_WORKSPACE_ID,
+  PRESETS_METIERS_WORKSPACES,
+  appliquerPresetMetier,
+  type WorkspaceContent,
+} from "./workspaces";
 
 /** Mock localStorage en mémoire (la persistance interne du store écrit dessus). */
 function installMockLocalStorage(): void {
@@ -388,5 +394,21 @@ describe("workspacesStore — re-clamp de la géométrie à l'apply", () => {
     // Re-clampée : entièrement contenue dans le workspace courant, pas seulement un bord.
     expect(fenetre?.x).toBeLessThanOrEqual(workspace.x + workspace.width - (fenetre?.width ?? 0));
     expect(fenetre?.y).toBeLessThanOrEqual(workspace.y + workspace.height - (fenetre?.height ?? 0));
+  });
+
+  it("appliquerPresetMetier ouvre les fenêtres du preset, les lie au même groupe couleur et enregistre le workspace", () => {
+    expect(PRESETS_METIERS_WORKSPACES.length).toBeGreaterThanOrEqual(4);
+    const ok = appliquerPresetMetier("preset-chasse-alpha");
+    expect(ok).toBe(true);
+    expect(appliquerPresetMetier("preset-inexistant")).toBe(false);
+
+    const wm = windowManagerStore.getState();
+    expect(wm.windows["screener"]?.open).toBe(true);
+    expect(wm.windows["sect"]?.open).toBe(true);
+    expect(wm.windows["derivatives"]?.open).toBe(true);
+    expect(wm.windows["screener"]?.groupColor).toBeTruthy();
+    expect(wm.windows["screener"]?.groupColor).toBe(wm.windows["derivatives"]?.groupColor);
+    expect(revenueStore.getState().enabled).toBe(true);
+    expect(parNom("Chasse Alpha & Contrats")).toBeDefined();
   });
 });

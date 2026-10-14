@@ -23,7 +23,12 @@ import {
   type WindowId,
 } from "../store/windowManager";
 import { chartLayoutStore, type ChartLayoutMode } from "../store/chart-layout";
-import { workspacesStore, DEFAULT_WORKSPACE_ID } from "../store/workspaces";
+import {
+  workspacesStore,
+  DEFAULT_WORKSPACE_ID,
+  PRESETS_METIERS_WORKSPACES,
+  appliquerPresetMetier,
+} from "../store/workspaces";
 import { exporterSauvegarde, importerSauvegarde } from "../store/persist";
 import { enregistrerCommandes } from "../commands/registry";
 import { supportedTimeframesFor } from "../data/adapters";
@@ -526,6 +531,28 @@ function WorkspaceMenu() {
                   </>
                 )}
               </div>
+            ))}
+
+            <div className="my-1 h-px bg-neutral-800" />
+            <div className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+              Presets métiers (groupes liés)
+            </div>
+            {PRESETS_METIERS_WORKSPACES.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                role="menuitem"
+                title={p.description}
+                onClick={() => {
+                  appliquerPresetMetier(p.id);
+                  pousserToast(`Preset « ${p.nom} » appliqué`);
+                  fermer();
+                }}
+                className="flex w-full flex-col gap-0.5 rounded px-2 py-1 text-left text-xs text-neutral-200 hover:bg-neutral-800"
+              >
+                <span className="truncate font-medium text-accent">{p.nom}</span>
+                <span className="truncate text-[10px] text-neutral-500">{p.description}</span>
+              </button>
             ))}
 
             <div className="my-1 h-px bg-neutral-800" />

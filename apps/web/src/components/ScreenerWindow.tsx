@@ -62,6 +62,7 @@ import {
 } from "./ui";
 import { TableTriable, trierLignes, type ColonneTable, type TriTable } from "./TableTriable";
 import { PanneauDiagnosticMicrostructure } from "./DomWindow";
+import { NouveauxTokensPanel } from "./NouveauxTokensPanel";
 
 /**
  * Presets « scénario » : teinte du glyphe directionnel (▲▼↔◆), portée par le premier
@@ -648,29 +649,36 @@ export function ScreenerWindow() {
         sousTitre={
           vue === "signaux"
             ? "Setups par confluence · perp Binance"
-            : "Binance spot USDT/USDC · funding perp"
+            : vue === "nouveaux"
+              ? "Nouveaux contrats on-chain · évaluation potentiel (Revenus, Tokenomics, TVL, Sécurité)"
+              : "Binance spot USDT/USDC · funding perp"
         }
       />
 
-      {/* Bascule Filtres / Signaux — l'état vit dans signauxStore (la commande SIG le force). */}
+      {/* Bascule Filtres / Signaux / Nouveaux tokens — l'état vit dans signauxStore (la commande SIG le force). */}
       <div className="px-4 pt-3">
         <Segmente
           options={[
             { id: "filtres", label: "Filtres" },
             { id: "signaux", label: "Signaux" },
+            { id: "nouveaux", label: "Nouveaux tokens & contrats" },
           ] as const}
           actif={vue}
           onChange={setVue}
         />
       </div>
 
-      <div className="px-4 pt-3">
-        <div className="overflow-hidden rounded-md border border-border">
-          <PanneauDiagnosticMicrostructure />
+      {vue !== "nouveaux" && (
+        <div className="px-4 pt-3">
+          <div className="overflow-hidden rounded-md border border-border">
+            <PanneauDiagnosticMicrostructure />
+          </div>
         </div>
-      </div>
+      )}
 
-      {vue === "signaux" ? (
+      {vue === "nouveaux" ? (
+        <NouveauxTokensPanel />
+      ) : vue === "signaux" ? (
         <VueSignaux />
       ) : (
       <div className="axiom-screener space-y-3 px-4 py-3">

@@ -67,7 +67,7 @@ const OI_HIST_LIMIT = 25;
 const DIVERGENCE_TF: Timeframe = "4h";
 const DIVERGENCE_KLINE_LIMIT = 200;
 
-export type VueScreener = "filtres" | "signaux";
+export type VueScreener = "filtres" | "signaux" | "nouveaux";
 export type SignauxRunState = "idle" | "loading" | "running" | "done" | "error";
 
 /** Résultats de la validation historique, par type de signal validable × horizon. */

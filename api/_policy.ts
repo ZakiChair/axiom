@@ -309,9 +309,13 @@ function serverPathAllowed(route: ProxyRouteId, path: string, query: URLSearchPa
     case "coinalyzeapi": return /^v1\/(?:open-interest|funding-rate|predicted-funding-rate|open-interest-history|funding-rate-history|long-short-ratio-history|liquidation-history|future-markets)$/.test(path);
     case "tdapi": return path === "time_series" || path === "quote";
     case "sosoapi": return ["openapi/v2/etf/currentEtfDataMetrics", "openapi/v1/etfs/summary-history"].includes(path);
-    case "ethscanapi": return path === "v2/api" && query.get("chainid") === "1" &&
-      ((query.get("module") === "stats" && ["ethsupply", "nodecount"].includes(query.get("action") ?? "")) ||
-       (query.get("module") === "gastracker" && query.get("action") === "gasoracle"));
+    case "ethscanapi": return path === "v2/api" && (
+      (query.get("chainid") === "1" &&
+        ((query.get("module") === "stats" && ["ethsupply", "nodecount"].includes(query.get("action") ?? "")) ||
+         (query.get("module") === "gastracker" && query.get("action") === "gasoracle"))) ||
+      (["1", "10", "56", "137", "8453", "42161", "43114"].includes(query.get("chainid") ?? "") &&
+        ((query.get("module") === "contract" && query.get("action") === "getsourcecode" && /^0x[a-fA-F0-9]{40}$/.test(query.get("address") ?? "")) ||
+         (query.get("module") === "stats" && query.get("action") === "tokensupply" && /^0x[a-fA-F0-9]{40}$/.test(query.get("contractaddress") ?? "")))));
     case "bgapi": return /^v1\/(?:mvrv-zscore|sopr|nupl|puell-multiple|reserve-risk|realized-price|asopr|sth-sopr|lth-sopr|rhodl-ratio|cvdd|balanced-price|bitcoin-dominance|etf-flow-btc|realized-price-sth|realized-price-lth|realized-cap|supply-profit|supply-loss|exchange-netflow-btc|exchange-reserve-btc|sth-mvrv|lth-mvrv|nrpl-usd|vdd-multiple|aviv|open-interest-futures)(?:\/last)?$/.test(path);
     case "ccdataapi": return path === "data/overview/v1/historical/marketcap/all-assets/days";
     case "finnhubapi": return ["stock/profile2", "calendar/earnings", "news"].includes(path);

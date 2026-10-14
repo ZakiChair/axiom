@@ -18,6 +18,7 @@ const cases = [
   ["coinalyzeapi/v1/open-interest?symbols=BTCUSDT_PERP.A", "api_key", "secret-coinalyze"],
   ["tdapi/time_series?symbol=AAPL", "apikey", "secret-twelvedata"],
   ["ethscanapi/v2/api?chainid=1&module=stats&action=ethsupply", "apikey", "secret-etherscan"],
+  ["ethscanapi/v2/api?chainid=8453&module=contract&action=getsourcecode&address=0x940181a94a35a4569e4529a3cdfb74e38fd98631", "apikey", "secret-etherscan"],
   ["finnhubapi/stock/profile2?symbol=AAPL", "token", "secret-finnhub"],
 ] as const;
 

@@ -36,6 +36,7 @@ import {
 } from "./ui";
 import { DefillamaProPanel } from "./DefillamaProPanel";
 import { EconomieChaines } from "./onchain/EconomieChaines";
+import { NouveauxTokensPanel } from "./NouveauxTokensPanel";
 
 /** Cadence de rafraîchissement (le cache 5 min partagé absorbe les appels réseau). */
 const REFRESH_MS = 5 * 60_000;
@@ -113,6 +114,7 @@ export function SectWindow() {
   const [triGroupes, setTriGroupes] = useState<TriTable | null>({ colonne: "cap", dir: -1 });
   const [triMembres, setTriMembres] = useState<TriTable | null>({ colonne: "cap", dir: -1 });
   const [proOuvert, setProOuvert] = useState(false);
+  const [nouveauxOuvert, setNouveauxOuvert] = useState(false);
 
   // — Chargement via le pipeline overview (cache 5 min, repli cache périmé) —
   useEffect(() => {
@@ -259,7 +261,7 @@ export function SectWindow() {
           </span>
         }
         actions={
-          <div className="flex items-center gap-2"><Bouton onClick={() => setProOuvert((v) => !v)}>Unlocks / bridges</Bouton><BoutonRafraichir
+          <div className="flex items-center gap-2"><Bouton onClick={() => setNouveauxOuvert((v) => !v)}>Nouveaux tokens / contrats</Bouton><Bouton onClick={() => setProOuvert((v) => !v)}>Unlocks / bridges</Bouton><BoutonRafraichir
             onClick={() => setTick((t) => t + 1)}
             disabled={loading}
             title="Rafraîchir (cache CoinGecko 5 min partagé avec MAP)"
@@ -268,6 +270,11 @@ export function SectWindow() {
       />
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
+        {nouveauxOuvert && (
+          <div className="rounded border border-border bg-surface/40">
+            <NouveauxTokensPanel />
+          </div>
+        )}
         {proOuvert && <DefillamaProPanel initialMode="bridges" />}
         <EconomieChaines />
         {error !== null && <ErreurBloc>{error}</ErreurBloc>}

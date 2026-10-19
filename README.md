@@ -241,6 +241,19 @@ vente : État ≤ 0, sans bougie de retard quand la source dit la dernière
 clôturée) et dans la fenêtre **BT** (opérandes du catalogue, preset livré
 « AXIS confluence (4h) », fills à l'open suivant avec frais et slippage ;
 stop, objectif et risque restent à régler).
+**AXIS S/R — variante avec futures zones de support/résistance (19 octobre 2026)** :
+dans **Stratégies → ＋ AXIS S/R** (`stratAxisSr`), la stratégie est dupliquée
+à côté d'**＋ AXIS** (qui reste sans zones S/R) : elle détecte de façon
+strictement causale les pivots de swing confirmés (`pivotSr`, défaut 5 bougies
+gauche/droite), les regroupe en zones d'épaisseur `± zoneSrAtr × ATR 14`
+(défaut 0,5) pondérées par le nombre de touches et de rejets sur volume fort
+avec inversion de polarité S↔R après cassure franche, projette sur le graphique
+les `maxZonesSr` (défaut 4) futures zones de support (`--up`) et de résistance
+(`--down`) les plus proches jusqu'au bord droit, expose les sorties masquées
+**Support actif proche** et **Résistance active proche** (ainsi que le preset
+BT « AXIS S/R confluence (4h) »), et propose un filtre d'entrée optionnel
+`margeResistanceAtr` (défaut 0 = sans) pour éviter les achats immédiatement
+sous une résistance active.
 [Méthode, réglages, limites et backtests](docs/axis-2026-10-07.md).
 
 ### Historique des décisions et nouveaux indicateurs

@@ -17,8 +17,8 @@ const VALID_CATEGORIES = new Set<IndicatorCategory>([
 ]);
 
 describe("registry", () => {
-  it("câble exactement 219 indicateurs", () => {
-    expect(INDICATORS.length).toBe(219);
+  it("câble exactement 220 indicateurs", () => {
+    expect(INDICATORS.length).toBe(220);
   });
 
   it("rend les trois nouvelles analyses disponibles sans série auxiliaire", () => {
@@ -50,12 +50,12 @@ describe("registry", () => {
     expect(getIndicator("__inexistant__")).toBeUndefined();
   });
 
-  it("catégorie strategy : 8 defs v2.1 déplacés + 7 stratégies v2.2 + 5 v2.3 + 7 v2.6 + 3 v2.8 + AXIS", () => {
+  it("catégorie strategy : 8 defs v2.1 déplacés + 7 stratégies v2.2 + 5 v2.3 + 7 v2.6 + 3 v2.8 + AXIS + AXIS S/R", () => {
     const strategie = INDICATORS.filter((def) => def.category === "strategy").map((d) => d.id);
     expect(strategie.sort()).toEqual([
       "cvdDivergence", "cvdSpotPerp", "macdDivergence", "mfiDivergence",
       "obvDivergence", "premiumSpotPerp", "rsiDivergence", "stochDivergence",
-      "stratAxis", "stratBollingerReversion", "stratChampion", "stratCroisementMM", "stratDivergenceRsi",
+      "stratAxis", "stratAxisSr", "stratBollingerReversion", "stratChampion", "stratCroisementMM", "stratDivergenceRsi",
       "stratDonchian", "stratIchimokuKumo", "stratMacdCross", "stratMacdSupertrend",
       "stratMmAdx", "stratMmRsi", "stratNetPositionFade", "stratPsar", "stratPsarAdx",
       "stratRsiRange", "stratRsiReversion", "stratSmartMoneyDivergence", "stratSpotBreakout",

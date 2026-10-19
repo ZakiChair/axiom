@@ -259,8 +259,9 @@ import { stratNetPositionFade } from "./strategy/stratNetPositionFade";
 import { stratSmartMoneyDivergence } from "./strategy/stratSmartMoneyDivergence";
 import { stratSpotBreakout } from "./strategy/stratSpotBreakout";
 
-// — stratégies (AXIS — confluence, demande du 7 octobre 2026) —
+// — stratégies (AXIS — confluence, demande du 7 octobre 2026 ; AXIS S/R du 19 octobre 2026) —
 import { stratAxis } from "./strategy/stratAxis";
+import { stratAxisSr } from "./strategy/stratAxisSr";
 
 export const INDICATORS: IndicatorDef[] = [
   // trend
@@ -495,8 +496,9 @@ export const INDICATORS: IndicatorDef[] = [
   stratNetPositionFade,
   stratSmartMoneyDivergence,
   stratSpotBreakout,
-  // — stratégies (AXIS — confluence)
+  // — stratégies (AXIS — confluence & AXIS S/R)
   stratAxis,
+  stratAxisSr,
 ];
 
 export function getIndicator(id: string): IndicatorDef | undefined {

@@ -199,11 +199,16 @@ export const CATALOGUE_OPERANDES: OperandeSpec[] = [
   indFixe("supertrend", "direction", "Supertrend (direction)", { period: 10, multiplier: 3 }),
   indLen("adx", "adx", "ADX", 14),
   indFixe("psar", "psar", "PSAR", { step: 0.02, max: 0.2 }),
-  // Sorties masquées d'AXIS (jamais tracées sur le chart) : état et score de la
-  // stratégie, aux défauts — le garde-fou de régime (défaut 100) s'applique dans
-  // le BT : la fenêtre charge la série de référence (`chargerRefCloseBacktest`).
+  // Sorties masquées d'AXIS (sans S/R) et d'AXIS S/R (avec S/R) : état, score et
+  // niveaux de structure S/R, aux défauts — le garde-fou de régime (défaut 100)
+  // s'applique dans le BT : la fenêtre charge la série de référence
+  // (`chargerRefCloseBacktest`).
   indFixe("stratAxis", "etat", "AXIS (état : 1 acheté, 0 à plat)", {}),
   indFixe("stratAxis", "score", "AXIS (score −6 à +6)", {}),
+  indFixe("stratAxisSr", "etat", "AXIS S/R (état : 1 acheté, 0 à plat)", {}),
+  indFixe("stratAxisSr", "score", "AXIS S/R (score −6 à +6)", {}),
+  indFixe("stratAxisSr", "support", "AXIS S/R (support proche)", {}),
+  indFixe("stratAxisSr", "resistance", "AXIS S/R (résistance proche)", {}),
 ];
 
 /** Résout une spec d'opérande par son id. */
@@ -322,6 +327,13 @@ const psarDefaut = (): Operande => ({
 const axisEtat = (): Operande => ({
   type: "indicateur",
   indicateurId: "stratAxis",
+  params: {},
+  output: "etat",
+});
+/** État masqué d'AXIS S/R aux défauts (1 acheté, 0 à plat). */
+const axisSrEtat = (): Operande => ({
+  type: "indicateur",
+  indicateurId: "stratAxisSr",
   params: {},
   output: "etat",
 });
@@ -523,6 +535,18 @@ export const BUILTIN_STRATEGIES: StrategiePreset[] = [
     targetPct: null,
     reglesEntree: [{ type: "comparaison", gauche: axisEtat(), comparateur: ">=", droite: constante(1) }],
     reglesSortie: [{ type: "comparaison", gauche: axisEtat(), comparateur: "<=", droite: constante(0) }],
+    builtin: true,
+  },
+  {
+    id: "builtin:axis-sr",
+    name: "AXIS S/R confluence (4h)",
+    tf: "4h",
+    direction: "long",
+    tailleFixe: 1000,
+    stopPct: null,
+    targetPct: null,
+    reglesEntree: [{ type: "comparaison", gauche: axisSrEtat(), comparateur: ">=", droite: constante(1) }],
+    reglesSortie: [{ type: "comparaison", gauche: axisSrEtat(), comparateur: "<=", droite: constante(0) }],
     builtin: true,
   },
 ];

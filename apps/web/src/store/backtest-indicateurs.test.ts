@@ -23,14 +23,25 @@ describe("nouveaux opérandes du backtest", () => {
 });
 
 describe("opérandes et preset AXIS (sorties masquées, 9 octobre 2026)", () => {
-  it("le catalogue expose etat et score d'AXIS aux défauts, et decrireOperande les retrouve", () => {
+  it("le catalogue expose etat et score d'AXIS ainsi que etat, score, support et resistance d'AXIS S/R", () => {
     const etat = specParId("stratAxis:etat");
     const score = specParId("stratAxis:score");
+    const srEtat = specParId("stratAxisSr:etat");
+    const srScore = specParId("stratAxisSr:score");
+    const support = specParId("stratAxisSr:support");
+    const resistance = specParId("stratAxisSr:resistance");
     expect(etat?.make()).toEqual({ type: "indicateur", indicateurId: "stratAxis", params: {}, output: "etat" });
     expect(score?.make()).toEqual({ type: "indicateur", indicateurId: "stratAxis", params: {}, output: "score" });
+    expect(srEtat?.make()).toEqual({ type: "indicateur", indicateurId: "stratAxisSr", params: {}, output: "etat" });
+    expect(srScore?.make()).toEqual({ type: "indicateur", indicateurId: "stratAxisSr", params: {}, output: "score" });
+    expect(support?.make()).toEqual({ type: "indicateur", indicateurId: "stratAxisSr", params: {}, output: "support" });
+    expect(resistance?.make()).toEqual({ type: "indicateur", indicateurId: "stratAxisSr", params: {}, output: "resistance" });
     expect(CATALOGUE_OPERANDES.filter((s) => s.id.startsWith("stratAxis:"))).toHaveLength(2);
+    expect(CATALOGUE_OPERANDES.filter((s) => s.id.startsWith("stratAxisSr:"))).toHaveLength(4);
     expect(decrireOperande(etat!.make()!)).toEqual({ specId: "stratAxis:etat" });
     expect(decrireOperande(score!.make()!)).toEqual({ specId: "stratAxis:score" });
+    expect(decrireOperande(support!.make()!)).toEqual({ specId: "stratAxisSr:support" });
+    expect(decrireOperande(resistance!.make()!)).toEqual({ specId: "stratAxisSr:resistance" });
   });
 
   it("builtin:axis : preset livré, long, 4h, entrée etat ≥ 1, sortie etat ≤ 0, rien de pré-réglé", () => {

@@ -1721,6 +1721,24 @@ dépendance ni ordre réel. Quatre changements de `@axiom/types` :
   une seule évaluation par clôture après l'arrivée de la série, échec → v2).
   Le daemon (alertes 1 min héritées), le screener et le rejeu commun
   (`valider-strategies.ts`) restent SANS référence — condition de la v2.
+- **AXIS S/R — duplication avec futures zones de support/résistance (demande du 19 octobre 2026)** :
+  sur demande explicite du propriétaire (« duplique la stratégie, l'une avec les
+  résistances et supports, l'autre sans »), `stratAxis` (« AXIS ») reste
+  strictement inchangée (sans zones S/R), et une 220e définition `stratAxisSr`
+  (« AXIS S/R », catégorie `strategy`, pane `overlay`, 32e stratégie) partage
+  les cœurs purs de `stratAxis` et y ajoute `zonesSrAxis` : confirmation causale
+  des pivots de swing (`pivotSr`, défaut 5 bougies gauche/droite : pivot en
+  $p = i - g$ confirmé à la clôture $i$, zéro repaint), agrégation en zones
+  d'épaisseur adaptative `± zoneSrAtr × ATR 14` (défaut 0,5), comptage des
+  touches et des rejets sur volume fort (`rvol ≥ seuilRvol`), inversion de
+  polarité S↔R après cassure franche d'une zone renforcée (≥ 2 touches ou rejet
+  sur volume fort ; retirée à la seconde cassure), projection des `maxZonesSr`
+  (défaut 4) futures zones de support (`--up`) et de résistance (`--down`) les
+  plus proches du cours jusqu'au bord droit via `annotations.rubans` et
+  `annotations.segments`, exposition des sorties masquées `support` et
+  `resistance` (et du preset BT `builtin:axis-sr`), et filtre d'entrée optionnel
+  `margeResistanceAtr` (défaut 0 = mêmes signaux qu'AXIS) exigeant une marge
+  minimale en ATR sous la résistance active la plus proche.
 - Chargement initial : AXIS coûte ~800 octets gzip, la couche flux ~1 200 de
   plus, les infobulles par unité ~1 000 de plus. Sur le modèle de BT et SIG, les commandes EQS, WHALE et MARKS vivent
   dans `commands/windowPanels.ts` (EQS : bascule identique ; WHALE et MARKS :

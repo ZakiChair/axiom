@@ -82,9 +82,9 @@ export function InstanceParamsEditor({
           {renderControl(input)}
         </label>
       ))}
-      {def.id === "stratAxis" && (
+      {(def.id === "stratAxis" || def.id === "stratAxisSr") && (
         <div className="mt-1 flex flex-col gap-1.5 border-t border-neutral-800/80 pt-1.5">
-          <label className="flex items-center justify-between gap-2 text-xs text-amber-300/90">
+          <label className="flex items-center justify-between gap-2 text-xs text-accent">
             <span className="truncate">Détecter les retournements (↺ Achat / Vente)</span>
             <input
               type="checkbox"

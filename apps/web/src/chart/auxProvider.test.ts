@@ -284,7 +284,36 @@ describe("AuxProvider.getAligned", () => {
     });
     // mvrv dérive l'asset "btc" de "BTCUSDT".
     expect(cmMock).toHaveBeenCalledWith("btc");
+    expect(stableMock).toHaveBeenCalledWith();
     expect(fundingFallbackMock).not.toHaveBeenCalled();
+  });
+
+  it("stablecoins : récupère tout l'historique DefiLlama sans troncature à 90 j pour suivre l'historique 1d de l'actif", async () => {
+    const J = 24 * H;
+    const maintenant = 2_000 * J;
+    vi.useFakeTimers();
+    vi.setSystemTime(maintenant);
+    const points = Array.from({ length: 500 }, (_, i) => ({
+      time: (1_501 + i) * J,
+      value: 1e11 + i * 1e9,
+    }));
+    stableMock.mockResolvedValue(points);
+    const p = new AuxProvider();
+    const candleTimes = points.map((pt) => pt.time);
+    const req = {
+      exchange: "binance" as const,
+      symbol: "BTCUSDT",
+      timeframe: "1d" as const,
+      ids: ["stablecoins" as const],
+      candleTimes,
+    };
+    await new Promise<void>((resolve) => p.getAligned(req, resolve));
+    const status = p.getAligned(req, () => {});
+    expect(stableMock).toHaveBeenCalledWith();
+    expect(status).toEqual({
+      status: "ready",
+      aux: { stablecoins: points.map((pt) => pt.value) },
+    });
   });
 
   it("sans clé Coinalyze → funding Binance direct", async () => {

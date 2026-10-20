@@ -198,7 +198,7 @@ export class MacroController {
 
     // crypto-total ne passe pas par ici (servi en direct depuis le store, cf. sync/rebuild).
     if (id === "stablecoins") {
-      return stablecoinsSupplyProvider.fetchSeries({ start, signal: this.abort.signal });
+      return stablecoinsSupplyProvider.fetchSeries({ signal: this.abort.signal });
     }
 
     // Clé personnelle si l'utilisateur en a saisi une ; sinon undefined → le proxy

@@ -1107,8 +1107,9 @@ angles, constats contre-vérifiés) a été suivie d'un second commit de correct
      moyenne. Limite : « clos » désigne la bougie de prix. Juste après 00:00 UTC, le point de la
      veille peut encore être partiel (cache de la série 1 h, publication DefiLlama) ; il se
      corrige au rafraîchissement suivant.
-   - Moyenne au plus 60 jours (la série couvre 90 jours) ; légende et axe abrégés (K/M/B),
-     comme pour l'offre de stablecoins.
+   - Moyenne jusqu'à 365 jours (la série auxiliaire `stablecoins` livre tout l'historique
+     quotidien DefiLlama, sans troncature à 90 jours, pour couvrir le même historique 1d que
+     l'actif) ; légende et axe abrégés (K/M/B), comme pour l'offre de stablecoins.
 3. **Dessins dont un point est hors des bougies chargées.** Dans klinecharts 9.8, un point
    posé à droite de la dernière bougie (ou avant la première) n'a qu'un `dataIndex`.
    - Cause : la sauvegarde ne gardait que `{timestamp, value}`. Le point revenait donc sans

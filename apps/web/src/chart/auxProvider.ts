@@ -496,7 +496,7 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe, e
       }
     }
     case "stablecoins": {
-      const s = await stablecoinsSupplyProvider.fetchSeries({ start: since });
+      const s = await stablecoinsSupplyProvider.fetchSeries();
       return toPoints(s.map((p) => ({ time: p.time, value: p.value })));
     }
     case "nvt":

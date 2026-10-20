@@ -26,8 +26,7 @@ export const stablecoinPrint: IndicatorDef = {
   aux: ["stablecoins"],
   minTimeframe: "1d",
   precision: 0,
-  // La série auxiliaire couvre 90 jours : au-delà de 60 observations la moyenne serait presque vide.
-  inputs: [{ key: "lissage", name: "Moyenne (jours)", type: "number", default: 7, min: 2, max: 60 }],
+  inputs: [{ key: "lissage", name: "Moyenne (jours)", type: "number", default: 7, min: 2, max: 365 }],
   outputs: [
     { key: "hausse", name: "Hausse nette de l'offre", style: "histogram", color: "--up" },
     { key: "baisse", name: "Baisse nette de l'offre", style: "histogram", color: "--down" },
@@ -36,7 +35,7 @@ export const stablecoinPrint: IndicatorDef = {
   ],
   calc(candles, params, ctx) {
     const n = candles.length;
-    const lissage = Math.min(60, Math.max(2, Math.round(Number(params.lissage ?? 7))));
+    const lissage = Math.min(365, Math.max(2, Math.round(Number(params.lissage ?? 7))));
     const vide = (): Array<number | undefined> => new Array(n).fill(undefined);
     const hausse = vide(), baisse = vide(), partiel = vide(), moyenne = vide();
     const serie = ctx.aux?.stablecoins;

@@ -53,8 +53,17 @@ describe("stablecoinPrint (impression de stablecoins, Δ offre / jour)", () => {
     expect(stablecoinPrint.minTimeframe).toBe("1d");
     expect(supportsIndicatorTimeframe("stablecoinPrint", "1d")).toBe(true);
     for (const tf of ["1h", "4h", "3d", "1w", "1M"] as const) expect(supportsIndicatorTimeframe("stablecoinPrint", tf), tf).toBe(false);
-    // La série auxiliaire couvre 90 jours : une moyenne plus longue ne s'afficherait jamais.
-    expect(stablecoinPrint.inputs[0]).toMatchObject({ key: "lissage", max: 60 });
+    expect(stablecoinPrint.inputs[0]).toMatchObject({ key: "lissage", max: 365 });
+  });
+
+  it("couvre un historique daily long (> 90 j, ex. 500 bougies 1d) en parallèle de l'actif", () => {
+    const n = 500;
+    const stablecoins = Array.from({ length: n }, (_, i) => 150e9 + i * 1e8);
+    const r = stablecoinPrint.calc(jours(n), { lissage: 90 }, { ...baseCtx, aux: { stablecoins } });
+    expect(r.series.hausse?.filter((v) => v !== undefined)).toHaveLength(n - 1);
+    expect(r.series.moyenne?.[89]).toBeUndefined();
+    expect(r.series.moyenne?.[90]).toBeCloseTo(1e8);
+    expect(r.series.moyenne?.[n - 1]).toBeCloseTo(1e8);
   });
 
   it("aux absent → séries vides, jamais de throw ; métadonnées", () => {

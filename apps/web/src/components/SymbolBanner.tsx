@@ -24,7 +24,7 @@ import {
   type TickerUpdate,
 } from "../data/ticker";
 import { formatSyntheticLabel, parseSyntheticSymbol } from "../data/synthetic";
-import { estSymboleCapitalisation } from "../data/mcap";
+import { COMPOSITION_DOMINANCE_STABLECOINS, estSerieEnPourcentage, estSymboleCapitalisation } from "../data/mcap";
 import { sourcesCapitalisationStore, type SourceCapitalisation } from "../data/mcapCandles";
 import {
   DENOMINATEURS_CRYPTO,
@@ -39,7 +39,7 @@ import {
 } from "../data/ratio";
 import { supportedTimeframesFor, timeframeProche } from "../data/adapters";
 import { MenuDeroulant } from "./ui";
-import { formatCompact, formatCountdown, formatPct, formatPrice } from "../lib/format";
+import { formatCompact, formatCountdown, formatPct, formatPourcentage, formatPrice } from "../lib/format";
 import { useMobileLayout } from "../hooks/useMobileLayout";
 
 /** Durée (ms) d'une bougie pour les timeframes à pas FIXE. */
@@ -118,6 +118,11 @@ export function libelleSourceCapitalisation(
     return `CoinMarketCap · ${timeframe === "1h" || timeframe === "4h" ? timeframe : "daily"}`;
   }
   return source === "ccdata" ? "CCData · daily" : "CoinGecko · local";
+}
+
+/** Prix et haut/bas du bandeau : « 9.53 % » pour une série en % (STABLE.D), prix adaptatif sinon. PURE & testée. */
+export function formatValeurBandeau(valeur: number, enPourcentage: boolean): string {
+  return enPourcentage ? formatPourcentage(valeur) : formatPrice(valeur);
 }
 
 /**
@@ -354,6 +359,8 @@ export function SymbolBanner() {
   const sourceCapitalisation = estCapitalisation
     ? libelleSourceCapitalisation(sourceServie, timeframe)
     : null;
+  // Dominance (en %) : composition en infobulle, « Vol » masqué (toujours nul), valeurs en %.
+  const enPourcentage = estSerieEnPourcentage(exchange, symbol);
   const hasClosedTradfiLeg = syntheticSpec !== null && (
     (syntheticSpec.exA === "twelvedata" && !isMarketOpen(classifyTradfi(syntheticSpec.legA), new Date())) ||
     (syntheticSpec.exB === "twelvedata" && !isMarketOpen(classifyTradfi(syntheticSpec.legB), new Date()))
@@ -369,6 +376,7 @@ export function SymbolBanner() {
   useEffect(() => {
     // Dernière variation 24 h connue (source ticker) : sert au texte ET à la couleur du prix.
     let changePct = Number.NaN;
+    const pct = estSerieEnPourcentage(exchange, symbol);
 
     /** Applique la teinte up/down (token de thème) au prix et à la variation. */
     const applyColor = (): void => {
@@ -392,10 +400,10 @@ export function SymbolBanner() {
         if (volRef.current) volRef.current.textContent = "—";
         return;
       }
-      if (priceRef.current) priceRef.current.textContent = formatPrice(last.close);
+      if (priceRef.current) priceRef.current.textContent = formatValeurBandeau(last.close, pct);
       const stats = rolling24h(candles, Date.now());
-      if (highRef.current) highRef.current.textContent = stats ? formatPrice(stats.high) : "—";
-      if (lowRef.current) lowRef.current.textContent = stats ? formatPrice(stats.low) : "—";
+      if (highRef.current) highRef.current.textContent = stats ? formatValeurBandeau(stats.high, pct) : "—";
+      if (lowRef.current) lowRef.current.textContent = stats ? formatValeurBandeau(stats.low, pct) : "—";
       if (volRef.current) volRef.current.textContent = stats ? formatCompact(stats.volume) : "—";
       applyColor();
     };
@@ -444,7 +452,7 @@ export function SymbolBanner() {
 
   return (
     <div data-chart-banner className={`pointer-events-none absolute top-2 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-border bg-surface/80 text-xs tabular-nums text-text-dim backdrop-blur-sm ${mobile ? "left-1 right-1 px-2" : "left-2 px-2.5 py-1"}`}>
-      <span title={bannerSymbol} className={`font-semibold text-text ${mobile ? "min-w-0 max-w-[28%] truncate" : ""}`}>{bannerSymbol}</span>
+      <span title={enPourcentage ? COMPOSITION_DOMINANCE_STABLECOINS : bannerSymbol} className={`font-semibold text-text ${mobile ? "min-w-0 max-w-[28%] truncate" : ""}`}>{bannerSymbol}</span>
       <span className="text-text-dim">{timeframe}</span>
       <span ref={priceRef} className="min-w-0 font-semibold text-text">
         —
@@ -471,9 +479,9 @@ export function SymbolBanner() {
       <span>
         L <span ref={lowRef} className="text-text">—</span>
       </span>
-      <span>
+      {!enPourcentage && <span>
         Vol <span ref={volRef} className="text-text">—</span>
-      </span>
+      </span>}
       <span>
         ⏱ <span ref={countdownRef} className="text-text">—</span>
       </span>

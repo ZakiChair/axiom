@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { SYNTHETIC_PRESETS, syntheticsStore } from "./synthetics";
+import { estSymboleCapitalisation } from "../data/mcap";
+import { parseSyntheticSymbol } from "../data/synthetic";
 
 beforeEach(() => {
   syntheticsStore.getState().setRecents([]);
@@ -36,6 +38,21 @@ describe("syntheticsStore", () => {
     expect(SYNTHETIC_PRESETS.map((preset) => preset.symbol)).toEqual(
       expect.arrayContaining(["TOTAL", "TOTAL2", "TOTAL3"]),
     );
+  });
+
+  it("accepte la dominance des stablecoins (récents et préréglage) mais jamais comme jambe mcap", () => {
+    syntheticsStore.getState().setRecents(["STABLE.D", "TOTAL", "mcap:STABLE.D|/|binance:BTCUSDT"]);
+    expect(syntheticsStore.getState().recents).toEqual(["STABLE.D", "TOTAL"]);
+    syntheticsStore.getState().addRecent("TOTAL3");
+    expect(syntheticsStore.getState().recents).toEqual(["TOTAL3", "STABLE.D", "TOTAL"]);
+    expect(SYNTHETIC_PRESETS).toEqual(expect.arrayContaining([{ label: "USDT+USDC+DAI dominance", symbol: "STABLE.D" }]));
+  });
+
+  it("chaque préréglage est un SYN à jambes ou une série autonome : aucun n'est inerte au clic", () => {
+    // Le clic remplit le constructeur (SYN) ou ouvre la série (TOTAL*, STABLE.D) — cf. PairSearch.
+    for (const preset of SYNTHETIC_PRESETS) {
+      expect(parseSyntheticSymbol(preset.symbol) !== null || estSymboleCapitalisation(preset.symbol), preset.label).toBe(true);
+    }
   });
 
   it("ignore les symboles invalides à l'ajout et à l'hydratation", () => {

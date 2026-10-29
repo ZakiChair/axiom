@@ -3,7 +3,7 @@ import type { ExchangeId, Timeframe } from "@axiom/types";
 import { fetchPairs, isTradfiMarketSymbol, pairsCacheExpiresAt, TRADFI_SEARCH_METADATA, TWELVEDATA_SYMBOLS } from "./pairs";
 import { supportedTimeframesFor, timeframeProche } from "./adapters";
 import { debutAccessible, lireProfondeur, mesurerProfondeurs, plancherAccessible, toleranceProfondeurMs, type PrioriteMesure } from "./profondeurHistorique";
-import { estSymboleCapitalisation, SYMBOLES_CAPITALISATION } from "./mcap";
+import { estSymboleCapitalisation, METADONNEES_SERIES_AUTONOMES, SYMBOLES_CAPITALISATION } from "./mcap";
 import { parseSyntheticSymbol } from "./synthetic";
 import { basePerp, splitSymbol } from "./symbol";
 
@@ -103,13 +103,18 @@ function rafraichirCatalogue(options: { force?: boolean }): Promise<MarketCatalo
 /**
  * Un résultat par instrument (`kind:symbol`), dans l'ordre habituel ; son représentant est la
  * place la mieux classée d'après le cache de profondeur (`timeframe`), sans aucune mesure réseau.
+ * Libellés et alias : catalogue TradFi curé et séries autonomes (STABLE.D trouvée par USDT.D…).
  */
 export function searchMarkets(catalog: MarketCatalog, query: string, limit = 30, timeframe: Timeframe = "1h"): MarketCandidate[] {
   const q = query.trim().toUpperCase();
   const groupes = new Map<string, MarketCandidate[]>();
-  const metadata = (candidate: MarketCandidate) => candidate.exchange === "twelvedata" ? TRADFI_SEARCH_METADATA[candidate.symbol] : undefined;
+  const metadata = (candidate: MarketCandidate) => candidate.exchange === "twelvedata" ? TRADFI_SEARCH_METADATA[candidate.symbol]
+    : candidate.exchange === "synthetic" ? METADONNEES_SERIES_AUTONOMES[candidate.symbol] : undefined;
   const rank = (candidate: MarketCandidate) => candidate.symbol === q ? 3
     : metadata(candidate)?.aliases.includes(q) ? 2 : candidate.symbol.startsWith(q) ? 1 : 0;
+  // À rang égal, un marché réel devance une série `synthetic` (absente de SOURCES) : « STABLE »
+  // ouvre la paire du token, STABLE.D reste listée.
+  const ordre = (exchange: ExchangeId) => exchange === "synthetic" ? SOURCES.length : SOURCES.indexOf(exchange);
   catalog.instruments
     .filter((candidate) => {
       const details = metadata(candidate);
@@ -117,7 +122,7 @@ export function searchMarkets(catalog: MarketCatalog, query: string, limit = 30,
         || details?.label.toUpperCase().includes(q)
         || details?.aliases.some((alias) => alias.includes(q));
     })
-    .sort((a, b) => SOURCES.indexOf(a.exchange) - SOURCES.indexOf(b.exchange))
+    .sort((a, b) => ordre(a.exchange) - ordre(b.exchange))
     .forEach((candidate) => {
       const key = `${candidate.kind}:${candidate.symbol}`;
       groupes.get(key)?.push(candidate) ?? groupes.set(key, [candidate]);

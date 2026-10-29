@@ -40,7 +40,7 @@ import { chargerAuCreneau, chargerAvecRepli, chargerPageAncienne, type MarcheCha
 import { prepareResyncApply } from "../data/resync";
 import { dataLoadErrorMessage } from "./dataLoadErrorMessage";
 import { adaptateurReplayActif } from "../data/replayFeed";
-import { estSymboleCapitalisation } from "../data/mcap";
+import { estSerieEnPourcentage, estSymboleCapitalisation } from "../data/mcap";
 import { parseSyntheticSymbol } from "../data/synthetic";
 import { replayStore } from "../store/replay";
 import {
@@ -163,6 +163,8 @@ const PAGINATION_LIMIT = 500;
 const PAGINATION_MCAP_LIMIT = 10_000;
 const PAGINATION_MCAP_RATIO_LIMIT = 1_000;
 const PAGINATION_MCAP_MAX_CANDLES = 150_000;
+/** Dominance STABLE.D (« 9.53 ») : 2 décimales au lieu des 4 dérivées de la magnitude. */
+const DECIMALES_SERIE_POURCENTAGE = 2;
 
 const JOUR_MS = 86_400_000;
 /**
@@ -632,10 +634,13 @@ export function ChartInstance({
   const spec = exchange === "synthetic" ? parseSyntheticSymbol(symbol) : null;
   const estSerieCapitalisation = exchange === "synthetic" &&
     (estSymboleCapitalisation(symbol) || spec?.exA === "mcap" || spec?.exB === "mcap");
-  const ccdataDataRevision = estSerieCapitalisation ? ccdataRevision : 0;
+  const estSerieDominance = estSerieEnPourcentage(exchange, symbol);
+  // STABLE.D ne lit jamais CCData : changer la clé ne la recharge pas.
+  const ccdataDataRevision = estSerieCapitalisation && !estSerieDominance ? ccdataRevision : 0;
+  // STABLE.D en 1h/4h : chaque page coûte le global + 3 pièces CMC → pages de 1 000 bougies.
   const paginationLimit = !estSerieCapitalisation
     ? PAGINATION_LIMIT
-    : estSymboleCapitalisation(symbol)
+    : estSymboleCapitalisation(symbol) && !(estSerieDominance && (timeframe === "1h" || timeframe === "4h"))
       ? PAGINATION_MCAP_LIMIT
       : PAGINATION_MCAP_RATIO_LIMIT;
   const paginationMaxCandles = estSerieCapitalisation
@@ -1257,7 +1262,7 @@ export function ChartInstance({
         }
         const { candles } = result;
         const adapter = replayAdapter ?? getAdapter(exchange);
-        chart.setPriceVolumePrecision(derivePricePrecision(candles), 0);
+        chart.setPriceVolumePrecision(estSerieDominance ? DECIMALES_SERIE_POURCENTAGE : derivePricePrecision(candles), 0);
         chart.applyNewData(candles.map(toKLineData));
         // Le store et la série deviennent « ready » dans le même tour JS. Si l'identité
         // a changé depuis la garde ci-dessus, le commit est refusé et le chart est repurgé.
@@ -1569,6 +1574,7 @@ export function ChartInstance({
     <div
       ref={containerRef}
       data-mobile={mobile}
+      data-unite={estSerieDominance ? "%" : undefined}
       className={`relative h-full w-full ${isFocus ? "ring-1 ring-accent/70 ring-inset" : ""}`}
       onPointerDownCapture={() => {
         if (chartLayoutStore.getState().focus !== slot) chartLayoutStore.getState().setFocus(slot);

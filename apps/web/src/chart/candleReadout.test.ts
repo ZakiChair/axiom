@@ -3,7 +3,7 @@
  * amplitude (haut−bas) et sens. Le rendu DOM de l'encart est vérifié en navigateur.
  */
 import { describe, expect, it } from "vitest";
-import { lectureBougie } from "./candleReadout";
+import { enPoints, lectureBougie } from "./candleReadout";
 
 describe("lectureBougie", () => {
   it("bougie haussière", () => {
@@ -31,5 +31,18 @@ describe("lectureBougie", () => {
     const r = lectureBougie({ open: 0, high: 5, low: 0, close: 3 });
     expect(Number.isNaN(r.variationPct)).toBe(true);
     expect(r.amplitude).toBeCloseTo(5, 6);
+  });
+});
+
+describe("enPoints — écarts d'une série en % (dominance) en points de pourcentage", () => {
+  it("Δ signé (C − O) et amplitude non signée, à 2 décimales", () => {
+    expect(enPoints(9.52 - 9.4, true)).toBe("+0.12 pt");
+    expect(enPoints(9.4 - 9.52, true)).toBe("-0.12 pt");
+    expect(enPoints(0, true)).toBe("+0.00 pt");
+    expect(enPoints(9.61 - 9.38)).toBe("0.23 pt");
+  });
+
+  it("valeur non finie : tiret cadratin", () => {
+    expect(enPoints(Number.NaN, true)).toBe("—");
   });
 });

@@ -462,6 +462,101 @@ describe("construireRegistre — commandes attendues présentes", () => {
   });
 });
 
+describe("commande ⌘K « Dominance stablecoins (graphe) »", () => {
+  const registre = construireRegistre();
+  const commande = registre.find((c) => c.id === "nav:dominance-stablecoins");
+  // Union réelle de la palette : registre statique + commandes greffées (STBL, CAP…).
+  const palette = [...registre, ...Object.values(SOURCES_GREFFEES).flat()];
+
+  it("porte ses mots-clés, sans mnémonique : la frappe « stable » ouvre toujours la même commande", () => {
+    expect(commande).toMatchObject({
+      libelle: "Dominance stablecoins (graphe)",
+      categorie: "navigation",
+      motsCles: ["stable.d", "usdt.d", "usdc.d", "dai.d", "usdt.d+usdc.d+dai.d", "dominance stablecoins", "usdt usdc dai"],
+    });
+    expect(commande?.mnemonique).toBeUndefined();
+    for (const requete of ["stable.d", "usdt.d", "usdc.d", "dai.d", "usdt.d+usdc.d+dai.d", "dominance stablecoins"]) {
+      expect(rechercher(palette, requete)[0]?.id, requete).toBe("nav:dominance-stablecoins");
+    }
+    // Un mnémonique « STABLE… » (bonus de préfixe +30) aurait détourné cette frappe.
+    const sansElle = palette.filter((c) => c.id !== "nav:dominance-stablecoins");
+    expect(rechercher(palette, "stable")[0]?.id).toBe(rechercher(sansElle, "stable")[0]?.id);
+  });
+
+  it("ouvre STABLE.D en 1d par la navigation existante, toast « Annuler » compris", () => {
+    vi.useFakeTimers();
+    const marketAvant = marketStore.getState();
+    const toastIdsAvant = new Set(toastsStore.getState().toasts.map((toast) => toast.id));
+    try {
+      marketStore.getState().setMarket({ exchange: "binance", symbol: "BTCUSDT", timeframe: "4h" });
+      commande?.action();
+      const apres = marketStore.getState();
+      expect({ exchange: apres.exchange, symbol: apres.symbol, timeframe: apres.timeframe }).toEqual({
+        exchange: "synthetic",
+        symbol: "STABLE.D",
+        timeframe: "1d",
+      });
+      const toast = toastsStore.getState().toasts.at(-1);
+      expect(toast?.texte).toBe("Paire changée → STABLE.D");
+      toast?.action?.executer();
+      const annule = marketStore.getState();
+      expect({ exchange: annule.exchange, symbol: annule.symbol, timeframe: annule.timeframe }).toEqual({
+        exchange: "binance",
+        symbol: "BTCUSDT",
+        timeframe: "4h",
+      });
+    } finally {
+      marketStore.setState(marketAvant, true);
+      for (const toast of toastsStore.getState().toasts) {
+        if (!toastIdsAvant.has(toast.id)) retirerToast(toast.id);
+      }
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("⌘K — alias pointés des séries autonomes tapés comme navigation", () => {
+  it("USDT.D, USDC.D, DAI.D et la forme composite, avec ou sans unité, se lisent STABLE.D ; tout autre symbole reste tel quel", () => {
+    expect(parseNavigation("usdt.d 4h")).toEqual({ symbol: "STABLE.D", timeframe: "4h" });
+    expect(parseNavigation("USDT.D+USDC.D+DAI.D")).toEqual({ symbol: "STABLE.D" });
+    expect(parseNavigation("1h usdt.d+usdc.d+dai.d")).toEqual({ symbol: "STABLE.D", timeframe: "1h" });
+    expect(parseNavigation("usdc.d")).toEqual({ symbol: "STABLE.D" });
+    expect(parseNavigation("DAI.D 1D")).toEqual({ symbol: "STABLE.D", timeframe: "1d" });
+    // Un autre symbole pointé (action à classe) part toujours vers la source TradFi.
+    expect(parseNavigation("brk.b 4h")).toEqual({ symbol: "BRK.B", timeframe: "4h" });
+    // Seuls les alias POINTÉS sont détournés : « STABLES » pourrait devenir un ticker.
+    expect(parseNavigation("stables")).toEqual({ symbol: "STABLES" });
+  });
+
+  it("appliquée, la navigation ouvre STABLE.D en synthetic, à l'unité demandée sinon en 1d — jamais vers Twelve Data", () => {
+    vi.useFakeTimers();
+    const marketAvant = marketStore.getState();
+    const toastIdsAvant = new Set(toastsStore.getState().toasts.map((toast) => toast.id));
+    try {
+      for (const [saisie, timeframe] of [["usdt.d 4h", "4h"], ["USDT.D+USDC.D+DAI.D", "1d"], ["dai.d", "1d"]] as const) {
+        marketStore.getState().setMarket({ exchange: "binance", symbol: "BTCUSDT", timeframe: "15m" });
+        const nav = parseNavigation(saisie);
+        expect(nav, saisie).not.toBeNull();
+        if (nav !== null) appliquerNavigation(nav);
+        const apres = marketStore.getState();
+        expect({ exchange: apres.exchange, symbol: apres.symbol, timeframe: apres.timeframe }, saisie).toEqual({
+          exchange: "synthetic",
+          symbol: "STABLE.D",
+          timeframe,
+        });
+      }
+    } finally {
+      marketStore.setState(marketAvant, true);
+      for (const toast of toastsStore.getState().toasts) {
+        if (!toastIdsAvant.has(toast.id)) retirerToast(toast.id);
+      }
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("unicité globale — ids et mnémoniques de TOUTES les sources", () => {
   // Union BRUTE : registre statique + sources greffées + miroir inline, chaque entrée
   // étiquetée de sa source pour le diagnostic. Volontairement AVANT tout passage par

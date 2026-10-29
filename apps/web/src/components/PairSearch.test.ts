@@ -1,6 +1,6 @@
 /** Recherche : défaut SYN, libellé/titre des résultats, sélection et anti-rebond des mesures ; gestes réels en E2E. */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clesMesures, JAMBE_B_TRADFI_DEFAUT, libelleSource, planifierMesures, resultatsAMesurer, titreSource } from "./PairSearch";
+import { clesMesures, JAMBE_B_TRADFI_DEFAUT, jambeCapitalisation, libelleSource, planifierMesures, resultatsAMesurer, titreSource } from "./PairSearch";
 import { TWELVEDATA_SYMBOLS } from "../data/pairs";
 import type { MarketCandidate } from "../data/marketRouting";
 import * as profondeur from "../data/profondeurHistorique";
@@ -127,5 +127,18 @@ describe("recherche — abandon des mesures au changement de requête, à la fer
     expect(mesurer.mock.calls.map(([places]) => places)).toEqual([[{ exchange: "binance", symbol: "HYPE14USDT" }, { exchange: "bybit", symbol: "HYPE14USDT" }]]);
     vi.restoreAllMocks();
     vi.useRealTimers();
+  });
+});
+
+describe("séries autonomes : colonne source et constructeur SYN (clic des préréglages : e2e dominance-stablecoins)", () => {
+  it("STABLE.D affiche « Dominance » (un pourcentage), TOTAL garde « Capitalisation »", () => {
+    expect(libelleSource({ exchange: "synthetic", symbol: "STABLE.D", kind: "synthetic" })).toBe("Dominance");
+    expect(libelleSource({ exchange: "synthetic", symbol: "TOTAL", kind: "synthetic" })).toBe("Capitalisation");
+  });
+
+  it("jambe saisie au constructeur : TOTAL* devient une jambe mcap, STABLE.D est refusée explicitement", () => {
+    expect(jambeCapitalisation("TOTAL3")).toEqual({ exchange: "mcap", symbol: "TOTAL3" });
+    expect(jambeCapitalisation("ETHUSDT")).toBeNull();
+    expect(() => jambeCapitalisation("STABLE.D")).toThrow("STABLE.D est une série en %, non composable");
   });
 });

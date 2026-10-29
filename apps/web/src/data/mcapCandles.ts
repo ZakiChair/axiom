@@ -1,5 +1,7 @@
 import type { Candle, IExchangeAdapter, Timeframe } from "@axiom/types";
 import { createStore } from "zustand/vanilla";
+// Échantillon {t, v} d'une série autonome (USD pour TOTAL*, % pour STABLE.D).
+import type { PointSerie } from "../lib/referentiel";
 import { macroHistoryStore, type McapSnapshot } from "../store/macroHistory";
 import { bucketStartMs } from "./binance";
 import {
@@ -12,8 +14,9 @@ import { chargerHistoriqueCcData, historiqueCcDataDisponible } from "./ccdataMca
 import {
   JOUR_MS,
   estSymboleCapitalisation,
+  estSymboleDominance,
   minuitUtc,
-  type SymboleCapitalisation,
+  type SymboleCapitalisationUsd,
 } from "./mcap";
 
 export const TIMEFRAMES_CAPITALISATION: Timeframe[] = [
@@ -22,8 +25,8 @@ export const TIMEFRAMES_CAPITALISATION: Timeframe[] = [
 
 const HEURE_MS = 3_600_000;
 /** Cadence du repoll de la bougie courante quand l'historique long CMC/CCData est actif. */
-const REPOLL_MCAP_INTRADAY_MS = 5 * 60_000;
-const REPOLL_MCAP_LENT_MS = 15 * 60_000;
+export const REPOLL_MCAP_INTRADAY_MS = 5 * 60_000;
+export const REPOLL_MCAP_LENT_MS = 15 * 60_000;
 const MOIS_PAR_TIMEFRAME: Partial<Record<Timeframe, number>> = {
   "1M": 1,
   "3M": 3,
@@ -31,7 +34,8 @@ const MOIS_PAR_TIMEFRAME: Partial<Record<Timeframe, number>> = {
   "12M": 12,
 };
 
-const MESURE_PAR_SYMBOLE: Record<SymboleCapitalisation, "total" | "total2" | "total3"> = {
+/** Mesure de McapSnapshot par capitalisation en USD — la dominance (en %) n'en a aucune. */
+const MESURE_PAR_SYMBOLE: Record<SymboleCapitalisationUsd, "total" | "total2" | "total3"> = {
   TOTAL: "total",
   TOTAL2: "total2",
   TOTAL3: "total3",
@@ -64,20 +68,24 @@ function finBucketCapitalisation(time: number, timeframe: Timeframe): number {
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + mois, 1);
 }
 
-export function construireBougiesCapitalisation(
-  snapshots: readonly McapSnapshot[],
-  symbol: SymboleCapitalisation,
+/**
+ * Bougies OHLC d'une série d'instantanés : bucket `debutBucketCapitalisation`, ouverture =
+ * clôture précédente (le dernier instantané du bucket d'avant), haut/bas sur les points du
+ * bucket, volume 0, `closed` selon la fin du bucket. Une valeur non finie ou ≤ 0 est écartée
+ * (avant USDT, la somme des stablecoins est nulle : la dominance ne trace rien).
+ */
+export function construireBougiesSerie(
+  points: readonly PointSerie[],
   timeframe: Timeframe = "1d",
   maintenant = Date.now(),
 ): Candle[] {
-  const mesure = MESURE_PAR_SYMBOLE[symbol];
   const candles: Candle[] = [];
   let closePrecedent: number | null = null;
 
-  for (const snapshot of [...snapshots].sort((a, b) => a.t - b.t)) {
-    const valeur = snapshot[mesure];
-    if (!Number.isFinite(snapshot.t) || !Number.isFinite(valeur) || valeur <= 0) continue;
-    const time = debutBucketCapitalisation(snapshot.t, timeframe);
+  for (const point of [...points].sort((a, b) => a.t - b.t)) {
+    const valeur = point.v;
+    if (!Number.isFinite(point.t) || !Number.isFinite(valeur) || valeur <= 0) continue;
+    const time = debutBucketCapitalisation(point.t, timeframe);
     const derniere = candles.at(-1);
 
     if (derniere?.time === time) {
@@ -102,6 +110,21 @@ export function construireBougiesCapitalisation(
   }
 
   return candles;
+}
+
+/** TOTAL/TOTAL2/TOTAL3 : projection de la mesure du snapshot, puis constructeur générique. */
+export function construireBougiesCapitalisation(
+  snapshots: readonly McapSnapshot[],
+  symbol: SymboleCapitalisationUsd,
+  timeframe: Timeframe = "1d",
+  maintenant = Date.now(),
+): Candle[] {
+  const mesure = MESURE_PAR_SYMBOLE[symbol];
+  return construireBougiesSerie(
+    snapshots.map((snapshot) => ({ t: snapshot.t, v: snapshot[mesure] })),
+    timeframe,
+    maintenant,
+  );
 }
 
 /** Source réellement servie par le dernier `fetchKlines` d'une série de capitalisation. */
@@ -130,6 +153,45 @@ function publierSourceCapitalisation(
   );
 }
 
+/**
+ * Chargeur mémorisé d'un module paresseux : un seul `import()` en vol, oublié en cas d'échec
+ * pour que l'essai suivant réessaie. Cela ne rattrape qu'une coupure réseau passagère : après
+ * un redéploiement, l'ancien chunk n'existe plus et seul un rechargement de la page aide.
+ */
+export function chargeurMemorise<T>(importer: () => Promise<T>): () => Promise<T> {
+  let enCours: Promise<T> | undefined;
+  return () => (enCours ??= importer().catch((erreur: unknown) => {
+    enCours = undefined;
+    throw erreur;
+  }));
+}
+
+/**
+ * Abonnement servi par un chunk : `subscribeKline` rend son désabonnement tout de suite, le
+ * module arrive après. Désabonner AVANT le chunk annule l'abonnement (aucun minuteur orphelin) ;
+ * chunk non chargé : rien (fetchKlines a déjà affiché « rechargez la page »).
+ */
+export function abonnerApresChargement<M>(
+  charger: () => Promise<M>,
+  abonner: (module: M) => () => void,
+): () => void {
+  let arret: (() => void) | undefined;
+  let annule = false;
+  charger().then((module) => {
+    if (!annule) arret = abonner(module);
+  }, () => {});
+  return () => {
+    annule = true;
+    arret?.();
+  };
+}
+
+/**
+ * STABLE.D (dominance des stablecoins, en %) vit dans un chunk à part : budget d'entrée, cf.
+ * MODULES_DIFFERES. JAMAIS d'import de valeur statique de ce module ici ni ailleurs.
+ */
+const chargerDominance = chargeurMemorise(() => import("./dominanceStablecoins"));
+
 export const capitalisationAdapter: IExchangeAdapter = {
   id: "synthetic",
 
@@ -139,6 +201,20 @@ export const capitalisationAdapter: IExchangeAdapter = {
     }
     if (!TIMEFRAMES_CAPITALISATION.includes(tf)) {
       throw new Error(`Timeframe de capitalisation non supporté : ${tf}`);
+    }
+    if (estSymboleDominance(symbol)) {
+      // CMC seul : ni CCData ni l'échantillonnage CoinGecko n'ont les capitalisations par
+      // stablecoin. La provenance n'est publiée qu'après un succès.
+      const module = await chargerDominance().catch((cause: unknown) => {
+        // Chunk introuvable (redéploiement : l'ancien nom haché n'existe plus) ou réseau coupé :
+        // texte fixe défini ICI, jamais importé du chunk ; dataLoadErrorMessage l'affiche tel quel.
+        throw Object.assign(new Error("Dominance stablecoins non chargée (réseau ou mise à jour d'AXIOM) ; rechargez la page.", { cause }), {
+          name: "ErreurDominanceStablecoins",
+        });
+      });
+      const bougies = await module.bougiesDominance(tf, opts);
+      publierSourceCapitalisation(symbol, tf, "cmc");
+      return bougies;
     }
 
     let snapshots: McapSnapshot[];
@@ -178,6 +254,10 @@ export const capitalisationAdapter: IExchangeAdapter = {
   subscribeKline(symbol, tf, cb) {
     if (!estSymboleCapitalisation(symbol) || !TIMEFRAMES_CAPITALISATION.includes(tf)) {
       return () => {};
+    }
+    if (estSymboleDominance(symbol)) {
+      // Repoll CMC du module ; pas de mode dégradé macroHistory (aucune pièce stable dedans).
+      return abonnerApresChargement(chargerDominance, (module) => module.abonnerDominance(tf, cb));
     }
     if (historiqueCmcDisponible() || historiqueCcDataDisponible()) {
       // Historique long actif : on ne mélange PAS les ticks CoinGecko (niveaux différents

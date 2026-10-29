@@ -26,7 +26,7 @@
  */
 import type { ExchangeId } from "@axiom/types";
 import { encodeSyntheticSymbol, parseSyntheticSymbol, type SyntheticLegSource, type SyntheticSpec } from "./synthetic";
-import { estSymboleCapitalisation } from "./mcap";
+import { estCapitalisationUsd } from "./mcap";
 import { basePerp, COTATIONS_USD, splitSymbol } from "./symbol";
 
 export const DENOMINATEURS_CRYPTO = ["BTC", "ETH", "SOL"] as const;
@@ -112,12 +112,13 @@ const COTATIONS_DOLLAR = COTATIONS_USD;
  * Ratio ÷ marché ou devise : jambe B Twelve Data unique. Actifs cotés en dollar seulement
  * (capitalisations TOTAL* en USD, tickers Twelve Data sans barre = valeurs US, paires
  * X/USD) ; jamais l'actif divisé par lui-même ou par sa propre devise (EURUSDT en EUR).
+ * La dominance STABLE.D (série en %) n'est pas cotée en dollar : aucun ratio.
  */
 function symboleRatioTradfi(symbol: string, exchange: ExchangeId, denom: DenominateurTradfi): string | null {
   const ref = REFS_TRADFI[denom].sym;
   let exA: SyntheticLegSource;
   if (exchange === "synthetic") {
-    if (!estSymboleCapitalisation(symbol)) return null;
+    if (!estCapitalisationUsd(symbol)) return null;
     exA = "mcap";
   } else if (exchange === "twelvedata") {
     const [base, quote] = symbol.toUpperCase().split("/");
@@ -160,10 +161,10 @@ export function symboleRatio(
   denom: DenominateurId,
 ): string | null {
   if (!estCrypto(denom)) return symboleRatioTradfi(symbol, exchange, denom);
-  // Garde `synthetic` EN PREMIER : seul un TOTAL* autonome devient une jambe `mcap` ;
-  // un SYN déjà encodé ne doit JAMAIS être imbriqué comme nouvelle jambe.
+  // Garde `synthetic` EN PREMIER : seul un TOTAL* autonome (en USD) devient une jambe `mcap` ;
+  // un SYN déjà encodé ne doit JAMAIS être imbriqué comme nouvelle jambe, ni STABLE.D (en %).
   if (exchange === "synthetic") {
-    if (!estSymboleCapitalisation(symbol)) return null;
+    if (!estCapitalisationUsd(symbol)) return null;
     const canon = REF_CANONIQUE[denom];
     return encodeSyntheticSymbol({
       exA: "mcap",

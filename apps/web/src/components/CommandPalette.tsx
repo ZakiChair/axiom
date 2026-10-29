@@ -49,7 +49,8 @@ const MAX_HISTO = 20;
  * Décide si la navigation doit être proéminente (en tête de la palette).
  * La navigation prend la tête si :
  *  - La saisie contient un timeframe explicite (« SOL 4H »)
- *  - La saisie a plusieurs tokens (« SOL 4H »)
+ *  - La saisie a plusieurs tokens (« SOL 4H »), sauf si elle est en entier un mot-clé d'une
+ *    commande (« dominance stablecoins ») : Entrée ouvrait sinon la paire DOMINANCE
  *  - Aucune commande du registre ne matche la saisie (utilisateur cherche à naviguer)
  * Sinon, la commande (si trouvée) prend la tête.
  */
@@ -63,6 +64,9 @@ export function devraitAvoirNavProeminent(
 
   // Navigation explicite : timeframe → proéminente.
   if (nav.timeframe !== undefined) return true;
+
+  // Saisie entière = mot-clé d'une commande → la commande garde la tête.
+  if (registre.some((c) => c.motsCles.includes(q.toLowerCase()))) return false;
 
   // Plusieurs tokens → proéminente (complexe, probablement une navigation).
   const tokens = q.split(/\s+/).filter((t) => t.length > 0);

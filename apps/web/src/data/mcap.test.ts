@@ -5,12 +5,21 @@ import {
   dominance,
   dominanceAlts,
   ErreurCoinGecko,
+  COMPOSITION_DOMINANCE_STABLECOINS,
+  estCapitalisationUsd,
+  estSerieEnPourcentage,
+  estSymboleCapitalisation,
+  estSymboleDominance,
   fetchHistoriquePiece,
   grilleJournaliere,
   JOUR_MS,
+  METADONNEES_SERIES_AUTONOMES,
   minuitUtc,
   reconstruireTotal,
   serieDifference,
+  SYMBOLE_DOMINANCE_STABLECOINS,
+  SYMBOLES_CAPITALISATION,
+  SYMBOLES_CAPITALISATION_USD,
 } from "./mcap";
 
 /** Minuit UTC du jour donné, en ms — raccourci de fixture. */
@@ -233,5 +242,48 @@ describe("fetchHistoriquePiece — lecture de /coins/{id}/market_chart", () => {
 describe("JOUR_MS", () => {
   it("vaut bien 24 h en millisecondes", () => {
     expect(JOUR_MS).toBe(24 * 60 * 60 * 1000);
+  });
+});
+
+describe("séries autonomes — capitalisations en USD et dominance des stablecoins", () => {
+  it("STABLE.D est une série autonome (routage de TOTAL) mais pas une capitalisation en USD", () => {
+    expect(SYMBOLE_DOMINANCE_STABLECOINS).toBe("STABLE.D");
+    expect(SYMBOLES_CAPITALISATION).toEqual(["TOTAL", "TOTAL2", "TOTAL3", "STABLE.D"]);
+    expect(SYMBOLES_CAPITALISATION_USD).toEqual(["TOTAL", "TOTAL2", "TOTAL3"]);
+    expect(estSymboleCapitalisation("STABLE.D")).toBe(true);
+    expect(estSymboleDominance("STABLE.D")).toBe(true);
+    // Un % divisé par des dollars n'a pas de sens : exclu des ratios et des jambes `mcap`.
+    expect(estCapitalisationUsd("STABLE.D")).toBe(false);
+    for (const symbole of ["TOTAL", "TOTAL2", "TOTAL3"]) {
+      expect(estSymboleCapitalisation(symbole)).toBe(true);
+      expect(estCapitalisationUsd(symbole)).toBe(true);
+      expect(estSymboleDominance(symbole)).toBe(false);
+    }
+  });
+
+  it("seul l'identifiant canonique est reconnu : ni casse, ni alias, ni USDT.D (USDT seul sur TradingView)", () => {
+    for (const symbole of ["stable.d", "USDT.D", "USDT.D+USDC.D+DAI.D", "STABLE", "BTCUSDT", ""]) {
+      expect(estSymboleCapitalisation(symbole)).toBe(false);
+      expect(estSymboleDominance(symbole)).toBe(false);
+      expect(estCapitalisationUsd(symbole)).toBe(false);
+    }
+  });
+
+  it("décrit la composition et les alias de recherche de STABLE.D, sans toucher TOTAL*", () => {
+    const meta = METADONNEES_SERIES_AUTONOMES["STABLE.D"];
+    expect(meta?.label).toBe("Dominance stablecoins (USDT+USDC+DAI)");
+    expect(COMPOSITION_DOMINANCE_STABLECOINS).toBe("(USDT+USDC+DAI) ÷ capitalisation crypto totale, en %");
+    // « STABLE » est le ticker d'un token réel (rang 89 sur CMC) : pas un alias de la dominance.
+    expect(meta?.aliases).toEqual(["USDT.D+USDC.D+DAI.D", "STABLES", "STABLECOINS", "DOMINANCE"]);
+    // La requête de recherche est mise en majuscules avant comparaison.
+    for (const alias of meta?.aliases ?? []) expect(alias).toBe(alias.toUpperCase());
+    for (const symbole of SYMBOLES_CAPITALISATION_USD) expect(METADONNEES_SERIES_AUTONOMES[symbole]).toBeUndefined();
+  });
+
+  it("seule la dominance sur sa source synthetic s'affiche en % (bandeau, encart, précision)", () => {
+    expect(estSerieEnPourcentage("synthetic", "STABLE.D")).toBe(true);
+    expect(estSerieEnPourcentage("synthetic", "TOTAL")).toBe(false);
+    expect(estSerieEnPourcentage("synthetic", "mcap:TOTAL3|/|binance:BTCUSDT")).toBe(false);
+    expect(estSerieEnPourcentage("twelvedata", "STABLE.D")).toBe(false);
   });
 });

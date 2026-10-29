@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Candle, Timeframe } from "@axiom/types";
 import type { McapSnapshot } from "../store/macroHistory";
 import { macroHistoryStore } from "../store/macroHistory";
+import { dataLoadErrorMessage } from "../chart/dataLoadErrorMessage";
 
 const {
   chargerHistoriqueCcDataMock,
@@ -8,6 +10,8 @@ const {
   chargerHistoriqueCmcMock,
   fetchPageHistoriqueCmcMock,
   historiqueCmcDisponibleMock,
+  fetchKlinesDominanceMock,
+  abonnerDominanceMock,
 } = vi.hoisted(() => ({
   chargerHistoriqueCcDataMock: vi.fn<() => Promise<McapSnapshot[] | null>>(),
   historiqueCcDataDisponibleMock: vi.fn<() => boolean>(),
@@ -16,6 +20,8 @@ const {
     (intervalle: "1h" | "4h" | "1d", options?: { endTime?: number; limit?: number }) => Promise<McapSnapshot[]>
   >(),
   historiqueCmcDisponibleMock: vi.fn<() => boolean>(),
+  fetchKlinesDominanceMock: vi.fn<(tf: Timeframe, opts?: { endTime?: number; limit?: number }) => Promise<Candle[]>>(),
+  abonnerDominanceMock: vi.fn<(tf: Timeframe, cb: (bougie: Candle) => void) => () => void>(),
 }));
 
 vi.mock("./ccdataMcap", () => ({
@@ -29,13 +35,23 @@ vi.mock("./cmcMcap", () => ({
   historiqueCmcDisponible: historiqueCmcDisponibleMock,
 }));
 
+// Module paresseux de STABLE.D (chargé par import()) : vi.mock intercepte aussi les imports dynamiques.
+vi.mock("./dominanceStablecoins", () => ({
+  bougiesDominance: fetchKlinesDominanceMock,
+  abonnerDominance: abonnerDominanceMock,
+}));
+
 import {
+  abonnerApresChargement,
   capitalisationAdapter,
+  chargeurMemorise,
   construireBougiesCapitalisation,
+  construireBougiesSerie,
   sourcesCapitalisationStore,
 } from "./mcapCandles";
 
 const JOUR = 86_400_000;
+const HEURE = 3_600_000;
 const T0 = Date.UTC(2026, 0, 1);
 
 function snapshot(t: number, total: number, total2 = total / 2, total3 = total / 4): McapSnapshot {
@@ -48,8 +64,16 @@ beforeEach(() => {
   historiqueCmcDisponibleMock.mockReset().mockReturnValue(false);
   chargerHistoriqueCcDataMock.mockReset().mockResolvedValue(null);
   historiqueCcDataDisponibleMock.mockReset().mockReturnValue(false);
+  fetchKlinesDominanceMock.mockReset().mockResolvedValue([]);
+  abonnerDominanceMock.mockReset().mockReturnValue(() => {});
   sourcesCapitalisationStore.setState({ sources: {} });
 });
+
+/** Laisse arriver le chunk simulé (import() dynamique + microtâches de son `then`). */
+async function chunkCharge(): Promise<void> {
+  await vi.dynamicImportSettled();
+  for (let i = 0; i < 5; i += 1) await Promise.resolve();
+}
 
 afterEach(() => {
   vi.useRealTimers();
@@ -138,6 +162,77 @@ describe("construireBougiesCapitalisation", () => {
     expect(construireBougiesCapitalisation(snapshots, "TOTAL", "12M").map((c) => c.time)).toEqual([
       Date.UTC(2026, 0, 1),
     ]);
+  });
+});
+
+describe("construireBougiesSerie — constructeur générique depuis une série {t, v}", () => {
+  it("1d : open = clôture précédente, haut/bas sur les points du bucket, volume 0, closed selon la fin du bucket", () => {
+    const bougies = construireBougiesSerie(
+      [
+        { t: T0 + JOUR + 12 * HEURE, v: 9.4 },
+        { t: T0, v: 9.5 },
+        { t: T0 + JOUR, v: 9.6 },
+        { t: T0 + 2 * JOUR, v: 9.55 },
+      ],
+      "1d",
+      T0 + 2 * JOUR + HEURE,
+    );
+
+    expect(bougies).toEqual([
+      { time: T0, open: 9.5, high: 9.5, low: 9.5, close: 9.5, volume: 0, closed: true },
+      { time: T0 + JOUR, open: 9.5, high: 9.6, low: 9.4, close: 9.4, volume: 0, closed: true },
+      // Bucket du jour encore ouvert à « maintenant ».
+      { time: T0 + 2 * JOUR, open: 9.4, high: 9.55, low: 9.4, close: 9.55, volume: 0, closed: false },
+    ]);
+  });
+
+  it("1w : semaines UTC commençant le lundi, ouverture = clôture de la semaine précédente", () => {
+    // 2026-01-01 est un jeudi : semaine du lundi 2025-12-29.
+    const bougies = construireBougiesSerie(
+      [
+        { t: Date.UTC(2026, 0, 1), v: 9.2 },
+        { t: Date.UTC(2026, 0, 4), v: 9.0 },
+        { t: Date.UTC(2026, 0, 5), v: 9.3 },
+      ],
+      "1w",
+      Date.UTC(2026, 0, 20),
+    );
+
+    expect(bougies).toEqual([
+      { time: Date.UTC(2025, 11, 29), open: 9.2, high: 9.2, low: 9.0, close: 9.0, volume: 0, closed: true },
+      { time: Date.UTC(2026, 0, 5), open: 9.0, high: 9.3, low: 9.0, close: 9.3, volume: 0, closed: true },
+    ]);
+  });
+
+  it("écarte les valeurs non finies ou non positives (somme nulle avant USDT : rien n'est tracé)", () => {
+    const bougies = construireBougiesSerie(
+      [
+        { t: T0, v: 0 },
+        { t: T0 + JOUR, v: Number.NaN },
+        { t: Number.NaN, v: 9 },
+        { t: T0 + 2 * JOUR, v: 9.1 },
+      ],
+      "1d",
+      T0 + 3 * JOUR,
+    );
+
+    expect(bougies.map((bougie) => [bougie.time, bougie.open, bougie.close])).toEqual([[T0 + 2 * JOUR, 9.1, 9.1]]);
+  });
+
+  it("MESURE_PAR_SYMBOLE ne connaît que les capitalisations en USD : STABLE.D refusée dès la compilation", () => {
+    // Si le typage acceptait un jour STABLE.D, ce @ts-expect-error ferait échouer `tsc`.
+    // @ts-expect-error — une dominance (en %) n'a aucune mesure de McapSnapshot.
+    const bougies = construireBougiesCapitalisation([snapshot(T0, 100)], "STABLE.D", "1d", T0 + JOUR);
+    expect(bougies).toEqual([]);
+  });
+
+  it("TOTAL passe par la projection de sa mesure : mêmes bougies que la série {t, total}", () => {
+    const snapshots = [snapshot(T0, 1_000, 600, 400), snapshot(T0 + JOUR, 1_100, 650, 420)];
+    for (const [symbole, mesure] of [["TOTAL", "total"], ["TOTAL2", "total2"], ["TOTAL3", "total3"]] as const) {
+      expect(construireBougiesCapitalisation(snapshots, symbole, "1d", T0 + 2 * JOUR)).toEqual(
+        construireBougiesSerie(snapshots.map((s) => ({ t: s.t, v: s[mesure] })), "1d", T0 + 2 * JOUR),
+      );
+    }
   });
 });
 
@@ -315,5 +410,146 @@ describe("capitalisationAdapter", () => {
 
     unsubscribe();
     vi.useRealTimers();
+  });
+});
+
+describe("STABLE.D — aiguillage vers le module paresseux de la dominance", () => {
+  const BOUGIE: Candle = { time: T0, open: 9.6, high: 9.6, low: 9.5, close: 9.51, volume: 0, closed: true };
+
+  it("fetchKlines délègue au module, publie la provenance « cmc » seule, sans aucune chaîne TOTAL", async () => {
+    fetchKlinesDominanceMock.mockResolvedValue([BOUGIE]);
+    macroHistoryStore.setState({ snapshots: [snapshot(T0, 100)] });
+
+    const bougies = await capitalisationAdapter.fetchKlines("STABLE.D", "1d", { limit: 10 });
+
+    expect(bougies).toEqual([BOUGIE]);
+    expect(fetchKlinesDominanceMock).toHaveBeenCalledWith("1d", { limit: 10 });
+    expect(sourcesCapitalisationStore.getState().sources).toEqual({ "STABLE.D:1d": "cmc" });
+    expect(chargerHistoriqueCmcMock).not.toHaveBeenCalled();
+    expect(fetchPageHistoriqueCmcMock).not.toHaveBeenCalled();
+    expect(chargerHistoriqueCcDataMock).not.toHaveBeenCalled();
+  });
+
+  it("échec du module : rejet explicite, aucune bascule CCData/CoinGecko, aucune provenance publiée", async () => {
+    fetchKlinesDominanceMock.mockRejectedValue(new Error("Dominance stablecoins indisponible : CoinMarketCap public ne répond pas"));
+    chargerHistoriqueCcDataMock.mockResolvedValue([snapshot(T0, 100)]);
+    macroHistoryStore.setState({ snapshots: [snapshot(T0, 100)] });
+
+    await expect(capitalisationAdapter.fetchKlines("STABLE.D", "1h", { limit: 10 })).rejects.toThrow(/Dominance stablecoins indisponible/);
+    await expect(capitalisationAdapter.fetchKlines("STABLE.D", "1d")).rejects.toThrow(/Dominance stablecoins indisponible/);
+
+    expect(chargerHistoriqueCcDataMock).not.toHaveBeenCalled();
+    expect(sourcesCapitalisationStore.getState().sources).toEqual({});
+  });
+
+  it("refuse un timeframe non exposé avant tout chargement du module", async () => {
+    await expect(capitalisationAdapter.fetchKlines("STABLE.D", "5m")).rejects.toThrow(/timeframe/i);
+    expect(fetchKlinesDominanceMock).not.toHaveBeenCalled();
+  });
+
+  it("TOTAL reste sur sa chaîne : le module de dominance n'est jamais sollicité", async () => {
+    chargerHistoriqueCmcMock.mockResolvedValue([snapshot(T0, 100)]);
+    await capitalisationAdapter.fetchKlines("TOTAL", "1d", { limit: 10 });
+    capitalisationAdapter.subscribeKline("TOTAL3", "1d", vi.fn())();
+    await chunkCharge();
+
+    expect(fetchKlinesDominanceMock).not.toHaveBeenCalled();
+    expect(abonnerDominanceMock).not.toHaveBeenCalled();
+    expect(sourcesCapitalisationStore.getState().sources).toEqual({ "TOTAL:1d": "cmc" });
+  });
+
+  it("désabonnement AVANT l'arrivée du chunk : aucun abonnement, donc aucun minuteur orphelin", async () => {
+    const off = capitalisationAdapter.subscribeKline("STABLE.D", "1d", vi.fn());
+    off();
+    await chunkCharge();
+
+    expect(abonnerDominanceMock).not.toHaveBeenCalled();
+  });
+
+  it("après le chunk : délègue au module (pas de mode dégradé macroHistory) et le désabonnement l'arrête", async () => {
+    const arret = vi.fn();
+    abonnerDominanceMock.mockReturnValue(arret);
+    const cb = vi.fn();
+
+    const off = capitalisationAdapter.subscribeKline("STABLE.D", "4h", cb);
+    await chunkCharge();
+    expect(abonnerDominanceMock).toHaveBeenCalledWith("4h", cb);
+
+    macroHistoryStore.setState({ snapshots: [snapshot(T0, 100), snapshot(T0 + JOUR, 120)] });
+    expect(cb).not.toHaveBeenCalled();
+
+    off();
+    expect(arret).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("chargement paresseux — briques génériques", () => {
+  it("chargeurMemorise : un seul import() en vol, l'échec est oublié (coupure réseau passagère ; un redéploiement, lui, exige un rechargement)", async () => {
+    let essais = 0;
+    const importer = vi.fn(async () => {
+      essais += 1;
+      if (essais === 1) throw new Error("réseau coupé");
+      return { pret: true };
+    });
+    const charger = chargeurMemorise(importer);
+
+    await expect(charger()).rejects.toThrow("réseau coupé");
+    const premier = charger();
+    expect(charger()).toBe(premier);
+    await expect(premier).resolves.toEqual({ pret: true });
+    expect(importer).toHaveBeenCalledTimes(2);
+  });
+
+  it("abonnerApresChargement : sûr dans les deux ordres, et inerte si le chunk ne charge pas", async () => {
+    let livrer: (module: string) => void = () => {};
+    const arret = vi.fn();
+    const abonner = vi.fn(() => arret);
+
+    const avantChunk = abonnerApresChargement(() => new Promise<string>((resolve) => { livrer = resolve; }), abonner);
+    avantChunk();
+    livrer("module");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(abonner).not.toHaveBeenCalled();
+
+    const apresChunk = abonnerApresChargement(async () => "module", abonner);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(abonner).toHaveBeenCalledWith("module");
+    apresChunk();
+    expect(arret).toHaveBeenCalledTimes(1);
+
+    const sansChunk = abonnerApresChargement(() => Promise.reject(new Error("chunk introuvable")), abonner);
+    await Promise.resolve();
+    await Promise.resolve();
+    sansChunk();
+    expect(abonner).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("STABLE.D — chunk introuvable (redéploiement : l'ancien nom haché n'existe plus)", () => {
+  const TEXTE = "Dominance stablecoins non chargée (réseau ou mise à jour d'AXIOM) ; rechargez la page.";
+
+  afterEach(() => {
+    // Fabrique du module simulé rétablie pour tout import ultérieur.
+    vi.doMock("./dominanceStablecoins", () => ({ bougiesDominance: fetchKlinesDominanceMock, abonnerDominance: abonnerDominanceMock }));
+    vi.resetModules();
+  });
+
+  it("import() rejeté : ErreurDominanceStablecoins au texte fixe « rechargez la page », cause conservée, affichée telle quelle", async () => {
+    vi.resetModules();
+    vi.doMock("./dominanceStablecoins", () => {
+      throw new TypeError("Failed to fetch dynamically imported module: /assets/dominanceStablecoins-ancien.js");
+    });
+    const { capitalisationAdapter: adaptateur, sourcesCapitalisationStore: sources } = await import("./mcapCandles");
+
+    const erreur: unknown = await adaptateur.fetchKlines("STABLE.D", "1d").catch((e: unknown) => e);
+
+    expect(erreur).toBeInstanceOf(Error);
+    expect(erreur).toMatchObject({ name: "ErreurDominanceStablecoins", message: TEXTE });
+    expect((erreur as Error).cause).toBeDefined();
+    // L'overlay n'accuse plus « la source » : le texte fixe dit quoi faire.
+    expect(dataLoadErrorMessage(erreur)).toBe(TEXTE);
+    expect(sources.getState().sources).toEqual({});
   });
 });

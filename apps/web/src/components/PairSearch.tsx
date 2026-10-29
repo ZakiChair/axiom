@@ -4,7 +4,7 @@ import { useStore } from "zustand";
 import type { ExchangeId } from "@axiom/types";
 import { marketStore } from "../store/market";
 import { SYNTHETIC_PRESETS, syntheticsStore } from "../store/synthetics";
-import { estSymboleCapitalisation } from "../data/mcap";
+import { estCapitalisationUsd, estSymboleCapitalisation, estSymboleDominance } from "../data/mcap";
 import { TWELVEDATA_SYMBOLS } from "../data/pairs";
 import { encodeSyntheticSymbol, formatSyntheticLabel, parseSyntheticSymbol, type SyntheticLegSource } from "../data/synthetic";
 import { fetchMarketCatalog, subscribeMarketCatalog, searchMarkets, resolveMarketCandidates, type MarketCandidate, type MarketCatalog } from "../data/marketRouting";
@@ -24,8 +24,9 @@ function sourceLabel(source: ExchangeId): string {
   return source === "okx" ? "OKX" : source === "mexc" ? "MEXC" : source[0]?.toUpperCase() + source.slice(1);
 }
 
-/** Source d'un résultat : « Auto » tant qu'une de ses places reste sans mesure de profondeur. */
-export const libelleSource = (m: MarketCandidate) => (m.kind === "perp" ? "Perp · " : "") + (m.profondeurIncomplete ? "Auto" : sourceLabel(m.exchange));
+/** Source d'un résultat : « Auto » tant qu'une de ses places reste sans mesure de profondeur ; « Dominance » pour une série en %. */
+export const libelleSource = (m: MarketCandidate) => (m.kind === "perp" ? "Perp · " : "")
+  + (m.profondeurIncomplete ? "Auto" : m.exchange === "synthetic" && estSymboleDominance(m.symbol) ? "Dominance" : sourceLabel(m.exchange));
 /** Places classées ; pendant la mesure, par ordre alphabétique (aucun gagnant présumé). */
 export const titreSource = (m: MarketCandidate) => m.places && (m.profondeurIncomplete
   ? `${m.places.map(sourceLabel).sort().join(", ")} — mesure de l'historique en cours`
@@ -66,6 +67,12 @@ export function clesMesures(resultats: readonly MarketCandidate[], indexActif: n
 }
 
 export const JAMBE_B_TRADFI_DEFAUT = "GLD";
+
+/** Jambe virtuelle `mcap` d'une capitalisation en USD ; une dominance (en %) n'est pas composable. PURE & testée. */
+export function jambeCapitalisation(symbol: string): { exchange: SyntheticLegSource; symbol: string } | null {
+  if (estSymboleDominance(symbol)) throw new Error(`${symbol} est une série en %, non composable`);
+  return estCapitalisationUsd(symbol) ? { exchange: "mcap", symbol } : null;
+}
 
 export function PairSearch({ onPick, placeholder = "Rechercher une paire" }: PairSearchProps = {}) {
   const mobile = useMobileLayout();
@@ -208,7 +215,8 @@ export function PairSearch({ onPick, placeholder = "Rechercher une paire" }: Pai
     try {
       const resolveLeg = async (symbol: string): Promise<{ exchange: SyntheticLegSource; symbol: string }> => {
         const normalized = symbol.trim().toUpperCase();
-        if (estSymboleCapitalisation(normalized)) return { exchange: "mcap", symbol: normalized };
+        const capitalisation = jambeCapitalisation(normalized);
+        if (capitalisation) return capitalisation;
         const candidates = await resolveMarketCandidates({ symbol: normalized, timeframe });
         const candidate = candidates.find((c) => c.exchange !== "synthetic" && !c.speculative);
         if (!candidate || candidate.exchange === "synthetic") throw new Error(`Actif indisponible : ${normalized}`);
@@ -284,6 +292,8 @@ export function PairSearch({ onPick, placeholder = "Rechercher une paire" }: Pai
       <div className="mb-2 flex flex-wrap gap-1">{SYNTHETIC_PRESETS.map((preset) => <button key={preset.symbol} type="button" onClick={() => {
         const spec = parseSyntheticSymbol(preset.symbol);
         if (spec) { invalidateBuild(); setLegA(spec.legA); setLegB(spec.legB); setOp(spec.op); }
+        // Série autonome (TOTAL*, STABLE.D) : ouverte comme un récent — inerte depuis bf25024 sans cette branche.
+        else chooseSynthetic(preset.symbol);
       }} className="rounded bg-neutral-800 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-700">{preset.label}</button>)}</div>
       {recents.length > 0 && <div className="mb-2 flex flex-wrap gap-1 border-t border-neutral-800 pt-2">{recents.map((recent) => {
         const spec = parseSyntheticSymbol(recent);

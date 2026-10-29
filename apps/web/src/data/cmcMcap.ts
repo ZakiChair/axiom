@@ -4,7 +4,7 @@ import { JOUR_MS } from "./mcap";
 
 const HOST = "api.coinmarketcap.com";
 const GLOBAL_PATH = "data-api/v3/global-metrics/quotes/historical";
-const ETH_PATH = "data-api/v3.3/cryptocurrency/detail/chart";
+export const ETH_PATH = "data-api/v3.3/cryptocurrency/detail/chart";
 export const DEBUT_HISTORIQUE_CMC = Date.UTC(2013, 11, 31);
 const LANCEMENT_ETH = Date.UTC(2015, 7, 7);
 const HEURE_MS = 3_600_000;
@@ -107,6 +107,7 @@ export function normaliserGlobalCmc(json: unknown): GlobalCmcPoint[] {
   return [...parJour.values()].sort((a, b) => a.t - b.t);
 }
 
+/** Capitalisations `v[2]` d'une série detail/chart par instant (ETH ici ; USDT, USDC, DAI pour STABLE.D). */
 export function normaliserEthCmc(json: unknown): Map<number, number> {
   const result = new Map<number, number>();
   if (erreurCode(json) !== null || json === null || typeof json !== "object") return result;
@@ -144,7 +145,8 @@ export function construireSnapshotsCmc(
   });
 }
 
-async function fetchJson(
+/** GET JSON CMC public via `/extapi`, sans clé ; lève aussi sur une erreur servie en HTTP 200. */
+export async function fetchJson(
   path: string,
   fetcher: typeof fetch,
   signal?: AbortSignal,
@@ -157,16 +159,17 @@ async function fetchJson(
   return json;
 }
 
-function pasIntervalle(intervalle: IntervalleCmc): number {
+export function pasIntervalle(intervalle: IntervalleCmc): number {
   return intervalle === "1h" ? HEURE_MS : intervalle === "4h" ? 4 * HEURE_MS : JOUR_MS;
 }
 
-function alignerTemps(value: number, intervalle: IntervalleCmc): number {
+export function alignerTemps(value: number, intervalle: IntervalleCmc): number {
   const pas = pasIntervalle(intervalle);
   return Math.floor(value / pas) * pas;
 }
 
-function plages(
+/** Lots `[debut, fin]` de `tailleLotPoints` points au plus (bornes incluses côté CMC). */
+export function plages(
   debut: number,
   fin: number,
   tailleLotPoints: number,
@@ -185,6 +188,39 @@ function plages(
   return result;
 }
 
+/**
+ * Global CMC (TOTAL, altcoins, dominances) sur `[debut, fin]` à l'intervalle demandé, en lots
+ * séquentiels sous la limite de 2 200 points. Extrait de `fetchHistoriqueCmc` (mêmes requêtes)
+ * pour servir aussi de dénominateur intrajournalier à la dominance des stablecoins.
+ */
+export async function chargerGlobauxCmc(
+  debut: number,
+  fin: number,
+  intervalle: IntervalleCmc,
+  deps: Pick<FetchCmcDeps, "fetcher" | "tailleLotPoints" | "signal"> = {},
+): Promise<GlobalCmcPoint[]> {
+  const fetcher = deps.fetcher ?? fetch;
+  const globaux: GlobalCmcPoint[] = [];
+  for (const plage of plages(debut, fin, deps.tailleLotPoints ?? TAILLE_LOT_POINTS, intervalle)) {
+    const json = await fetchJson(
+      `${GLOBAL_PATH}?${new URLSearchParams({
+        convertId: "2781",
+        timeStart: String(Math.floor(plage.debut / 1000)),
+        timeEnd: String(Math.floor(plage.fin / 1000)),
+        interval: intervalle,
+      })}`,
+      fetcher,
+      deps.signal,
+    );
+    const points = normaliserGlobalCmc(json).filter(
+      (point) => point.t >= plage.debut && point.t <= plage.fin,
+    );
+    if (points.length === 0) throw new Error("CoinMarketCap public ne renvoie aucun historique global");
+    globaux.push(...points);
+  }
+  return globaux;
+}
+
 export async function fetchHistoriqueCmc(deps: FetchCmcDeps = {}): Promise<McapSnapshot[]> {
   const fetcher = deps.fetcher ?? fetch;
   const intervalle = deps.intervalle ?? "1d";
@@ -194,28 +230,6 @@ export async function fetchHistoriqueCmc(deps: FetchCmcDeps = {}): Promise<McapS
   );
   const fin = alignerTemps(deps.fin ?? Date.now(), intervalle);
   if (fin < debut) return [];
-
-  const chargerGlobaux = async () => {
-    const globaux: GlobalCmcPoint[] = [];
-    for (const plage of plages(debut, fin, deps.tailleLotPoints ?? TAILLE_LOT_POINTS, intervalle)) {
-      const json = await fetchJson(
-        `${GLOBAL_PATH}?${new URLSearchParams({
-          convertId: "2781",
-          timeStart: String(Math.floor(plage.debut / 1000)),
-          timeEnd: String(Math.floor(plage.fin / 1000)),
-          interval: intervalle,
-        })}`,
-        fetcher,
-        deps.signal,
-      );
-      const points = normaliserGlobalCmc(json).filter(
-        (point) => point.t >= plage.debut && point.t <= plage.fin,
-      );
-      if (points.length === 0) throw new Error("CoinMarketCap public ne renvoie aucun historique global");
-      globaux.push(...points);
-    }
-    return globaux;
-  };
 
   const chargerEth = async () => {
     const ethDebut = Math.max(debut, LANCEMENT_ETH);
@@ -243,7 +257,15 @@ export async function fetchHistoriqueCmc(deps: FetchCmcDeps = {}): Promise<McapS
     return ethParJour;
   };
 
-  const [globaux, ethParJour] = await Promise.all([chargerGlobaux(), chargerEth()]);
+  // Aucune pièce stable ici : une panne USDC ou DAI ne doit jamais casser TOTAL*.
+  const [globaux, ethParJour] = await Promise.all([
+    chargerGlobauxCmc(debut, fin, intervalle, {
+      fetcher,
+      tailleLotPoints: deps.tailleLotPoints,
+      signal: deps.signal,
+    }),
+    chargerEth(),
+  ]);
   return construireSnapshotsCmc(globaux, ethParJour);
 }
 

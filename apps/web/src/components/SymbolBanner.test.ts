@@ -10,6 +10,7 @@
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import type { Candle } from "@axiom/types";
 import {
+  formatValeurBandeau,
   libelleSourceCapitalisation,
   nextCloseTs,
   resetVariation24h,
@@ -124,5 +125,17 @@ describe("libelleSourceCapitalisation", () => {
     expect(libelleSourceCapitalisation("cmc", "1w")).toBe("CoinMarketCap · daily");
     expect(libelleSourceCapitalisation("ccdata", "1d")).toBe("CCData · daily");
     expect(libelleSourceCapitalisation("coingecko", "1h")).toBe("CoinGecko · local");
+  });
+});
+
+describe("formatValeurBandeau", () => {
+  it("série en % (STABLE.D) : prix et haut/bas « 9.53 % »", () => {
+    expect(formatValeurBandeau(9.5326, true)).toBe("9.53 %");
+    expect(formatValeurBandeau(1.2749, true)).toBe("1.27 %");
+  });
+
+  it("TOTAL et les marchés gardent le prix adaptatif", () => {
+    expect(formatValeurBandeau(2_705_348_676_015.38, false)).toBe("2,705,348,676,015.38");
+    expect(formatValeurBandeau(0.0123, false)).toBe("0.0123");
   });
 });

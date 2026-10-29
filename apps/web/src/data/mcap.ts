@@ -31,6 +31,7 @@
  * appels (AIMD, repli sur 429) et la persistance vivent dans `store/mcap.ts` ; ici,
  * un 429 est simplement remonté typé (`ErreurCoinGecko`) pour que l'appelant décide.
  */
+import type { ExchangeId } from "@axiom/types";
 import {
   CG_BASE,
   parseGlobal,
@@ -43,12 +44,71 @@ import {
 /** Une journée en millisecondes. */
 export const JOUR_MS = 86_400_000;
 
-export const SYMBOLES_CAPITALISATION = ["TOTAL", "TOTAL2", "TOTAL3"] as const;
+/**
+ * Séries AUTONOMES chartables (source `synthetic`) : capitalisations en USD et dominance des
+ * stablecoins.
+ *
+ * ─── POURQUOI UNE SEULE LISTE (demande du 29/10/2026, STABLE.D) ─────────────────────────
+ * `estSymboleCapitalisation` pilote les 18 sites de routage (adaptateur autonome, unités de
+ * temps, 1d par défaut, catalogue, persistance, slots, watchlist, bandeau, pagination) : y
+ * inscrire STABLE.D les fait suivre sans code. Un site oublié avec un nom à point partirait
+ * sinon SILENCIEUSEMENT vers Twelve Data (« . » = TradFi, data/pairs.ts) et ses crédits. Le
+ * point est sûr parce que ce prédicat est testé AVANT la règle TradFi partout.
+ * En revanche, les 5 sites « valeur en USD » (ratios ÷BTC/÷Or/devises, jambes `mcap` des SYN,
+ * constructeur SYN, mesure de McapSnapshot) testent `estCapitalisationUsd` : un pourcentage
+ * divisé par des dollars n'a pas de sens.
+ * ──────────────────────────────────────────────────────────────────────────────────────────
+ */
+export const SYMBOLES_CAPITALISATION_USD = ["TOTAL", "TOTAL2", "TOTAL3"] as const;
+export type SymboleCapitalisationUsd = (typeof SYMBOLES_CAPITALISATION_USD)[number];
+
+/**
+ * Dominance USDT + USDC + DAI en % du TOTAL CoinMarketCap (calcul : data/dominanceStablecoins.ts,
+ * chargé à la demande). 8 caractères (bandeau mobile) ; ne finit pas par une devise de cotation
+ * (`splitSymbol` découperait « …DAI ») ; `USDT.D` désigne USDT seul sur TradingView.
+ */
+export const SYMBOLE_DOMINANCE_STABLECOINS = "STABLE.D";
+export type SymboleDominance = typeof SYMBOLE_DOMINANCE_STABLECOINS;
+
+export const SYMBOLES_CAPITALISATION = [...SYMBOLES_CAPITALISATION_USD, SYMBOLE_DOMINANCE_STABLECOINS] as const;
 export type SymboleCapitalisation = (typeof SYMBOLES_CAPITALISATION)[number];
 
 export function estSymboleCapitalisation(symbol: string): symbol is SymboleCapitalisation {
   return (SYMBOLES_CAPITALISATION as readonly string[]).includes(symbol);
 }
+
+/** Série exprimée en % (dominance), jamais composable avec une valeur en USD. */
+export function estSymboleDominance(symbol: string): symbol is SymboleDominance {
+  return symbol === SYMBOLE_DOMINANCE_STABLECOINS;
+}
+
+/** Capitalisation en USD (TOTAL*) : seule une telle série se divise par BTC, l'or ou une devise. */
+export function estCapitalisationUsd(symbol: string): symbol is SymboleCapitalisationUsd {
+  return (SYMBOLES_CAPITALISATION_USD as readonly string[]).includes(symbol);
+}
+
+/** Série affichée en % (bandeau, encart, précision du graphe) : la dominance sur sa source `synthetic`. */
+export function estSerieEnPourcentage(exchange: ExchangeId, symbol: string): boolean {
+  return exchange === "synthetic" && estSymboleDominance(symbol);
+}
+
+/**
+ * Composition en clair (infobulle du bandeau) : la série ne couvre PAS tous les stablecoins
+ * (ni USDe, FDUSD, PYUSD, ni USDS).
+ */
+export const COMPOSITION_DOMINANCE_STABLECOINS = "(USDT+USDC+DAI) ÷ capitalisation crypto totale, en %";
+
+/**
+ * Libellé et alias de recherche des séries autonomes (alias en MAJUSCULES : la requête l'est
+ * déjà). Les sous-chaînes USDT.D, USDC.D et DAI.D trouvent l'alias composite ; TOTAL* n'en ont pas.
+ * Pas d'alias « STABLE » : c'est le ticker d'un token réel (rang 89 sur CMC, 29/10/2026).
+ */
+export const METADONNEES_SERIES_AUTONOMES: Readonly<Record<string, { label: string; aliases: readonly string[] }>> = {
+  [SYMBOLE_DOMINANCE_STABLECOINS]: {
+    label: "Dominance stablecoins (USDT+USDC+DAI)",
+    aliases: ["USDT.D+USDC.D+DAI.D", "STABLES", "STABLECOINS", "DOMINANCE"],
+  },
+};
 
 /** Un point journalier : capitalisation en USD au minuit UTC `t`. */
 export interface PointJour {

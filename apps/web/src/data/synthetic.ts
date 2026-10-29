@@ -11,7 +11,7 @@
  * Jambe B absente d'un bucket → forward-fill de son dernier close (marché fermé).
  */
 import type { Candle, ExchangeId, IExchangeAdapter } from "@axiom/types";
-import { estSymboleCapitalisation } from "./mcap";
+import { estCapitalisationUsd, estSymboleCapitalisation } from "./mcap";
 
 export type SyntheticOp = "/" | "-";
 export type SyntheticLegSource = Exclude<ExchangeId, "synthetic"> | "mcap";
@@ -24,7 +24,10 @@ export interface SyntheticSpec {
   op: SyntheticOp;
 }
 
-/** Sources autorisées comme jambe : marchés câblés historiques + pseudo-source `mcap`. */
+/**
+ * Sources autorisées comme jambe : marchés câblés historiques + pseudo-source `mcap`, réservée
+ * aux capitalisations en USD (STABLE.D, en %, reste une série autonome non composable).
+ */
 const LEG_EXCHANGES: ReadonlySet<string> = new Set([
   "binance", "kraken", "coinbase", "twelvedata", "mexc", "bybit", "okx", "hyperliquid", "mcap",
 ]);
@@ -34,7 +37,7 @@ function splitLeg(leg: string): { ex: SyntheticLegSource; sym: string } | null {
   if (i <= 0 || i >= leg.length - 1) return null;
   const ex = leg.slice(0, i);
   const sym = leg.slice(i + 1);
-  if (!LEG_EXCHANGES.has(ex) || (ex === "mcap" && !estSymboleCapitalisation(sym))) return null;
+  if (!LEG_EXCHANGES.has(ex) || (ex === "mcap" && !estCapitalisationUsd(sym))) return null;
   return { ex: ex as SyntheticLegSource, sym };
 }
 

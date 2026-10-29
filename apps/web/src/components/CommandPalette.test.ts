@@ -122,4 +122,20 @@ describe("construireItemsRecherche — la navigation n'est jamais supprimée", (
     expect(items[0]?.cmd.id).toBe("nav");
     expect(items.filter((it) => it.cmd.id === "nav").length).toBe(1);
   });
+
+  it("« dominance stablecoins » et « usdt usdc dai » (mots-clés entiers) : la commande garde la tête, la nav reste en queue", () => {
+    for (const q of ["dominance stablecoins", "usdt usdc dai"]) {
+      const items = construireItemsRecherche(q, reel);
+      expect(items[0]?.cmd.id, q).toBe("nav:dominance-stablecoins");
+      expect(items[items.length - 1]?.cmd.id, q).toBe("nav");
+    }
+  });
+
+  it("« eth 4h », « btcusdt 1h », « eth binance » : une navigation de plusieurs mots ordinaire garde la tête, comme « 4h », pourtant mot-clé de tf:4h", () => {
+    // Prérequis : ces saisies matchent des commandes, la nav n'est donc pas seule en liste.
+    for (const q of ["eth binance", "4h"]) expect(rechercher(reel, q).length, q).toBeGreaterThan(0);
+    for (const q of ["eth 4h", "btcusdt 1h", "eth binance", "4h"]) {
+      expect(construireItemsRecherche(q, reel)[0]?.cmd.id, q).toBe("nav");
+    }
+  });
 });

@@ -9,6 +9,7 @@
  * proposer un sélecteur manuel supprimé.
  */
 import { describe, expect, it } from "vitest";
+import { ErreurDominanceStablecoins } from "../data/dominanceStablecoins";
 import { dataLoadErrorMessage } from "./dataLoadErrorMessage";
 
 const GENERIQUE = "La source n’a pas pu fournir l’historique demandé.";
@@ -24,6 +25,14 @@ describe("dataLoadErrorMessage", () => {
     const err = new Error("CCData est injoignable ou bloqué par le navigateur.");
     err.name = "ErreurCcData";
     expect(dataLoadErrorMessage(err)).toBe("CCData est injoignable ou bloqué par le navigateur.");
+  });
+
+  it("ErreurDominanceStablecoins : le message explicite de STABLE.D s'affiche tel quel, sans la cause technique", () => {
+    // Classe réelle du module paresseux : renommer son `name` casserait ce test, pas l'overlay en silence.
+    const err = new ErreurDominanceStablecoins(new Error("CoinMarketCap public erreur 503"));
+    expect(dataLoadErrorMessage(err)).toBe(
+      "Dominance stablecoins indisponible : CoinMarketCap public ne répond pas — aucun repli, ni CCData ni CoinGecko ne publient ces capitalisations",
+    );
   });
 
   it("quota Twelve Data : le prochain créneau annoncé par la file s'affiche tel quel, et lui seul", () => {

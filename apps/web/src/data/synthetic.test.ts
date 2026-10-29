@@ -259,3 +259,24 @@ describe("subscribeKline — Twelve Data au numérateur après la clôture (cont
     expect(recu).toHaveLength(avant);
   });
 });
+
+describe("STABLE.D — série autonome en %, jamais jambe d'un SYN", () => {
+  it("refuse une jambe mcap:STABLE.D (un % ne se divise ni ne se soustrait à des dollars)", () => {
+    expect(parseSyntheticSymbol("mcap:STABLE.D|/|binance:BTCUSDT")).toBeNull();
+    expect(parseSyntheticSymbol("binance:BTCUSDT|-|mcap:STABLE.D")).toBeNull();
+    expect(parseSyntheticSymbol("mcap:STABLE.D|/|mcap:TOTAL")).toBeNull();
+    expect(parseSyntheticSymbol("mcap:TOTAL3|/|binance:SOLUSDT")).not.toBeNull();
+  });
+
+  it("délègue STABLE.D autonome au standalone, en historique comme en abonnement", async () => {
+    const dominance = fakeAdapter("synthetic", [c(1000, 9.6, 9.6, 9.5, 9.51)]);
+    const syn = createSyntheticAdapter((() => { throw new Error("aucune jambe attendue"); }) as never, dominance);
+
+    await expect(syn.fetchKlines("STABLE.D", "1d", {})).resolves.toEqual([c(1000, 9.6, 9.6, 9.5, 9.51)]);
+    const recues: Candle[] = [];
+    const off = syn.subscribeKline("STABLE.D", "1d", (bougie) => recues.push(bougie));
+    expect(recues.at(-1)?.close).toBe(9.51);
+    off();
+    expect(dominance.unsubs).toBe(1);
+  });
+});

@@ -23,7 +23,7 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 - **Données dérivées (OI/funding/L-S/liquidations)** : **ACHETER** via un `IDerivedDataProvider` (Coinalyze **câblé**, M6 atteint) — NE PAS construire d'AggregationEngine multi-exchange. Trois couches de liquidations distinctes et étiquetées : heatmap *exécutée*, niveaux **EST.** (modèle levier), niveaux **HL réels** (Hyperliquid, non exhaustif). Depuis le 2026-09-21, la heatmap exécutée reçoit aussi une venue `hyperliquid` **PARTIELLE** (fills des makers suivis, couverture mesurée affichée — cf. « Corrections et extension demandées le 21 septembre 2026 »). Depuis le 2026-09-22, la couche HL réels est aussi une **heatmap temps × prix des instantanés** collectés par le daemon (opt-in, couverture mesurée en % de l'OI — cf. « Revue et extension du 22 septembre 2026 »).
 - **Trading** : **PAS d'exécution d'ordres** — aucune clé de trading. Le paper trading (`PAPER`) est une simulation locale (hors gate G100/K8). Ne rien implémenter qui touche à des clés de trading réelles.
 - **Sources** : **9 identifiants** (`EXCHANGE_IDS` dans `@axiom/types`) — Binance, Bybit, OKX, Hyperliquid, Coinbase, Kraken, Twelve Data, MEXC, synthetic. Ne pas en ajouter sans nécessité démontrée (non-objectif avant G100).
-- **Fournisseurs de capitalisation (exception ACTÉE le 2026-09-01, même statut que WHALES)** : l'historique TOTAL/TOTAL2/TOTAL3 et la fenêtre BPL sont servis par l'endpoint public `api.coinmarketcap.com/data-api` (sans clé, via `/extapi`), avec repli CryptoCompare/CCData `min-api.cryptocompare.com` (clé personnelle navigateur, route dédiée `/ccdataapi` daemon + Vercel) puis CoinGecko local. `EXCHANGE_IDS` reste à 9 (l'adaptateur de capitalisation est de source `synthetic`). Aucun autre fournisseur sans amendement du contrat (amendements : fournisseurs statistiques publics le 2026-09-06, CryptoQuant BASIC le 2026-09-16 — cf. « Extension autorisée le 16 septembre 2026 »).
+- **Fournisseurs de capitalisation (exception ACTÉE le 2026-09-01, même statut que WHALES)** : l'historique TOTAL/TOTAL2/TOTAL3 et la fenêtre BPL sont servis par l'endpoint public `api.coinmarketcap.com/data-api` (sans clé, via `/extapi`) — de même, SANS repli, la dominance des stablecoins `STABLE.D` (2026-10-29, cf. section « Dominance des stablecoins ») —, avec repli CryptoCompare/CCData `min-api.cryptocompare.com` (clé personnelle navigateur, route dédiée `/ccdataapi` daemon + Vercel) puis CoinGecko local. `EXCHANGE_IDS` reste à 9 (l'adaptateur de capitalisation est de source `synthetic`). Aucun autre fournisseur sans amendement du contrat (amendements : fournisseurs statistiques publics le 2026-09-06, CryptoQuant BASIC le 2026-09-16 — cf. « Extension autorisée le 16 septembre 2026 »).
 - **Fournisseurs statistiques publics (exception ACTÉE le 2026-09-06, même statut que les fournisseurs de capitalisation)** : trois sources publiques sans clé API — OCDE (`sdmx.oecd.org`), Eurostat (`ec.europa.eu`), ONS (`www.ons.gov.uk`) — admis en appel DIRECT avec vérification des en-têtes CORS, sans ajout à `shared/extapi-hosts.ts`. Remplacent des miroirs FRED internationaux défaillants (CPI zone euro arrêté en 2023, CPI japonais en 2021, M2 chinois en 2019) avec des `last_updated` trompeurs. `EXCHANGE_IDS` reste à 9 (aucun adaptateur marché n'est impliqué). Cf. `docs/superpowers/specs/2026-09-06-indicateurs-macro-mondiaux-design.md`.
 
 ## Conventions
@@ -1836,3 +1836,125 @@ Usage, limites et tests :
 [`scripts/axis/rapport-v3-2026-10-08.md`](scripts/axis/rapport-v3-2026-10-08.md)
 [`scripts/axis/rapport-v4-2026-10-09.md`](scripts/axis/rapport-v4-2026-10-09.md)
 et [`scripts/axis/rapport-v5-2026-10-10.md`](scripts/axis/rapport-v5-2026-10-10.md).
+
+## Dominance des stablecoins (demande du 29 octobre 2026)
+
+Le propriétaire demande « la courbe de l'USDT+USDC+DAI dominance afin de voir la dominance des
+stablecoin sur le marché ». Elle est livrée comme série chartable autonome **`STABLE.D`**, de
+source `synthetic` comme TOTAL/TOTAL2/TOTAL3 : `100 × (USDT + USDC + DAI) / TOTAL`, en %, soit
+l'équivalent de `USDT.D+USDC.D+DAI.D` sur TradingView. **39 fenêtres, aucun indicateur,
+aucun fournisseur ni hôte nouveau (endpoint CMC public de l'exception du 2026-09-01), aucune
+dépendance, `@axiom/types` inchangé.** Exception au gel G100 au titre de la demande explicite du
+propriétaire. Spec : `docs/superpowers/specs/2026-10-29-dominance-stablecoins-design.md` ; son
+§9 (amendement après revue) prime sur les §0 à §8.
+
+- **Données : CoinMarketCap seul, aucun repli.**
+  - Numérateur : `data-api/v3.3/cryptocurrency/detail/chart`, un appel par id (825 USDT,
+    3408 USDC, 4943 DAI ; le multi-id est refusé), capitalisation `v[2]` et prix `v[0]`.
+  - Dénominateur : le TOTAL CMC (`global-metrics/quotes/historical`). Numérateur et
+    dénominateur viennent du même fournisseur et suivent la même méthode.
+  - Ni CCData ni l'échantillonnage CoinGecko local n'ont ces capitalisations. Une panne donne
+    dans l'overlay « Dominance stablecoins indisponible : … », jamais un repli.
+- **Instants (mesurés le 29/10/2026).**
+  - Le global 1d daté D est l'instantané de D 00:00 UTC, égal aux points 1h et 4h de 00:00.
+  - Le point 1d d'une pièce daté D vaut `prix(D 00:00) × offre(D 23:00)` : USDT et USDC sur
+    584 jours sur 584, DAI sur 801 jours sur 849 (le reste est de l'arrondi). Il est publié
+    après D 23:00.
+  - L'apparier tel quel au TOTAL de D donnait 23 h d'avance au numérateur. Effets : 0,856 pt
+    d'erreur le 2020-03-31 ; 295 jours récents sur 499 faux à 2 décimales ; le même instant
+    affiché 9.51 en 1d et 9.53 en 4h. La revue indépendante l'a classé bloquant.
+  - Correction « V2 » : `cap(D) = cap1d(D−1) × prix1d(D) / prix1d(D−1)`, soit l'offre de
+    D−1 23:00 au prix de D 00:00. Pour la barre du jour (ligne de D pas encore publiée) ou un
+    prix invalide, on garde `cap1d(D−1)` (« V1 »). Les lancements sont décalés d'un jour sur ce
+    chemin : la série 1d commence le 2015-02-26, la série 1h le 2015-02-25 à 13:00.
+  - Le point 1h d'une pièce est l'instantané de HH:00 : le 1h et le 4h n'ont pas de décalage.
+  - Contrôle indépendant : le module est identique bit à bit à un calcul V2 fait à part, sur
+    4 261 jours. Écart à la vérité horaire (somme des capitalisations 1h de 00:00 divisée par le
+    TOTAL de 00:00), sur 595 jours : médiane 0,0007 pt, p99 0,064, max 0,10 pt (2022-11-12).
+    Référence : 9,5326 % le 28/10/2026, pour une vérité de 9,5331 %.
+- **Calcul.**
+  - Contribution d'une pièce avant son lancement (USDT 2015-02-25, USDC 2018-10-08, DAI
+    2019-11-22) : 0.
+  - Après : son dernier point s'il date d'au plus 2 pas (2 j en 1d, 2 h en 1h). Au-delà, aucune
+    bougie : jamais de 0 inventé.
+- **Unités de temps.**
+  - 1h et 4h : pages CMC. Le global est lu à l'unité du graphe et les pièces en 1h, car
+    `interval=4h` renvoie du journalier. Pagination par 1 000 bougies, 4 appels par page.
+  - Au plus 2 pages en vol : EVTS en 1h passe de 48 requêtes CMC simultanées à 8.
+  - 1d à 12M : historique journalier. Le global vient du cache 12 h de TOTAL. Les pièces, prix
+    compris, viennent du cache brut `axiom:mcap:cmc-stables:v2` (≈ 186 Ko), rafraîchi par
+    incréments.
+  - Repoll à la cadence de TOTAL : 5 min en 1h/4h, 15 min au-delà.
+  - Règle « pièce vide → erreur ». Seule exemption : une fenêtre 1h qui finit avant le minuit
+    suivant le lancement. Les premiers points horaires tombent à 13:00 (USDT), 18:00 (USDC) et
+    01:00 (DAI) ; aucune bougie n'est tracée sur les heures qui précèdent.
+- **Routage.**
+  - `STABLE.D` rejoint `SYMBOLES_CAPITALISATION`. Adaptateur, unités, catalogue, persistance,
+    watchlist, bandeau et pagination le traitent donc comme TOTAL, avant la règle
+    « . = TradFi ».
+  - `estCapitalisationUsd` l'exclut des 5 sites « valeur en USD » : ratios ÷BTC/÷Or/devises,
+    jambes `mcap` des SYN, constructeur SYN (« STABLE.D est une série en %, non composable »),
+    mesure de `McapSnapshot`.
+  - En watchlist, STABLE.D est résolu sans prix, comme TOTAL* (cf. point 2 des corrections du
+    24 septembre).
+  - Vérifié au navigateur sur API réelles : toutes les requêtes de STABLE.D vont à
+    `/extapi/api.coinmarketcap.com`, aucune vers Twelve Data ni vers une place.
+- **Interface.**
+  - Recherche par `USDT.D`, `USDC.D`, `DAI.D`, `USDT.D+USDC.D+DAI.D`, `STABLES`, `STABLECOINS`
+    ou `DOMINANCE`, avec la colonne source « Dominance ».
+  - Pas d'alias `STABLE` : un token STABLE existe (rang 89 sur CMC). À rang égal, un marché
+    réel passe désormais devant une série `synthetic` (« T » ou « TO » ne mettent plus TOTAL en
+    tête ; « TOTAL » exact, si).
+  - Préréglage SYN « USDT+USDC+DAI dominance ».
+  - Commande ⌘K « Dominance stablecoins (graphe) », sans mnémonique : la frappe « stable »
+    ouvre STBL. Les alias pointés tapés comme navigation ⌘K (« usdt.d 4h ») ouvrent STABLE.D au
+    lieu de partir vers Twelve Data.
+  - Palette ⌘K, pour toutes les commandes : une saisie de plusieurs mots égale à un mot-clé
+    (« dominance stablecoins », « open interest »…) ne met plus « Changer la paire → … » en
+    tête.
+  - Affichage : bandeau, haut/bas et encart en % (« 9.53 % »), Δ et amplitude en points
+    (« +0.03 pt »), axe à 2 décimales, « Vol » masqué, composition en infobulle.
+  - Correction au passage : les préréglages SYN des séries autonomes (TOTAL*) étaient inertes
+    depuis bf25024.
+- **Chargement paresseux.**
+  - Requêtes, cache, calcul et repoll vivent dans `data/dominanceStablecoins.ts`. Le module est
+    chargé par un `import()` mémorisé depuis `data/mcapCandles.ts` et inscrit dans
+    `MODULES_DIFFERES`.
+  - Si le chunk est introuvable (redéploiement), l'overlay dit « Dominance stablecoins non
+    chargée (réseau ou mise à jour d'AXIOM) ; rechargez la page. ». Un nouvel essai ne rattrape
+    qu'une coupure passagère.
+  - `chart/dataLoadErrorMessage.ts` (ratifié hors attribution) reconnaît les deux erreurs par
+    leur nom, sans import de valeur du chunk.
+- **Signaux.**
+  - Rafraîchissement des pièces en échec : le cache est servi s'il a au plus 24 h, avec un
+    `console.warn` ; au-delà, erreur explicite. Un `majTs` futur vaut cache périmé.
+  - Repoll en échec : un `console.warn` au premier échec d'une série.
+- **Budget.**
+  - Chargement initial : **1 186 324 / 355 233** avec la clé factice de la mesure de référence
+    (355 231 sans clé, dans `pnpm check`), Node 24.13.0, zlib 1.3.1.
+  - Soit +2 337 / +984 depuis 2f187fe (1 183 987 / 354 249). L'objectif d'environ +600 o gzip
+    est dépassé, et l'écart est accepté : plafonds 1 220 000 / 360 000, marge gzip 4 767.
+  - Chunk paresseux : 6 412 / ≈ 3 060.
+- **Limites.**
+  - Périmètre littéral USDT + USDC + DAI : ni USDe, FDUSD, PYUSD, ni USDS (successeur de DAI),
+    ni SAI. `data-api` n'est pas documentée.
+  - Une bougie formée en direct garde, jusqu'au rechargement, la valeur reportée de la pièce,
+    publiée un pas après le global :
+    - en 1h/4h : écart médian 0,001 pt, max 0,07 pt ;
+    - en 1d : V1 jusqu'à la publication de la ligne, écart médian 0,001 pt, max 0,15 pt
+      (2020-03-13).
+  - Avec 2 décimales, la période 2015–2017 s'affiche entre 0.00 et 0.0x %.
+  - Hors lot, préexistant et identique pour TOTAL* : l'alerte Funding et la fenêtre LIQ
+    envoient le symbole à Binance fapi, Bybit et Coinalyze.
+  - Hors lot, préexistant : dans PairSearch, « USDT.D » + Entrée avant l'arrivée du catalogue
+    commun part brut vers Twelve Data.
+- **Revue et tests.**
+  - Revue indépendante en 6 angles (calcul, routage, réseau et sécurité, défaillances
+    silencieuses, tests, simplicité), chaque constat contre-vérifié : 26 constats, 20 retenus
+    (1 bloquant et 1 important, signalé deux fois), tous traités ou assumés ci-dessus.
+  - Deux tours de contrôle indépendant ont suivi : portes, recalcul financier, routage.
+  - `pnpm check` vert : typage des 7 projets ; web 424 fichiers / 6 110 tests, indicateurs
+    1 043, alertes 127, backtest 131, pacte 120, daemon 786.
+  - `pnpm check:e2e` : 171/171 sur 45 fichiers, dont les 4 parcours de
+    `dominance-stablecoins.e2e`. Le suffixe est obligatoire dans `scripts/ci.sh` : le motif nu
+    sélectionne tout le worktree `.worktrees/dominance-stablecoins/`.

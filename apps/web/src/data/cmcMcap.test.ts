@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CLE_CACHE_CMC,
+  chargerGlobauxCmc,
   chargerHistoriqueCmc,
   construireSnapshotsCmc,
   fetchHistoriqueCmc,
@@ -201,6 +202,43 @@ describe("fetchHistoriqueCmc", () => {
     expect(second).toBe(premier);
     await Promise.all([premier, second]);
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("chargerGlobauxCmc — chargement du global extrait de fetchHistoriqueCmc", () => {
+  it("découpe sous la limite de lot, filtre chaque lot à ses bornes et n'appelle que global-metrics", async () => {
+    const debut = Date.UTC(2024, 0, 1);
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      expect(new Headers(init?.headers).has("authorization")).toBe(false);
+      const start = Number(url.searchParams.get("timeStart")) * 1000;
+      const end = Number(url.searchParams.get("timeEnd")) * 1000;
+      // Un point hors bornes (heure précédente) : le filtre du lot doit l'écarter.
+      const quotes = Array.from({ length: Math.floor((end - start) / HEURE) + 2 }, (_, i) =>
+        globalQuote(start + (i - 1) * HEURE, 1_000 + i, 600 + i, 10));
+      return reponse({ data: { quotes }, status: { error_code: "0" } });
+    });
+
+    const globaux = await chargerGlobauxCmc(debut, debut + 4 * HEURE, "1h", {
+      fetcher: fetcher as typeof fetch,
+      tailleLotPoints: 2,
+    });
+
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    for (const [input] of fetcher.mock.calls) {
+      const url = new URL(String(input), "http://localhost");
+      expect(url.pathname).toContain("/extapi/api.coinmarketcap.com/data-api/v3/global-metrics/quotes/historical");
+      expect(url.searchParams.get("interval")).toBe("1h");
+      expect(url.searchParams.get("convertId")).toBe("2781");
+    }
+    expect(globaux.map((point) => point.t)).toEqual([0, 1, 2, 3, 4].map((i) => debut + i * HEURE));
+  });
+
+  it("lève sur un lot vide et sur une erreur CMC servie en HTTP 200", async () => {
+    const vide = vi.fn(async () => reponse({ data: { quotes: [] }, status: { error_code: "0" } }));
+    await expect(chargerGlobauxCmc(T0, T0, "1d", { fetcher: vide as typeof fetch })).rejects.toThrow(/aucun historique global/);
+    const erreur = vi.fn(async () => reponse({ status: { error_code: "500", error_message: "Too many items requested. Limit is 2200" } }));
+    await expect(chargerGlobauxCmc(T0, T0, "1d", { fetcher: erreur as typeof fetch })).rejects.toThrow(/erreur 500/);
   });
 });
 

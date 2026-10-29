@@ -7,7 +7,7 @@
  * basculé/clampé pour rester DANS le pane prix près des bords.
  */
 import type { Chart as KLineChartInstance, KLineData } from "klinecharts";
-import { formatPct, formatPrice } from "../lib/format";
+import { formatPct, formatPourcentage, formatPrice, VALEUR_ABSENTE } from "../lib/format";
 
 const CANDLE_PANE_ID = "candle_pane";
 
@@ -25,6 +25,15 @@ export function lectureBougie(
   const variationPct =
     c.open !== 0 && Number.isFinite(c.open) ? ((c.close - c.open) / c.open) * 100 : Number.NaN;
   return { variationPct, amplitude: c.high - c.low, hausse: c.close >= c.open };
+}
+
+/**
+ * Écart d'une série en % (dominance STABLE.D) en points de pourcentage : « +0.12 pt » (Δ signé)
+ * ou « 0.23 pt » (amplitude) — une variation RELATIVE d'un pourcentage serait ambiguë. PURE.
+ */
+export function enPoints(valeur: number, signe = false): string {
+  if (!Number.isFinite(valeur)) return VALEUR_ABSENTE;
+  return `${signe && valeur >= 0 ? "+" : ""}${valeur.toFixed(2)} pt`;
 }
 
 /** Contrôleur impératif de l'encart, attaché à UNE instance de graphe. */
@@ -67,15 +76,18 @@ export class CandleReadout {
   /** Affiche l'encart pour la bougie `c` au pixel (x,y) du crosshair. */
   montrer(c: KLineData, x: number, y: number): void {
     const mobile = this.container.dataset.mobile === "true";
+    // Série en % (data-unite posé par ChartInstance, comme data-mobile) : O/H/L/C en %, Δ et ampl en points.
+    const pct = this.container.dataset.unite === "%";
+    const niveau = pct ? formatPourcentage : formatPrice;
     const r = lectureBougie(c);
     const teinte = r.hausse ? "var(--up)" : "var(--down)";
     this.box.replaceChildren();
-    this.ligne("O", formatPrice(c.open));
-    this.ligne("H", formatPrice(c.high));
-    this.ligne("L", formatPrice(c.low));
-    this.ligne("C", formatPrice(c.close), teinte);
-    this.ligne("Δ", formatPct(r.variationPct), teinte);
-    this.ligne("ampl", formatPrice(r.amplitude));
+    this.ligne("O", niveau(c.open));
+    this.ligne("H", niveau(c.high));
+    this.ligne("L", niveau(c.low));
+    this.ligne("C", niveau(c.close), teinte);
+    this.ligne("Δ", pct ? enPoints(c.close - c.open, true) : formatPct(r.variationPct), teinte);
+    this.ligne("ampl", pct ? enPoints(r.amplitude) : formatPrice(r.amplitude));
     // Sur téléphone, trois lignes et une largeur bornée libèrent le point inspecté.
     this.box.style.display = mobile ? "grid" : "block";
     this.box.style.gridTemplateColumns = mobile ? "repeat(2, minmax(0, 1fr))" : "";

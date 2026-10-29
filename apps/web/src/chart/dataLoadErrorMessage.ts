@@ -6,12 +6,15 @@
  * refuse la région, Twelve Data signale une clé invalide ou un abonnement requis, ou
  * la file de son quota annonce le prochain créneau (ou la reprise du plafond journalier). La sélection
  * de source est automatique ; aucune suggestion de changer manuellement de fournisseur.
+ * Une source SANS REPLI (CCData, dominance des stablecoins STABLE.D) affiche son message fixe en
+ * français, qui dit pourquoi rien ne la remplace — ou, module paresseux de STABLE.D non chargé,
+ * demande de recharger la page ; sa cause technique reste dans la console.
  *
  * Fonction PURE — `ChartInstance.tsx` n'est pas testable sans stub DOM lourd.
  */
 export function dataLoadErrorMessage(error: unknown): string {
   if (error instanceof Error && error.name === "AbortError") return "Chargement annulé.";
-  if (error instanceof Error && error.name === "ErreurCcData") return error.message;
+  if (error instanceof Error && (error.name === "ErreurCcData" || error.name === "ErreurDominanceStablecoins")) return error.message;
   if (error instanceof Error && /Twelve Data/i.test(error.message)) {
     // Ces messages fixes n'exposent ni clé, ni URL, ni corps fournisseur arbitraire.
     // Refus de la file du quota (texte fixe de data/twelvedata.ts) : le délai annoncé sert tel quel.

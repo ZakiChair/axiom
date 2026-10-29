@@ -301,3 +301,22 @@ describe("vérification du 26/09 : une paire en dollar n'est pas annoncée en TU
     expect(noteDollar("BTCTUSD", "binance")).toBe("TUSD compté pour 1 USD");
   });
 });
+
+describe("STABLE.D (dominance, série en %) : aucun ratio ni conversion de devise", () => {
+  it("aucun dénominateur ne la compose : ni ÷BTC/÷ETH/÷SOL, ni ÷Or/÷QQQ/÷SPY, ni « en CHF »", () => {
+    for (const denom of DENOMINATEURS) expect(symboleRatio("STABLE.D", "synthetic", denom)).toBeNull();
+    expect(noteDollar("STABLE.D", "synthetic")).toBeNull();
+  });
+
+  it("un SYN bâti à la main sur une jambe mcap:STABLE.D n'est jamais reconnu comme ratio actif", () => {
+    expect(estRatio("mcap:STABLE.D|/|binance:BTCUSDT", "synthetic")).toBeNull();
+    expect(estRatio("mcap:STABLE.D|/|twelvedata:XAU/USD", "synthetic")).toBeNull();
+  });
+
+  it("TOTAL3 garde ÷BTC, ÷SOL et ÷Or (non-régression du parcours gate v2.5)", () => {
+    expect(symboleRatio("TOTAL3", "synthetic", "BTC")).toBe("mcap:TOTAL3|/|binance:BTCUSDT");
+    expect(symboleRatio("TOTAL3", "synthetic", "SOL")).toBe("mcap:TOTAL3|/|binance:SOLUSDT");
+    expect(symboleRatio("TOTAL3", "synthetic", "OR")).toBe("mcap:TOTAL3|/|twelvedata:XAU/USD");
+    expect(estRatio("mcap:TOTAL3|/|binance:SOLUSDT", "synthetic")?.denom).toBe("SOL");
+  });
+});

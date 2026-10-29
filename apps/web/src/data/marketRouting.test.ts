@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Candle, ExchangeId, Timeframe } from "@axiom/types";
 import { resolveMarketCandidates, searchMarkets, type MarketCatalog } from "./marketRouting";
+import { SYMBOLES_CAPITALISATION } from "./mcap";
 import * as profondeur from "./profondeurHistorique";
 
 // Hors des blocs dédiés, la profondeur reste inconnue : aucune sonde réseau réelle.
@@ -19,6 +20,60 @@ const catalogue: MarketCatalog = { unavailableSources: [], instruments: [
   { exchange: "hyperliquid", symbol: "BTC-PERP", kind: "perp" },
   { exchange: "twelvedata", symbol: "SPY", kind: "tradfi" },
 ] };
+
+describe("recherche des séries autonomes : libellé et alias de STABLE.D", () => {
+  const avecSeries: MarketCatalog = { unavailableSources: [], instruments: [
+    { exchange: "binance", symbol: "USDTTRY", kind: "spot" },
+    { exchange: "binance", symbol: "BTCUSDT", kind: "spot" },
+    // Token STABLE (rang 89 sur CMC), coté sur Kraken, Coinbase, Bybit et MEXC.
+    { exchange: "kraken", symbol: "STABLEUSD", kind: "spot" },
+    { exchange: "coinbase", symbol: "STABLEUSD", kind: "spot" },
+    { exchange: "bybit", symbol: "STABLEUSDT", kind: "spot" },
+    { exchange: "mexc", symbol: "STABLEUSDT", kind: "spot" },
+    { exchange: "twelvedata", symbol: "SPY", kind: "tradfi" },
+    ...SYMBOLES_CAPITALISATION.map((symbol) => ({ exchange: "synthetic" as const, symbol, kind: "synthetic" as const })),
+  ] };
+  const STABLE_D = { exchange: "synthetic", symbol: "STABLE.D", kind: "synthetic", label: "Dominance stablecoins (USDT+USDC+DAI)" };
+
+  it("les alias (sous-chaînes USDT.D, USDC.D, DAI.D comprises) trouvent STABLE.D en tête, avec son libellé", () => {
+    for (const requete of ["USDT.D", "usdc.d", "DAI.D", "USDT.D+USDC.D+DAI.D", "STABLES", "STABLECOINS", "DOMINANCE", "STABLE.D"]) {
+      expect(searchMarkets(avecSeries, requete)[0], requete).toEqual(STABLE_D);
+    }
+  });
+
+  it("« STABLE » (token réel) : à rang égal, la paire du token passe devant la série synthetic, qui reste listée", () => {
+    const resultats = searchMarkets(avecSeries, "STABLE");
+    expect(resultats[0]).toMatchObject({ symbol: "STABLEUSD", kind: "spot" });
+    expect(resultats.map((r) => r.symbol)).toEqual(["STABLEUSD", "STABLEUSDT", "STABLE.D"]);
+  });
+
+  it("« TOTAL » : la série TOTAL en tête (symbole exact)", () => {
+    expect(searchMarkets(avecSeries, "TOTAL")[0]).toEqual({ exchange: "synthetic", symbol: "TOTAL", kind: "synthetic" });
+  });
+
+  it("« USDT » + Entrée reste sur une paire USDT… en tête ; STABLE.D se trouve par « USDT.D » ou par la forme composite", () => {
+    expect(searchMarkets(avecSeries, "USDT")[0]?.symbol).toBe("USDTTRY");
+    for (const requete of ["USDT.D", "USDT.D+USDC.D+DAI.D"]) {
+      expect(searchMarkets(avecSeries, requete)[0], requete).toEqual(STABLE_D);
+    }
+  });
+
+  it("TOTAL* gardent leur affichage de recherche (aucun libellé ajouté)", () => {
+    expect(searchMarkets(avecSeries, "TOTAL3")).toEqual([{ exchange: "synthetic", symbol: "TOTAL3", kind: "synthetic" }]);
+  });
+
+  it("STABLE.D se résout sans catalogue ni sonde, en synthetic, avec les unités de TOTAL", async () => {
+    const fetch = vi.fn(() => Promise.reject(new Error("réseau interdit")));
+    vi.stubGlobal("fetch", fetch);
+    try {
+      expect(await resolveMarketCandidates({ symbol: "stable.d", timeframe: "1d" })).toEqual([{ exchange: "synthetic", symbol: "STABLE.D", timeframe: "1d" }]);
+      expect(await resolveMarketCandidates({ exchange: "twelvedata", symbol: "STABLE.D", timeframe: "4h" })).toEqual([{ exchange: "synthetic", symbol: "STABLE.D", timeframe: "4h" }]);
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 describe("routage automatique des actifs", () => {
   it("déduplique les places spot mais distingue quote et contrat perp", () => {

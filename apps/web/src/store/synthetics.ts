@@ -1,11 +1,12 @@
 import { createStore } from "zustand/vanilla";
-import { estSymboleCapitalisation } from "../data/mcap";
+import { estSymboleCapitalisation, SYMBOLE_DOMINANCE_STABLECOINS } from "../data/mcap";
 import { parseSyntheticSymbol } from "../data/synthetic";
 
 export const SYNTHETIC_PRESETS: { label: string; symbol: string }[] = [
   { label: "TOTAL", symbol: "TOTAL" },
   { label: "TOTAL2 · hors BTC", symbol: "TOTAL2" },
   { label: "TOTAL3 · hors BTC et ETH", symbol: "TOTAL3" },
+  { label: "USDT+USDC+DAI dominance", symbol: SYMBOLE_DOMINANCE_STABLECOINS },
   { label: "ETH / BTC", symbol: "binance:ETHUSDT|/|binance:BTCUSDT" },
   { label: "SOL / BTC", symbol: "binance:SOLUSDT|/|binance:BTCUSDT" },
   { label: "BNB / BTC", symbol: "binance:BNBUSDT|/|binance:BTCUSDT" },

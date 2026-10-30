@@ -507,8 +507,12 @@ export class ChartIndicators {
     const candleTimes = candles.map((c) => c.time);
     const symbol = this.symbol;
     const timeframe = this.timeframe;
+    // Réponse d'un ancien symbole jetée : entre `setMarket` et le sync du backfill, `latestArgs`
+    // porte encore la source de l'ancien graphe, qu'`onAuxReady` lirait avec le nouveau symbole.
     const aligner = (ids: AuxSeriesId[]) =>
-      auxProvider.getAligned({ exchange, symbol, timeframe, ids, candleTimes }, () => this.onAuxReady(inst.instanceId));
+      auxProvider.getAligned({ exchange, symbol, timeframe, ids, candleTimes }, () => {
+        if (this.symbol === symbol) this.onAuxReady(inst.instanceId);
+      });
     // Demande séparée pour les facultatives : leur attente ou leur échec ne change
     // jamais le verdict du def, complet sans elles — il s'enrichit si elles arrivent.
     const bonus = facultatives.length > 0 ? aligner(facultatives) : undefined;

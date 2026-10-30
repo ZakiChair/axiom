@@ -110,6 +110,20 @@ export const METADONNEES_SERIES_AUTONOMES: Readonly<Record<string, { label: stri
   },
 };
 
+/**
+ * Série autonome désignée par une saisie libre, casse et espaces ignorés : son nom exact, ou un
+ * alias POINTÉ (la forme composite, ou l'un de ses termes : USDT.D, USDC.D, DAI.D) — que la règle
+ * « . = TradFi » enverrait sinon à Twelve Data. `null` pour tout le reste, alias sans point
+ * compris (STABLES : un ticker possible). Appliqué avant `normalizeMarketSymbol`, jamais dedans :
+ * la source explicite resterait, {twelvedata, STABLE.D} ; `setMarket` résout donc le COUPLE. PURE.
+ */
+export function resoudreSerieAutonome(saisie: string): { exchange: "synthetic"; symbol: SymboleCapitalisation } | null {
+  const s = saisie.trim().toUpperCase();
+  const symbol = estSymboleCapitalisation(s) ? s : SYMBOLES_CAPITALISATION.find((serie) =>
+    METADONNEES_SERIES_AUTONOMES[serie]?.aliases.some((alias) => alias.includes(".") && [alias, ...alias.split("+")].includes(s)));
+  return symbol === undefined ? null : { exchange: "synthetic", symbol };
+}
+
 /** Un point journalier : capitalisation en USD au minuit UTC `t`. */
 export interface PointJour {
   /** Minuit UTC (ms epoch) du jour mesuré. */

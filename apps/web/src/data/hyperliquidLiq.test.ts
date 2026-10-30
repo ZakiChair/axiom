@@ -287,7 +287,7 @@ describe("sync — local SANS daemon : repli sur le scan navigateur", () => {
 
       // Changement de symbole : republié par le scanner, AUCUN appel daemon ni nouveau scan.
       marketStore.getState().setSymbol("ETHUSDT");
-      expect(nav.scanner.definirCoin).toHaveBeenLastCalledWith("ETH");
+      expect(nav.scanner.definirCoin).toHaveBeenLastCalledWith("ETH", true);
       expect(nav.scanner.demarrer).toHaveBeenCalledOnce();
       expect(lire).toHaveBeenCalledOnce();
 

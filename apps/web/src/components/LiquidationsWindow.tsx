@@ -85,6 +85,7 @@ import {
   type BucketTemporel,
   type GroupeCascade,
 } from "./liquidationsWindow.util";
+import { raisonLiqSansPerp } from "./sansPerp.util";
 
 /** Nombre max de liquidations affichées dans le feed (dernières du buffer). */
 const MAX_FEED = 60;
@@ -515,6 +516,9 @@ function LigneGroupe({
 /** Onglet « Live » : TOUT le contenu temps réel de la fenêtre (source : liqEventsStore). */
 function ContenuLive() {
   const symbol = useStore(marketStore, (s) => s.symbol);
+  const exchange = useStore(marketStore, (s) => s.exchange);
+  // Série sans marché perp (STABLE.D, SPY…) : le flux n'est pas ouvert, rien n'arrivera.
+  const raisonSansPerp = raisonLiqSansPerp(exchange, symbol);
   const [fenetre, setFenetre] = useState<FenetreId>("1h");
   // Révision du buffer, throttlée : SEULE trace du flux dans le state React (un entier).
   const [rev, setRev] = useState(() => liqEventsStore.getState().rev);
@@ -696,10 +700,14 @@ function ContenuLive() {
           Dernières liquidations ({MAX_FEED} max · indépendant de la fenêtre 5m/1h/24h)
         </div>
         {feed.length === 0 ? (
-          <Vide>
-            En attente de liquidations… (flux live ; l'historique local — daemon/navigateur —
-            se charge automatiquement s'il existe)
-          </Vide>
+          raisonSansPerp !== null ? (
+            <Unusable raison={raisonSansPerp} />
+          ) : (
+            <Vide>
+              En attente de liquidations… (flux live ; l'historique local — daemon/navigateur —
+              se charge automatiquement s'il existe)
+            </Vide>
+          )
         ) : (
           <div className="axiom-liquidations-table text-xs">
             <div

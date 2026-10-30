@@ -21,7 +21,7 @@ import { EXCHANGE_IDS, type ExchangeId, type Timeframe } from "@axiom/types";
 import { SUPPORTED_TIMEFRAMES, supportedTimeframesFor, timeframeProche } from "../data/adapters";
 import { exchangeForSymbol, normalizeMarketSymbol } from "./market";
 import { parseSyntheticSymbol } from "../data/synthetic";
-import { estSymboleCapitalisation } from "../data/mcap";
+import { estSymboleCapitalisation, resoudreSerieAutonome } from "../data/mcap";
 
 /** Modes de disposition : 1 seul, 2 côte-à-côte, 2 empilés, 2×2. */
 export type ChartLayoutMode = "1" | "2h" | "2v" | "2x2";
@@ -126,9 +126,10 @@ export function sanitizeSlotConfig(raw: unknown, fallback: SlotConfig): SlotConf
       ? (o.exchange as ExchangeId)
       : fallback.exchange;
   const rawSymbol = typeof o.symbol === "string" ? o.symbol.trim() : "";
+  // Alias pointé (USDT.D…) tapé, lié ou persisté : la série, jamais Twelve Data.
   const symbol =
     rawSymbol.length > 0 && rawSymbol.length <= 200
-      ? normalizeMarketSymbol(rawSymbol)
+      ? resoudreSerieAutonome(rawSymbol)?.symbol ?? normalizeMarketSymbol(rawSymbol)
       : fallback.symbol;
   // Répare uniquement les anciens couples source réelle / symbole synthétique.
   // Toute autre identité persistée garde sa source, notamment les perps HL historiques

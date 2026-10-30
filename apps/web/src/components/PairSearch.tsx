@@ -4,7 +4,7 @@ import { useStore } from "zustand";
 import type { ExchangeId } from "@axiom/types";
 import { marketStore } from "../store/market";
 import { SYNTHETIC_PRESETS, syntheticsStore } from "../store/synthetics";
-import { estCapitalisationUsd, estSymboleCapitalisation, estSymboleDominance } from "../data/mcap";
+import { estCapitalisationUsd, estSymboleCapitalisation, estSymboleDominance, METADONNEES_SERIES_AUTONOMES, resoudreSerieAutonome, SYMBOLES_CAPITALISATION } from "../data/mcap";
 import { TWELVEDATA_SYMBOLS } from "../data/pairs";
 import { encodeSyntheticSymbol, formatSyntheticLabel, parseSyntheticSymbol, type SyntheticLegSource } from "../data/synthetic";
 import { fetchMarketCatalog, subscribeMarketCatalog, searchMarkets, resolveMarketCandidates, type MarketCandidate, type MarketCatalog } from "../data/marketRouting";
@@ -68,6 +68,42 @@ export function clesMesures(resultats: readonly MarketCandidate[], indexActif: n
 
 export const JAMBE_B_TRADFI_DEFAUT = "GLD";
 
+/**
+ * Catalogue local initial, sans aucun appel : TradFi curé et séries autonomes — « USDT.D » +
+ * Entrée ouvre STABLE.D avant même l'arrivée du catalogue commun. Il reste propre à l'affichage :
+ * le catalogue commun (`fetchMarketCatalog` de data/marketRouting) continue de charger les vrais
+ * catalogues des autres marchés.
+ */
+export const CATALOGUE_LOCAL: MarketCatalog = {
+  instruments: [
+    ...TWELVEDATA_SYMBOLS.map<MarketCandidate>((symbol) => ({ exchange: "twelvedata", symbol, kind: "tradfi" })),
+    ...SYMBOLES_CAPITALISATION.map<MarketCandidate>((symbol) => ({ exchange: "synthetic", symbol, kind: "synthetic" })),
+  ],
+  unavailableSources: [],
+};
+
+/**
+ * Catalogue local interrogé pour une saisie : une série n'y est retenue que par son nom, un préfixe,
+ * un alias exact ou un terme pointé (USDT.D), jamais par une sous-chaîne de libellé ou d'alias —
+ * « COIN » (Coinbase) et « CE » restent des tickers Twelve Data avant le catalogue commun. PURE.
+ */
+export function catalogueLocalPour(saisie: string): MarketCatalog {
+  const q = saisie.trim().toUpperCase();
+  return {
+    ...CATALOGUE_LOCAL,
+    instruments: CATALOGUE_LOCAL.instruments.filter((m) => m.kind !== "synthetic" || m.symbol.startsWith(q)
+      || resoudreSerieAutonome(q)?.symbol === m.symbol || METADONNEES_SERIES_AUTONOMES[m.symbol]?.aliases.includes(q) === true),
+  };
+}
+
+/**
+ * Catalogue interrogé pour une saisie : tant que le catalogue commun n'est pas arrivé (ou en panne),
+ * le local, dont les séries ne sortent que par nom, préfixe ou alias. PURE.
+ */
+export function catalogueInterroge(catalog: MarketCatalog, saisie: string): MarketCatalog {
+  return catalog === CATALOGUE_LOCAL ? catalogueLocalPour(saisie) : catalog;
+}
+
 /** Jambe virtuelle `mcap` d'une capitalisation en USD ; une dominance (en %) n'est pas composable. PURE & testée. */
 export function jambeCapitalisation(symbol: string): { exchange: SyntheticLegSource; symbol: string } | null {
   if (estSymboleDominance(symbol)) throw new Error(`${symbol} est une série en %, non composable`);
@@ -87,12 +123,7 @@ export function PairSearch({ onPick, placeholder = "Rechercher une paire" }: Pai
   const timeframe = useStore(marketStore, (s) => s.timeframe);
   const recents = useStore(syntheticsStore, (s) => s.recents);
   const [query, setQuery] = useState("");
-  // Ce catalogue local ne dépend d'aucun appel crypto. Il reste propre à l'affichage :
-  // le résolveur partagé continue de charger les vrais catalogues des autres marchés.
-  const [catalog, setCatalog] = useState<MarketCatalog>(() => ({
-    instruments: TWELVEDATA_SYMBOLS.map<MarketCandidate>((symbol) => ({ exchange: "twelvedata", symbol, kind: "tradfi" })),
-    unavailableSources: [],
-  }));
+  const [catalog, setCatalog] = useState<MarketCatalog>(CATALOGUE_LOCAL);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -159,7 +190,8 @@ export function PairSearch({ onPick, placeholder = "Rechercher une paire" }: Pai
 
   // Le moteur de comparaison garde son périmètre réel : aucune sélection d'un actif
   // d'une autre source qui serait ensuite chargé avec le mauvais adaptateur.
-  const searchable = onPick ? { ...catalog, instruments: catalog.instruments.filter((m) => m.exchange === exchange) } : catalog;
+  const base = catalogueInterroge(catalog, query);
+  const searchable = onPick ? { ...base, instruments: base.instruments.filter((m) => m.exchange === exchange) } : base;
   const matches = query.trim() ? searchMarkets(searchable, query, 30, timeframe) : [];
   const listeVisible = open && !syntheticOpen && matches.length > 0;
   // Liste ouverte : le résultat actif puis les 12 premiers « Auto » sont mesurés (l'actif d'abord,

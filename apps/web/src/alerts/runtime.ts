@@ -50,7 +50,7 @@
  */
 import { alerteActiveAuTemps, evaluerAlertes, prochaineEcheanceAlerte, typesDeDef, type AlertDef, type ContexteAlerte, type Declenchement, type MetriqueOnchainAlerte } from "@axiom/alerts";
 import type { Unsubscribe } from "@axiom/types";
-import { marketStore } from "../store/market";
+import { marketStore, sansMarchePerpCible } from "../store/market";
 import { getIndicator } from "@axiom/indicators";
 import { auxProvider } from "../chart/auxProvider";
 import { refSymbolStore } from "../store/refSymbol";
@@ -81,6 +81,11 @@ const COMPOSITE_THROTTLE_MS = 1_000;
 
 function defPorte(def: AlertDef, type: string): boolean {
   return typesDeDef(def).has(type);
+}
+
+/** Def funding à sonder : active, et sur un marché perp — une série (STABLE.D, SPY…) reste inerte. */
+function fundingSondable(def: AlertDef): boolean {
+  return alerteActiveAuTemps(def, Date.now()) && defPorte(def, "funding-extreme") && !sansMarchePerpCible(def.source, def.symbol);
 }
 
 /**
@@ -397,7 +402,7 @@ function creerRuntime(): Unsubscribe {
         .sort().join("|");
     const depart = new Map<string, string>();
     for (const d of alertsStore.getState().defs) {
-      if (!alerteActiveAuTemps(d, Date.now()) || !defPorte(d, "funding-extreme")) continue;
+      if (!fundingSondable(d)) continue;
       const sources = sourcesParSymbole.get(d.symbol) ?? new Set<AlertDef["source"]>();
       sources.add(d.source);
       sourcesParSymbole.set(d.symbol, sources);
@@ -423,9 +428,7 @@ function creerRuntime(): Unsubscribe {
 
   let fundingTimer: ReturnType<typeof setInterval> | undefined;
   const resyncFunding = (): void => {
-    const aDesFunding = alertsStore
-      .getState()
-      .defs.some((d) => alerteActiveAuTemps(d, Date.now()) && defPorte(d, "funding-extreme"));
+    const aDesFunding = alertsStore.getState().defs.some(fundingSondable);
     if (aDesFunding && fundingTimer === undefined) {
       void pollFunding();
       fundingTimer = setInterval(() => {

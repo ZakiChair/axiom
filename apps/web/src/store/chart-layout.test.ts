@@ -309,3 +309,31 @@ describe("chartLayoutStore — dérivation de source sur symbole synthétique (p
     expect(s3).toEqual({ exchange: "binance", symbol: "ETHUSD", timeframe: "1h" });
   });
 });
+
+describe("slot secondaire — alias pointé d'une série autonome (jamais Twelve Data)", () => {
+  const fallback = { exchange: "binance" as const, symbol: "ETHUSDT", timeframe: "1m" as const };
+
+  it("identité restaurée d'avant le correctif {twelvedata, USDT.D, 1h} → synthetic:STABLE.D", () => {
+    expect(sanitizeSlotConfig({ exchange: "twelvedata", symbol: "USDT.D", timeframe: "1h" }, fallback))
+      .toEqual({ exchange: "synthetic", symbol: "STABLE.D", timeframe: "1h" });
+    expect(sanitizeSlotConfig({ exchange: "binance", symbol: "usdt.d+usdc.d+dai.d", timeframe: "1d" }, fallback))
+      .toEqual({ exchange: "synthetic", symbol: "STABLE.D", timeframe: "1d" });
+  });
+
+  it("« usdt.d » tapé dans un slot en 1m : STABLE.D en synthetic, unité la plus proche offerte", () => {
+    chartLayoutStore.getState().setSlotSymbol(1, "usdt.d");
+    expect(chartLayoutStore.getState().slots[0]).toEqual({ exchange: "synthetic", symbol: "STABLE.D", timeframe: "1h" });
+  });
+
+  it("liaison (identité connue) : {twelvedata, DAI.D} propagé devient la série", () => {
+    chartLayoutStore.getState().setSlotMarket(2, { exchange: "twelvedata", symbol: "DAI.D", timeframe: "4h" });
+    expect(chartLayoutStore.getState().slots[1]).toEqual({ exchange: "synthetic", symbol: "STABLE.D", timeframe: "4h" });
+  });
+
+  it("BRK.B et EUR/USD restent à Twelve Data", () => {
+    chartLayoutStore.getState().setSlotSymbol(1, "brk.b");
+    expect(chartLayoutStore.getState().slots[0]).toMatchObject({ exchange: "twelvedata", symbol: "BRK.B" });
+    chartLayoutStore.getState().setSlotSymbol(1, "EUR/USD");
+    expect(chartLayoutStore.getState().slots[0]).toMatchObject({ exchange: "twelvedata", symbol: "EUR/USD" });
+  });
+});

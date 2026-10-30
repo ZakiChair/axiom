@@ -42,7 +42,7 @@ import type { Commande } from "../commands/registry";
 import { hlLiqLevelsGet, daemonSupporteHl, detectDaemon, kvPut } from "./daemon";
 import { basePerp } from "./symbol";
 import { IS_VERCEL } from "../lib/deployment";
-import { marketStore } from "../store/market";
+import { grapheSansPerp, marketStore } from "../store/market";
 import { pousserToast } from "../store/toasts";
 
 /** Un niveau de liquidation RÉEL : position ouverte d'une adresse du leaderboard. */
@@ -261,7 +261,7 @@ async function rafraichir(coin: string): Promise<void> {
   // Lu APRÈS l'appel : `hlLiqLevelsGet` a sondé /health, la capability est donc à jour.
   // Daemon absent (ou sans `hl`) : repli sur le scan navigateur au lieu de « sans-daemon ».
   if (brut === null && deciderModeHl(IS_VERCEL, daemonSupporteHl()) === "navigateur") {
-    if (coinActif === coin) passerEnNavigateur(coin);
+    if (coinActif === coin) passerEnNavigateur(coin, true); // coin actif : graphe sur un perp
     return;
   }
   const reponse = brut === null ? null : mapperReponseHl(brut);
@@ -276,22 +276,33 @@ async function rafraichir(coin: string): Promise<void> {
 }
 
 /**
- * Aligne le fetch sur l'état (bascule + symbole) : fetch au ON, refresh 4 min, reset au OFF.
+ * Actif HL du graphe (`basePerp`), aucun pour une série sans marché perp (STABLE.D, EUR/USD…), et
+ * garde du scan navigateur : le prédicat partagé, jamais la nullité du coin (SUSDT est un perp).
+ */
+function cibleDuGraphe(): { coin: string | null; perp: boolean } {
+  const etat = marketStore.getState();
+  const perp = !grapheSansPerp(etat);
+  return { coin: perp ? basePerp(etat.symbol, etat.exchange) : null, perp };
+}
+
+/**
+ * Aligne le fetch sur l'état (bascule, symbole et source) : fetch au ON, refresh 4 min, reset au OFF.
  * Le coin est la BASE du symbole du chart (`basePerp` — Hyperliquid indexe par actif, « BTC »,
  * pas par paire) ; une base inextricable (symbole synthétique) reste sur l'état « vide », le
  * seul des quatre qui décrive honnêtement « rien à montrer pour ce symbole » sans accuser à
- * tort le daemon ni inventer une erreur.
+ * tort le daemon ni inventer une erreur. Hors marché perp, le scan navigateur attend le premier.
  */
 function sync(): void {
   const actif = hlLiqStore.getState().actif;
-  const coin = actif ? basePerp(marketStore.getState().symbol, marketStore.getState().exchange) : null;
+  const cible = cibleDuGraphe();
+  const coin = actif ? cible.coin : null;
 
   if (!actif) arreterNavigateur();
   else if (modeNavigateur) {
-    scannerNav?.definirCoin(coin); // un instantané couvre tous les coins : aucun scan relancé
+    scannerNav?.definirCoin(coin, cible.perp); // un instantané couvre tous les coins : aucun scan relancé
     return;
   } else if (IS_VERCEL) {
-    passerEnNavigateur(coin);
+    passerEnNavigateur(coin, cible.perp);
     return;
   }
   if (!actif || coin === null) {
@@ -341,7 +352,7 @@ async function sonderRetourDaemon(): Promise<void> {
 }
 
 /** Coupe le mode daemon (minuteurs) et confie la couche au scanner navigateur. */
-function passerEnNavigateur(coin: string | null): void {
+function passerEnNavigateur(coin: string | null, perp: boolean): void {
   if (refreshTimer !== null) {
     clearInterval(refreshTimer);
     refreshTimer = null;
@@ -354,7 +365,7 @@ function passerEnNavigateur(coin: string | null): void {
   }
   hlLiqStore.setState({ ...VIDE, etat: "chargement", source: "navigateur" });
   if (scannerNav !== null) {
-    scannerNav.demarrer(coin);
+    scannerNav.demarrer(coin, perp);
     return;
   }
   if (chargementNav) return;
@@ -365,7 +376,10 @@ function passerEnNavigateur(coin: string | null): void {
       scannerNav = m.scannerNavigateurHl((p) => {
         if (modeNavigateur) hlLiqStore.setState({ ...p, source: "navigateur" });
       });
-      if (modeNavigateur) scannerNav.demarrer(basePerp(marketStore.getState().symbol, marketStore.getState().exchange));
+      if (modeNavigateur) {
+        const relue = cibleDuGraphe(); // le graphe a pu changer pendant le chargement du chunk
+        scannerNav.demarrer(relue.coin, relue.perp);
+      }
     },
     () => {
       chargementNav = false; // chunk introuvable (déploiement remplacé) : erreur, pas d'attente sans fin
@@ -388,11 +402,15 @@ export function demarrerHyperliquidLiq(): void {
   if (controllerStarted) return;
   controllerStarted = true;
 
+  // Symbole ET source, comme liquidationMarkers : la garde du scan lit la source, et `setExchange`
+  // garde le symbole ({synthetic, BTCUSDT} republié {binance, BTCUSDT} atteint le premier perp).
   let prevSymbol = marketStore.getState().symbol;
+  let prevExchange = marketStore.getState().exchange;
   marketStore.subscribe(() => {
-    const symbol = marketStore.getState().symbol;
-    if (symbol !== prevSymbol) {
+    const { exchange, symbol } = marketStore.getState();
+    if (symbol !== prevSymbol || exchange !== prevExchange) {
       prevSymbol = symbol;
+      prevExchange = exchange;
       sync();
     }
   });

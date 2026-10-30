@@ -1,8 +1,8 @@
 /** Recherche : défaut SYN, libellé/titre des résultats, sélection et anti-rebond des mesures ; gestes réels en E2E. */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clesMesures, JAMBE_B_TRADFI_DEFAUT, jambeCapitalisation, libelleSource, planifierMesures, resultatsAMesurer, titreSource } from "./PairSearch";
+import { CATALOGUE_LOCAL, catalogueInterroge, catalogueLocalPour, clesMesures, JAMBE_B_TRADFI_DEFAUT, jambeCapitalisation, libelleSource, planifierMesures, resultatsAMesurer, titreSource } from "./PairSearch";
 import { TWELVEDATA_SYMBOLS } from "../data/pairs";
-import type { MarketCandidate } from "../data/marketRouting";
+import { searchMarkets, type MarketCandidate, type MarketCatalog } from "../data/marketRouting";
 import * as profondeur from "../data/profondeurHistorique";
 
 describe("constructeur SYN — jambe B par défaut", () => {
@@ -140,5 +140,56 @@ describe("séries autonomes : colonne source et constructeur SYN (clic des prér
     expect(jambeCapitalisation("TOTAL3")).toEqual({ exchange: "mcap", symbol: "TOTAL3" });
     expect(jambeCapitalisation("ETHUSDT")).toBeNull();
     expect(() => jambeCapitalisation("STABLE.D")).toThrow("STABLE.D est une série en %, non composable");
+  });
+});
+
+describe("catalogue local initial : séries trouvées avant le catalogue commun (Entrée immédiate)", () => {
+  it("STABLE.D et tous ses alias, STABLES compris, sans aucun appel réseau ; TOTAL3 et SPY aussi", () => {
+    for (const requete of ["USDT.D", "usdc.d", "DAI.D", "USDT.D+USDC.D+DAI.D", "STABLES", "STABLECOINS", "DOMINANCE", "STABLE.D"]) {
+      expect(searchMarkets(CATALOGUE_LOCAL, requete)[0], requete).toMatchObject({ exchange: "synthetic", symbol: "STABLE.D", kind: "synthetic" });
+    }
+    expect(searchMarkets(CATALOGUE_LOCAL, "TOTAL3")[0]).toEqual({ exchange: "synthetic", symbol: "TOTAL3", kind: "synthetic" });
+    expect(searchMarkets(CATALOGUE_LOCAL, "SPY")[0]).toEqual({ exchange: "twelvedata", symbol: "SPY", kind: "tradfi" });
+    expect(CATALOGUE_LOCAL.unavailableSources).toEqual([]);
+  });
+});
+
+// Revue du 30/10 : avant le catalogue commun (jusqu'à 12 s à froid) ou pendant sa panne, Entrée sur
+// un vrai ticker boursier sous-chaîne du libellé « Dominance stablecoins (USDT+USDC+DAI) » ouvrait
+// STABLE.D au lieu de Twelve Data. Le catalogue interrogé ne retient une série que par son nom, un
+// préfixe, un alias exact ou un terme pointé.
+describe("catalogue local interrogé : séries par nom, préfixe ou alias, jamais par sous-chaîne de libellé", () => {
+  it("COIN (Coinbase), CE (Celanese) et les autres sous-chaînes ne trouvent aucune série : Entrée garde le routage de c2f757d", () => {
+    for (const requete of ["COIN", "CE", "MINA", "OIN", "NCE", "USDT", "USDC", "DAI", "DOM", "coin"]) {
+      expect(searchMarkets(catalogueLocalPour(requete), requete), requete).toEqual([]);
+    }
+  });
+
+  it("noms, préfixes, alias exacts et termes pointés trouvent toujours la série ; la TradFi curée est intacte", () => {
+    for (const requete of ["USDT.D", "usdc.d", "DAI.D", "USDT.D+USDC.D+DAI.D", "STABLES", "STABLECOINS", "DOMINANCE", "STABLE.D", "STAB", "stable"]) {
+      expect(searchMarkets(catalogueLocalPour(requete), requete)[0], requete).toMatchObject({ exchange: "synthetic", symbol: "STABLE.D", kind: "synthetic" });
+    }
+    expect(searchMarkets(catalogueLocalPour("TOT"), "TOT").map((c) => c.symbol)).toEqual(["TOTAL", "TOTAL2", "TOTAL3"]);
+    expect(searchMarkets(catalogueLocalPour("SPY"), "SPY")[0]).toEqual({ exchange: "twelvedata", symbol: "SPY", kind: "tradfi" });
+    expect(catalogueLocalPour("COIN").instruments.filter((c) => c.exchange === "twelvedata")).toEqual(CATALOGUE_LOCAL.instruments.filter((c) => c.exchange === "twelvedata"));
+  });
+});
+
+// Revue du 30/10, tour 3 : le choix du catalogue interrogé par le composant n'était couvert par
+// aucun test (le mutant « catalogue local non filtré » survivait).
+describe("catalogue interrogé par la recherche", () => {
+  it("avant le catalogue commun : COIN ne trouve rien (Entrée garde Twelve Data) ; USDT.D et STABLES trouvent STABLE.D", () => {
+    expect(searchMarkets(catalogueInterroge(CATALOGUE_LOCAL, "COIN"), "COIN")).toEqual([]);
+    for (const requete of ["USDT.D", "STABLES"]) {
+      expect(searchMarkets(catalogueInterroge(CATALOGUE_LOCAL, requete), requete)[0], requete).toMatchObject({ exchange: "synthetic", symbol: "STABLE.D", kind: "synthetic" });
+    }
+  });
+
+  it("le catalogue commun arrivé est interrogé tel quel", () => {
+    const commun: MarketCatalog = {
+      instruments: [{ exchange: "twelvedata", symbol: "COIN", kind: "tradfi" }, ...CATALOGUE_LOCAL.instruments],
+      unavailableSources: [],
+    };
+    expect(catalogueInterroge(commun, "COIN")).toBe(commun);
   });
 });

@@ -31,7 +31,7 @@ import { TWELVEDATA_SYMBOLS } from "../data/pairs";
 import { pousserToast } from "../store/toasts";
 import { raisonUnusableIndicateur } from "../lib/indicatorUsability";
 import { supportedTimeframesFor } from "../data/adapters";
-import { METADONNEES_SERIES_AUTONOMES, SYMBOLE_DOMINANCE_STABLECOINS } from "../data/mcap";
+import { resoudreSerieAutonome, SYMBOLE_DOMINANCE_STABLECOINS } from "../data/mcap";
 
 // ─────────────────────────── Types ───────────────────────────
 
@@ -138,7 +138,8 @@ const LEGACY_SOURCE_TOKENS = new Set(["BINANCE", "BIN", "BN", "KRAKEN", "KRK", "
 /**
  * Normalise un token en symbole exploitable :
  *  - alias POINTÉ d'une série autonome (USDT.D+USDC.D+DAI.D, ou l'un de ses termes) : la série
- *    (STABLE.D) — la règle « . = TradFi » l'enverrait sinon à Twelve Data ;
+ *    (STABLE.D), par le résolveur partagé de data/mcap — la règle « . = TradFi » l'enverrait
+ *    sinon à Twelve Data ;
  *  - « EUR/USD » (slash) : conservé tel quel ;
  *  - source tradfi : conservé tel quel (SPY, GLD…), aucune complétion de cotation ;
  *  - déjà suffixé d'une cotation connue (BTCUSDT, ETHUSD…) : conservé ;
@@ -146,9 +147,8 @@ const LEGACY_SOURCE_TOKENS = new Set(["BINANCE", "BIN", "BN", "KRAKEN", "KRK", "
  */
 function normaliserSymbole(token: string): string {
   const s = token.toUpperCase();
-  const serie = Object.entries(METADONNEES_SERIES_AUTONOMES).find(([, { aliases }]) =>
-    aliases.some((alias) => alias.includes(".") && [alias, ...alias.split("+")].includes(s)))?.[0];
-  if (serie !== undefined) return serie;
+  const serie = resoudreSerieAutonome(s);
+  if (serie !== null) return serie.symbol;
   if (s.includes("/")) return s;
   if (TWELVEDATA_SYMBOLS.includes(s)) return s;
   if (QUOTE_ASSETS.some((q) => s.endsWith(q) && s.length > q.length)) return s;

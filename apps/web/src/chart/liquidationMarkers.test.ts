@@ -4,7 +4,7 @@
  * (sérialisation v2, fusion/dédoublonnage, borne FIFO, seed Coinalyze). Le rendu
  * KLineChart et le couplage aux stores ne sont pas testés.
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // liquidationMarkers.ts appelle registerOverlay + importe ./drawing (klinecharts) et
 // ../store/theme (pose [data-theme] au chargement) + s'abonne à des flux WS/daemon à
@@ -51,6 +51,7 @@ import {
   joursApproxDansEvenements,
   joursSansEvenements,
   filtrerSeedSurJours,
+  fluxLiqRetenu,
   liqEventsStore,
   liqMarksStore,
   retenirFluxLiq,
@@ -442,5 +443,73 @@ describe("joursSansEvenements / filtrerSeedSurJours / joursApproxDansEvenements"
     ];
     expect(joursApproxDansEvenements(events)).toBe(2);
     expect(joursApproxDansEvenements([])).toBe(0);
+  });
+});
+
+// ───────── Série sans marché perp : flux traité comme inactif (spec §2) ─────────
+
+describe("flux de liquidations hors marché perp (séries, Twelve Data, composites)", () => {
+  // Reteneurs UI relâchés dans afterEach, même après une assertion en échec : un reteneur oublié
+  // garderait le flux retenu et ferait échouer en cascade les tests suivants.
+  const relachements: Array<() => void> = [];
+  const retenir = (): void => { relachements.push(retenirFluxLiq()); };
+  beforeEach(() => {
+    subSpy.mockClear();
+    unsubSpy.mockClear();
+    liqGetSpy.mockClear();
+    coinalyzeSpy.mockClear();
+    liqGetSpy.mockResolvedValue(null); // daemon absent, comme sur Vercel : l'amorce irait chez Coinalyze
+    coinalyzeSpy.mockResolvedValue([]);
+    marketStore.setState({ candles: [] });
+  });
+  afterEach(() => {
+    for (const relacher of relachements.splice(0)) relacher();
+    liqMarksStore.getState().setActif(false);
+    marketStore.setState({ exchange: "binance", symbol: "BTCUSDT", candles: [] });
+  });
+
+  it.each([
+    ["synthetic", "STABLE.D"],
+    ["synthetic", "TOTAL3"],
+    ["synthetic", "binance:BTCUSDT|/|binance:ETHUSDT"],
+    ["twelvedata", "SPY"],
+    ["twelvedata", "EUR/USD"],
+  ] as const)("%s:%s retenu par la fenêtre et la heatmap : aucun WS, aucune amorce, rien d'« en attente »", async (exchange, symbol) => {
+    marketStore.setState({ exchange, symbol });
+    retenir();
+    liqMarksStore.getState().setActif(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(subSpy).not.toHaveBeenCalled();
+    expect(liqGetSpy).not.toHaveBeenCalled();
+    expect(coinalyzeSpy).not.toHaveBeenCalled();
+    // Une alerte cascade ne doit pas recevoir un faux 0 sur un buffer qui ne se remplira jamais.
+    expect(fluxLiqRetenu()).toBe(false);
+    expect(liqEventsStore.getState().enAttente).toBe(false);
+  });
+
+  it("retour sur un perp : la bascule persistée redevient effective (WS + amorce), puis « en attente »", async () => {
+    marketStore.setState({ exchange: "synthetic", symbol: "STABLE.D" });
+    liqMarksStore.getState().setActif(true);
+    expect(subSpy).not.toHaveBeenCalled();
+    marketStore.setState({ exchange: "binance", symbol: "BTCUSDT" });
+    expect(subSpy).toHaveBeenCalledWith("BTCUSDT", expect.any(Function));
+    expect(fluxLiqRetenu()).toBe(true);
+    expect(liqEventsStore.getState().enAttente).toBe(true);
+    await vi.waitFor(() => expect(coinalyzeSpy).toHaveBeenCalled());
+    // Et l'inverse : quitter le perp pour la série désabonne et vide le buffer.
+    marketStore.setState({ exchange: "synthetic", symbol: "STABLE.D" });
+    expect(unsubSpy).toHaveBeenCalledTimes(1);
+    expect(liqEventsStore.getState()).toMatchObject({ events: [], enAttente: false });
+  });
+
+  it("changement de SOURCE seul (symbole conservé) : désabonne vers Twelve Data, réabonne au retour", () => {
+    marketStore.setState({ exchange: "binance", symbol: "BTCUSDT" });
+    retenir();
+    expect(subSpy).toHaveBeenCalledTimes(1);
+    marketStore.setState({ exchange: "twelvedata" });
+    expect(unsubSpy).toHaveBeenCalledTimes(1);
+    expect(fluxLiqRetenu()).toBe(false);
+    marketStore.setState({ exchange: "binance" });
+    expect(subSpy).toHaveBeenCalledTimes(2);
   });
 });

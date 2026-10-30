@@ -163,10 +163,17 @@ export interface DependancesScannerHl {
 }
 
 export interface ScannerNavigateurHl {
-  /** Active la couche pour `coin` : republie l'état courant, lance ou programme un cycle. */
-  demarrer(coin: string | null): void;
-  /** Change le coin publié — AUCUN nouveau scan (l'instantané couvre tous les coins). */
-  definirCoin(coin: string | null): void;
+  /**
+   * Active la couche pour `coin` : republie l'état courant, lance ou programme un cycle — sauf
+   * hors marché perp (`perp` faux : STABLE.D, SPY…), où le scan attend le premier perp. Un vrai
+   * perp sans coin affiché (SUSDT) lance le scan comme avant.
+   */
+  demarrer(coin: string | null, perp: boolean): void;
+  /**
+   * Change le coin publié — AUCUN nouveau scan (l'instantané couvre tous les coins), hormis le
+   * premier perp après une activation hors marché perp.
+   */
+  definirCoin(coin: string | null, perp: boolean): void;
   /** Couche OFF : interrompt le cycle en cours, coupe le minuteur, ne publie plus rien. */
   arreter(): void;
   /** Promesse du cycle en cours (résolue sans cycle) — tests et vérifications. */
@@ -187,6 +194,8 @@ export function creerScannerNavigateurHl(deps: DependancesScannerHl): ScannerNav
   let cycle: Promise<void> | null = null;
   let ctrlCourant: AbortController | null = null;
   let minuteur: unknown = null;
+  /** Scan démarré depuis l'activation : au premier marché perp, jamais sur STABLE.D, SPY… */
+  let lance = false;
 
   const publierCourant = (): void => {
     if (actif) deps.publier(publicationNavigateur({ complet, partiel, phase, progression, coin }));
@@ -352,7 +361,7 @@ export function creerScannerNavigateurHl(deps: DependancesScannerHl): ScannerNav
   };
 
   function programmer(): void {
-    if (!actif || cycle !== null) return;
+    if (!actif || !lance || cycle !== null) return;
     annulerMinuteur();
     const delai = delaiProchainCycle(complet?.ts ?? null, dernierEchecTs, horloge.now());
     if (delai <= 0) {
@@ -365,23 +374,31 @@ export function creerScannerNavigateurHl(deps: DependancesScannerHl): ScannerNav
     }, delai);
   }
 
+  /**
+   * Lance le scan au premier marché perp de l'activation — le prédicat, jamais la nullité du coin
+   * (`basePerp` rejette SUSDT). Lancé, un passage sur une série ne l'arrête pas.
+   */
+  const lancerAuPremierPerp = (perp: boolean): void => {
+    if (!actif || lance || !perp) return;
+    lance = true;
+    programmer();
+  };
+
   return {
-    demarrer(c) {
+    demarrer(c, perp) {
       coin = c;
-      if (actif) {
-        publierCourant();
-        return;
-      }
       actif = true;
       publierCourant();
-      programmer();
+      lancerAuPremierPerp(perp);
     },
-    definirCoin(c) {
+    definirCoin(c, perp) {
       coin = c;
       publierCourant();
+      lancerAuPremierPerp(perp);
     },
     arreter() {
       actif = false;
+      lance = false;
       ctrlCourant?.abort();
       annulerMinuteur();
       partiel = null;

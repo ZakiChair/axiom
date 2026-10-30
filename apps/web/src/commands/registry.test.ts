@@ -529,6 +529,19 @@ describe("⌘K — alias pointés des séries autonomes tapés comme navigation"
     expect(parseNavigation("stables")).toEqual({ symbol: "STABLES" });
   });
 
+  it("équivalence avec le résolveur partagé (resoudreSerieAutonome) : navigation inchangée sur 24 jetons", () => {
+    const attendus: Record<string, string> = {
+      "USDT.D": "STABLE.D", "usdt.d": "STABLE.D", "USDC.D": "STABLE.D", "DAI.D": "STABLE.D",
+      "USDT.D+USDC.D+DAI.D": "STABLE.D", "STABLE.D": "STABLE.D", "stable.d": "STABLE.D",
+      TOTAL: "TOTAL", TOTAL2: "TOTAL2", TOTAL3: "TOTAL3", total3: "TOTAL3",
+      "BRK.B": "BRK.B", "EUR/USD": "EUR/USD", BTCUSDT: "BTCUSDT", BTC: "BTCUSDT", SOL: "SOLUSDT", "1INCH": "1INCHUSDT",
+      IBM: "IBM", USOIL: "USOIL", "XBT/USD": "XBT/USD", STABLES: "STABLES", DOMINANCE: "DOMINANCE", STABLE: "STABLE",
+      "USDT.D+USDC.D": "USDT.D+USDC.D",
+    };
+    expect(Object.keys(attendus)).toHaveLength(24);
+    for (const [jeton, symbol] of Object.entries(attendus)) expect(parseNavigation(jeton), jeton).toEqual({ symbol });
+  });
+
   it("appliquée, la navigation ouvre STABLE.D en synthetic, à l'unité demandée sinon en 1d — jamais vers Twelve Data", () => {
     vi.useFakeTimers();
     const marketAvant = marketStore.getState();

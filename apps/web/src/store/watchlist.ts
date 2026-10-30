@@ -20,9 +20,19 @@
  */
 import { createStore } from "zustand/vanilla";
 import type { ExchangeId } from "@axiom/types";
+import { resoudreSerieAutonome } from "../data/mcap";
 
 /** Sources câblées pouvant alimenter un ticker de watchlist (cf. data/adapters.ts). */
 export type WatchlistSource = ExchangeId;
+
+/**
+ * Forme stockée d'un symbole, à l'ajout comme à la restauration (store/persist.ts) : un alias
+ * pointé de série autonome (USDT.D…) devient la série (STABLE.D), sinon le symbole est inchangé.
+ * Sans cela, la règle « . = TradFi » le sonde chez Twelve Data à chaque session.
+ */
+export function symboleWatchlist(symbol: string): string {
+  return resoudreSerieAutonome(symbol)?.symbol ?? symbol;
+}
 
 /** Identifiant stable du groupe par défaut (jamais supprimable s'il reste seul). */
 export const PRINCIPAL_GROUP_ID = "principal";
@@ -108,7 +118,7 @@ export const watchlistStore = createStore<WatchlistState>((set, get) => ({
   symbols: [...DEFAULT_WATCHLIST],
 
   add: (symbol, source) => {
-    const s = symbol.trim().toUpperCase();
+    const s = symboleWatchlist(symbol.trim().toUpperCase());
     if (s.length === 0) return;
     const { groups, activeGroupId } = get();
     const active = groups.find((g) => g.id === activeGroupId);

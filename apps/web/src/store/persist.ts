@@ -52,6 +52,7 @@ import {
   watchlistStore,
   DEFAULT_WATCHLIST,
   PRINCIPAL_GROUP_ID,
+  symboleWatchlist,
   type WatchlistGroup,
   type WatchlistSource,
 } from "./watchlist";
@@ -72,7 +73,7 @@ import { distOverlayStore } from "../chart/distLignes";
 import { niveauxOverlaysStore, type FamilleNiveauxCles } from "../chart/niveauxOverlays";
 import { windowManagerStore, WINDOW_REGISTRY, type EtatFenetre } from "./windowManager";
 import { syntheticsStore } from "./synthetics";
-import { estSymboleCapitalisation } from "../data/mcap";
+import { estSymboleCapitalisation, resoudreSerieAutonome } from "../data/mcap";
 import { parseSyntheticSymbol } from "../data/synthetic";
 import { CLES_SNAPSHOT, remplacerClesLocales } from "../data/sauvegardeLocale";
 import { CLE_GENERATION_ABONNEMENT, CLE_REFUS_ABONNEMENT } from "../data/onchain/refusAbonnementBg";
@@ -332,6 +333,11 @@ function isWatchlistSource(v: unknown): v is WatchlistSource {
   return typeof v === "string" && (RESTORABLE_EXCHANGES as string[]).includes(v);
 }
 
+/** Symboles restaurés : un alias pointé d'avant le correctif (USDT.D) devient sa série, sans doublon. */
+function symbolesRestaures(liste: unknown[]): string[] {
+  return [...new Set(liste.filter(isNonEmptyString).map(symboleWatchlist))];
+}
+
 /**
  * Valide un objet watchlist persisté (nouveau format). Filtre les groupes/symboles
  * invalides, garantit au moins un groupe, corrige l'onglet actif et élague les sources
@@ -348,7 +354,8 @@ function validateWatchlist(raw: Record<string, unknown>): PersistedWatchlist & {
     if (!isNonEmptyString(o.id) || !isNonEmptyString(o.name) || !Array.isArray(o.symbols)) continue;
     if (usedIds.has(o.id)) continue; // ids dupliqués : on garde le premier
     usedIds.add(o.id);
-    const symbols = o.symbols.filter(isNonEmptyString);
+    // Avant les sources : celle d'un alias migré (clé USDT.D) devient orpheline et tombe.
+    const symbols = symbolesRestaures(o.symbols);
     groups.push({ id: o.id, name: o.name, symbols });
   }
   if (groups.length === 0) return null;
@@ -376,7 +383,7 @@ function hydrateWatchlist(): void {
   const raw = readJson<unknown>(WATCH_KEY);
   if (Array.isArray(raw)) {
     // Ancien format : liste plate de symboles -> repli sur un unique groupe « Principal ».
-    const symbols = raw.filter(isNonEmptyString);
+    const symbols = symbolesRestaures(raw);
     watchlistStore.getState().setAll(symbols.length > 0 ? symbols : [...DEFAULT_WATCHLIST]);
     return;
   }
@@ -569,7 +576,13 @@ function hydrateSession(): void {
  * aussi bien au boot (avant rendu) qu'À CHAUD lors de la réconciliation daemon.
  */
 function hydrateChart(): void {
-  const persisted = readJson<Partial<ChartState>>(CHART_KEY);
+  const lu = readJson<Partial<ChartState>>(CHART_KEY);
+  // Série désignée par un alias pointé d'avant le correctif ({twelvedata, USDT.D}) ou posée sur une
+  // source réelle ({kraken, TOTAL}) : résolue en {synthetic, série}, comme dans sanitizeSlotConfig,
+  // AVANT la validation de l'unité, qui se fait ainsi contre la série (1m → 1h pour STABLE.D).
+  // setMarket résoudrait le couple Twelve Data, mais garderait l'unité persistée.
+  const serie = typeof lu?.symbol === "string" ? resoudreSerieAutonome(lu.symbol) : null;
+  const persisted = lu && serie ? { ...lu, ...serie } : lu;
 
   if (persisted) {
     // Un état `synthetic` exige un symbole encodé parsable ou un TOTAL* autonome ;

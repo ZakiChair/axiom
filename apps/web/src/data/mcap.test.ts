@@ -16,6 +16,7 @@ import {
   METADONNEES_SERIES_AUTONOMES,
   minuitUtc,
   reconstruireTotal,
+  resoudreSerieAutonome,
   serieDifference,
   SYMBOLE_DOMINANCE_STABLECOINS,
   SYMBOLES_CAPITALISATION,
@@ -285,5 +286,41 @@ describe("séries autonomes — capitalisations en USD et dominance des stableco
     expect(estSerieEnPourcentage("synthetic", "TOTAL")).toBe(false);
     expect(estSerieEnPourcentage("synthetic", "mcap:TOTAL3|/|binance:BTCUSDT")).toBe(false);
     expect(estSerieEnPourcentage("twelvedata", "STABLE.D")).toBe(false);
+  });
+});
+
+describe("resoudreSerieAutonome — saisie libre vers une série autonome (jamais Twelve Data)", () => {
+  it.each([
+    ["TOTAL", "TOTAL"],
+    ["total", "TOTAL"],
+    [" TOTAL2 ", "TOTAL2"],
+    ["TOTAL3", "TOTAL3"],
+    ["STABLE.D", "STABLE.D"],
+    ["stable.d", "STABLE.D"],
+    // Alias POINTÉS : la forme composite et chacun de ses termes.
+    ["USDT.D", "STABLE.D"],
+    ["usdt.d", "STABLE.D"],
+    [" USDC.D ", "STABLE.D"],
+    ["DAI.D", "STABLE.D"],
+    ["USDT.D+USDC.D+DAI.D", "STABLE.D"],
+    ["usdt.d+usdc.d+dai.d", "STABLE.D"],
+  ])("%j → synthetic:%s", (saisie, symbol) => {
+    expect(resoudreSerieAutonome(saisie)).toEqual({ exchange: "synthetic", symbol });
+  });
+
+  it.each([
+    // TradFi à point, forex, crypto spot et perps : chemins actuels inchangés.
+    "BRK.B", "brk.b", "EUR/USD", "BTCUSDT", "HYPEUSDT", "BTC-PERP", "HYPE-PERP", "kPEPE-PERP",
+    "XBT/USD", "SPY", "GLD", "WTI/USD", "USOIL", "GBTC",
+    // Alias SANS point : des tickers possibles (« stables » reste STABLES dans ⌘K).
+    "STABLES", "stables", "STABLECOINS", "DOMINANCE",
+    // Tokens et paires voisins : STABLE est un token réel.
+    "STABLE", "STABLEUSDT", "DAIUSDT", "USDTTRY", "USDT", "USDC",
+    // Résidus hors périmètre : dominances TradingView, composite partiel, unité tapée.
+    "BTC.D", "ETH.D", "USDT.D+USDC.D", "USDT.D 4H",
+    // SYN encodés, vides et faux amis.
+    "binance:BTCUSDT|/|binance:ETHUSDT", "mcap:TOTAL3|/|binance:BTCUSDT", "", "   ", "TOTAL4", ".D",
+  ])("%j → null", (saisie) => {
+    expect(resoudreSerieAutonome(saisie)).toBeNull();
   });
 });

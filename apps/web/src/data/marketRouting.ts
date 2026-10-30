@@ -3,7 +3,7 @@ import type { ExchangeId, Timeframe } from "@axiom/types";
 import { fetchPairs, isTradfiMarketSymbol, pairsCacheExpiresAt, TRADFI_SEARCH_METADATA, TWELVEDATA_SYMBOLS } from "./pairs";
 import { supportedTimeframesFor, timeframeProche } from "./adapters";
 import { debutAccessible, lireProfondeur, mesurerProfondeurs, plancherAccessible, toleranceProfondeurMs, type PrioriteMesure } from "./profondeurHistorique";
-import { estSymboleCapitalisation, METADONNEES_SERIES_AUTONOMES, SYMBOLES_CAPITALISATION } from "./mcap";
+import { estSymboleCapitalisation, METADONNEES_SERIES_AUTONOMES, resoudreSerieAutonome, SYMBOLES_CAPITALISATION } from "./mcap";
 import { parseSyntheticSymbol } from "./synthetic";
 import { basePerp, splitSymbol } from "./symbol";
 
@@ -156,6 +156,8 @@ interface IdentitePreparee { exchange?: ExchangeId; symbol: string; timeframe: T
 function preparerIdentite(identity: { exchange?: ExchangeId; symbol: string; timeframe: Timeframe }): IdentitePreparee {
   let symbol = identity.symbol.trim();
   if (!symbol.includes("|")) symbol = symbol.toUpperCase();
+  // Alias pointé restauré d'avant le correctif ({twelvedata, USDT.D}) : la série, jamais Twelve Data.
+  symbol = resoudreSerieAutonome(symbol)?.symbol ?? symbol;
   if (estSymboleCapitalisation(symbol) || parseSyntheticSymbol(symbol)) return { ...identity, symbol, kind: "synthetic" };
   if (identity.exchange === "hyperliquid" && !symbol.endsWith("-PERP") && !TWELVEDATA_SYMBOLS.includes(symbol)) {
     const base = basePerp(symbol) ?? (/^[A-Z0-9]{2,20}$/.test(symbol) ? symbol : null);

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Candle, ExchangeId, Timeframe } from "@axiom/types";
-import { resolveMarketCandidates, searchMarkets, type MarketCatalog } from "./marketRouting";
+import { resolveMarketCandidates, resolveMarketCandidatesProgressifs, searchMarkets, type MarketCatalog } from "./marketRouting";
 import { SYMBOLES_CAPITALISATION } from "./mcap";
 import * as profondeur from "./profondeurHistorique";
 
@@ -68,6 +68,26 @@ describe("recherche des séries autonomes : libellé et alias de STABLE.D", () =
     try {
       expect(await resolveMarketCandidates({ symbol: "stable.d", timeframe: "1d" })).toEqual([{ exchange: "synthetic", symbol: "STABLE.D", timeframe: "1d" }]);
       expect(await resolveMarketCandidates({ exchange: "twelvedata", symbol: "STABLE.D", timeframe: "4h" })).toEqual([{ exchange: "synthetic", symbol: "STABLE.D", timeframe: "4h" }]);
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("identité restaurée d'avant le correctif : alias pointé de STABLE.D (défense en profondeur)", () => {
+  it("{twelvedata, USDT.D} et ses variantes se résolvent en synthetic:STABLE.D, sans aucun réseau ; BRK.B reste à Twelve Data", async () => {
+    const fetch = vi.fn(() => Promise.reject(new Error("réseau interdit")));
+    vi.stubGlobal("fetch", fetch);
+    try {
+      expect(await resolveMarketCandidates({ exchange: "twelvedata", symbol: "USDT.D", timeframe: "1h" }))
+        .toEqual([{ exchange: "synthetic", symbol: "STABLE.D", timeframe: "1h" }]);
+      expect(await resolveMarketCandidates({ exchange: "binance", symbol: "usdt.d+usdc.d+dai.d", timeframe: "1d" }))
+        .toEqual([{ exchange: "synthetic", symbol: "STABLE.D", timeframe: "1d" }]);
+      expect((await resolveMarketCandidatesProgressifs({ exchange: "twelvedata", symbol: "DAI.D", timeframe: "4h" })).immediats)
+        .toEqual([{ exchange: "synthetic", symbol: "STABLE.D", timeframe: "4h" }]);
+      expect(await resolveMarketCandidates({ exchange: "twelvedata", symbol: "BRK.B", timeframe: "1h" }))
+        .toEqual([{ exchange: "twelvedata", symbol: "BRK.B", timeframe: "1h" }]);
       expect(fetch).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();

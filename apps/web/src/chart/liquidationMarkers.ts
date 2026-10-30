@@ -30,7 +30,7 @@
 import { createStore } from "zustand/vanilla";
 import type { StoreApi } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
-import { marketStore } from "../store/market";
+import { grapheSansPerp, marketStore } from "../store/market";
 import { subscribeLiquidations, type Liquidation } from "../data/liquidations";
 import { fetchLiquidationHistory, type LiquidationHistPoint } from "../data/coinalyze";
 import {
@@ -420,9 +420,12 @@ function arreterPollHl(): void {
   }
 }
 
-/** Pousse l'état courant du buffer dans le store vanilla (bump `rev`, calcule `enAttente`). */
-function publier(): void {
-  const enAttente = liqMarksStore.getState().actif && evenements.length === 0;
+/**
+ * Pousse l'état courant du buffer dans le store vanilla (bump `rev`, calcule `enAttente`). Sans
+ * marché perp (STABLE.D, SPY, composite…), aucun flux à attendre ; `sync()` passe son verdict.
+ */
+function publier(sansPerp = grapheSansPerp(marketStore.getState())): void {
+  const enAttente = liqMarksStore.getState().actif && evenements.length === 0 && !sansPerp;
   liqEventsStore.setState((s) => ({ events: evenements, rev: s.rev + 1, enAttente }));
 }
 
@@ -624,20 +627,25 @@ export function retenirFluxLiq(): () => void {
 
 /**
  * Vrai si le flux liq est actuellement RETENU (heatmap ON ou consommateur UI, ex.
- * fenêtre LIQ ouverte) : le buffer `liqEventsStore` est alors alimenté en live.
- * Lecture seule — utilisée par le runtime des alertes pour gater `liq-cascade`.
+ * fenêtre LIQ ouverte) sur un graphe à marché perp : le buffer `liqEventsStore` est alors
+ * alimenté en live. Lecture seule — utilisée par le runtime des alertes pour gater
+ * `liq-cascade` (hors perp : non évaluable, jamais un faux 0). `sansPerp` : verdict déjà évalué
+ * par `sync()`.
  */
-export function fluxLiqRetenu(): boolean {
-  return liqMarksStore.getState().actif || retenteursUi > 0;
+export function fluxLiqRetenu(sansPerp = grapheSansPerp(marketStore.getState())): boolean {
+  return (liqMarksStore.getState().actif || retenteursUi > 0) && !sansPerp;
 }
 
 /**
  * Aligne l'abonnement WS sur l'état (bascule OU reteneur UI, + symbole). Réinitialise le
- * buffer au changement de symbole.
+ * buffer au changement de symbole. Sans marché perp, traité comme inactif (aucun WS Bybit ni
+ * OKX, aucune amorce) : la bascule persistée redevient effective au retour sur un perp.
  */
 function sync(): void {
-  const actif = liqMarksStore.getState().actif || retenteursUi > 0;
-  const symbol = marketStore.getState().symbol;
+  const etat = marketStore.getState();
+  const sansPerp = grapheSansPerp(etat); // une seule évaluation par passage
+  const actif = fluxLiqRetenu(sansPerp);
+  const symbol = etat.symbol;
 
   if (!actif) {
     if (abonnement) {
@@ -652,7 +660,7 @@ function sync(): void {
     symboleAbonne = null;
     evenements = [];
     arreterPollHl();
-    publier();
+    publier(sansPerp);
     return;
   }
   if (symboleAbonne !== symbol) {
@@ -666,7 +674,7 @@ function sync(): void {
     // Restaure les événements persistés v2 du symbole (survit aux reloads / changements de
     // symbole) ; les liquidations live s'y ajoutent. Vide si jamais accumulé.
     evenements = chargerProfil(symbol);
-    publier();
+    publier(sansPerp);
     abonnement = subscribeLiquidations(symbol, (l) => ajouterLive(l));
     // Poll HL (daemon, source partielle — cf. en-tête) : suit l'abonnement.
     demarrerPollHl();
@@ -676,7 +684,7 @@ function sync(): void {
   }
   // Déjà abonné au bon symbole : re-publie pour recalculer `enAttente` (ex. heatmap
   // activée alors que la fenêtre LIQ retenait déjà le flux sur un buffer vide).
-  publier();
+  publier(sansPerp);
 }
 
 let controllerStarted = false;
@@ -686,15 +694,18 @@ export function demarrerLiquidationMarkers(): void {
 
   // Réaligne l'abonnement WS (buffer + seed) sur le symbole/état de chargement du marché.
   // Le RENDU suit le viewport côté canvas (LiquidationHeatController), donc plus besoin de
-  // pister l'instance de chart ni les bornes de bougies ici — seuls symbole et readiness
-  // (bougies chargées, pour le seed Coinalyze) déclenchent un resync des données.
+  // pister l'instance de chart ni les bornes de bougies ici — symbole, source (marché perp
+  // ou non : `setExchange` conserve le symbole, cf. depthHeat.ts) et readiness (bougies
+  // chargées, pour le seed Coinalyze) déclenchent un resync des données.
   let prevSymbol = marketStore.getState().symbol;
+  let prevExchange = marketStore.getState().exchange;
   let prevReady = marketStore.getState().candles.length > 0;
   marketStore.subscribe(() => {
-    const { symbol, candles } = marketStore.getState();
+    const { exchange, symbol, candles } = marketStore.getState();
     const ready = candles.length > 0;
-    if (symbol !== prevSymbol || ready !== prevReady) {
+    if (symbol !== prevSymbol || exchange !== prevExchange || ready !== prevReady) {
       prevSymbol = symbol;
+      prevExchange = exchange;
       prevReady = ready;
       sync();
     }

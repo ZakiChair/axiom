@@ -9,8 +9,8 @@
 import { createStore } from "zustand/vanilla";
 import type { StoreApi } from "zustand/vanilla";
 import type { Candle, ExchangeId, Timeframe } from "@axiom/types";
-import { isTradfiMarketSymbol } from "../data/pairs";
-import { estSymboleCapitalisation } from "../data/mcap";
+import { isTradfiMarketSymbol, TWELVEDATA_SYMBOLS } from "../data/pairs";
+import { estSymboleCapitalisation, resoudreSerieAutonome } from "../data/mcap";
 import { parseSyntheticSymbol } from "../data/synthetic";
 
 
@@ -152,7 +152,8 @@ function loadingState(previous: MarketDataLoadState, requested: MarketIdentity):
  *
  * Volontairement absent de `setMarket`/`setExchange` : une source posée EXPLICITEMENT
  * doit gagner, sinon la séquence `setExchange("synthetic")` puis `setSymbol(SYN)` (SYN
- * builder, restauration de session) ne pourrait plus jamais entrer dans un ratio.
+ * builder, restauration de session) ne pourrait plus jamais entrer dans un ratio. Seule
+ * exception, dans `setMarket` : une série désignée sur Twelve Data ({twelvedata, USDT.D}).
  */
 export function exchangeForSymbol(
   state: Pick<MarketState, "exchange" | "symbol">,
@@ -169,6 +170,38 @@ export function exchangeForSymbol(
   return sourcePrecedente === undefined || sourcePrecedente === "mcap" || sourcePrecedente === "twelvedata" || sourcePrecedente === "hyperliquid"
     ? "binance"
     : sourcePrecedente;
+}
+
+/**
+ * Aucun marché perp derrière ce couple : série autonome ou composite, source Twelve Data, ou
+ * symbole TradFi saisi sur une autre source. Garde RÉSEAU partagée des sites perp (alertes
+ * funding/CVD/cascade, flux de liquidations, LIQHL, LIQEST, liquidations par bougie) ; jamais
+ * `basePerp`/`actifPerpDe`, dont les bornes rejettent de vrais perps (SUSDT, BROCCOLI714USDT…). PURE.
+ *
+ * TradFi RECONNUE seulement (catalogue Twelve Data, « . ^ = », forex à barre) : le repli
+ * « cotation inconnue → TradFi » de la saisie libre prendrait de vrais perps (BTCUSD1, BTCU).
+ */
+export function sansMarchePerp(exchange: ExchangeId, symbol: string): boolean {
+  const s = symbol.trim().toUpperCase();
+  return exchange === "synthetic" || exchange === "twelvedata" || estSymboleCapitalisation(s) || s.includes("|")
+    || (isTradfiMarketSymbol(s) && (TWELVEDATA_SYMBOLS.includes(s) || /[./^=]/.test(s)));
+}
+
+/** Le graphe courant n'a pas de marché perp : garde commune de LIQ, LIQHL et LIQEST. PURE. */
+export function grapheSansPerp(state: Pick<MarketState, "exchange" | "symbol">): boolean {
+  return sansMarchePerp(state.exchange, state.symbol);
+}
+
+/**
+ * Variante pour une CIBLE D'ALERTE {source du graphe à la création, symbole saisi} : le symbole se
+ * lit dans le contexte du graphe. Sur une série (crypto), comme sur Binance : BTCUSDT et BTCUSD1
+ * restent sondés, STABLE.D et SPY exclus. Sur Twelve Data, selon son routage : BTCUSDT sondé, un
+ * ticker libre (IBM) exclu — et, faute de catalogue perp, un perp coté dans une devise inconnue de
+ * QUOTE_ASSETS (BTCU, BTCUSD1) aussi. PURE.
+ */
+export function sansMarchePerpCible(source: ExchangeId, symbol: string): boolean {
+  return sansMarchePerp(source === "synthetic" ? "binance"
+    : source === "twelvedata" ? exchangeForSymbol({ exchange: source, symbol }, symbol) : source, symbol);
 }
 
 /**
@@ -212,9 +245,14 @@ export function createMarketStore(init: MarketStoreInit = {}): MarketStore {
     // appartenait. `loaded` est conservée uniquement comme provenance du dernier succès.
     setMarket: (nextIdentity) => {
       const state = get();
+      // Seule exception à la source explicite : une série désignée sur Twelve Data (identité
+      // d'avant le correctif {twelvedata, USDT.D} rendue par un workspace, une autre fenêtre ou
+      // « Voir sur le chart »). Le COUPLE est résolu, jamais {twelvedata, STABLE.D} ; sans cela le
+      // bandeau sonde /quote. L'unité est gardée : le graphe la ramène à une unité servie.
+      const serie = nextIdentity.exchange === "twelvedata" ? resoudreSerieAutonome(nextIdentity.symbol) : null;
       const requested: MarketIdentity = {
-        exchange: nextIdentity.exchange,
-        symbol: normalizeMarketSymbol(nextIdentity.symbol),
+        exchange: serie?.exchange ?? nextIdentity.exchange,
+        symbol: serie?.symbol ?? normalizeMarketSymbol(nextIdentity.symbol),
         timeframe: nextIdentity.timeframe,
       };
       if (sameMarketIdentity(marketIdentity(state), requested)) return;
@@ -232,7 +270,8 @@ export function createMarketStore(init: MarketStoreInit = {}): MarketStore {
     },
     setSymbol: (nextSymbol) => {
       const state = get();
-      const symbol = normalizeMarketSymbol(nextSymbol);
+      // Alias pointé (USDT.D…) : la série, avant la règle « . = TradFi » de exchangeForSymbol.
+      const symbol = resoudreSerieAutonome(nextSymbol)?.symbol ?? normalizeMarketSymbol(nextSymbol);
       const spec = parseSyntheticSymbol(symbol);
       const capitalisation =
         estSymboleCapitalisation(symbol) || spec?.exA === "mcap" || spec?.exB === "mcap";

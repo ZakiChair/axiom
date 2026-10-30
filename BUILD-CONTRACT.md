@@ -1944,10 +1944,11 @@ propriétaire. Spec : `docs/superpowers/specs/2026-10-29-dominance-stablecoins-d
     - en 1d : V1 jusqu'à la publication de la ligne, écart médian 0,001 pt, max 0,15 pt
       (2020-03-13).
   - Avec 2 décimales, la période 2015–2017 s'affiche entre 0.00 et 0.0x %.
-  - Hors lot, préexistant et identique pour TOTAL* : l'alerte Funding et la fenêtre LIQ
-    envoient le symbole à Binance fapi, Bybit et Coinalyze.
-  - Hors lot, préexistant : dans PairSearch, « USDT.D » + Entrée avant l'arrivée du catalogue
-    commun part brut vers Twelve Data.
+  - Deux fuites préexistantes, relevées ici hors lot, sont corrigées par le lot suivant (voir
+    « Fuites des séries synthétiques ») :
+    - l'alerte Funding et la fenêtre LIQ envoyaient le symbole à Binance fapi, Bybit et
+      Coinalyze ;
+    - « USDT.D » + Entrée avant l'arrivée du catalogue commun partait brut vers Twelve Data.
 - **Revue et tests.**
   - Revue indépendante en 6 angles (calcul, routage, réseau et sécurité, défaillances
     silencieuses, tests, simplicité), chaque constat contre-vérifié : 26 constats, 20 retenus
@@ -1958,3 +1959,95 @@ propriétaire. Spec : `docs/superpowers/specs/2026-10-29-dominance-stablecoins-d
   - `pnpm check:e2e` : 171/171 sur 45 fichiers, dont les 4 parcours de
     `dominance-stablecoins.e2e`. Le suffixe est obligatoire dans `scripts/ci.sh` : le motif nu
     sélectionne tout le worktree `.worktrees/dominance-stablecoins/`.
+
+## Fuites des séries synthétiques (demande du 29 octobre 2026)
+
+Le propriétaire demande de corriger « dans un lot séparé » les deux fuites préexistantes repérées
+pendant la revue de STABLE.D :
+- une série sans marché perp interrogeait des fournisseurs perp ;
+- un alias pointé partait brut vers Twelve Data.
+
+**Aucun fournisseur, hôte, dépendance ni indicateur nouveau. `@axiom/types`, `QUOTE_ASSETS`
+(`data/symbol.ts`) et `normalizeMarketSymbol` sont inchangés.** Spec :
+`docs/superpowers/specs/2026-10-29-fuites-series-synthetiques-design.md`. Ses arbitrages après
+revue priment dans cet ordre : §6, §5, puis les §0 à §4.
+
+- **Prédicat partagé.**
+  - `sansMarchePerp(exchange, symbol)`, fonction PURE de `store/market.ts`. Il est vrai pour une
+    source synthetic ou twelvedata, une série de capitalisation (TOTAL*, STABLE.D), un composite
+    (`|`) ou une TradFi reconnue (`isTradfiMarketSymbol`).
+  - `sansMarchePerpCible` juge une cible d'alerte saisie : sur un graphe synthetic, la saisie se
+    lit comme sur Binance.
+  - `grapheSansPerp(state)` est l'aide unique des contrôleurs, évaluée une fois par `sync()`.
+  - Jamais `basePerp` ni `actifPerpDe` comme garde réseau : leurs bornes rejettent de vrais perps
+    (SUSDT, WUSDT, TUSDT, BROCCOLI714USDT, 1000000PEIPEIUSDT).
+  - Balayage des catalogues réels : aucun vrai marché exclu sur 24 134 couples.
+- **Sites gardés : aucune requête perp hors perp.**
+  - Alertes Funding, CVD S/P et Cascade liq :
+    - options désactivées avec un titre, refus à la soumission et dans « Créer l'alerte
+      composée » ;
+    - `pollFunding` ignore une définition sans perp ;
+    - le minuteur de 60 s n'est armé que s'il reste une définition éligible ;
+    - les définitions persistées sont conservées, inertes.
+  - Liquidations, dont le `sync()` est partagé par la fenêtre LIQ et la heatmap :
+    - WS Bybit et OKX fermés, aucune amorce Coinalyze, sondage HL arrêté ;
+    - la fenêtre LIQ affiche « Pas de marché perp pour cette série : liquidations
+      indisponibles. » ;
+    - l'état actif reste persisté et redevient effectif au retour sur un perp ;
+    - le déclencheur suit aussi la source.
+  - Liquidations par bougie :
+    - `raisonUnusableIndicateur` est gardée par le prédicat, symbole compris ;
+    - `ChartIndicators` jette la réponse auxiliaire d'un ancien symbole. Une réponse Coinalyze en
+      vol ne vise donc plus le nouveau symbole avec la source de l'ancien graphe (IBM, PLTR) ;
+    - le sync du backfill demande ensuite le nouveau perp.
+  - LIQHL sur Vercel : le scan navigateur démarre au premier perp, atteint par le symbole ou par
+    la source. Un scan déjà lancé n'est pas arrêté : son pool sert à toutes les pièces.
+  - LIQEST : garde à la synchronisation et au rafraîchissement de 15 min. Avant, EUR/USD
+    interrogeait Coinalyze et fapi.
+- **Twelve Data.**
+  - `resoudreSerieAutonome(saisie)`, fonction PURE de `data/mcap.ts`, rend `{synthetic, série}`
+    pour un nom exact de série, un alias pointé ou l'un de ses termes « + » (USDT.D, USDC.D,
+    DAI.D).
+  - Points d'application :
+    - catalogue local de PairSearch : séries comprises avant l'arrivée du catalogue commun ;
+    - `setSymbol` ;
+    - watchlist : ajout et hydratation ;
+    - `sanitizeSlotConfig` ;
+    - `preparerIdentite` ;
+    - `hydrateChart`, qui résout avant de valider l'unité (1m devient 1h pour STABLE.D) ;
+    - `setMarket`, pour une série désignée sur twelvedata.
+  - Les alias sans point (STABLES…) rendent `null`. BRK.B, EUR/USD et SPY ne changent pas.
+- **Résidus acceptés.**
+  - Sur un graphe Twelve Data, une cible perp cotée USD1 ou U (BTCUSD1, BTCU…) reste refusée :
+    `QUOTE_ASSETS` ignore ces cotations. Le titre de l'option et le refus disent « Indisponible
+    depuis un graphe Twelve Data : ouvrez la paire crypto pour créer cette alerte. », sans nier le
+    marché perp.
+  - Transitoires :
+    - changement de source seul sur le même symbole, avec une réponse en vol ;
+    - identité {binance, IBM} créée par une alerte PRIX à source forcée ;
+    - kraken+TOTAL.
+  - LIQEST : un aller-retour par {synthetic, même symbole} relance l'OI au retour sur le perp.
+- **Hors lot**, signalé au propriétaire :
+  - NEWS (GDELT), revenus (DefiLlama) ;
+  - import Backtest, funding « binance-reel » ;
+  - fenêtres liées, comparaison base 100, presets d'espace de travail ;
+  - variantes d'alias (combinaisons partielles, BTC.D) ;
+  - alerte PRIX à source forcée ;
+  - appels au daemon local.
+- **Budget.**
+  - Chargement initial : **1 188 293 / 355 970** avec la clé factice, sous Node 24.13.0 (355 953
+    sans clé, dans `pnpm check`).
+  - Soit +1 969 / +737 depuis c2f757d (1 186 324 / 355 233).
+  - La cible de +400 o gzip est dépassée ; l'écart est accepté sous le plafond de 360 000, avec
+    une marge de 4 030.
+- **Revue et tests.**
+  - Revue indépendante en 7 tours (fuites, régressions, qualité), puis un contrôle indépendant
+    des portes. Moyens : capteurs fetch et WS, tests de course, mutants, et différentiel contre
+    c2f757d.
+  - `pnpm check` vert : typage des 7 projets ; web 430 fichiers / 6 366 tests, indicateurs
+    1 043, alertes 127, backtest 131, pacte 120, daemon 786.
+  - `pnpm check:e2e` : 175/175, dont les 4 parcours de `fuites-series-synthetiques.e2e`, inscrit
+    avec son suffixe dans `scripts/ci.sh`.
+  - Instabilité préexistante, hors lot : `quatre-lots-sauvegardes.e2e.ts:32` échoue parfois. La
+    réouverture de NOTE par ⌘K, juste après « Fermer », n'aboutit pas. C'est reproduit à
+    c2f757d.

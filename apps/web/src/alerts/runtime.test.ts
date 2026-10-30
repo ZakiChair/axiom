@@ -1004,3 +1004,106 @@ describe("référence du garde-fou de régime dans les alertes web (10 octobre 2
     expect(auxRecus.at(-1)).toEqual({ refClose: ref });
   });
 });
+
+describe("funding — séries sans marché perp (inertes, aucune requête)", () => {
+  const funding = { type: "funding-extreme", seuilAbs: 0.001, sens: "long-crowded" } as const;
+  const defFunding = (id: string, symbol: string, source: AlertDef["source"]): AlertDef => ({
+    id, symbol, source, condition: funding, actif: true, declenchements: [],
+  });
+  /** Capteur réseau : URLs demandées, réponse vide (aucun taux exploitable). */
+  function capterFetch(): string[] {
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return Response.json({});
+    }));
+    return urls;
+  }
+
+  it("synthetic, twelvedata, composite et série saisie sur Binance : ni premiumIndex, ni Coinalyze, ni minuteur 60 s", async () => {
+    vi.useFakeTimers();
+    const urls = capterFetch();
+    const armer = vi.spyOn(globalThis, "setInterval");
+    alertsStore.setState({ defs: [
+      defFunding("stable", "STABLE.D", "synthetic"),
+      defFunding("total3", "TOTAL3", "synthetic"),
+      defFunding("spy", "SPY", "twelvedata"),
+      defFunding("eurusd", "EUR/USD", "twelvedata"),
+      defFunding("saisie", "STABLE.D", "binance"),
+      { id: "compose", symbol: "TOTAL2", source: "synthetic", actif: true, declenchements: [],
+        condition: { type: "composite", conditions: [{ type: "prix-croise", niveau: 1, sens: "hausse" }, funding] } },
+    ], journal: [] });
+    stop = demarrerAlertes();
+    await vi.advanceTimersByTimeAsync(3 * 60_000);
+    expect(urls.filter((url) => url.includes("premiumIndex") || url.includes("fundingRate"))).toEqual([]);
+    expect(coinalyzeFundingMock).not.toHaveBeenCalled();
+    expect(coinalyzeHistoryMock).not.toHaveBeenCalled();
+    expect(armer.mock.calls.some(([, ms]) => ms === 60_000)).toBe(false);
+  });
+
+  it("témoin : les vrais perps restent sondés, y compris ceux que basePerp rejette ou cotés en USD1/U", async () => {
+    const urls = capterFetch();
+    const armer = vi.spyOn(globalThis, "setInterval");
+    alertsStore.setState({ defs: [
+      defFunding("btc", "BTCUSDT", "binance"),
+      defFunding("s", "SUSDT", "bybit"),
+      defFunding("hype", "HYPE-PERP", "hyperliquid"),
+      defFunding("brocoli", "BROCCOLI714USDT", "binance"),
+      defFunding("btcusd1", "BTCUSD1", "binance"),
+      defFunding("btcu", "BTCU", "binance"),
+      defFunding("stable", "STABLE.D", "synthetic"),
+    ], journal: [] });
+    stop = demarrerAlertes();
+    await vi.waitFor(() => expect(coinalyzeFundingMock).toHaveBeenCalledTimes(6));
+    const sondes = urls.filter((url) => url.includes("premiumIndex")).map((url) => url.slice(url.indexOf("symbol=") + 7));
+    expect(sondes).toEqual(["BTCUSDT", "SUSDT", "HYPE-PERP", "BROCCOLI714USDT", "BTCUSD1", "BTCU"]);
+    expect(armer.mock.calls.some(([, ms]) => ms === 60_000)).toBe(true);
+  });
+
+  it("un perp saisi sur un graphe série ou Twelve Data vise son marché : sondé, comme à c2f757d", async () => {
+    const urls = capterFetch();
+    alertsStore.setState({ defs: [
+      // En tête : un ticker libre resté sur Twelve Data serait sondé avant les deux perps.
+      defFunding("ibm-sur-td", "IBM", "twelvedata"),
+      defFunding("btc-sur-serie", "BTCUSDT", "synthetic"),
+      defFunding("sol-sur-td", "SOLUSDT", "twelvedata"),
+    ], journal: [] });
+    stop = demarrerAlertes();
+    await vi.waitFor(() => expect(coinalyzeFundingMock).toHaveBeenCalledTimes(2));
+    const sondes = urls.filter((url) => url.includes("premiumIndex")).map((url) => url.slice(url.indexOf("symbol=") + 7));
+    expect(sondes).toEqual(["BTCUSDT", "SOLUSDT"]);
+  });
+
+  it("perps Binance cotés USD1 ou U saisis sur une série : sondés, comme à c2f757d ; un ticker libre sur Twelve Data reste inerte", async () => {
+    const urls = capterFetch();
+    alertsStore.setState({ defs: [
+      defFunding("ibm-sur-td", "IBM", "twelvedata"),
+      defFunding("btcusd1", "BTCUSD1", "synthetic"),
+      defFunding("ethusd1", "ETHUSD1", "synthetic"),
+      defFunding("spcxusd1", "SPCXUSD1", "synthetic"),
+      defFunding("btcu", "BTCU", "synthetic"),
+      defFunding("ethu", "ETHU", "synthetic"),
+    ], journal: [] });
+    stop = demarrerAlertes();
+    await vi.waitFor(() => expect(coinalyzeFundingMock).toHaveBeenCalledTimes(5));
+    const sondes = urls.filter((url) => url.includes("premiumIndex")).map((url) => url.slice(url.indexOf("symbol=") + 7));
+    expect(sondes).toEqual(["BTCUSD1", "ETHUSD1", "SPCXUSD1", "BTCU", "ETHU"]);
+  });
+
+  it("une def perp retirée ne laisse que des defs inertes : le minuteur s'arrête", async () => {
+    vi.useFakeTimers();
+    const urls = capterFetch();
+    alertsStore.setState({ defs: [defFunding("btc", "BTCUSDT", "binance"), defFunding("stable", "STABLE.D", "synthetic")], journal: [] });
+    stop = demarrerAlertes();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(urls.filter((url) => url.includes("premiumIndex"))).toHaveLength(1);
+    const minuteursAvant = vi.getTimerCount();
+    alertsStore.setState({ defs: [defFunding("stable", "STABLE.D", "synthetic")] });
+    // Le minuteur 60 s lui-même est coupé : sans cela, pollFunding ne sonderait rien (filtre
+    // fundingSondable) mais resterait armé.
+    expect(vi.getTimerCount()).toBe(minuteursAvant - 1);
+    urls.length = 0;
+    await vi.advanceTimersByTimeAsync(3 * 60_000);
+    expect(urls.filter((url) => url.includes("premiumIndex"))).toEqual([]);
+  });
+});

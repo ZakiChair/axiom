@@ -6,7 +6,7 @@
  *  - la map `sources` reste creuse (purge des orphelins).
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_WATCHLIST, PRINCIPAL_GROUP_ID, watchlistStore } from "./watchlist";
+import { DEFAULT_WATCHLIST, PRINCIPAL_GROUP_ID, symboleWatchlist, watchlistStore } from "./watchlist";
 
 beforeEach(() => {
   // Réinitialise via setAll => un unique groupe « Principal » (état de départ propre).
@@ -125,5 +125,26 @@ describe("watchlistStore — groupes/onglets", () => {
     watchlistStore.getState().removeGroup(altId);
     // XRPUSDT ne figure plus dans aucun groupe → sa source explicite est purgée.
     expect(watchlistStore.getState().sources["XRPUSDT"]).toBeUndefined();
+  });
+});
+
+describe("watchlistStore — alias pointé d'une série autonome (jamais sondé chez Twelve Data)", () => {
+  it("« USDT.D » ajouté est stocké STABLE.D ; la forme composite ensuite est un doublon", () => {
+    watchlistStore.getState().add("usdt.d");
+    watchlistStore.getState().add("USDT.D+USDC.D+DAI.D");
+    const s = watchlistStore.getState();
+    expect(s.symbols).toEqual([...DEFAULT_WATCHLIST, "STABLE.D"]);
+    expect(s.sources).toEqual({});
+  });
+
+  it("BRK.B, EUR/USD et STABLES restent tels quels", () => {
+    for (const symbole of ["brk.b", "EUR/USD", "stables"]) watchlistStore.getState().add(symbole);
+    expect(watchlistStore.getState().symbols).toEqual([...DEFAULT_WATCHLIST, "BRK.B", "EUR/USD", "STABLES"]);
+  });
+
+  it("symboleWatchlist : la série pour un alias pointé, le symbole inchangé sinon (SYN compris)", () => {
+    expect(symboleWatchlist("USDC.D")).toBe("STABLE.D");
+    expect(symboleWatchlist("BRK.B")).toBe("BRK.B");
+    expect(symboleWatchlist("binance:BTCUSDT|/|binance:ETHUSDT")).toBe("binance:BTCUSDT|/|binance:ETHUSDT");
   });
 });

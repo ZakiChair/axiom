@@ -45,6 +45,7 @@ import {
   construireConditionCroisement,
   INDICATEURS_CROISEMENT,
 } from "./alertsPanel.util";
+import { refusAlertePerp, titreOptionsPerp } from "./optionsPerp.util";
 import { SidebarSection } from "./SidebarSection";
 import { Badge, Unusable, Vide } from "./ui";
 
@@ -123,6 +124,7 @@ export function AlertsPanel() {
   const defs = useStore(alertsStore, (s) => s.defs);
   const journal = useStore(alertsStore, (s) => s.journal);
   const symbolCourant = useStore(marketStore, (s) => s.symbol);
+  const exchangeCourant = useStore(marketStore, (s) => s.exchange);
   const tfCourant = useStore(marketStore, (s) => s.timeframe);
   // Alertes de scan (EQS) : liste réactive + message discret sur refus de reprise (limite).
   const alertesScan = useStore(presetAlertsStore, (s) => s.alertes);
@@ -191,6 +193,13 @@ export function AlertsPanel() {
   const [symboleCompose, setSymboleCompose] = useState<string | null>(null);
 
   const symboleEffectif = (symbol.trim() || symbolCourant).toUpperCase();
+  // Cible des contrôles perp : le symbole de la composition en cours, sinon le symbole effectif —
+  // une composition vidée par « × » ne garde pas son ancien symbole.
+  const symboleCible = (composition.length > 0 ? symboleCompose : null) ?? symboleEffectif;
+  // Funding, CVD S/P et Cascade liq exigent un marché perp pour la cible (source du graphe et
+  // symbole saisi ou composé) : options désactivées sur STABLE.D, SPY… (création seulement :
+  // les défs déjà persistées restent, inertes au runtime). Titre propre à un graphe Twelve Data.
+  const titrePerp = titreOptionsPerp(exchangeCourant, symboleCible);
 
   const outputsDispo = useMemo(() => {
     const idef = getIndicator(indicateurId);
@@ -222,6 +231,12 @@ export function AlertsPanel() {
     if (IS_VERCEL && type === "whale-flux") return;
     if (composer && (type === "whale-flux" || type === "onchain-seuil" || (type === "prix-croise" && sens === "les-deux"))) {
       setErreurForm("Type non composable (whale-flux / on-chain / prix ↕).");
+      return;
+    }
+    // Contrôle défensif : le type choisi survit à un changement de graphe (option désactivée depuis).
+    const refusPerp = refusAlertePerp([type], marketStore.getState().exchange, symboleCible);
+    if (refusPerp !== null) {
+      setErreurForm(refusPerp);
       return;
     }
     let condition: Condition;
@@ -538,9 +553,9 @@ export function AlertsPanel() {
             <option value="variation-pct">Var %</option>
             <option value="indicateur-seuil">Indicateur</option>
             <option value="indicateur-croisement">Croisement</option>
-            <option value="funding-extreme">Funding</option>
-            <option value="cvd-spot-perp-div">CVD S/P</option>
-            <option value="liq-cascade">Cascade liq</option>
+            <option value="funding-extreme" disabled={titrePerp !== null} title={titrePerp ?? undefined}>Funding</option>
+            <option value="cvd-spot-perp-div" disabled={titrePerp !== null} title={titrePerp ?? undefined}>CVD S/P</option>
+            <option value="liq-cascade" disabled={titrePerp !== null} title={titrePerp ?? undefined}>Cascade liq</option>
             <option value="regime-seuil">Régime</option>
             <option value="onchain-seuil">On-chain</option>
             <option value="whale-flux">Baleines</option>
@@ -918,11 +933,17 @@ export function AlertsPanel() {
                 setErreurForm("RVOL saisonnier : choisir l’intervalle 1h avant de créer la composition.");
                 return;
               }
+              // Le graphe a pu passer sur une série depuis l'ajout d'une sous-condition perp.
+              const refusCompose = refusAlertePerp(composition.map((c) => c.type), marketStore.getState().exchange, symboleCible);
+              if (refusCompose !== null) {
+                setErreurForm(refusCompose);
+                return;
+              }
               const aUneBougie = composition.some((c) =>
                 c.type === "variation-pct" || c.type === "indicateur-seuil" || c.type === "indicateur-croisement",
               );
               alertsStore.getState().ajouter({
-                symbol: symboleCompose ?? symboleEffectif,
+                symbol: symboleCible,
                 source: marketStore.getState().exchange,
                 condition: { type: "composite", conditions: [...composition] },
                 ...(aUneBougie ? { timeframe: marketStore.getState().timeframe } : {}),

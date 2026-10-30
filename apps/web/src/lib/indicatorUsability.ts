@@ -2,6 +2,7 @@ import type { AuxSeriesId, ExchangeId, IndicatorDef, Timeframe } from "@axiom/ty
 import { TIMEFRAME_REQUIS } from "@axiom/indicators";
 import { tfAtLeast } from "../chart/tfOrder";
 import { coinalyzeKeyStore } from "../store/coinalyze";
+import { sansMarchePerp } from "../store/market";
 import { daemonSupporte } from "../data/daemon";
 import { basePerp } from "../data/symbol";
 import { normaliserIdentiteFunding } from "../data/fundingIdentity";
@@ -172,6 +173,14 @@ export function raisonUnusableIndicateur(
   }
   if (def.id === "quarterlyBasis" && actif !== "BTC" && actif !== "ETH") {
     return "Basis trimestriel disponible uniquement pour BTC et ETH";
+  }
+  // Liquidations perp : une série ou Twelve Data n'en a pas (pas AUX_PERP : sa règle USDT
+  // écarterait HYPE-PERP, servi par Coinalyze). Le symbole compte : avec une source de transition
+  // (`navigateTo` à source explicite, ex. {binance, SPY}), une série ou une TradFi reconnue reste
+  // refusée. La réponse en vol d'un ancien symbole n'arrive pas jusqu'ici : ChartIndicators la
+  // jette en amont, quel que soit le nouveau symbole (chart/indicators.ts).
+  if (def.id === "liqParBougie" && sansMarchePerp(exchange, symbol)) {
+    return "Nécessite un marché perp";
   }
   // Flux liquidations Coinalyze : `hasKey` reflète déjà le repli `.env` du proxy
   // local (même prédicat que `rawFetch("oi")` dans chart/auxProvider.ts).

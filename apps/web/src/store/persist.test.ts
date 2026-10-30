@@ -259,6 +259,26 @@ describe("hydrateStores — marché (exchange/symbole/timeframe)", () => {
     expect(marketStore.getState()).toMatchObject({ exchange: "synthetic", symbol: "TOTAL3", timeframe: "1d" });
   });
 
+  // Alias pointé d'avant le correctif : setMarket résoudrait déjà le couple en {synthetic, STABLE.D}.
+  // hydrateChart le résout AVANT de valider l'unité, contre la série : gardée si STABLE.D la sert
+  // (points horaires), sinon la suivante proposée (1m → 1h).
+  it.each([
+    ["USDT.D", "1h", "1h"],
+    ["usdt.d", "4h", "4h"],
+    ["USDT.D+USDC.D+DAI.D", "1m", "1h"],
+  ])("identité restaurée {twelvedata, %s, %s} : la série STABLE.D en %s", (symbol, tfPersistee, tfRestauree) => {
+    localStorage.setItem(CHART_KEY, JSON.stringify({ exchange: "twelvedata", symbol, timeframe: tfPersistee, indicators: [] }));
+    hydrateStores();
+    const { exchange, symbol: restaure, timeframe } = marketStore.getState();
+    expect({ exchange, symbol: restaure, timeframe }).toEqual({ exchange: "synthetic", symbol: "STABLE.D", timeframe: tfRestauree });
+  });
+
+  it.each(["BRK.B", "EUR/USD"])("témoin : {twelvedata, %s} restauré tel quel", (symbol) => {
+    localStorage.setItem(CHART_KEY, JSON.stringify({ exchange: "twelvedata", symbol, timeframe: "1d", indicators: [] }));
+    hydrateStores();
+    expect(marketStore.getState()).toMatchObject({ exchange: "twelvedata", symbol, timeframe: "1d" });
+  });
+
   it("ignore un exchange non restaurable (absent de RESTORABLE_EXCHANGES)", () => {
     localStorage.setItem(
       CHART_KEY,
@@ -353,6 +373,38 @@ describe("hydrateStores — watchlist nouveau format (groupes + sources)", () =>
     expect(s.activeGroupId).toBe("principal");
     // FANTOME (absent des groupes) et la source invalide sont écartées.
     expect(s.sources).toEqual({ BTCUSDT: "coinbase" });
+  });
+
+  it("un alias pointé persisté avant le correctif (USDT.D) devient STABLE.D, sans doublon ni source Twelve Data", () => {
+    localStorage.setItem(
+      WATCH_KEY,
+      JSON.stringify({
+        groups: [
+          { id: "principal", name: "Principal", symbols: ["BTCUSDT", "USDT.D", "STABLE.D", "BRK.B"] },
+          { id: "grp-2", name: "Séries", symbols: ["DAI.D", "binance:BTCUSDT|/|binance:ETHUSDT"] },
+        ],
+        activeGroupId: "principal",
+        sources: { "USDT.D": "twelvedata", "BRK.B": "twelvedata" },
+      })
+    );
+
+    hydrateStores();
+
+    const s = watchlistStore.getState();
+    expect(s.groups.map((g) => g.symbols)).toEqual([
+      ["BTCUSDT", "STABLE.D", "BRK.B"],
+      ["STABLE.D", "binance:BTCUSDT|/|binance:ETHUSDT"],
+    ]);
+    expect(s.symbols).toEqual(["BTCUSDT", "STABLE.D", "BRK.B"]);
+    expect(s.sources).toEqual({ "BRK.B": "twelvedata" });
+  });
+
+  it("ancien format (liste plate) : le même alias migre aussi", () => {
+    localStorage.setItem(WATCH_KEY, JSON.stringify(["ETHUSDT", "usdc.d", "STABLE.D"]));
+
+    hydrateStores();
+
+    expect(watchlistStore.getState().symbols).toEqual(["ETHUSDT", "STABLE.D"]);
   });
 
   it("saveWatchlist écrit le nouveau format objet {groups, activeGroupId, sources}", () => {

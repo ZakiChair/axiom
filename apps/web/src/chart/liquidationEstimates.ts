@@ -25,7 +25,7 @@ import type { Commande } from "../commands/registry";
 import { candleContenant } from "./liquidationMarkers";
 import { histOiUsdAvecRepli } from "../data/referentiels";
 import { basePerp } from "../data/symbol";
-import { marketStore } from "../store/market";
+import { grapheSansPerp, marketStore } from "../store/market";
 
 /** Un niveau de liquidation ESTIMÉ (approximation — étiquetage « EST. » obligatoire). */
 export interface NiveauEstime {
@@ -205,6 +205,8 @@ const REFRESH_MS = 15 * 60 * 1000;
 const OI_PERIOD = "1hour";
 
 let symboleActif: string | null = null;
+/** Le graphe de `symboleActif` est sans marché perp (une source seule peut le basculer). */
+let sansPerpActif = false;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
@@ -215,7 +217,8 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null;
  *     (« BTC-USD » Coinbase, « XBT/USD » Kraken, MEXC…) donnait un identifiant inconnu de la
  *     source, donc une série vide. On interroge donc `basePerp(symbol) + "USDT"` ; une base
  *     inextricable (symbole synthétique…) publie explicitement un historique VIDE — la légende
- *     affiche alors la raison (cf. `libelleLegendeEst`).
+ *     affiche alors la raison (cf. `libelleLegendeEst`). De même sans marché perp au graphe
+ *     (EUR/USD donnerait la base « EUR ») : aucune requête, ni au rafraîchissement.
  *  2. REPLI DE SOURCE — `histOiUsdAvecRepli` bascule sur `openInterestHist` Binance (gratuit,
  *     sans clé) dès que Coinalyze rejette ou rend une série vide (quota / 401 sans clé).
  *
@@ -231,7 +234,7 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null;
  * Ne REJETTE jamais (contrat de `histOiUsdAvecRepli`) : les deux sources muettes → série vide.
  */
 async function rafraichirOi(symbol: string): Promise<void> {
-  const base = basePerp(symbol);
+  const base = sansPerpActif ? null : basePerp(symbol);
   const depuis = Date.now() - WINDOW_MS;
   const hist =
     base === null
@@ -243,10 +246,15 @@ async function rafraichirOi(symbol: string): Promise<void> {
   oiHistStore.setState((s) => ({ hist, symbol, rev: s.rev + 1 }));
 }
 
-/** Aligne le fetch OI sur l'état (bascule + symbole) : fetch au ON, refresh 15 min, reset au OFF. */
+/**
+ * Aligne le fetch OI sur l'état (bascule, symbole, marché perp ou non) : fetch au ON, refresh
+ * 15 min, reset au OFF.
+ */
 function sync(): void {
   const actif = liqEstStore.getState().actif;
-  const symbol = marketStore.getState().symbol;
+  const etat = marketStore.getState();
+  const symbol = etat.symbol;
+  const sansPerp = grapheSansPerp(etat);
 
   if (!actif) {
     if (refreshTimer !== null) {
@@ -259,8 +267,9 @@ function sync(): void {
     }
     return;
   }
-  if (symboleActif !== symbol) {
+  if (symboleActif !== symbol || sansPerpActif !== sansPerp) {
     symboleActif = symbol;
+    sansPerpActif = sansPerp;
     // Vide l'historique le temps du fetch (évite d'afficher les niveaux de l'ancien symbole).
     oiHistStore.setState((s) => ({ hist: [], symbol, rev: s.rev + 1 }));
     void rafraichirOi(symbol);
@@ -277,11 +286,17 @@ export function demarrerLiquidationEstimates(): void {
   if (controllerStarted) return;
   controllerStarted = true;
 
+  // Symbole ET source : {synthetic, BTCUSDT} republié {binance, BTCUSDT} atteint un perp. Entre
+  // deux perps au même symbole, `sync()` ne relance rien (même OI). Un aller-retour par une série
+  // au même symbole (« Voir sur le chart » d'une alerte {synthetic, BTCUSDT}) relance une requête
+  // OI : contrepartie assumée de l'attente de 15 min évitée.
   let prevSymbol = marketStore.getState().symbol;
+  let prevExchange = marketStore.getState().exchange;
   marketStore.subscribe(() => {
-    const symbol = marketStore.getState().symbol;
-    if (symbol !== prevSymbol) {
+    const { exchange, symbol } = marketStore.getState();
+    if (symbol !== prevSymbol || exchange !== prevExchange) {
       prevSymbol = symbol;
+      prevExchange = exchange;
       sync();
     }
   });

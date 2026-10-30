@@ -247,6 +247,35 @@ describe("raisonUnusableIndicateur", () => {
     ).toBeNull();
   });
 
+  it("liqParBougie : aucune requête Coinalyze sur une série synthétique ou Twelve Data ; les perps restent servis", () => {
+    coinalyzeKeyStore.setState({ hasKey: true });
+    for (const ctx of [
+      { exchange: "synthetic", symbol: "STABLE.D" },
+      { exchange: "synthetic", symbol: "TOTAL3" },
+      { exchange: "synthetic", symbol: "binance:BTCUSDT|/|binance:ETHUSDT" },
+      { exchange: "twelvedata", symbol: "SPY" },
+      { exchange: "twelvedata", symbol: "EUR/USD" },
+    ] as const) {
+      expect(raisonUnusableIndicateur(def("liqParBougie"), { ...ctx, timeframe: "1d" }), ctx.symbol).toBe("Nécessite un marché perp");
+    }
+    // Source de transition (`navigateTo` à source explicite) : le symbole suffit, sinon une requête
+    // liquidation-history part pour la série. La réponse en vol d'un ancien symbole n'arrive pas
+    // jusqu'à la garde : ChartIndicators la jette (indicatorUsability.course.test.ts).
+    for (const ctx of [
+      { exchange: "binance", symbol: "STABLE.D" },
+      { exchange: "bybit", symbol: "TOTAL3" },
+      { exchange: "okx", symbol: "binance:BTCUSDT|/|binance:ETHUSDT" },
+      { exchange: "binance", symbol: "SPY" },
+      { exchange: "hyperliquid", symbol: "EUR/USD" },
+    ] as const) {
+      expect(raisonUnusableIndicateur(def("liqParBougie"), { ...ctx, timeframe: "1d" }), `${ctx.exchange}:${ctx.symbol}`).toBe("Nécessite un marché perp");
+    }
+    // Témoins : la règle USDT d'AUX_PERP n'est pas appliquée (HYPE-PERP reste utilisable).
+    expect(raisonUnusableIndicateur(def("liqParBougie"), binanceBtc)).toBeNull();
+    expect(raisonUnusableIndicateur(def("liqParBougie"), { exchange: "hyperliquid", symbol: "HYPE-PERP", timeframe: "1h" })).toBeNull();
+    expect(raisonUnusableIndicateur(def("liqParBougie"), { exchange: "bybit", symbol: "SUSDT", timeframe: "1h" })).toBeNull();
+  });
+
   it("l'intensité de liquidations exige clé, perp USDT et timeframe Coinalyze", () => {
     coinalyzeKeyStore.setState({ hasKey: false });
     expect(raisonUnusableIndicateur(def("liquidationsOi"), binanceBtc)).toBe("Nécessite une clé Coinalyze");

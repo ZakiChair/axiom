@@ -278,7 +278,7 @@ describe("scanner navigateur — pool puis scan, progression publiée", () => {
     const { fetchImpl, appels } = reseau({ hlpool: "html" });
     const stockage = stockageMemoire();
     const { scanner, publications, derniere } = monter({ fetchImpl, stockage });
-    scanner.demarrer("BTC");
+    scanner.demarrer("BTC", true);
     expect(derniere()?.etat).toBe("chargement"); // « chargement du pool »
     expect(derniere()?.progression).toBeNull();
     await scanner.attendreCycle();
@@ -303,7 +303,7 @@ describe("scanner navigateur — pool puis scan, progression publiée", () => {
     const { fetchImpl, appels } = reseau({ hlpool: "json" });
     const stockage = stockageMemoire();
     const { scanner } = monter({ fetchImpl, stockage });
-    scanner.demarrer("BTC");
+    scanner.demarrer("BTC", true);
     await scanner.attendreCycle();
     expect(appels).not.toContain("leaderboard");
     expect(stockage.donnees.has(CLE_POOL_HL)).toBe(true);
@@ -317,7 +317,7 @@ describe("scanner navigateur — pool puis scan, progression publiée", () => {
       JSON.stringify({ adresses: [adresse(1), adresse(2)], ts: T0 - TTL_POOL_MS + 60_000, nValeur: N_VALEUR_POOL, tailleCible: TAILLE_POOL }),
     );
     const { scanner, derniere } = monter({ fetchImpl, stockage });
-    scanner.demarrer("BTC");
+    scanner.demarrer("BTC", true);
     await scanner.attendreCycle();
     expect(appels).toEqual([`info:${adresse(1)}`, `info:${adresse(2)}`]);
     expect(derniere()?.adressesScannees).toBe(2);
@@ -326,7 +326,7 @@ describe("scanner navigateur — pool puis scan, progression publiée", () => {
   it("stockage bloqué (accès qui jette) : le scan fonctionne quand même", async () => {
     const { fetchImpl } = reseau({ hlpool: "json" });
     const { scanner, derniere } = monter({ fetchImpl, stockage: stockageMemoire(true) });
-    scanner.demarrer("BTC");
+    scanner.demarrer("BTC", true);
     await scanner.attendreCycle();
     expect(derniere()?.etat).toBe("ok");
   });
@@ -334,7 +334,7 @@ describe("scanner navigateur — pool puis scan, progression publiée", () => {
   it("aucun pool (hlpool KO, leaderboard KO, rien de stocké) → « erreur », réessai dans 2 min", async () => {
     const { fetchImpl, appels } = reseau({ hlpool: "panne", leaderboard: "panne" });
     const { scanner, horloge, derniere } = monter({ fetchImpl });
-    scanner.demarrer("BTC");
+    scanner.demarrer("BTC", true);
     await scanner.attendreCycle();
     expect(derniere()?.etat).toBe("erreur");
     expect(appels.filter((a) => a.startsWith("info:"))).toEqual([]);
@@ -346,7 +346,7 @@ describe("scanner navigateur — pool puis scan, progression publiée", () => {
     const stockage = stockageMemoire();
     stockage.setItem(CLE_POOL_HL, JSON.stringify({ adresses: [adresse(1)], ts: T0 - 2 * TTL_POOL_MS, nValeur: 150, tailleCible: 500 }));
     const { scanner, derniere } = monter({ fetchImpl, stockage });
-    scanner.demarrer("BTC");
+    scanner.demarrer("BTC", true);
     await scanner.attendreCycle();
     expect(derniere()).toMatchObject({ etat: "ok", adressesScannees: 1 });
   });
@@ -356,15 +356,15 @@ describe("scanner navigateur — un instantané pour tous les coins, rescan, arr
   it("changer de coin republie depuis le MÊME instantané, sans aucun appel réseau", async () => {
     const { fetchImpl, appels } = reseau({ hlpool: "json" });
     const { scanner, derniere } = monter({ fetchImpl });
-    scanner.demarrer("BTC");
+    scanner.demarrer("BTC", true);
     await scanner.attendreCycle();
     const n = appels.length;
-    scanner.definirCoin("ETH");
+    scanner.definirCoin("ETH", true);
     expect(derniere()).toMatchObject({ etat: "ok", adressesScannees: 12 });
     expect(derniere()?.niveaux.every((x) => x.addr !== adresse(1))).toBe(true);
-    scanner.definirCoin("SOL");
+    scanner.definirCoin("SOL", true);
     expect(derniere()?.etat).toBe("vide");
-    scanner.definirCoin(null);
+    scanner.definirCoin(null, false);
     expect(derniere()?.etat).toBe("vide");
     expect(appels.length).toBe(n);
   });
@@ -372,7 +372,7 @@ describe("scanner navigateur — un instantané pour tous les coins, rescan, arr
   it("rescan 5 min après le début du scan ; l'instantané complet reste affiché pendant le rescan", async () => {
     const { fetchImpl, appels } = reseau({ hlpool: "json" });
     const { scanner, horloge, publications } = monter({ fetchImpl });
-    scanner.demarrer("BTC");
+    scanner.demarrer("BTC", true);
     await scanner.attendreCycle();
     expect(horloge.minuteurs.map((m) => m.ms)).toEqual([PERIODE_SCAN_MS]);
     const avant = publications.length;
@@ -398,24 +398,24 @@ describe("scanner navigateur — un instantané pour tous les coins, rescan, arr
     }) as typeof fetch;
     const m = monter({ fetchImpl });
     scanner = m.scanner;
-    m.scanner.demarrer("BTC");
+    m.scanner.demarrer("BTC", true);
     await m.scanner.attendreCycle();
     const nPublications = m.publications.length;
     expect(appels.filter((a) => a.startsWith("info:"))).toHaveLength(8);
     expect(m.horloge.minuteurs).toEqual([]);
-    m.scanner.definirCoin("ETH");
+    m.scanner.definirCoin("ETH", true);
     expect(m.publications.length).toBe(nPublications);
   });
 
   it("re-démarrage dans les 5 min : l'instantané complet est republié tout de suite, pas de nouveau scan", async () => {
     const { fetchImpl, appels } = reseau({ hlpool: "json" });
     const { scanner, horloge, derniere } = monter({ fetchImpl });
-    scanner.demarrer("BTC");
+    scanner.demarrer("BTC", true);
     await scanner.attendreCycle();
     scanner.arreter();
     const n = appels.length;
     horloge.t += 60_000;
-    scanner.demarrer("BTC");
+    scanner.demarrer("BTC", true);
     expect(derniere()).toMatchObject({ etat: "ok", adressesScannees: 12 });
     expect(horloge.minuteurs.map((m) => m.ms)).toEqual([PERIODE_SCAN_MS - 60_000]);
     expect(appels.length).toBe(n);
@@ -425,7 +425,7 @@ describe("scanner navigateur — un instantané pour tous les coins, rescan, arr
     const { fetchImpl, appels } = reseau({ hlpool: "json" });
     const vis = visibilite(true);
     const { scanner, derniere } = monter({ fetchImpl, vis });
-    scanner.demarrer("BTC");
+    scanner.demarrer("BTC", true);
     await new Promise((r) => setTimeout(r, 10));
     expect(appels).toEqual(["hlpool"]); // pool chargé, scan en pause
     expect(derniere()?.progression).toEqual({ faites: 0, total: 12 });
@@ -439,7 +439,7 @@ describe("scanner navigateur — un instantané pour tous les coins, rescan, arr
     const { fetchImpl, appels } = reseau({ hlpool: "json" });
     const vis = visibilite();
     const { scanner, horloge, derniere } = monter({ fetchImpl, vis });
-    scanner.demarrer("BTC");
+    scanner.demarrer("BTC", true);
     await scanner.attendreCycle();
     // L'utilisateur passe sur un autre onglet ; le minuteur du rescan tombe pendant l'absence.
     vis.basculer(true);
@@ -459,10 +459,74 @@ describe("scanner navigateur — un instantané pour tous les coins, rescan, arr
   it("un seul scan à la fois : démarrer deux fois ne lance pas deux cycles", async () => {
     const { fetchImpl, appels } = reseau({ hlpool: "json" });
     const { scanner } = monter({ fetchImpl });
-    scanner.demarrer("BTC");
-    scanner.demarrer("ETH");
+    scanner.demarrer("BTC", true);
+    scanner.demarrer("ETH", true);
     await scanner.attendreCycle();
     expect(appels.filter((a) => a === "hlpool")).toHaveLength(1);
     expect(appels.filter((a) => a.startsWith("info:"))).toHaveLength(12);
+  });
+});
+
+describe("scanner navigateur — démarrage différé sans actif perp (STABLE.D, SPY…)", () => {
+  it("activé sans coin : « vide », aucun appel ni minuteur ; le scan démarre au premier actif perp", async () => {
+    const { fetchImpl, appels } = reseau({ hlpool: "json" });
+    const { scanner, horloge, derniere } = monter({ fetchImpl });
+    scanner.demarrer(null, false);
+    await scanner.attendreCycle();
+    expect(derniere()?.etat).toBe("vide");
+    scanner.definirCoin(null, false);
+    expect(appels).toEqual([]);
+    expect(horloge.minuteurs).toEqual([]);
+    scanner.definirCoin("BTC", true);
+    await scanner.attendreCycle();
+    expect(appels.filter((a) => a.startsWith("info:"))).toHaveLength(12);
+    expect(derniere()).toMatchObject({ etat: "ok", adressesScannees: 12 });
+  });
+
+  it("vrai perp sans coin affiché (SUSDT, que basePerp rejette) : le scan démarre comme avant, état « vide »", async () => {
+    const direct = reseau({ hlpool: "json" });
+    const m1 = monter({ fetchImpl: direct.fetchImpl });
+    m1.scanner.demarrer(null, true); // activé sur SUSDT
+    await m1.scanner.attendreCycle();
+    expect(direct.appels.filter((a) => a.startsWith("info:"))).toHaveLength(12);
+    expect(m1.derniere()?.etat).toBe("vide");
+
+    const differe = reseau({ hlpool: "json" });
+    const m2 = monter({ fetchImpl: differe.fetchImpl });
+    m2.scanner.demarrer(null, false); // activé sur STABLE.D…
+    m2.scanner.definirCoin(null, true); // …puis passage sur SUSDT
+    await m2.scanner.attendreCycle();
+    expect(differe.appels.filter((a) => a.startsWith("info:"))).toHaveLength(12);
+  });
+
+  it("un scan lancé n'est pas arrêté par un passage sur une série : son pool sert à toutes les pièces", async () => {
+    const { fetchImpl, appels } = reseau({ hlpool: "json" });
+    const { scanner, horloge, derniere } = monter({ fetchImpl });
+    scanner.demarrer("BTC", true);
+    scanner.definirCoin(null, false);
+    await scanner.attendreCycle();
+    expect(appels.filter((a) => a.startsWith("info:"))).toHaveLength(12);
+    expect(horloge.minuteurs.map((m) => m.ms)).toEqual([PERIODE_SCAN_MS]);
+    scanner.definirCoin("ETH", true);
+    expect(derniere()).toMatchObject({ etat: "ok", adressesScannees: 12 });
+  });
+
+  it("OFF puis ON sans actif perp pendant un scan : le cycle interrompu ne relance rien", async () => {
+    const { fetchImpl: base, appels } = reseau({ hlpool: "json", nPool: 40 });
+    let m: ReturnType<typeof monter> | null = null;
+    const fetchImpl = (async (e: RequestInfo | URL, i?: RequestInit) => {
+      const r = await base(e, i);
+      if (appels.filter((a) => a.startsWith("info:")).length === 8) {
+        m?.scanner.arreter();
+        m?.scanner.demarrer(null, false); // graphe passé sur STABLE.D pendant le OFF/ON
+      }
+      return r;
+    }) as typeof fetch;
+    m = monter({ fetchImpl });
+    m.scanner.demarrer("BTC", true);
+    await m.scanner.attendreCycle();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(appels.filter((a) => a.startsWith("info:"))).toHaveLength(8);
+    expect(m.horloge.minuteurs).toEqual([]);
   });
 });

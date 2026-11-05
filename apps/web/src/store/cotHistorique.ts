@@ -169,17 +169,24 @@ async function lireJson(chemin: string): Promise<unknown> {
   return (await res.json()) as unknown;
 }
 
+/** Réponse CFTC lisible mais sans aucune colonne de positions connue (format modifié). */
+class ColonnesIntrouvables extends Error {}
+
+/** Message affiché : un format modifié ne doit pas ressembler à une panne réseau. */
+export const MESSAGE_COLONNES_INTROUVABLES =
+  "Format CFTC inattendu : aucune colonne de positions reconnue dans la réponse (champ renommé ?).";
+
 /**
  * Découverte des colonnes puis historique complet. `null` si le marché n'a aucune ligne dans
- * ce rapport (non couvert). Rejette sur échec réseau ou si aucune colonne de positions n'est
- * reconnue dans la réponse réelle.
+ * ce rapport (non couvert). Rejette sur échec réseau, ou par `ColonnesIntrouvables` si aucune
+ * colonne de positions n'est reconnue dans la réponse réelle.
  */
 async function telechargerHistorique(dataset: DatasetCot, nom: string): Promise<SerieHistoriqueCot | null> {
   const decouverte = await lireJson(cheminSocrata(dataset, construireRequeteDecouverte(nom)));
   if (!Array.isArray(decouverte) || decouverte.length === 0) return null;
   const colonnes = resoudreColonnes(dataset, colonnesPresentes(decouverte));
   if (colonnes.categories.every((c) => c === null)) {
-    throw new Error("colonnes de positions introuvables dans la réponse CFTC");
+    throw new ColonnesIntrouvables("colonnes de positions introuvables dans la réponse CFTC");
   }
   const historique = await lireJson(cheminSocrata(dataset, construireRequeteHistorique(nom, colonnes)));
   return parserHistorique(historique, dataset, nom, colonnes);
@@ -281,6 +288,13 @@ export const cotHistoriqueStore = createStore<CotHistoriqueState>((set, get) => 
     set({ enCours: true });
     try {
       const serie = await telechargerHistorique(dataset, nom);
+      // Une réponse valide est gardée même si la sélection a changé entre-temps : un retour
+      // au marché précédent la retrouve sans nouvel appel.
+      const entree = serie !== null && serie.points.length > 0 ? { ts: Date.now(), serie } : null;
+      if (entree !== null) {
+        memoire.set(cle, entree);
+        ecrireCacheHistorique(cle, entree);
+      }
       if (run !== runCourant) return;
       healthStore.getState().setEtat(HEALTH_SOURCE, "polling", { dernierMessageTs: Date.now() });
       if (serie === null) {
@@ -288,20 +302,15 @@ export const cotHistoriqueStore = createStore<CotHistoriqueState>((set, get) => 
         planifier();
         return;
       }
-      if (serie.points.length === 0) throw new Error("historique vide");
-      const entree = { ts: Date.now(), serie };
-      memoire.set(cle, entree);
-      ecrireCacheHistorique(cle, entree);
-      set({ serie, ts: entree.ts, enCours: false, erreur: null, nonCouvert: false });
-    } catch {
+      if (entree === null) throw new Error("historique vide");
+      set({ serie: entree.serie, ts: entree.ts, enCours: false, erreur: null, nonCouvert: false });
+    } catch (e) {
       if (run !== runCourant) return;
       healthStore.getState().marquerErreur(HEALTH_SOURCE, "Historique COT (CFTC) indisponible");
+      const cause = e instanceof ColonnesIntrouvables ? MESSAGE_COLONNES_INTROUVABLES : "Historique COT (CFTC) indisponible.";
       set({
         enCours: false,
-        erreur:
-          connu !== null
-            ? "Historique COT (CFTC) indisponible — dernières données conservées."
-            : "Historique COT (CFTC) indisponible.",
+        erreur: connu !== null ? `${cause} Dernières données conservées.` : cause,
       });
     }
     planifier();

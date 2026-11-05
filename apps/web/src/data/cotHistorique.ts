@@ -271,7 +271,8 @@ export const LIMITE_HISTORIQUE = 5000;
 
 /**
  * Requête d'HISTORIQUE complète d'un marché, restreinte aux colonnes résolues (toutes vues
- * dans la réponse de découverte). Tri chronologique croissant. Fonction PURE.
+ * dans la réponse de découverte). Tri DÉCROISSANT : si `$limit` tronquait un jour, il couperait
+ * les rapports les plus anciens, jamais les plus récents (le parsing retrie). Fonction PURE.
  */
 export function construireRequeteHistorique(nom: string, colonnes: ColonnesResolues): string {
   const select = [CHAMP_NOM, CHAMP_DATE];
@@ -280,7 +281,7 @@ export function construireRequeteHistorique(nom: string, colonnes: ColonnesResol
   const params = new URLSearchParams();
   params.set("$select", [...new Set(select)].join(","));
   params.set("$where", `${CHAMP_NOM}=${litteralSoql(nom)}`);
-  params.set("$order", `${CHAMP_DATE} ASC`);
+  params.set("$order", `${CHAMP_DATE} DESC`);
   params.set("$limit", String(LIMITE_HISTORIQUE));
   return params.toString();
 }
@@ -355,10 +356,11 @@ export function netCategorie(p: PointHistoriqueCot, i: number): number | null {
 
 // ─────────────────────────── Contrôle de cohérence ───────────────────────────
 
-/** Tolérance du contrôle : 0,1 % de l'OI, au moins 1 contrat. */
-function tolerance(oi: number): number {
-  return Math.max(1, Number.isFinite(oi) ? oi * 0.001 : 0);
-}
+/**
+ * Tolérance du contrôle : 1 contrat. La CFTC publie des entiers exactement équilibrés (les non
+ * déclarants sont calculés par différence) : tout écart réel signale une colonne mal associée.
+ */
+export const TOLERANCE_SOMME_NETS = 1;
 
 /**
  * Somme des nets de TOUTES les catégories d'un rapport (doit valoir 0 : chaque contrat a un
@@ -379,7 +381,7 @@ export function sommeNets(p: PointHistoriqueCot): number | null {
 export interface BilanCoherence {
   /** Rapports où toutes les catégories sont présentes (contrôle possible). */
   controles: number;
-  /** Rapports où |Σ nets| dépasse la tolérance. */
+  /** Rapports où |Σ nets| dépasse la tolérance (1 contrat). */
   ecarts: number;
   /** Date du dernier rapport en écart, sinon null. */
   dernierEcart: number | null;
@@ -394,7 +396,7 @@ export function bilanCoherence(serie: SerieHistoriqueCot): BilanCoherence {
     const s = sommeNets(p);
     if (s === null) continue;
     controles++;
-    if (Math.abs(s) > tolerance(p.oi)) {
+    if (Math.abs(s) > TOLERANCE_SOMME_NETS) {
       ecarts++;
       dernierEcart = p.t;
     }
@@ -454,8 +456,14 @@ export function expositionDerniere(serie: SerieHistoriqueCot): ExpositionCategor
 
 // ─────────────────────────── Calendrier de publication hebdomadaire ───────────────────────────
 
-/** Relecture minimale quand le rapport attendu tarde (jour férié, retard de publication). */
+/** Juste après l'heure prévue, la CFTC peut mettre quelques minutes à alimenter Socrata. */
+export const RELANCE_RAPIDE_MS = 15 * 60 * 1000;
+/** Durée des relances rapprochées après l'heure prévue de publication. */
+export const FENETRE_RELANCE_RAPIDE_MS = 3 * 60 * 60 * 1000;
+/** Relecture espacée quand le rapport attendu tarde vraiment (jour férié, retard CFTC). */
 export const RELANCE_MIN_MS = 6 * 60 * 60 * 1000;
+/** Au-delà de 3 semaines sans nouveau rapport, le contrat n'est peut-être plus publié. */
+export const RETARD_ABANDON_MS = 21 * 86_400_000;
 
 /**
  * Instant de publication du rapport SUIVANT celui daté `dernierRapport` (positions d'un mardi).
@@ -469,12 +477,17 @@ export function prochainePublicationCot(dernierRapport: number): number {
 }
 
 /**
- * Instant jusqu'auquel un historique récupéré à `ts` reste à jour : la publication suivante,
- * ou `ts + 6 h` si celle-ci est déjà passée sans nouveau rapport. Fonction PURE.
+ * Instant jusqu'auquel un historique récupéré à `ts` reste à jour :
+ *  - récupéré AVANT la publication suivante → jusqu'à cette publication ;
+ *  - récupéré après, sans nouveau rapport → `ts + 15 min` pendant les 3 h qui suivent l'heure
+ *    prévue (mise à jour Socrata en cours), puis `ts + 6 h` (jour férié, retard CFTC).
+ * Fonction PURE.
  */
 export function finValiditeHistorique(dernierRapport: number | null, ts: number): number {
-  const relance = ts + RELANCE_MIN_MS;
-  return dernierRapport === null ? relance : Math.max(prochainePublicationCot(dernierRapport), relance);
+  if (dernierRapport === null) return ts + RELANCE_MIN_MS;
+  const publication = prochainePublicationCot(dernierRapport);
+  if (ts < publication) return publication;
+  return ts + (ts < publication + FENETRE_RELANCE_RAPIDE_MS ? RELANCE_RAPIDE_MS : RELANCE_MIN_MS);
 }
 
 /** L'historique est-il à jour à `now` ? Fonction PURE. */
@@ -485,6 +498,11 @@ export function historiqueAJour(dernierRapport: number | null, ts: number, now: 
 /** Le rapport suivant aurait-il dû paraître (publication attendue dépassée) ? Fonction PURE. */
 export function rapportEnRetard(dernierRapport: number | null, now: number): boolean {
   return dernierRapport !== null && now >= prochainePublicationCot(dernierRapport);
+}
+
+/** Plus de 3 semaines de retard : contrat peut-être plus publié. Fonction PURE. */
+export function rapportAbandonne(dernierRapport: number | null, now: number): boolean {
+  return dernierRapport !== null && now >= prochainePublicationCot(dernierRapport) + RETARD_ABANDON_MS;
 }
 
 /**
@@ -501,11 +519,17 @@ export function dateRapportSuivant(dernierRapport: number): number {
 /** Version du format de cache compact. */
 export const VERSION_CACHE_HISTORIQUE = 1;
 
-/** Forme JSON compacte : une ligne = [t, oi, l0, s0, l1, s1, …], null pour NaN. */
+/**
+ * Forme JSON compacte : une ligne = [t, oi, l0, s0, l1, s1, …], null pour NaN. `ids` fige l'ordre
+ * des catégories au moment de l'écriture : une entrée dont l'ordre ne correspond plus est rejetée
+ * (jamais de valeurs sous la mauvaise étiquette). Changer un CANDIDAT de colonne impose
+ * d'incrémenter `VERSION_CACHE_HISTORIQUE`.
+ */
 export interface SerieCompacte {
   v: number;
   dataset: DatasetCot;
   nom: string;
+  ids: string[];
   disponibles: boolean[];
   lignes: (number | null)[][];
 }
@@ -519,6 +543,7 @@ export function compacterSerie(serie: SerieHistoriqueCot): SerieCompacte {
     v: VERSION_CACHE_HISTORIQUE,
     dataset: serie.dataset,
     nom: serie.nom,
+    ids: CATEGORIES_GRAPHE[serie.dataset].map((c) => c.id),
     disponibles: [...serie.disponibles],
     lignes: serie.points.map((p) => {
       const ligne: (number | null)[] = [p.t, versJson(p.oi)];
@@ -533,7 +558,9 @@ export function decompacterSerie(brut: unknown): SerieHistoriqueCot | null {
   const c = brut as Partial<SerieCompacte> | null;
   if (c === null || typeof c !== "object" || c.v !== VERSION_CACHE_HISTORIQUE) return null;
   if (c.dataset === undefined || !(c.dataset in CATEGORIES_GRAPHE) || typeof c.nom !== "string") return null;
-  const nbCategories = CATEGORIES_GRAPHE[c.dataset].length;
+  const ids = CATEGORIES_GRAPHE[c.dataset].map((cat) => cat.id);
+  const nbCategories = ids.length;
+  if (!Array.isArray(c.ids) || c.ids.join("|") !== ids.join("|")) return null;
   if (!Array.isArray(c.disponibles) || c.disponibles.length !== nbCategories || !Array.isArray(c.lignes)) return null;
   const points: PointHistoriqueCot[] = [];
   for (const ligne of c.lignes) {

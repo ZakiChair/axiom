@@ -39,6 +39,16 @@ describe("graduations", () => {
     expect(formatAxeCot(2.5, "pctOi")).toBe("2,5 %");
   });
 
+  it("décimales tirées du pas des graduations", () => {
+    expect(ticksRonds(0, 1, 4)).toEqual([0, 0.25, 0.5, 0.75, 1]);
+    expect([0.25, 0.75].map((v) => formatAxeCot(v, "pctOi", 0.25))).toEqual(["0,25 %", "0,75 %"]);
+    expect(formatAxeCot(37_500, "contrats", 12_500)).toBe("37,5K");
+    expect(formatAxeCot(-2_000_000, "contrats", 500_000)).toBe("−2,0M");
+    expect(formatAxeCot(0, "contrats", 500_000)).toBe("0");
+    expect(formatAxeCot(0, "pctOi", 0.25)).toBe("0 %");
+    expect(formatAxeCot(-20, "pctOi", 10)).toBe("−20 %");
+  });
+
   it("valeurs signées exactes", () => {
     expect(formatValeurCot(123456, "contrats").replace(/\u202f|\u00a0/g, " ")).toBe("+123 456");
     expect(formatValeurCot(-5, "contrats")).toBe("−5");

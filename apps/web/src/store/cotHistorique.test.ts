@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CLE_INDEX_HISTORIQUE,
   MAX_ENTREES,
+  MESSAGE_COLONNES_INTROUVABLES,
   RELANCE_ERREUR_MS,
   cleCacheHistorique,
   cotHistoriqueStore,
@@ -158,7 +159,7 @@ describe("chargement d'un historique", () => {
     const appels = stubFetch([], [{ market_and_exchange_names: SP, report_date_as_yyyy_mm_dd: "2026-10-27" }]);
     await cotHistoriqueStore.getState().charger();
     expect(appels).toHaveLength(1);
-    expect(cotHistoriqueStore.getState().erreur).toBe("Historique COT (CFTC) indisponible.");
+    expect(cotHistoriqueStore.getState().erreur).toBe(MESSAGE_COLONNES_INTROUVABLES);
     expect(cotHistoriqueStore.getState().serie).toBeNull();
   });
 
@@ -169,7 +170,7 @@ describe("chargement d'un historique", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
     await cotHistoriqueStore.getState().rafraichir();
     const s = cotHistoriqueStore.getState();
-    expect(s.erreur).toBe("Historique COT (CFTC) indisponible — dernières données conservées.");
+    expect(s.erreur).toBe("Historique COT (CFTC) indisponible. Dernières données conservées.");
     expect(s.serie?.points).toHaveLength(2);
   });
 
@@ -192,10 +193,28 @@ describe("chargement d'un historique", () => {
     await premier;
     expect(cotHistoriqueStore.getState().marche).toBe(OR);
     expect(cotHistoriqueStore.getState().serie?.dataset).toBe("disaggregated");
+    // La réponse tardive est gardée : revenir au S&P ne relit pas la CFTC.
+    const appels = stubFetch(HISTORIQUE);
+    await cotHistoriqueStore.getState().selectionner(SP);
+    expect(appels).toHaveLength(0);
+    expect(cotHistoriqueStore.getState().serie?.dataset).toBe("tff");
   });
 });
 
 describe("suivi hebdomadaire", () => {
+  it("rapport attendu absent juste après l'heure prévue : nouvelle lecture 15 min plus tard", async () => {
+    vi.setSystemTime(new Date("2026-11-06T20:40:00Z"));
+    stubStorage();
+    const desactiver = cotHistoriqueStore.getState().activerSuivi();
+    stubFetch(HISTORIQUE); // Socrata pas encore à jour : dernier rapport toujours le 27 octobre
+    await cotHistoriqueStore.getState().charger();
+    const appels = stubFetch([...HISTORIQUE, recTff("2026-11-03", 1100)]);
+    await vi.advanceTimersByTimeAsync(15 * 60_000 + 31_000);
+    expect(appels).toHaveLength(2);
+    expect(cotHistoriqueStore.getState().serie?.points).toHaveLength(3);
+    desactiver();
+  });
+
   it("relit automatiquement à la publication suivante tant que le graphique est affiché", async () => {
     stubStorage();
     const appels = stubFetch(HISTORIQUE);

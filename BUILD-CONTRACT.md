@@ -2072,8 +2072,11 @@ le rapport ». Livré comme onglet **« Graphique »** de la fenêtre COT exista
   - Unité : contrats ou % de l'open interest total. Périodes 1 a / 3 a (défaut) / 5 a / 10 a / Tout,
     zoom et déplacement (`useDomaineZoom`). Open interest dans un panneau séparé (jamais de double axe).
   - Le tableau sous le graphe est la légende cliquable (masquer / afficher) et la vue chiffrée du
-    dernier rapport : longs, shorts, net, Δ net, net/OI, indice 3 ans (`cotIndex`, même définition
-    que la synthèse). Non déclarants en pointillé atténué.
+    dernier rapport : net, net/OI, Δ net, longs, shorts, indice 3 ans (`cotIndex`, même définition
+    que la synthèse) — net en tête pour rester visible à 390 px. L'infobulle donne chaque rapport.
+  - Identité jamais portée par la seule couleur : « Autres déclarants » en tirets (sa couleur est
+    voisine de la 3e dans le thème sombre), non déclarants en pointillés atténués ; même motif dans
+    la légende. Un rapport sans voisin relié (rapport unique, trou de plus de 3 semaines) est un point.
   - Le bouton « Graphique › » de chaque marché de la synthèse ouvre l'onglet sur ce marché.
 - **Colonnes vérifiées à l'exécution (contrat « ne pas deviner »).**
   - Seules quatre paires étaient vérifiées en direct (`DATASETS_COT`) ; l'environnement de ce lot
@@ -2085,23 +2088,32 @@ le rapport ». Livré comme onglet **« Graphique »** de la fenêtre COT exista
   - Catégorie non résolue : « Absente de la réponse CFTC », jamais 0. Aucune colonne de positions
     reconnue : erreur explicite. Marché absent du rapport : message et piste Legacy.
   - Contrôle à chaque rapport : la somme des nets de toutes les catégories (non déclarants
-    compris) vaut 0, tolérance 0,1 % de l'OI. Un écart est signalé (badge), pas masqué.
+    compris, spreads compensés) vaut 0, tolérance 1 contrat (la CFTC publie des entiers équilibrés).
+    Un écart est signalé au-dessus du graphe (« Contrôle en échec… chiffres à vérifier »), pas masqué.
+    Aucune colonne de positions reconnue : message propre (« Format CFTC inattendu »), distinct
+    d'une panne réseau.
   - **À confirmer** au premier chargement réel : le badge de contrôle doit afficher
     « vaut 0 sur les N rapports » pour un marché TFF et un marché Disaggregated.
 - **Cadence hebdomadaire.**
   - Le rapport du mardi T paraît le vendredi T+3 ; le suivant, le vendredi T+10. Heure retenue :
     20 h 30 UTC (15 h 30 à New York en hiver, une heure de marge l'été). Jours lus en composantes
     locales, comme au parsing (`Date.parse` d'un horodatage flottant).
-  - Un historique reste à jour jusqu'à la publication suivante, ou 6 h après sa récupération si
-    celle-ci est passée sans nouveau rapport (jour férié). Le statut l'affiche (« prochain
-    rapport ven. 6 nov. vers 15 h 30 (New York) » ou « rapport du … attendu, pas encore publié »).
+  - Un historique récupéré avant la publication suivante reste à jour jusqu'à elle. Récupéré
+    après sans nouveau rapport : relu toutes les 15 min pendant 3 h (mise à jour Socrata), puis
+    toutes les 6 h (jour férié). Le statut l'affiche (« prochain rapport ven. 6 nov. vers 15 h 30
+    (New York) », « rapport du … attendu, pas encore publié », et après 3 semaines « contrat
+    peut-être plus publié »).
   - Tant que l'onglet est affiché, une minuterie relit la CFTC à l'échéance (+ 30 s), 30 min après
     un échec ; aucune minuterie onglet fermé. À la réouverture, un historique périmé est relu.
 - **Cache et réseau.**
   - Deux requêtes par (rapport, marché) et par semaine, via `/extapi` (daemon, Vite ou Vercel).
+    Historique en `$order DESC` : une troncature par `$limit` (5 000) couperait les plus anciens.
   - localStorage compact `axiom:cot:historique:v1:<dataset>:<marché>` (≈ 10× plus petit que les
     records Socrata), au plus 8 séries, index LRU `axiom:cot:historique-index:v1` ; quota plein :
-    éviction des plus anciennes. Dernière sélection : `axiom:cot:graphique:v1`.
+    éviction des plus anciennes. Chaque entrée porte les identifiants de catégories dans leur
+    ordre ; une entrée qui ne correspond plus est rejetée. Changer un candidat de colonne impose
+    d'incrémenter `VERSION_CACHE_HISTORIQUE`. Une réponse arrivée après un changement de marché
+    est gardée en cache. Dernière sélection : `axiom:cot:graphique:v1`.
   - Échec réseau : la dernière série reste affichée avec un bandeau. Santé : source `cot:cftc`
     partagée avec la synthèse.
 - **Fichiers.** `data/cotHistorique.ts` (pur), `store/cotHistorique.ts`,
@@ -2109,3 +2121,21 @@ le rapport ». Livré comme onglet **« Graphique »** de la fenêtre COT exista
   `CotWindow.tsx` ; tests unitaires associés ; e2e `cot-graphique.e2e.ts` (données fictives
   cohérentes, horloge figée), inscrit dans `scripts/ci.sh --e2e`. `cot-lisibilite.e2e.ts` : l'ordre
   clavier passe désormais par l'onglet « Graphique » avant la zone de rapports.
+- **Budget.** Chargement initial **1 188 308 / 355 986** (plafond 1 220 000 / 360 000), quasi inchangé :
+  le graphique vit dans le bloc chargé à la demande de la fenêtre COT (≈ 34 Ko bruts).
+- **Revue et tests.**
+  - Revue indépendante : aucun bloquant. Trois points importants confirmés puis corrigés (relecture
+    jusqu'à 6 h après la publication, aucune relance rapprochée, rapport isolé invisible) et les
+    mineurs (tolérance, alerte visible, axe, réponse tardive, ordre du cache, tri, abandon, survol
+    tactile, colonnes à 390 px, motifs de trait).
+  - Calendrier vérifié pour tous les mardis de 2025 à 2027 dans 11 fuseaux, changements d'heure
+    compris ; tests unitaires sous 4 fuseaux.
+  - Web : 434 fichiers / 6 430 tests verts, typage et build verts ; e2e `cot-graphique` et
+    `cot-lisibilite` verts à 1280 et 390 px.
+  - Préexistant, hors lot, reproduit à l'identique sur a2043a1 :
+    - `tests daemon (bun)` rouge sur GitHub : `vercelProxy.redirection.test.ts` simule
+      `node:dns/promises` sans export nommé `lookup` et, exécuté en premier sur le runner, casse le
+      chargement des 5 fichiers qui importent `proxy.ts` (correctif de 3 lignes proposé sur la PR) ;
+    - `src/chart/orderflow.cadence.test.ts` : erreur non gérée intermittente (WebSocket réelle)
+      dans un environnement sans réseau ;
+    - `CotWindow.test.tsx` dépend du fuseau (« 14 jours » faux à New York, Pago Pago, Santiago).

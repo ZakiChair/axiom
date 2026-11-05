@@ -271,10 +271,11 @@ synthèse y mène directement.
 
 Chaque semaine, la CFTC publie le vendredi à 15 h 30 (New York) les positions du
 mardi : l'historique est conservé en cache jusqu'à la publication suivante, puis
-relu automatiquement (toutes les 6 h si le rapport tarde, jour férié). Les
-colonnes CFTC sont lues dans la réponse réelle avant d'être demandées ; une
-catégorie introuvable est dite absente et un contrôle vérifie que la somme des
-nets de toutes les catégories vaut 0 à chaque rapport.
+relu automatiquement (toutes les 15 min pendant 3 h si le rapport tarde, puis
+toutes les 6 h — jour férié). Les colonnes CFTC sont lues dans la réponse réelle
+avant d'être demandées ; une catégorie introuvable est dite absente et un
+contrôle vérifie que la somme des nets de toutes les catégories vaut 0 à chaque
+rapport (alerte au-dessus du graphe sinon).
 
 ### Historique des décisions et nouveaux indicateurs
 

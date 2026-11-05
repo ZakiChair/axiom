@@ -48,14 +48,31 @@ export function ticksRonds(min: number, max: number, n: number): number[] {
   return ticks;
 }
 
-/** Libellé d'axe compact : « −250K », « 1,2M », « 35 % ». */
-export function formatAxeCot(v: number, unite: UniteCot): string {
+/** Décimales nécessaires pour écrire exactement les multiples de `pas` (0 à 3). Fonction PURE. */
+export function decimalesPas(pas: number): number {
+  if (!Number.isFinite(pas) || pas <= 0) return 0;
+  for (let d = 0; d < 3; d++) {
+    const m = pas * 10 ** d;
+    if (Math.abs(m - Math.round(m)) < 1e-6 * Math.max(1, m)) return d;
+  }
+  return 3;
+}
+
+/**
+ * Libellé d'axe compact : « −250K », « 1,2M », « 0,25 % ». Avec `pas` (écart entre graduations),
+ * les décimales suivent le pas : 12 500 → « 12,5K », 0,25 % → « 0,25 % », jamais d'arrondi
+ * trompeur entre deux graduations voisines.
+ */
+export function formatAxeCot(v: number, unite: UniteCot, pas?: number): string {
+  if (v === 0) return unite === "pctOi" ? "0 %" : "0";
   const signe = v < 0 ? "−" : "";
   const abs = Math.abs(v);
-  if (unite === "pctOi") return `${signe}${abs.toFixed(abs < 10 && abs % 1 !== 0 ? 1 : 0).replace(".", ",")} %`;
-  if (abs >= 1e6) return `${signe}${(abs / 1e6).toFixed(abs >= 1e7 ? 0 : 1).replace(".", ",")}M`;
-  if (abs >= 1e3) return `${signe}${(abs / 1e3).toFixed(abs >= 1e4 ? 0 : 1).replace(".", ",")}K`;
-  return `${signe}${abs.toFixed(0)}`;
+  const ecrire = (x: number, decimalesDefaut: number, diviseur: number): string =>
+    x.toFixed(pas !== undefined ? decimalesPas(pas / diviseur) : decimalesDefaut).replace(".", ",");
+  if (unite === "pctOi") return `${signe}${ecrire(abs, abs < 10 && abs % 1 !== 0 ? 1 : 0, 1)} %`;
+  if (abs >= 1e6 || (pas !== undefined && pas >= 1e6)) return `${signe}${ecrire(abs / 1e6, abs >= 1e7 ? 0 : 1, 1e6)}M`;
+  if (abs >= 1e3 || (pas !== undefined && pas >= 1e3)) return `${signe}${ecrire(abs / 1e3, abs >= 1e4 ? 0 : 1, 1e3)}K`;
+  return `${signe}${ecrire(abs, 0, 1)}`;
 }
 
 /** Valeur d'infobulle/tableau : contrats signés exacts, ou % signé à une décimale. */

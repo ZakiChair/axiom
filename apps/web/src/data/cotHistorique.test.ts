@@ -22,6 +22,8 @@ import {
   resoudreColonnes,
   sommeNets,
   RELANCE_MIN_MS,
+  RELANCE_RAPIDE_MS,
+  rapportAbandonne,
   type ColonnesResolues,
 } from "./cotHistorique";
 
@@ -150,7 +152,7 @@ describe("requêtes Socrata", () => {
     expect(p.get("$limit")).toBe(String(LIGNES_DECOUVERTE));
   });
 
-  it("l'historique ne sélectionne que des colonnes vues, par date croissante", () => {
+  it("l'historique ne sélectionne que des colonnes vues, du plus récent au plus ancien", () => {
     const presentes = new Set(COLONNES_TFF.filter((c) => !c.startsWith("dealer_")));
     const p = new URLSearchParams(construireRequeteHistorique(EUR, resoudreColonnes("tff", presentes)));
     const select = p.get("$select")!.split(",");
@@ -158,7 +160,8 @@ describe("requêtes Socrata", () => {
     expect(select).toContain("open_interest_all");
     expect(select.some((c) => c.startsWith("dealer_"))).toBe(false);
     for (const c of select) expect(presentes.has(c)).toBe(true);
-    expect(p.get("$order")).toBe("report_date_as_yyyy_mm_dd ASC");
+    // Une troncature par $limit couperait les plus anciens, jamais les plus récents.
+    expect(p.get("$order")).toBe("report_date_as_yyyy_mm_dd DESC");
     expect(p.get("$where")).toBe(`market_and_exchange_names='${EUR}'`);
   });
 
@@ -209,7 +212,7 @@ describe("contrôle Σ nets = 0", () => {
     expect(sommeNets(serie.points[1]!)).toBe(-10);
     const bilan = bilanCoherence(serie);
     expect(bilan.controles).toBe(2);
-    expect(bilan.ecarts).toBe(1); // −10 contrats > 0,1 % de 800
+    expect(bilan.ecarts).toBe(1); // −10 contrats : au-delà de la tolérance d'un contrat
     expect(bilan.dernierEcart).toBe(serie.points[1]!.t);
   });
 
@@ -268,12 +271,28 @@ describe("calendrier hebdomadaire de la CFTC", () => {
     expect(rapportEnRetard(null, Date.now())).toBe(false);
   });
 
-  it("rapport en retard (jour férié) : nouvelle vérification au plus tôt 6 h après", () => {
-    const ts = Date.parse("2026-11-06T21:00:00Z");
-    expect(finValiditeHistorique(mardi, ts)).toBe(ts + RELANCE_MIN_MS);
-    expect(historiqueAJour(mardi, ts, ts + RELANCE_MIN_MS - 1)).toBe(true);
-    expect(historiqueAJour(mardi, ts, ts + RELANCE_MIN_MS)).toBe(false);
-    expect(finValiditeHistorique(null, ts)).toBe(ts + RELANCE_MIN_MS);
+  it("récupéré peu avant la publication : relu dès la publication, pas 6 h plus tard", () => {
+    const vendrediMidi = Date.parse("2026-11-06T18:00:00Z");
+    expect(finValiditeHistorique(mardi, vendrediMidi)).toBe(Date.parse("2026-11-06T20:30:00Z"));
+    expect(historiqueAJour(mardi, Date.parse("2026-11-06T20:29:00Z"), Date.parse("2026-11-06T20:31:00Z"))).toBe(false);
+  });
+
+  it("rapport attendu pas encore là : toutes les 15 min pendant 3 h, puis toutes les 6 h", () => {
+    const juste = Date.parse("2026-11-06T20:31:00Z");
+    expect(finValiditeHistorique(mardi, juste)).toBe(juste + RELANCE_RAPIDE_MS);
+    const finFenetre = Date.parse("2026-11-06T23:29:00Z");
+    expect(finValiditeHistorique(mardi, finFenetre)).toBe(finFenetre + RELANCE_RAPIDE_MS);
+    const ferie = Date.parse("2026-11-06T23:31:00Z"); // jour férié : publication lundi
+    expect(finValiditeHistorique(mardi, ferie)).toBe(ferie + RELANCE_MIN_MS);
+    expect(historiqueAJour(mardi, ferie, ferie + RELANCE_MIN_MS - 1)).toBe(true);
+    expect(historiqueAJour(mardi, ferie, ferie + RELANCE_MIN_MS)).toBe(false);
+    expect(finValiditeHistorique(null, ferie)).toBe(ferie + RELANCE_MIN_MS);
+  });
+
+  it("plus de 3 semaines sans rapport : contrat peut-être plus publié", () => {
+    expect(rapportAbandonne(mardi, Date.parse("2026-11-20T12:00:00Z"))).toBe(false);
+    expect(rapportAbandonne(mardi, Date.parse("2026-11-27T21:00:00Z"))).toBe(true);
+    expect(rapportAbandonne(null, Date.now())).toBe(false);
   });
 });
 
@@ -298,6 +317,9 @@ describe("cache compact", () => {
     expect(decompacterSerie({ ...ok, dataset: "inconnu" })).toBeNull();
     expect(decompacterSerie({ ...ok, dataset: "legacy" })).toBeNull(); // 3 catégories ≠ 5
     expect(decompacterSerie({ ...ok, lignes: [[1, 2, 3]] })).toBeNull();
+    // Ordre des catégories changé depuis l'écriture : rejet, jamais de valeur sous une autre étiquette.
+    expect(decompacterSerie({ ...ok, ids: ["asset_mgr", "dealer", "lev_money", "other_rept", "nonrept"] })).toBeNull();
+    expect(decompacterSerie({ ...ok, ids: undefined })).toBeNull();
     expect(decompacterSerie(null)).toBeNull();
   });
 });

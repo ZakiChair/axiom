@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { GraphiqueCot } from "./GraphiqueCot";
+import { GraphiqueCot, tracerLigne } from "./GraphiqueCot";
 import { CotWindow } from "../CotWindow";
 import { cotHistoriqueStore } from "../../store/cotHistorique";
-import { parserHistorique, resoudreColonnes } from "../../data/cotHistorique";
+import { parserHistorique, resoudreColonnes, type PointHistoriqueCot } from "../../data/cotHistorique";
 
 // Le snapshot SSR de Zustand est figé à la création ; les fixtures visent ici l'état courant.
 vi.mock("zustand", () => ({
@@ -100,6 +100,7 @@ describe("graphique COT — exposition par catégorie", () => {
   it("une incohérence Σ nets ≠ 0 est signalée", () => {
     const html = rendu(COLONNES, [rec("2026-10-20", 900000, 600000), { ...rec("2026-10-27", 950000, 650000), lev_money_positions_short: "300000" }]);
     expect(html).toContain("Σ des nets ≠ 0 sur 1/2 rapports");
+    expect(html).toContain("Contrôle en échec : la somme des nets des catégories n&#x27;est pas nulle sur 1/2");
   });
 
   it("marché absent du rapport détaillé : message et piste Legacy", () => {
@@ -129,5 +130,44 @@ describe("fenêtre COT — onglets", () => {
     const html = renderToStaticMarkup(<CotWindow />);
     expect(html).toContain(">Synthèse<");
     expect(html).toContain(">Graphique<");
+  });
+});
+
+describe("tracé d'une catégorie", () => {
+  /** Contexte canvas minimal qui enregistre les appels de tracé. */
+  function ctxEspion() {
+    const appels: string[] = [];
+    const ctx = {
+      lineWidth: 2,
+      strokeStyle: "#123456",
+      fillStyle: "",
+      beginPath: () => appels.push("begin"),
+      moveTo: (x: number) => appels.push(`M${x}`),
+      lineTo: (x: number) => appels.push(`L${x}`),
+      stroke: () => appels.push("stroke"),
+      arc: (x: number) => appels.push(`arc${x}`),
+      fill: () => appels.push("fill"),
+    };
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, appels };
+  }
+  const SEM = 7 * 86_400_000;
+  const pt = (t: number, v: number | null): PointHistoriqueCot => ({ t, oi: 100, longs: [v ?? NaN], shorts: [0] });
+  const valeur = (p: PointHistoriqueCot) => (Number.isFinite(p.longs[0]!) ? p.longs[0]! : null);
+  const x = (t: number) => t / SEM;
+
+  it("relie les rapports consécutifs et marque d'un point ceux sans voisin", () => {
+    // 0-1 reliés ; 5 isolé (écart > 3 semaines) ; 6 absent ; 7 isolé (voisin absent).
+    const points = [pt(0, 1), pt(SEM, 2), pt(5 * SEM, 3), pt(6 * SEM, null), pt(7 * SEM, 4)];
+    const { ctx, appels } = ctxEspion();
+    tracerLigne(ctx, points, 0, points.length - 1, valeur, x, (v) => v);
+    expect(appels.filter((a) => a.startsWith("L"))).toEqual(["L1"]);
+    expect(appels.filter((a) => a.startsWith("arc"))).toEqual(["arc5", "arc7"]);
+    expect(ctx.fillStyle).toBe("#123456");
+  });
+
+  it("une série d'un seul rapport est visible", () => {
+    const { ctx, appels } = ctxEspion();
+    tracerLigne(ctx, [pt(0, 1)], 0, 0, valeur, x, (v) => v);
+    expect(appels.filter((a) => a.startsWith("arc"))).toEqual(["arc0"]);
   });
 });

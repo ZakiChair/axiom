@@ -4,8 +4,8 @@
  *
  * Panneau du haut : net (longs − shorts) de chaque catégorie, en contrats ou en % de l'open
  * interest. Panneau du bas : open interest du marché (échelle propre — jamais de double axe).
- * Le tableau sous le graphe sert de légende (clic = masquer/afficher), donne les chiffres
- * exacts du dernier rapport et tient lieu de vue tabulaire.
+ * Le tableau sous le graphe sert de légende (clic = masquer/afficher) et donne les chiffres
+ * exacts du dernier rapport ; l'infobulle donne ceux de chaque rapport de l'historique.
  *
  * Présentation pure : les données vivent dans `cotHistoriqueStore`. Le tracé suit le patron
  * canvas des fenêtres analytiques (CBPREM, NETLIQ) : CSS px sous `setTransform(dpr)`, tokens
@@ -24,6 +24,7 @@ import {
   expositionDerniere,
   instrumentCot,
   prochainePublicationCot,
+  rapportAbandonne,
   rapportEnRetard,
   type CategorieGraphe,
   type ExpositionCategorie,
@@ -100,6 +101,15 @@ function couleurCss(cat: CategorieGraphe, index: number): string {
   return cat.residuel ? "var(--text-dim)" : `var(--serie-${index + 1})`;
 }
 
+/**
+ * Motif du trait : la couleur ne porte pas seule l'identité. « Autres déclarants » (4e couleur,
+ * voisine de la 3e dans certains thèmes) est en tirets, les non déclarants en pointillés.
+ */
+function motifTrait(cat: CategorieGraphe, index: number): { canvas: number[]; css: "solid" | "dashed" | "dotted" } {
+  if (cat.residuel) return { canvas: [2, 3], css: "dotted" };
+  return index === 3 ? { canvas: [7, 3], css: "dashed" } : { canvas: [], css: "solid" };
+}
+
 // ─────────────────────────── Dessin ───────────────────────────
 
 interface ParamsDessin {
@@ -110,7 +120,7 @@ interface ParamsDessin {
   survol: number | null;
 }
 
-function tracerLigne(
+export function tracerLigne(
   ctx: CanvasRenderingContext2D,
   points: readonly PointHistoriqueCot[],
   debut: number,
@@ -119,22 +129,43 @@ function tracerLigne(
   x: (t: number) => number,
   y: (v: number) => number,
 ): void {
+  // Un rapport sans voisin relié (série d'un seul rapport, rapports espacés de plus de 3 semaines,
+  // valeurs intercalées d'absences) ne produirait qu'un `moveTo` invisible : il reçoit un point.
+  const isoles: [number, number][] = [];
+  let longueur = 0;
+  let dernier: [number, number] | null = null;
+  const clore = (): void => {
+    if (longueur === 1 && dernier !== null) isoles.push(dernier);
+    longueur = 0;
+  };
   ctx.beginPath();
-  let ouvert = false;
   let tPrec = -Infinity;
   for (let k = debut; k <= fin; k++) {
     const p = points[k]!;
     const v = valeur(p);
     if (v === null) {
-      ouvert = false;
+      clore();
       continue;
     }
-    if (!ouvert || p.t - tPrec > ECART_MAX_MS) ctx.moveTo(x(p.t), y(v));
-    else ctx.lineTo(x(p.t), y(v));
-    ouvert = true;
+    const xy: [number, number] = [x(p.t), y(v)];
+    if (longueur === 0 || p.t - tPrec > ECART_MAX_MS) {
+      clore();
+      ctx.moveTo(xy[0], xy[1]);
+    } else ctx.lineTo(xy[0], xy[1]);
+    longueur++;
     tPrec = p.t;
+    dernier = xy;
   }
+  clore();
   ctx.stroke();
+  if (isoles.length > 0) {
+    ctx.fillStyle = ctx.strokeStyle;
+    for (const [xi, yi] of isoles) {
+      ctx.beginPath();
+      ctx.arc(xi, yi, Math.max(2, ctx.lineWidth), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
 }
 
 function dessiner(canvas: HTMLCanvasElement, params: ParamsDessin): void {
@@ -177,11 +208,14 @@ function dessiner(canvas: HTMLCanvasElement, params: ParamsDessin): void {
   }
 
   // ── Panneau net ──
-  const domY = domaineVertical(points, visibles, unite, domaine) ?? { min: -1, max: 1 };
+  const domCalcule = domaineVertical(points, visibles, unite, domaine);
+  const domY = domCalcule ?? { min: -1, max: 1 };
   const yNet = (v: number): number => yDe(g.net, domY, v);
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
-  for (const t of ticksRonds(domY.min, domY.max, 4)) {
+  const ticksNet = domCalcule === null ? [] : ticksRonds(domY.min, domY.max, 4);
+  const pasNet = ticksNet.length > 1 ? ticksNet[1]! - ticksNet[0]! : undefined;
+  for (const t of ticksNet) {
     const yt = yNet(t);
     ctx.strokeStyle = grille;
     ctx.beginPath();
@@ -189,7 +223,17 @@ function dessiner(canvas: HTMLCanvasElement, params: ParamsDessin): void {
     ctx.lineTo(g.right, yt);
     ctx.stroke();
     ctx.fillStyle = dim;
-    ctx.fillText(formatAxeCot(t, unite), g.left - 4, yt);
+    ctx.fillText(formatAxeCot(t, unite, pasNet), g.left - 4, yt);
+  }
+  if (domCalcule === null) {
+    ctx.textAlign = "center";
+    ctx.fillStyle = dim;
+    ctx.fillText(
+      visibles.length === 0 ? "Aucune catégorie affichée" : "Aucune valeur sur cette plage",
+      g.left + g.plotW / 2,
+      (g.net.top + g.net.bottom) / 2 - 12,
+    );
+    ctx.textAlign = "right";
   }
   // Zéro en trait plein : au-dessus = exposition nette acheteuse, en dessous = vendeuse.
   ctx.strokeStyle = dim;
@@ -208,7 +252,7 @@ function dessiner(canvas: HTMLCanvasElement, params: ParamsDessin): void {
     const cat = categories[i]!;
     ctx.strokeStyle = couleurCanvas(cat, i);
     ctx.lineWidth = cat.residuel ? 1.25 : 2;
-    ctx.setLineDash(cat.residuel ? [4, 3] : []);
+    ctx.setLineDash(motifTrait(cat, i).canvas);
     tracerLigne(ctx, points, debut, fin, (p) => valeurCot(p, i, unite), x, yNet);
   }
   ctx.setLineDash([]);
@@ -224,6 +268,7 @@ function dessiner(canvas: HTMLCanvasElement, params: ParamsDessin): void {
     const pasOi = ticksRonds(0, oiMax, 2);
     const domOi: Domaine = { min: 0, max: Math.max(oiMax * 1.05, pasOi.at(-1) ?? oiMax) };
     const yOi = (v: number): number => yDe(g.oi, domOi, v);
+    const ecartOi = pasOi.length > 1 ? pasOi[1]! - pasOi[0]! : undefined;
     for (const t of pasOi) {
       if (t === 0) continue;
       ctx.strokeStyle = grille;
@@ -232,7 +277,7 @@ function dessiner(canvas: HTMLCanvasElement, params: ParamsDessin): void {
       ctx.lineTo(g.right, yOi(t));
       ctx.stroke();
       ctx.fillStyle = dim;
-      ctx.fillText(formatAxeCot(t, "contrats"), g.left - 4, yOi(t));
+      ctx.fillText(formatAxeCot(t, "contrats", ecartOi), g.left - 4, yOi(t));
     }
     ctx.save();
     ctx.beginPath();
@@ -303,13 +348,13 @@ function dessiner(canvas: HTMLCanvasElement, params: ParamsDessin): void {
 
 // ─────────────────────────── Sous-composants ───────────────────────────
 
-/** Échantillon du style de trait d'une catégorie (identité jamais portée par la seule couleur). */
+/** Échantillon du trait d'une catégorie : sa couleur et son motif, comme sur le graphe. */
 function Echantillon({ cat, index }: { cat: CategorieGraphe; index: number }) {
   return (
     <span
       aria-hidden="true"
       className="inline-block w-3.5 shrink-0"
-      style={{ borderTop: `${cat.residuel ? "1.5px dashed" : "2.5px solid"} ${couleurCss(cat, index)}` }}
+      style={{ borderTop: `${cat.residuel ? "2px" : "2.5px"} ${motifTrait(cat, index).css} ${couleurCss(cat, index)}` }}
     />
   );
 }
@@ -373,16 +418,17 @@ function TableauExposition({
         );
       },
     },
-    { id: "long", label: "Longs", align: "right", rendu: nombre((l) => formatEntier(l.long)) },
-    { id: "short", label: "Shorts", align: "right", rendu: nombre((l) => formatEntier(l.short)) },
+    // Net d'abord : à 390 px, la colonne essentielle reste visible sans défiler le tableau.
     { id: "net", label: "Net", align: "right", rendu: nombre((l) => formatValeurCot(l.net, "contrats"), true) },
+    { id: "pct", label: "Net/OI", align: "right", rendu: nombre((l) => formatValeurCot(l.netPctOi, "pctOi"), unite === "pctOi") },
     {
       id: "delta",
       label: "Δ net",
       align: "right",
       rendu: nombre((l) => <span className={deltaClasse(l.deltaNet)}>{formatValeurCot(l.deltaNet, "contrats")}</span>),
     },
-    { id: "pct", label: "Net/OI", align: "right", rendu: nombre((l) => formatValeurCot(l.netPctOi, "pctOi"), unite === "pctOi") },
+    { id: "long", label: "Longs", align: "right", rendu: nombre((l) => formatEntier(l.long)) },
+    { id: "short", label: "Shorts", align: "right", rendu: nombre((l) => formatEntier(l.short)) },
     { id: "indice", label: "Indice", align: "right", rendu: nombre((l) => (l.indice === null ? "—" : Math.round(l.indice))) },
   ];
   return (
@@ -419,11 +465,16 @@ function StatutPublication({ serie, ts, enCours }: { serie: SerieHistoriqueCot; 
     timeZone: "America/New_York",
   });
   const retard = rapportEnRetard(dernier, Date.now());
+  const abandonne = rapportAbandonne(dernier, Date.now());
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[10px] text-text-dim">
       <span>
         Positions du {formatDateComplete(dernier)} ·{" "}
-        {retard ? (
+        {abandonne ? (
+          <Badge ton="warn" title="Plus de trois semaines sans nouveau rapport : la CFTC ne publie peut-être plus ce contrat sous ce nom.">
+            aucun nouveau rapport depuis 3 semaines : contrat peut-être plus publié
+          </Badge>
+        ) : retard ? (
           <Badge ton="warn" title="Publication décalée (jour férié aux États-Unis) ou retard CFTC : nouvelle vérification automatique.">
             rapport du {formatDateComplete(dateRapportSuivant(dernier))} attendu, pas encore publié
           </Badge>
@@ -451,6 +502,8 @@ export function GraphiqueCot() {
   const [periode, setPeriode] = useState<string | null>(PERIODE_DEFAUT);
   const [masquees, setMasquees] = useState<ReadonlySet<string>>(() => new Set());
   const [survol, setSurvol] = useState<{ index: number; xPix: number; largeur: number } | null>(null);
+  // Nouvelle série (marché, rapport, relecture) : l'index et la position du survol ne valent plus.
+  useEffect(() => setSurvol(null), [serie]);
 
   // Chargement au montage (garde StrictMode : `charger` pose `enCours` avant son premier await)
   // et suivi hebdomadaire tant que l'onglet est affiché.
@@ -601,6 +654,13 @@ export function GraphiqueCot() {
       <>
         <StatutPublication serie={serie} ts={ts} enCours={enCours} />
         {erreur !== null && <ErreurBloc>{erreur}</ErreurBloc>}
+        {coherence !== null && coherence.ecarts > 0 && (
+          <ErreurBloc>
+            Contrôle en échec : la somme des nets des catégories n'est pas nulle sur {coherence.ecarts}/{coherence.controles}{" "}
+            rapports (dernier : {formatDateComplete(coherence.dernierEcart ?? 0)}). Une colonne CFTC a peut-être changé de
+            nom ou de sens : chiffres à vérifier.
+          </ErreurBloc>
+        )}
         <div className="relative h-[300px]">
           <canvas
             ref={refCanvas}

@@ -7,9 +7,10 @@
  */
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
-mock.module("node:dns/promises", () => ({
-  default: { lookup: async () => [{ address: "93.184.216.34", family: 4 }] },
-}));
+// `mock.module` vaut pour tout le processus bun : l'export nommé doit exister aussi, sinon un
+// fichier suivant qui importe `{ lookup }` (proxy.ts) échoue au chargement selon l'ordre des fichiers.
+const lookup = async () => [{ address: "93.184.216.34", family: 4 }];
+mock.module("node:dns/promises", () => ({ default: { lookup }, lookup }));
 
 function url(route: string, path: string, query = ""): string {
   const params = new URLSearchParams({ __axiom_route: route, __axiom_path: path });

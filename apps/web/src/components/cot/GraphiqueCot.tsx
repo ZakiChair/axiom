@@ -26,6 +26,7 @@ import {
   prochainePublicationCot,
   rapportEnRetard,
   type CategorieGraphe,
+  type ExpositionCategorie,
   type ModeRapportGraphe,
   type PointHistoriqueCot,
   type SerieHistoriqueCot,
@@ -41,7 +42,8 @@ import {
 } from "../../lib/domaineAxe";
 import { POLICE_CANVAS, lireTokenCanvas, rgbaTokenCanvas, serieCanvas } from "../../lib/canvasTokens";
 import { formatDateComplete, formatEntier } from "../../lib/format";
-import { Badge, Chargement, ErreurBloc, Fraicheur, NoteSource, Select, SegmenteCompact, Vide } from "../ui";
+import { TableTriable, type ColonneTable } from "../TableTriable";
+import { Badge, Chargement, ErreurBloc, Fraicheur, NoteSource, Select, SegmenteCompact, TitreSection, Vide } from "../ui";
 import {
   ECART_MAX_MS,
   PERIODES_COT,
@@ -327,7 +329,10 @@ function deltaClasse(v: number | null): string {
   return v === null || v === 0 ? "text-text-dim" : "text-text";
 }
 
-/** Tableau d'exposition au dernier rapport — sert aussi de légende cliquable. */
+/**
+ * Tableau d'exposition au dernier rapport — sert aussi de légende cliquable. Ordre FIXE des
+ * catégories (celui des couleurs) : pas de tri. `TableTriable` = gabarit de table du dépôt.
+ */
 function TableauExposition({
   serie,
   unite,
@@ -339,72 +344,65 @@ function TableauExposition({
   masquees: ReadonlySet<string>;
   basculer: (id: string) => void;
 }) {
-  const lignes = expositionDerniere(serie);
   const dernier = serie.points.at(-1);
+  const nombre = (rendu: (l: ExpositionCategorie) => ReactNode, gras = false) => (l: ExpositionCategorie) =>
+    l.disponible ? <span className={`whitespace-nowrap ${gras ? "font-medium" : ""}`}>{rendu(l)}</span> : <span className="text-text-dim">—</span>;
+  const colonnes: ColonneTable<ExpositionCategorie>[] = [
+    {
+      id: "categorie",
+      label: "Catégorie",
+      largeur: "minmax(8.5rem, 2.2fr)",
+      rendu: (l) => {
+        const masquee = masquees.has(l.categorie.id);
+        return l.disponible ? (
+          <button
+            type="button"
+            onClick={() => basculer(l.categorie.id)}
+            aria-pressed={!masquee}
+            title={l.categorie.description}
+            className={`flex items-center gap-1.5 text-left hover:text-text ${masquee ? "text-text-dim line-through" : "text-text"}`}
+          >
+            <Echantillon cat={l.categorie} index={l.index} />
+            {l.categorie.libelle}
+          </button>
+        ) : (
+          <span className="flex items-center gap-1.5 text-text-dim" title="Colonnes absentes de la réponse CFTC">
+            <Echantillon cat={l.categorie} index={l.index} />
+            {l.categorie.libelle} (absente)
+          </span>
+        );
+      },
+    },
+    { id: "long", label: "Longs", align: "right", rendu: nombre((l) => formatEntier(l.long)) },
+    { id: "short", label: "Shorts", align: "right", rendu: nombre((l) => formatEntier(l.short)) },
+    { id: "net", label: "Net", align: "right", rendu: nombre((l) => formatValeurCot(l.net, "contrats"), true) },
+    {
+      id: "delta",
+      label: "Δ net",
+      align: "right",
+      rendu: nombre((l) => <span className={deltaClasse(l.deltaNet)}>{formatValeurCot(l.deltaNet, "contrats")}</span>),
+    },
+    { id: "pct", label: "Net/OI", align: "right", rendu: nombre((l) => formatValeurCot(l.netPctOi, "pctOi"), unite === "pctOi") },
+    { id: "indice", label: "Indice", align: "right", rendu: nombre((l) => (l.indice === null ? "—" : Math.round(l.indice))) },
+  ];
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[30rem] text-[11px] tabular-nums" aria-label="Exposition par catégorie au dernier rapport">
-        <caption className="pb-1 text-left text-[10px] uppercase tracking-wide text-text-dim">
-          Exposition au {formatDateComplete(dernier?.t ?? 0)} · cliquer une catégorie pour la masquer
-        </caption>
-        <thead>
-          <tr className="whitespace-nowrap text-[10px] text-text-dim">
-            <th scope="col" className="py-1 pr-2 text-left font-normal">Catégorie</th>
-            <th scope="col" className="px-1 text-right font-normal">Longs</th>
-            <th scope="col" className="px-1 text-right font-normal">Shorts</th>
-            <th scope="col" className="px-1 text-right font-normal">Net</th>
-            <th scope="col" className="px-1 text-right font-normal" title="Variation du net depuis le rapport précédent">Δ net</th>
-            <th scope="col" className="px-1 text-right font-normal" title="Net en % de l'open interest total du marché">Net/OI</th>
-            <th scope="col" className="pl-1 text-right font-normal" title="Position du net dans son amplitude min–max des 156 derniers rapports (≈ 3 ans) — pas un percentile">Indice 3 a</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lignes.map((l) => {
-            const masquee = masquees.has(l.categorie.id);
-            return (
-              <tr key={l.categorie.id} className="border-t border-border/60" data-cot-categorie={l.categorie.id}>
-                <th scope="row" className="py-1 pr-2 text-left font-normal">
-                  {l.disponible ? (
-                    <button
-                      type="button"
-                      onClick={() => basculer(l.categorie.id)}
-                      aria-pressed={!masquee}
-                      title={l.categorie.description}
-                      className={`flex items-center gap-1.5 text-left hover:text-text ${masquee ? "text-text-dim line-through" : "text-text"}`}
-                    >
-                      <Echantillon cat={l.categorie} index={l.index} />
-                      {l.categorie.libelle}
-                    </button>
-                  ) : (
-                    <span className="flex items-center gap-1.5 text-text-dim" title={l.categorie.description}>
-                      <Echantillon cat={l.categorie} index={l.index} />
-                      {l.categorie.libelle}
-                    </span>
-                  )}
-                </th>
-                {l.disponible ? (
-                  <>
-                    <td className="whitespace-nowrap px-1 text-right">{formatEntier(l.long)}</td>
-                    <td className="whitespace-nowrap px-1 text-right">{formatEntier(l.short)}</td>
-                    <td className="whitespace-nowrap px-1 text-right font-medium">{formatValeurCot(l.net, "contrats")}</td>
-                    <td className={`whitespace-nowrap px-1 text-right ${deltaClasse(l.deltaNet)}`}>{formatValeurCot(l.deltaNet, "contrats")}</td>
-                    <td className={`whitespace-nowrap px-1 text-right ${unite === "pctOi" ? "font-medium" : ""}`}>{formatValeurCot(l.netPctOi, "pctOi")}</td>
-                    <td className="whitespace-nowrap pl-1 text-right">{l.indice === null ? "—" : Math.round(l.indice)}</td>
-                  </>
-                ) : (
-                  <td colSpan={6} className="px-1 text-right text-text-dim">Absente de la réponse CFTC</td>
-                )}
-              </tr>
-            );
-          })}
-          {dernier !== undefined && (
-            <tr className="border-t border-border/60 text-text-dim">
-              <th scope="row" className="py-1 pr-2 text-left font-normal">Open interest (tout le marché)</th>
-              <td colSpan={6} className="px-1 text-right">{formatEntier(Number.isFinite(dernier.oi) ? dernier.oi : null)} contrats</td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+    <div className="space-y-1">
+      <TitreSection extra={<>cliquer une catégorie pour la masquer</>}>
+        Exposition au {formatDateComplete(dernier?.t ?? 0)}
+      </TitreSection>
+      <TableTriable
+        ariaLabel="Exposition par catégorie au dernier rapport"
+        colonnes={colonnes}
+        lignes={expositionDerniere(serie)}
+        cle={(l) => l.categorie.id}
+      />
+      {dernier !== undefined && (
+        <p className="text-[10px] tabular-nums text-text-dim">
+          Open interest (tout le marché) : {formatEntier(Number.isFinite(dernier.oi) ? dernier.oi : null)} contrats ·
+          Δ net : variation depuis le rapport précédent · Indice : position du net dans son amplitude
+          min–max des 156 derniers rapports (≈ 3 ans), pas un percentile.
+        </p>
+      )}
     </div>
   );
 }

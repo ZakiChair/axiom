@@ -125,9 +125,9 @@ for (const largeur of [1280, 390]) {
     await expect(region.getByLabel("Marché")).toHaveValue(SP);
 
     const tableau = region.getByRole("table", { name: "Exposition par catégorie au dernier rapport" });
-    await expect(tableau).toContainText("Exposition au 27 oct. 2026");
+    await expect(region).toContainText("Exposition au 27 oct. 2026");
     for (const cat of ["Dealers / intermédiaires", "Gérants d'actifs / institutionnels", "Fonds à effet de levier", "Autres déclarants", "Non déclarants"]) {
-      await expect(tableau.getByRole("rowheader", { name: cat })).toBeVisible();
+      await expect(tableau.getByRole("button", { name: cat })).toHaveAttribute("aria-pressed", "true");
     }
     await expect(region).toContainText("la somme des nets de toutes les catégories vaut 0 sur les 160 rapports");
     await expect(region).toContainText(/prochain rapport ven\. 6 nov\. vers 15 h 30 \(New York\)/);
@@ -163,11 +163,14 @@ for (const largeur of [1280, 390]) {
     // Rien ne déborde horizontalement de la fenêtre (le tableau défile dans son propre cadre).
     expect(await region.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
     await fenetre.screenshot({ path: test.info().outputPath(`cot-graphique-${largeur}.png`) });
+    await region.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+    await fenetre.screenshot({ path: test.info().outputPath(`cot-graphique-bas-${largeur}.png`) });
+    await region.evaluate((el) => el.scrollTo(0, 0));
 
     // Matières premières : rapport Disaggregated, graphie réelle des colonnes swap résolue.
     await region.getByLabel("Marché").selectOption(OR);
     await expect(tableau).toContainText("Managed Money");
-    await expect(tableau.getByRole("rowheader", { name: "Swap dealers" })).toBeVisible();
+    await expect(tableau.getByRole("button", { name: "Swap dealers" })).toBeVisible();
     await expect(region).toContainText("Disaggregated");
     await expect(region).toContainText("vaut 0 sur les 160 rapports");
     expect(appels).toHaveLength(4);
@@ -184,7 +187,7 @@ for (const largeur of [1280, 390]) {
     const deja = await fenetre2.isVisible();
     const f = deja ? fenetre2 : await ouvrirCot(page);
     await f.getByRole("button", { name: "Graphique", exact: true }).click();
-    await expect(f.getByRole("table", { name: "Exposition par catégorie au dernier rapport" })).toContainText("Exposition au 27 oct. 2026");
+    await expect(f.getByRole("region", { name: "Graphique COT", exact: true })).toContainText("Exposition au 27 oct. 2026");
     expect(appels).toHaveLength(4);
   });
 }

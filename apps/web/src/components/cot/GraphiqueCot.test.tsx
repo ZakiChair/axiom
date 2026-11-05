@@ -64,7 +64,8 @@ describe("graphique COT — exposition par catégorie", () => {
     expect(html).toContain("+750 000"); // net des gérants d'actifs
     expect(html).toContain("+50 000"); // Δ net des gérants d'actifs
     expect(html).toContain("+37,5 %"); // net/OI des gérants d'actifs
-    expect(html).toContain("2 000 000 contrats");
+    expect(html).toContain("Open interest (tout le marché) : 2 000 000 contrats");
+    expect(html).toContain('role="table" aria-label="Exposition par catégorie au dernier rapport"');
     expect(html).toContain('aria-pressed="true"');
   });
 
@@ -91,7 +92,7 @@ describe("graphique COT — exposition par catégorie", () => {
 
   it("une catégorie absente de la réponse est dite, jamais remplacée par zéro", () => {
     const html = rendu(COLONNES.filter((c) => !c.startsWith("other_rept")));
-    expect(html).toContain("Absente de la réponse CFTC");
+    expect(html).toContain("Autres déclarants (absente)");
     expect(html).toContain("Contrôle Σ des nets = 0 indisponible");
     expect(html).toContain("Absente(s) de la réponse CFTC : Autres déclarants.");
   });

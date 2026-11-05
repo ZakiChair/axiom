@@ -2132,10 +2132,13 @@ le rapport ». Livré comme onglet **« Graphique »** de la fenêtre COT exista
     compris ; tests unitaires sous 4 fuseaux.
   - Web : 434 fichiers / 6 430 tests verts, typage et build verts ; e2e `cot-graphique` et
     `cot-lisibilite` verts à 1280 et 390 px.
+  - `tests daemon (bun)` était rouge sur GitHub depuis c2f757d (préexistant, corrigé dans ce lot
+    sur accord du propriétaire) : `vercelProxy.redirection.test.ts` simulait `node:dns/promises`
+    sans export nommé `lookup` ; `mock.module` valant pour tout le processus bun, ce fichier exécuté
+    en premier sur le runner cassait le chargement des 5 fichiers qui importent `proxy.ts`. Le mock
+    expose désormais aussi `lookup` : 786/786 sous bun 1.3.11 (version de la CI) et 1.4.4, y compris
+    avec ce fichier forcé en premier.
   - Préexistant, hors lot, reproduit à l'identique sur a2043a1 :
-    - `tests daemon (bun)` rouge sur GitHub : `vercelProxy.redirection.test.ts` simule
-      `node:dns/promises` sans export nommé `lookup` et, exécuté en premier sur le runner, casse le
-      chargement des 5 fichiers qui importent `proxy.ts` (correctif de 3 lignes proposé sur la PR) ;
     - `src/chart/orderflow.cadence.test.ts` : erreur non gérée intermittente (WebSocket réelle)
       dans un environnement sans réseau ;
     - `CotWindow.test.tsx` dépend du fuseau (« 14 jours » faux à New York, Pago Pago, Santiago).

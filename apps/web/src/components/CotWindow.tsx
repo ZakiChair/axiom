@@ -15,7 +15,7 @@
  * avec une note discrète. Dégradation gracieuse : sur échec, on garde le dernier cache et on affiche
  * un état clair, jamais d'erreur bloquante.
  */
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
@@ -29,10 +29,12 @@ import {
   type PointCot,
 } from "../data/cot";
 import { cotStore } from "../store/cot";
+import { cotHistoriqueStore } from "../store/cotHistorique";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 import { formatDateComplete, formatEntier } from "../lib/format";
+import { GraphiqueCot } from "./cot/GraphiqueCot";
 import { GuidePositionsCot, NetCot, PeriodeCot, PositionsCot } from "./cot/PositionsCot";
-import { BoutonRafraichir, Chargement, EnTeteFenetre, ErreurBloc, NoteSource, Segmente } from "./ui";
+import { BoutonRafraichir, Chargement, EnTeteFenetre, ErreurBloc, NoteSource, Onglets, Segmente } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -143,14 +145,24 @@ function BarreNet({ netSurOi: nsoi }: { netSurOi: number | null }) {
 }
 
 /** Stocks et mouvements au premier plan ; net et repères historiques en contexte. */
-function Ligne({ ligne }: { ligne: LigneCot }) {
+function Ligne({ ligne, onGraphique }: { ligne: LigneCot; onGraphique: (nom: string) => void }) {
   const idx = cotIndex(ligne.serie);
   const nsoi = netSurOi(ligne.net, ligne.openInterest);
   return (
     <article className="space-y-2 border-b border-border/50 px-3 py-2 last:border-b-0" aria-label={ligne.libelle}>
-      <div>
-        <h3 className="text-xs font-semibold text-text">{ligne.libelle}</h3>
-        <PeriodeCot ligne={ligne} />
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h3 className="text-xs font-semibold text-text">{ligne.libelle}</h3>
+          <PeriodeCot ligne={ligne} />
+        </div>
+        <button
+          type="button"
+          onClick={() => onGraphique(ligne.nom)}
+          className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-text-dim hover:border-accent hover:text-text"
+          title={`Historique de l'exposition de toutes les catégories de traders — ${ligne.libelle}`}
+        >
+          Graphique ›
+        </button>
       </div>
       <PositionsCot ligne={ligne} />
       <NetCot ligne={ligne} />
@@ -207,7 +219,11 @@ const CATEGORIES_POSITIONNEMENT: readonly {
 
 // ─────────────────────────── Composant ───────────────────────────
 
+/** Onglets de la fenêtre : synthèse du dernier rapport, ou graphique historique par marché. */
+type VueCot = "synthese" | "graphique";
+
 export function CotWindow() {
+  const [vue, setVue] = useState<VueCot>("synthese");
   // État piloté par le store de catégories (data/cot.ts + store/cot.ts). L'ancien orchestrateur
   // interne (chargerRapportCot / clé de cache plate) est abandonné : le store route chaque
   // instrument vers son dataset selon la catégorie choisie.
@@ -229,6 +245,11 @@ export function CotWindow() {
   const meta =
     CATEGORIES_POSITIONNEMENT.find((c) => c.id === categorie) ?? CATEGORIES_POSITIONNEMENT[0]!;
 
+  const ouvrirGraphique = (nom: string): void => {
+    setVue("graphique");
+    void cotHistoriqueStore.getState().selectionner(nom);
+  };
+
   // Lignes réellement couvertes par le dataset routé : les stubs `nonCouvert` sont MASQUÉS et leur
   // net/OI (NaN) ne doit JAMAIS alimenter cotIndex/netSurOi — d'où le filtre AVANT tout rendu.
   const lignesVisibles = resume.lignes.filter((l) => !l.nonCouvert);
@@ -241,96 +262,127 @@ export function CotWindow() {
         mnemo="COT"
         titre="CFTC"
         sousTitre={
-          <>
-            {meta.semantique} · dernier disponible : {formatDateComplete(resume.dateRapport ?? 0)}
-            {enCours ? " · maj…" : ""}
-          </>
+          vue === "graphique" ? (
+            <>Exposition de chaque catégorie de traders · historique hebdomadaire</>
+          ) : (
+            <>
+              {meta.semantique} · dernier disponible : {formatDateComplete(resume.dateRapport ?? 0)}
+              {enCours ? " · maj…" : ""}
+            </>
+          )
         }
         actions={
-          <>
-            <Segmente
-              options={CATEGORIES_POSITIONNEMENT.map((c) => ({
-                id: c.id,
-                label: c.label,
-                title: c.title,
-              }))}
-              actif={categorie}
-              onChange={(id) => void cotStore.getState().setCategorie(id)}
-            />
+          vue === "graphique" ? (
             <BoutonRafraichir
-              onClick={() => void cotStore.getState().rafraichir()}
-              title="Rafraîchir le rapport COT"
+              onClick={() => void cotHistoriqueStore.getState().rafraichir()}
+              title="Relire l'historique COT du marché affiché"
             />
-          </>
+          ) : (
+            <>
+              <Segmente
+                options={CATEGORIES_POSITIONNEMENT.map((c) => ({
+                  id: c.id,
+                  label: c.label,
+                  title: c.title,
+                }))}
+                actif={categorie}
+                onChange={(id) => void cotStore.getState().setCategorie(id)}
+              />
+              <BoutonRafraichir
+                onClick={() => void cotStore.getState().rafraichir()}
+                title="Rafraîchir le rapport COT"
+              />
+            </>
+          )
         }
       />
 
-      <div
-        role="region"
-        aria-label="Rapports COT"
-        tabIndex={0}
-        className="min-w-0 flex-1 overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
-      >
-        <GuidePositionsCot />
-        {/* Signal « indisponible » : jamais tiré de la longueur (une ligne par instrument, stubs
-            inclus), mais de enCours/erreur/aucune-ligne-couverte. Ordre : enCours d'abord (pas de
-            faux « non couvert » pendant un chargement), puis erreur, puis vide. */}
-        {aucuneVisible ? (
-          enCours ? (
-            <Chargement />
-          ) : erreur ? (
-            <div className="px-3 py-2">
-              <ErreurBloc>{erreur}</ErreurBloc>
-            </div>
-          ) : (
-            <div className="px-3 py-6 text-center text-[11px] text-text-dim">
-              Aucun marché couvert par ce rapport.
-            </div>
-          )
-        ) : (
-          <>
-            {/* Dégradation non destructive : sur échec de refetch avec données conservées, un
-                bandeau discret plutôt qu'un remplacement de la liste. */}
-            {erreur && (
-              <div className="px-3 pt-2">
+      <Onglets<VueCot>
+        options={[
+          { id: "synthese", label: "Synthèse" },
+          { id: "graphique", label: "Graphique" },
+        ]}
+        actif={vue}
+        onChange={setVue}
+      />
+
+      {vue === "graphique" ? (
+        <div
+          role="region"
+          aria-label="Graphique COT"
+          tabIndex={0}
+          className="min-w-0 flex-1 overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+        >
+          <GraphiqueCot />
+        </div>
+      ) : (
+        <div
+          role="region"
+          aria-label="Rapports COT"
+          tabIndex={0}
+          className="min-w-0 flex-1 overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+        >
+          <GuidePositionsCot />
+          {/* Signal « indisponible » : jamais tiré de la longueur (une ligne par instrument, stubs
+              inclus), mais de enCours/erreur/aucune-ligne-couverte. Ordre : enCours d'abord (pas de
+              faux « non couvert » pendant un chargement), puis erreur, puis vide. */}
+          {aucuneVisible ? (
+            enCours ? (
+              <Chargement />
+            ) : erreur ? (
+              <div className="px-3 py-2">
                 <ErreurBloc>{erreur}</ErreurBloc>
               </div>
-            )}
-
-            {CATEGORIES_COT.map((cat: { id: CotCategorie; libelle: string }) => {
-              const duGroupe = lignesVisibles.filter((l) => l.categorie === cat.id);
-              if (duGroupe.length === 0) return null;
-              return (
-                <section key={cat.id} className="border-b border-border last:border-b-0">
-                  <h3 className="bg-bg/40 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-dim">
-                    {cat.libelle}
-                  </h3>
-                  {duGroupe.map((l) => (
-                    <Ligne key={l.nom} ligne={l} />
-                  ))}
-                </section>
-              );
-            })}
-
-            {nbNonCouvert > 0 && (
-              <div className="px-3 py-2 text-[10px] text-text-dim">
-                {nbNonCouvert} marché{nbNonCouvert > 1 ? "s" : ""} non couvert
-                {nbNonCouvert > 1 ? "s" : ""} par ce rapport.
+            ) : (
+              <div className="px-3 py-6 text-center text-[11px] text-text-dim">
+                Aucun marché couvert par ce rapport.
               </div>
-            )}
-
-            <div className="px-3 py-3">
-              <NoteSource>
-                {meta.semantique} = longs − shorts. OI = contrats ouverts de tout le marché,
-                pas la somme longs + shorts de cette catégorie. Barre Net/OI : échelle ±50 %.
-                COT Index : position du net dans son amplitude min–max des 156 derniers rapports
-                (≈ 3 ans), pas un percentile ; 0 = minimum du net, 100 = maximum, 50 si constant.
-                Indisponible avec moins de 26 rapports. Source {meta.source}, publication hebdomadaire.
-              </NoteSource>
-            </div>
-          </>
-        )}
-      </div>
+            )
+          ) : (
+            <>
+              {/* Dégradation non destructive : sur échec de refetch avec données conservées, un
+                  bandeau discret plutôt qu'un remplacement de la liste. */}
+              {erreur && (
+                <div className="px-3 pt-2">
+                  <ErreurBloc>{erreur}</ErreurBloc>
+                </div>
+              )}
+  
+              {CATEGORIES_COT.map((cat: { id: CotCategorie; libelle: string }) => {
+                const duGroupe = lignesVisibles.filter((l) => l.categorie === cat.id);
+                if (duGroupe.length === 0) return null;
+                return (
+                  <section key={cat.id} className="border-b border-border last:border-b-0">
+                    <h3 className="bg-bg/40 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-dim">
+                      {cat.libelle}
+                    </h3>
+                    {duGroupe.map((l) => (
+                      <Ligne key={l.nom} ligne={l} onGraphique={ouvrirGraphique} />
+                    ))}
+                  </section>
+                );
+              })}
+  
+              {nbNonCouvert > 0 && (
+                <div className="px-3 py-2 text-[10px] text-text-dim">
+                  {nbNonCouvert} marché{nbNonCouvert > 1 ? "s" : ""} non couvert
+                  {nbNonCouvert > 1 ? "s" : ""} par ce rapport.
+                </div>
+              )}
+  
+              <div className="px-3 py-3">
+                <NoteSource>
+                  {meta.semantique} = longs − shorts. OI = contrats ouverts de tout le marché,
+                  pas la somme longs + shorts de cette catégorie. Barre Net/OI : échelle ±50 %.
+                  COT Index : position du net dans son amplitude min–max des 156 derniers rapports
+                  (≈ 3 ans), pas un percentile ; 0 = minimum du net, 100 = maximum, 50 si constant.
+                  Indisponible avec moins de 26 rapports. Source {meta.source}, publication hebdomadaire.
+                </NoteSource>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </>
   );
 }
@@ -352,8 +404,13 @@ export const commandes: Commande[] = [
       "non commercial",
       "futures",
       "sentiment",
+      "graphique",
+      "exposition",
+      "institutions",
+      "asset manager",
+      "managed money",
     ],
-    apercu: "Ouvre / ferme le résumé du rapport COT (CFTC)",
+    apercu: "Ouvre / ferme le rapport COT (CFTC) : synthèse et graphique de l'exposition par catégorie",
     action: () => cotUiStore.getState().toggleCot(),
   },
 ];

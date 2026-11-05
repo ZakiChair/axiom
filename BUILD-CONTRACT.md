@@ -2051,3 +2051,61 @@ revue priment dans cet ordre : §6, §5, puis les §0 à §4.
   - Instabilité préexistante, hors lot : `quatre-lots-sauvegardes.e2e.ts:32` échoue parfois. La
     réouverture de NOTE par ⌘K, juste après « Fermer », n'aboutit pas. C'est reproduit à
     c2f757d.
+
+## Graphique COT (demande du 5 novembre 2026)
+
+Le propriétaire demande « une vision graphique du rapport COT : chaque semaine on récupère les
+résultats et on trace le graphique de l'exposition des institutions sur les marchés décrits dans
+le rapport ». Livré comme onglet **« Graphique »** de la fenêtre COT existante (à côté de
+« Synthèse »). **39 fenêtres, aucun indicateur, aucun fournisseur ni hôte nouveau
+(`publicreporting.cftc.gov` est déjà dans `shared/extapi-hosts.ts`), aucune dépendance,
+`@axiom/types` inchangé.** Exception au gel G100 au titre de la demande explicite du propriétaire.
+
+- **Contenu.**
+  - Pour un marché de `WATCHLIST_COT` (14), le net (longs − shorts) de CHAQUE catégorie de traders,
+    rapport après rapport, sur tout l'historique publié (« Futures Only ») :
+    - financiers (devises, indices, crypto CME) → TFF `gpe5-46if` : Dealers / intermédiaires,
+      Gérants d'actifs / institutionnels, Fonds à effet de levier, Autres déclarants, Non déclarants ;
+    - matières premières (métaux, énergie) → Disaggregated `72hh-3qpy` : Producteurs / négociants,
+      Swap dealers, Managed Money, Autres déclarants, Non déclarants ;
+    - au choix, Legacy `6dca-aqww` pour tous : Commerciaux, Non-commerciaux, Non déclarants.
+  - Unité : contrats ou % de l'open interest total. Périodes 1 a / 3 a (défaut) / 5 a / 10 a / Tout,
+    zoom et déplacement (`useDomaineZoom`). Open interest dans un panneau séparé (jamais de double axe).
+  - Le tableau sous le graphe est la légende cliquable (masquer / afficher) et la vue chiffrée du
+    dernier rapport : longs, shorts, net, Δ net, net/OI, indice 3 ans (`cotIndex`, même définition
+    que la synthèse). Non déclarants en pointillé atténué.
+  - Le bouton « Graphique › » de chaque marché de la synthèse ouvre l'onglet sur ce marché.
+- **Colonnes vérifiées à l'exécution (contrat « ne pas deviner »).**
+  - Seules quatre paires étaient vérifiées en direct (`DATASETS_COT`) ; l'environnement de ce lot
+    ne joignait ni `publicreporting.cftc.gov`, ni `dev.socrata.com`, ni `www.cftc.gov`. Les autres
+    noms (dealer, swap, other_rept, nonrept…) sont donc des CANDIDATS, jamais envoyés à l'aveugle.
+  - Requête de découverte sans `$select` (4 dernières lignes du marché ; une colonne inconnue dans
+    `$select` ferait échouer toute la requête). Chaque catégorie est résolue contre les clés
+    réellement reçues ; l'historique ne sélectionne que des colonnes vues.
+  - Catégorie non résolue : « Absente de la réponse CFTC », jamais 0. Aucune colonne de positions
+    reconnue : erreur explicite. Marché absent du rapport : message et piste Legacy.
+  - Contrôle à chaque rapport : la somme des nets de toutes les catégories (non déclarants
+    compris) vaut 0, tolérance 0,1 % de l'OI. Un écart est signalé (badge), pas masqué.
+  - **À confirmer** au premier chargement réel : le badge de contrôle doit afficher
+    « vaut 0 sur les N rapports » pour un marché TFF et un marché Disaggregated.
+- **Cadence hebdomadaire.**
+  - Le rapport du mardi T paraît le vendredi T+3 ; le suivant, le vendredi T+10. Heure retenue :
+    20 h 30 UTC (15 h 30 à New York en hiver, une heure de marge l'été). Jours lus en composantes
+    locales, comme au parsing (`Date.parse` d'un horodatage flottant).
+  - Un historique reste à jour jusqu'à la publication suivante, ou 6 h après sa récupération si
+    celle-ci est passée sans nouveau rapport (jour férié). Le statut l'affiche (« prochain
+    rapport ven. 6 nov. vers 15 h 30 (New York) » ou « rapport du … attendu, pas encore publié »).
+  - Tant que l'onglet est affiché, une minuterie relit la CFTC à l'échéance (+ 30 s), 30 min après
+    un échec ; aucune minuterie onglet fermé. À la réouverture, un historique périmé est relu.
+- **Cache et réseau.**
+  - Deux requêtes par (rapport, marché) et par semaine, via `/extapi` (daemon, Vite ou Vercel).
+  - localStorage compact `axiom:cot:historique:v1:<dataset>:<marché>` (≈ 10× plus petit que les
+    records Socrata), au plus 8 séries, index LRU `axiom:cot:historique-index:v1` ; quota plein :
+    éviction des plus anciennes. Dernière sélection : `axiom:cot:graphique:v1`.
+  - Échec réseau : la dernière série reste affichée avec un bandeau. Santé : source `cot:cftc`
+    partagée avec la synthèse.
+- **Fichiers.** `data/cotHistorique.ts` (pur), `store/cotHistorique.ts`,
+  `components/cot/GraphiqueCot.tsx`, `components/cot/graphiqueCot.util.ts` (pur), onglets dans
+  `CotWindow.tsx` ; tests unitaires associés ; e2e `cot-graphique.e2e.ts` (données fictives
+  cohérentes, horloge figée), inscrit dans `scripts/ci.sh --e2e`. `cot-lisibilite.e2e.ts` : l'ordre
+  clavier passe désormais par l'onglet « Graphique » avant la zone de rapports.

@@ -21,7 +21,7 @@ droits de l’opérateur ; certains historiques exigent une clé ou un abonnemen
 | | |
 |---|---|
 | **Lire le prix** | orderflow / CVD / footprint, profil de volume, heatmap de liquidations (exécutées, estimées, niveaux réels Hyperliquid), **219 indicateurs** testés |
-| **Lire le contexte** | **39 fenêtres** à mnémonique : calendrier éco, news, corrélations, on-chain, mouvements de baleines, treemap, options, COT, taux (dont 24 familles macro sur 8 zones) & liquidité Fed, saisonnalité, stablecoins, cycle halving… |
+| **Lire le contexte** | **39 fenêtres** à mnémonique : calendrier éco, news, corrélations, on-chain, mouvements de baleines, treemap, options, COT (synthèse + graphique hebdomadaire de l'exposition de chaque catégorie de traders), taux (dont 24 familles macro sur 8 zones) & liquidité Fed, saisonnalité, stablecoins, cycle halving… |
 | **Décider** | screener, playbooks 1-clic, alertes (dont composite ET), backtest en R (stop ATR / sizing risque), coût d’exécution L2 (DOM), stress-test, étude d’évènements, journal, paper trading |
 | **Ne pas décrocher** | alertes onglet fermé (macOS + Telegram optionnel), replay sur dumps officiels Binance, panneau de santé des sources |
 
@@ -255,6 +255,26 @@ BT « AXIS S/R confluence (4h) »), et propose un filtre d'entrée optionnel
 `margeResistanceAtr` (défaut 0 = sans) pour éviter les achats immédiatement
 sous une résistance active.
 [Méthode, réglages, limites et backtests](docs/axis-2026-10-07.md).
+
+### COT — exposition des catégories de traders
+
+**COT → Graphique** trace, pour un marché de la watchlist (devises, indices, or,
+argent, WTI, BTC/ETH CME), le net (longs − shorts) de chaque catégorie du rapport
+CFTC sur tout l'historique publié : Dealers, Gérants d'actifs / institutionnels,
+Fonds à effet de levier, Autres déclarants et Non déclarants pour les financiers
+(TFF) ; Producteurs, Swap dealers, Managed Money, Autres et Non déclarants pour
+les matières premières (Disaggregated) ; ou le rapport Legacy. Unité en contrats
+ou en % de l'open interest, périodes 1 a → Tout, zoom/déplacement, open interest
+en panneau séparé. Le tableau sous le graphe donne les chiffres du dernier
+rapport et sert de légende. Le bouton « Graphique › » de chaque marché de la
+synthèse y mène directement.
+
+Chaque semaine, la CFTC publie le vendredi à 15 h 30 (New York) les positions du
+mardi : l'historique est conservé en cache jusqu'à la publication suivante, puis
+relu automatiquement (toutes les 6 h si le rapport tarde, jour férié). Les
+colonnes CFTC sont lues dans la réponse réelle avant d'être demandées ; une
+catégorie introuvable est dite absente et un contrôle vérifie que la somme des
+nets de toutes les catégories vaut 0 à chaque rapport.
 
 ### Historique des décisions et nouveaux indicateurs
 

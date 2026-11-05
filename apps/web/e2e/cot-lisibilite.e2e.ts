@@ -106,8 +106,8 @@ for (const largeur of [1280, 390]) {
     await expect(fenetre).not.toContainText(/\d+ longs (ouverts|fermés)/);
     await verifierLargeur(fenetre);
     const rapports = fenetre.getByRole("region", { name: "Rapports COT", exact: true });
-    // Depuis le dernier contrôle d'en-tête, Tab doit atteindre le conteneur lui-même.
-    await fenetre.getByRole("button", { name: /Rafraîchir/ }).focus();
+    // Depuis le dernier contrôle avant la zone (onglet « Graphique »), Tab atteint le conteneur.
+    await fenetre.getByRole("button", { name: "Graphique", exact: true }).focus();
     await page.keyboard.press("Tab");
     await expect(rapports).toBeFocused();
     expect(await rapports.evaluate((el) => getComputedStyle(el).boxShadow)).not.toBe("none");

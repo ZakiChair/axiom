@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { GraphiqueCot, tracerLigne } from "./GraphiqueCot";
 import { CotWindow } from "../CotWindow";
@@ -12,7 +12,17 @@ vi.mock("zustand", () => ({
 
 const SP = "E-MINI S&P 500 - CHICAGO MERCANTILE EXCHANGE";
 const initial = cotHistoriqueStore.getState();
-afterEach(() => cotHistoriqueStore.setState(initial, true));
+// Horloge figée : le statut de cadence (« prochain rapport… », « attendu, pas encore publié »)
+// dépend de l'instant présent. Lundi 2 novembre 2026 : le rapport du 27 octobre est paru le
+// vendredi 30, le suivant est attendu le vendredi 6 novembre.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-11-02T12:00:00Z"));
+});
+afterEach(() => {
+  vi.useRealTimers();
+  cotHistoriqueStore.setState(initial, true);
+});
 
 const COLONNES = [
   "open_interest_all",

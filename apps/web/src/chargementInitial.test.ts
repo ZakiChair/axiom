@@ -39,6 +39,8 @@ const MODULES_DIFFERES: Record<string, string> = {
   "data/eco": "calendrier économique (ForexFactory / FRED / FOMC) — import() par store/eco à la demande",
   "chart/rampesHeat": "rampes des heatmaps — partagées par chart/depthHeat et chart/liquidationHeat, tous deux différés",
   "data/depth": "carnet Binance (WS + agrégation) — chargé avec DomWindow (React.lazy) et chart/depthHeat",
+  "chart/bougiesUnite": "indicateurs sur unité supérieure (chargement, calcul, projection) — import() par chart/indicators à la première instance qui porte `params.unite`",
+  "chart/uniteSuperieure": "éligibilité de l'unité supérieure — chargée avec chart/bougiesUnite et l'éditeur de paramètres (menu Indicateurs)",
   "data/dominanceStablecoins": "dominance des stablecoins STABLE.D (requêtes CMC, cache, calcul, repoll) — import() mémorisé par data/mcapCandles à l'ouverture de la série",
 };
 

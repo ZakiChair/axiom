@@ -35,9 +35,9 @@
 import type { Chart } from "klinecharts";
 import { ActionType, DomPosition } from "klinecharts";
 import { getIndicator } from "@axiom/indicators";
-import { indicatorsStore, formatInstanceLabel } from "../store/indicators";
+import { indicatorsStore } from "../store/indicators";
 import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
-import { abonnerStatutsIndicateurs, axiomPaneId, statutIndicateur, type StatutIndicateur } from "./indicators";
+import { abonnerStatutsIndicateurs, axiomPaneId, libelleInstance, statutIndicateur, type StatutIndicateur } from "./indicators";
 import { estReglable } from "./legendeReglable";
 import {
   creerBoutonFermer,
@@ -65,13 +65,18 @@ const BADGE_STATUT: Record<StatutIndicateur["etat"], string> = {
   unusable: "UNUSABLE",
   vide: "indisponible",
   chargement: "chargement",
+  partiel: "partiel",
 };
 
-/** Couleur du badge : rouge = panne, ambre = rien à tracer, neutre = attente d'une source. */
+/**
+ * Couleur du badge : rouge = panne, ambre = rien à tracer ou tracé incomplet, neutre =
+ * attente d'une source.
+ */
 const COULEUR_STATUT: Record<StatutIndicateur["etat"], string> = {
   unusable: "bg-down/15 text-down",
   vide: "bg-warn/15 text-warn",
   chargement: "bg-text-dim/15 text-text-dim",
+  partiel: "bg-warn/15 text-warn",
 };
 
 /** Présentation PURE d'un statut d'indicateur : `null` = valeurs tracées, pas de badge. */
@@ -127,7 +132,7 @@ function panesSepares(): EnTetePane[] {
     result.push({
       instanceId: inst.instanceId,
       paneId: axiomPaneId(inst.instanceId),
-      label: formatInstanceLabel(def, inst.params),
+      label: libelleInstance(def, inst.params),
       couleurIdx: inst.couleurIdx,
       reglable: estReglable(def),
     });

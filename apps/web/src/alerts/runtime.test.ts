@@ -1107,3 +1107,54 @@ describe("funding — séries sans marché perp (inertes, aucune requête)", () 
     expect(urls.filter((url) => url.includes("premiumIndex"))).toEqual([]);
   });
 });
+
+describe("paramètre « unité » refusé hors du graphe (SUG-1, phase 1)", () => {
+  const maintenant = Date.now();
+  /** 40 clôtures en hausse : RSI 14 défini (100), l'alerte se calibre à la première passe. */
+  const hausse = (n: number) => Array.from({ length: n }, (_v, i) => bougie(maintenant - (n - i) * 60_000, 100 + i, true));
+  const rsiDef: AlertDef = {
+    id: "rsi-natif",
+    symbol: "BTCUSDT",
+    source: "binance",
+    condition: { type: "indicateur-seuil", indicateurId: "rsi", params: { length: 14 }, output: "rsi", comparateur: ">", valeur: 70 },
+    actif: true,
+    declenchements: [],
+  };
+  const rsiUnite: AlertDef = {
+    ...rsiDef,
+    id: "rsi-4h",
+    condition: { type: "indicateur-seuil", indicateurId: "rsi", params: { length: 14, unite: "4h" }, output: "rsi", comparateur: ">", valeur: 70 },
+  };
+  const compositeUnite: AlertDef = {
+    ...rsiDef,
+    id: "composite-1d",
+    condition: {
+      type: "composite",
+      conditions: [
+        { type: "variation-pct", fenetreMs: 60_000, seuilPct: -50 },
+        { type: "indicateur-seuil", indicateurId: "ema", params: { length: 20, unite: "1d" }, output: "ema", comparateur: ">", valeur: 0 },
+      ],
+    },
+  };
+
+  it("une alerte importée avec une unité n'est jamais évaluée ; motif journalisé une seule fois", () => {
+    const avertir = vi.spyOn(console, "warn").mockImplementation(() => {});
+    alertsStore.setState({ defs: [rsiDef, rsiUnite, compositeUnite], journal: [] });
+    marketStore.setState({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1m", candles: hausse(40) });
+    stop = demarrerAlertes();
+    marketStore.setState({ candles: [...hausse(40), bougie(maintenant, 200, true)] });
+    marketStore.setState({ candles: [...hausse(40), bougie(maintenant, 200, true), bougie(maintenant + 60_000, 210, true)] });
+
+    const defs = alertsStore.getState().defs;
+    expect(defs.find((d) => d.id === "rsi-natif")?.arme).toBeDefined(); // évaluée normalement
+    expect(defs.find((d) => d.id === "rsi-4h")?.arme).toBeUndefined(); // jamais calibrée
+    expect(defs.find((d) => d.id === "composite-1d")?.arme).toBeUndefined();
+    expect(alertsStore.getState().journal.every((j) => j.alertId === "rsi-natif")).toBe(true);
+
+    const motifs = avertir.mock.calls.map((args) => String(args[0])).filter((m) => m.includes("réservé au graphe"));
+    expect(motifs).toEqual([
+      "[AXIOM] alerte rsi-4h non évaluée : Paramètre « unité » [4h] réservé au graphe : l'alerte calculerait sur ses propres bougies, sans unité supérieure. Retire ce paramètre.",
+      "[AXIOM] alerte composite-1d non évaluée : Paramètre « unité » [1d] réservé au graphe : l'alerte calculerait sur ses propres bougies, sans unité supérieure. Retire ce paramètre.",
+    ]);
+  });
+});

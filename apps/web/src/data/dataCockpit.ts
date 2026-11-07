@@ -52,6 +52,7 @@ const LIBELLES_SOURCE: Record<string, string> = {
   sosovalue: "SoSoValue",
   news: "Actualités",
   "coingecko:market": "CoinGecko · marché",
+  wikimedia: "Wikimedia · pages vues",
   axiomd: "Daemon Axiom",
 };
 

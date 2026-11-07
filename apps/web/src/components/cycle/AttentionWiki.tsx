@@ -64,6 +64,8 @@ export type EtatAttentionWiki =
       relative: AttentionRelative | null;
       /** Échec du chargement de BTC pour la comparaison (alt seulement). */
       erreurBtc: string | null;
+      /** Série BTC resservie depuis un cache périmé (Wikimedia en échec sur la seconde requête). */
+      btcPerime?: boolean;
     };
 
 /** Badge du niveau d'attention (z 365 j). */
@@ -87,7 +89,10 @@ function TuilesAttention({
   etat: Extract<EtatAttentionWiki, { statut: "pret" }>;
   maintenant: number;
 }) {
-  const { analyse: a, resultat, relative, erreurBtc } = etat;
+  const { analyse: a, resultat, relative, erreurBtc, btcPerime = false } = etat;
+  // Part vs BTC lue à un jour commun antérieur au dernier jour de l'actif (série BTC en retard).
+  const communEnRetard =
+    relative?.dernierJourCommun != null && a.dernierJour !== null && relative.dernierJourCommun < a.dernierJour;
   const retard = a.dernierJour !== null ? retardJours(a.dernierJour, maintenant) : 0;
   const dernierPic = a.pics.at(-1);
   // Épisodes chronologiques, tous antérieurs au dernier jour : les `picsSur365j` derniers sont ceux de l'année.
@@ -138,14 +143,14 @@ function TuilesAttention({
         title="Moyenne des vues des 7 derniers jours mesurés rapportée à celle des 90 derniers"
       />
       <TuileStat
-        label={`Pics > ${SEUIL_PIC_SIGMA}σ · 365 j`}
+        label={`Épisodes > ${SEUIL_PIC_SIGMA}σ · 365 j`}
         valeur={a.picsSur365j !== null ? formatEntier(a.picsSur365j) : NON_MESURE}
         title={
           a.picsSur365j === null
             ? `z 365 j mesuré sur aucun des ${JOURS_ANNEE} derniers jours (historique ou couverture insuffisants) : pas de décompte`
             : pics365.length > 0
-              ? `Épisodes sur ${baseDecompte} (jour compté, z) : ${pics365.map((p) => `${dateIso(p.jour)} z ${formatDec(p.z, 1)}`).join(" · ")}`
-              : `Aucun jour au-delà de ${SEUIL_PIC_SIGMA}σ (z 365 j) sur ${baseDecompte}`
+              ? `Nouveaux épisodes sur ${baseDecompte} (premier jour au-delà de ${SEUIL_PIC_SIGMA}σ, z) : ${pics365.map((p) => `${dateIso(p.jour)} z ${formatDec(p.z, 1)}`).join(" · ")}`
+              : `Aucun nouvel épisode (premier jour au-delà de ${SEUIL_PIC_SIGMA}σ, z 365 j) sur ${baseDecompte} ; un épisode commencé avant peut s'y prolonger`
         }
         pied={
           <>
@@ -173,11 +178,23 @@ function TuilesAttention({
               ? `Série Bitcoin indisponible : ${erreurBtc}`
               : "Vues de l'article de l'actif rapportées à celles de l'article Bitcoin, même édition, 7 derniers jours communs"
           }
+          badge={
+            erreurBtc === null && btcPerime ? (
+              <Badge ton="warn" title="Wikimedia a échoué pour Bitcoin : dernière série BTC en cache, au-delà de sa durée de fraîcheur">
+                cache BTC périmé
+              </Badge>
+            ) : undefined
+          }
           pied={
-            <span>
-              z 365 j du ratio{" "}
-              {erreurBtc === null && relative?.zRatio365 != null ? formatDec(relative.zRatio365, 2) : NON_MESURE}
-            </span>
+            <>
+              <span>
+                z 365 j du ratio{" "}
+                {erreurBtc === null && relative?.zRatio365 != null ? formatDec(relative.zRatio365, 2) : NON_MESURE}
+              </span>
+              {erreurBtc === null && communEnRetard && relative?.dernierJourCommun != null && (
+                <span>au {dateIso(relative.dernierJourCommun)}</span>
+              )}
+            </>
           }
         />
       )}
@@ -277,17 +294,19 @@ export const SectionAttentionWiki = memo(function SectionAttentionWiki() {
         const resultat = await chargerAttentionWiki(actif, edition, { signal });
         let relative: AttentionRelative | null = null;
         let erreurBtc: string | null = null;
+        let btcPerime = false;
         if (actif !== "BTC") {
           try {
             const btc = await chargerAttentionWiki("BTC", edition, { signal });
             relative = attentionRelative(resultat.serie, btc.serie);
+            btcPerime = btc.perime;
           } catch (err) {
             if (signal.aborted) return;
             erreurBtc = message(err);
           }
         }
         if (signal.aborted) return;
-        setEtat({ statut: "pret", resultat, analyse: analyserAttention(resultat.serie), relative, erreurBtc });
+        setEtat({ statut: "pret", resultat, analyse: analyserAttention(resultat.serie), relative, erreurBtc, btcPerime });
       } catch (err) {
         if (!signal.aborted) setEtat({ statut: "erreur", message: message(err) });
       }

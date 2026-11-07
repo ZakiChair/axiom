@@ -59,7 +59,7 @@ function htmlTuile(html: string, label: string): string {
   return html.slice(debut, suite < 0 ? undefined : suite);
 }
 
-const LABEL_PICS = "Pics &gt; 3σ · 365 j";
+const LABEL_PICS = "Épisodes &gt; 3σ · 365 j";
 
 describe("section Attention grand public de CYCLE", () => {
   it("affiche les tuiles BTC, les libellés « descriptif » et « Source : Wikimedia (CC0) »", () => {
@@ -128,6 +128,35 @@ describe("section Attention grand public de CYCLE", () => {
     const complet = rendre({ statut: "pret", resultat: resultat("BTC", "Bitcoin"), analyse: analyse(), relative: null, erreurBtc: null });
     expect(valeurTuile(complet, LABEL_PICS)).toBe("1");
     expect(htmlTuile(complet, LABEL_PICS)).not.toContain("j mesurés");
+  });
+
+  it("épisode commencé avant l'année et prolongé dedans : « aucun nouvel épisode », pas « aucun jour au-delà de 3σ »", () => {
+    // Vues × 20 du jour 420 au jour 445 ; lecture au jour 800 : l'épisode commence avant la
+    // fenêtre d'un an (jours 436 à 800) et se prolonge dedans (jours 436 à 445).
+    const vues = Array.from({ length: 801 }, (_, i) => (i >= 420 && i <= 445 ? 20 : 1) * (40_000 + (i % 7) * 900));
+    const debut = jour("2026-11-06") - 800 * JOUR_MS;
+    const a = analyserAttention({ debut, vues });
+    expect(a.pics.map((p) => (p.jour - debut) / JOUR_MS)).toEqual([420]);
+    expect(a.picsSur365j).toBe(0);
+    const html = rendre({ statut: "pret", resultat: resultat("BTC", "Bitcoin"), analyse: a, relative: null, erreurBtc: null });
+    expect(html).toContain("Aucun nouvel épisode (premier jour au-delà de 3σ, z 365 j)");
+    expect(html).not.toContain("Aucun jour au-delà");
+  });
+
+  it("alt : série BTC resservie d'un cache périmé et en retard → badge et jour commun affichés", () => {
+    const html = rendre(
+      {
+        statut: "pret",
+        resultat: resultat("ETH", "Ethereum"),
+        analyse: analyse({ niveau: "normale", z365: 0.4 }),
+        relative: { dernierJourCommun: jour("2026-09-27"), partVsBtc7j: 0.3, zRatio365: 0.1 },
+        erreurBtc: null,
+        btcPerime: true,
+      },
+      "ETH",
+    );
+    expect(html).toContain("cache BTC périmé");
+    expect(htmlTuile(html, "Vues vs Bitcoin · 7 j")).toContain("au 2026-09-27");
   });
 
   it("alt : part des vues vs Bitcoin et z du ratio ; BTC en échec → « indisponible »", () => {

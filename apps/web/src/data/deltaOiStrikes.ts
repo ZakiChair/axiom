@@ -125,15 +125,18 @@ type Cotes = { c: number | null; p: number | null };
 
 /**
  * ΔOI de la chaîne courante contre un instantané de référence. null si la référence n'est pas
- * strictement antérieure à `nowMs` (causalité). PURE.
+ * strictement antérieure aux DONNÉES courantes (`donneesA`, réception de la chaîne) : une
+ * chaîne restée figée après une panne ne se compare jamais à une référence écrite après elle
+ * (par un autre navigateur, via le KV). `nowMs` sert à exclure les échéances réglées. PURE.
  */
 export function calculerDeltaOi(
   chain: readonly OptionPoint[],
   ref: InstantaneOi,
   spot: number,
   nowMs: number,
+  donneesA: number = nowMs,
 ): ResultatDeltaOi | null {
-  if (!(ref.t < nowMs)) return null;
+  if (!(ref.t < donneesA)) return null;
   const courant = construireInstantaneOi(chain, nowMs);
   const cle = (e: number, k: number) => `${e}|${k}`;
   const avant = new Map<string, { e: number; k: number; cotes: Cotes }>();
@@ -328,6 +331,10 @@ export async function capturerInstantaneOi(devise: DeviseOi, chain: readonly Opt
   if (capturesSession.has(cleSession)) return false;
   capturesSession.add(cleSession);
   if (lireLocal(devise, jour) !== null) return false;
+  // Sonde attendue avant de lire daemonPret() : une chaîne arrivée avant la fin de la première
+  // sonde n'écrirait sinon que localement, et le Set de session priverait le KV de cette
+  // référence J-1/J-7 pour les autres navigateurs.
+  await detectDaemon("kv").catch(() => false);
   if (daemonPret()) {
     const distant = validerInstantane(await kvGet(NS_KV_OI, cleKvOi(devise, jour)));
     if (distant !== null) {

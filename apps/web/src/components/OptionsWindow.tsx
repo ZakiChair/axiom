@@ -527,12 +527,16 @@ export function OptionsWindow() {
   const bandeOiDesc = useMemo(() => [...bandeOi].sort((a, b) => b - a), [bandeOi]);
 
   // ΔOI contre l'instantané J-1 ou J-7 de la devise affichée (fonction pure, nowMs au bord :
-  // échéances réglées exclues, référence strictement antérieure). null = aucune référence.
+  // échéances réglées exclues ; référence strictement antérieure à la réception de la chaîne,
+  // majTs). null = aucune référence.
   const refsOiDevise = refsOi?.devise === devise ? refsOi.refs : null;
   const refOi = refsOiDevise === null ? null : refOiChoix === "j1" ? refsOiDevise.j1 : refsOiDevise.j7;
   const deltaOi = useMemo(
-    () => (vue === "heatmap" && heatmapMetrique === "doi" && refOi !== null ? calculerDeltaOi(chain, refOi, spotChaine, nowMs) : null),
-    [vue, heatmapMetrique, refOi, chain, spotChaine, nowMs],
+    () =>
+      vue === "heatmap" && heatmapMetrique === "doi" && refOi !== null && majTs !== null
+        ? calculerDeltaOi(chain, refOi, spotChaine, nowMs, majTs)
+        : null,
+    [vue, heatmapMetrique, refOi, chain, spotChaine, nowMs, majTs],
   );
   const deltaOiCarte = useMemo(
     () => (deltaOi === null ? null : {

@@ -132,6 +132,13 @@ describe("calculerDeltaOi", () => {
     expect(calculerDeltaOi(courante, ref, SPOT, NOW)).not.toBeNull();
   });
 
+  it("causalité : référence postérieure à la chaîne courante (figée après une panne) mais antérieure à nowMs, refusée", () => {
+    const recueA = ref.t - 3_600_000; // chaîne reçue une heure avant la référence
+    expect(ref.t).toBeLessThan(NOW);
+    expect(calculerDeltaOi(courante, ref, SPOT, NOW, recueA)).toBeNull();
+    expect(calculerDeltaOi(courante, ref, SPOT, NOW, ref.t + 1)).not.toBeNull();
+  });
+
   it("spot absent : Δ en contrats conservé, USD non mesuré", () => {
     const r = calculerDeltaOi(courante, ref, NaN, NOW)!;
     expect(r.cellules.every((c) => c.deltaUsd === null)).toBe(true);

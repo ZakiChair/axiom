@@ -82,9 +82,10 @@ export function DeltaOi({ devise, choix, refs, resultat, top, expiryMs }: Props)
       </div>
       {refs !== null && (
         <div className="mt-0.5 text-[10px] text-text-dim">
-          Instantanés {refs.daemon ? "(daemon + ce navigateur)" : "(ce navigateur seulement)"} :{" "}
-          {jours.length === 0 ? "aucun dans ce navigateur" : jours.map(formatJourUtc).join(", ")} — un par jour UTC,
-          pris au premier chargement après 08:05 UTC, {JOURS_CONSERVES + 1} jours conservés.
+          Instantanés dans ce navigateur :{" "}
+          {jours.length === 0 ? "aucun" : jours.map(formatJourUtc).join(", ")} — un par jour UTC,
+          pris au premier chargement après 08:05 UTC, {JOURS_CONSERVES + 1} jours conservés
+          {refs.daemon ? " ; le daemon fournit aussi ceux pris par un autre navigateur (référence J-1 / J-7 comprise)." : " (pas de daemon : ce navigateur seulement)."}
         </div>
       )}
       {resultat !== null && expiryMs !== null && top !== null && (

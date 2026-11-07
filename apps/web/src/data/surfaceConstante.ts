@@ -505,6 +505,8 @@ export async function capturerSurfaceDuJour(
   const point = pointHistorique(surfaceMaturiteConstante(chain, spot, recuLe), recuLe);
   if (point === null) return null;
   capturesSession.add(cleSession);
+  // Sonde attendue avant de lire daemonPret() (première sonde pas encore finie au démarrage).
+  await detectDaemon("kv").catch(() => false);
   const distante = daemonPret() ? validerArchive(await kvGet(NS_KV_SURFACE, cleKvSurface(devise))) : null;
   const archive = fusionnerArchives(locale, distante, { v: 1, points: [point] });
   ecrireLocal(devise, archive);

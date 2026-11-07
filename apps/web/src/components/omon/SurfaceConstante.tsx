@@ -8,10 +8,16 @@
  */
 import type { LectureHistorique, LectureMaturite, PointMaturiteConstante } from "../../data/surfaceConstante";
 import { MIN_POINTS_HISTORIQUE, SEUIL_OI_AILE_10D_USD } from "../../data/surfaceConstante";
-import { formatDateComplete, formatPourcentage, formatUsd, VALEUR_ABSENTE } from "../../lib/format";
+import { formatPourcentage, formatUsd, VALEUR_ABSENTE } from "../../lib/format";
 import { NoteSource } from "../ui";
 import { TableTriable, type ColonneTable } from "../TableTriable";
 import { formatDateHeureUtc, formatPointsIv } from "./format";
+
+/** Jour UTC complet (« 6 nov. 2026 ») : les instantanés sont définis par jour UTC, pas local. */
+function formatJourCompletUtc(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return VALEUR_ABSENTE;
+  return new Date(ms).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+}
 
 interface Props {
   lectures: LectureMaturite[];
@@ -135,7 +141,7 @@ export function SurfaceConstanteBloc({ lectures, couverture, daemon, nbEcheances
           Historique ({daemon ? "daemon + ce navigateur" : "ce navigateur seulement"}, 1 instantané par jour UTC après 08:05) :{" "}
           {couverture === null
             ? "aucun instantané pour l'instant."
-            : `${couverture.jours} jour${couverture.jours > 1 ? "s" : ""} capturé${couverture.jours > 1 ? "s" : ""} sur ${couverture.joursPossibles} depuis le ${formatDateComplete(couverture.debutMs)}.`}
+            : `${couverture.jours} jour${couverture.jours > 1 ? "s" : ""} capturé${couverture.jours > 1 ? "s" : ""} sur ${couverture.joursPossibles} depuis le ${formatJourCompletUtc(couverture.debutMs)} (UTC).`}
         </div>
         {l30 && precedent !== null && (
           <div className="text-[11px]">

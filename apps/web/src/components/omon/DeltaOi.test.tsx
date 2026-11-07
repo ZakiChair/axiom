@@ -28,6 +28,7 @@ describe("DeltaOi", () => {
     expect(html).toContain("−$5.00M");
     expect(html).toContain("nouveau");
     expect(html).toContain("06/11, 07/11");
+    expect(html).toContain("Instantanés dans ce navigateur");
     expect(html).toContain("ce navigateur seulement");
     expect(html).not.toMatch(/haussi|baissi|bullish|bearish|achet|vend/i);
   });

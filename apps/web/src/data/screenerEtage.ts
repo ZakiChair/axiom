@@ -121,6 +121,24 @@ export interface IoEtage {
   progression?: (done: number, total: number) => void;
 }
 
+/** Durée d'une bougie des unités du screener (15m, 1h, 4h, 1d), en ms. */
+function dureeUnite(tf: Timeframe): number {
+  return 86_400_000 / bougiesParJour(tf);
+}
+
+/**
+ * Bougies closes manquantes à la fin de la référence au chargement : 0 si sa dernière
+ * bougie close est la plus récente possible. Une bougie de retard est tolérée (clôture à
+ * la frontière, publication de la place) ; au-delà, la référence est arrêtée ou suspendue
+ * et caler les symboles sur elle lirait toutes leurs conditions dans le passé.
+ */
+export function retardReference(ref: readonly Candle[], tf: Timeframe, maintenantMs: number): number {
+  const derniere = ref[ref.length - 1];
+  if (derniere === undefined) return Number.POSITIVE_INFINITY;
+  const duree = dureeUnite(tf);
+  return Math.max(0, Math.floor((maintenantMs - (derniere.time + duree)) / duree));
+}
+
 /** Résultat de l'étage : lignes survivantes et notes de couverture. */
 export interface ResultatEtage {
   rows: ScreenerRow[];
@@ -130,7 +148,9 @@ export interface ResultatEtage {
 /**
  * Évalue les conditions sur chaque candidat, en série, avec progression. Rejette si une
  * condition est refusée (message prêt à afficher). Un symbole sans klines ne passe pas
- * et est compté dans les notes.
+ * et est compté dans les notes ; de même, un symbole arrêté sur une condition NON
+ * MESURÉE (historique ou volume taker insuffisant) est compté par condition, pour que la
+ * couverture se voie (« N résultats » ne veut pas dire que tous les autres ont échoué).
  */
 export async function executerEtage(req: RequeteEtage, io: IoEtage): Promise<ResultatEtage> {
   const raison = raisonConditions(req.conditions, req.tf);
@@ -163,8 +183,20 @@ export async function executerEtage(req: RequeteEtage, io: IoEtage): Promise<Res
     } catch {
       ref = null;
     }
+    if (ref === null) {
+      notes.push(`référence ${req.refSymbol} ${tf} indisponible : force relative non évaluée`);
+    } else {
+      // Référence arrêtée (paire suspendue dont la place sert encore l'historique) : aucun
+      // symbole n'est calé sur elle, la force relative est tenue pour indisponible.
+      const retard = retardReference(ref, tf, io.maintenant());
+      if (retard > 1) {
+        ref = null;
+        notes.push(
+          `référence ${req.refSymbol} ${tf} en retard de ${retard} bougies : force relative non évaluée`,
+        );
+      }
+    }
     refs.set(tf, ref);
-    if (ref === null) notes.push(`référence ${req.refSymbol} ${tf} indisponible : force relative non évaluée`);
   }
 
   const survivants: ScreenerRow[] = [];
@@ -173,6 +205,9 @@ export async function executerEtage(req: RequeteEtage, io: IoEtage): Promise<Res
   let echecs = 0;
   // Symboles lus à la dernière bougie commune avec la référence (bougie close pendant le run).
   let cales = 0;
+  // Symboles arrêtés sur une condition NON MESURÉE (état inconnu sur toute sa fenêtre), par
+  // libellé : ils ne sont pas « faux », leur absence des résultats doit se voir.
+  const nonMesures = new Map<string, number>();
 
   for (const cand of req.candidates) {
     let cale = false;
@@ -202,8 +237,15 @@ export async function executerEtage(req: RequeteEtage, io: IoEtage): Promise<Res
           cache = new Map();
           caches.set(tf, cache);
         }
-        const lecture = evaluerCondition(cond, candles, { tf, ref: refs.get(tf), cache });
+        const ref = refs.get(tf);
+        const lecture = evaluerCondition(cond, candles, { tf, ref, cache });
         if (!lecture.vraie || lecture.valeur === undefined) {
+          // Référence indisponible : déjà dite par sa propre note.
+          const sansRef = ref === null && cond.kind === "indicator" && champParId(cond.fieldId)?.besoin === "ref";
+          if (!lecture.vraie && !lecture.mesuree && !sansRef) {
+            const libelle = libelleCondition(cond, req.tf);
+            nonMesures.set(libelle, (nonMesures.get(libelle) ?? 0) + 1);
+          }
           passe = false;
           break;
         }
@@ -237,6 +279,13 @@ export async function executerEtage(req: RequeteEtage, io: IoEtage): Promise<Res
     notes.push(
       `${cales} symbole${cales > 1 ? "s" : ""} lu${cales > 1 ? "s" : ""} à la dernière bougie commune avec ` +
         `${req.refSymbol} (bougie close après le chargement de la référence)`,
+    );
+  }
+  for (const [libelle, nb] of nonMesures) {
+    const s = nb > 1 ? "s" : "";
+    notes.push(
+      `${nb} symbole${s} non mesuré${s} pour « ${libelle} » (historique ou volume taker insuffisant) : ` +
+        `écarté${s} sans évaluation`,
     );
   }
   if (echecs > 0) notes.push(`${echecs} symbole${echecs > 1 ? "s" : ""} sans klines`);

@@ -15,6 +15,7 @@ import {
   limitesParUnite,
   parserKlines,
   REQ_INTERVAL_MS,
+  retardReference,
   type IoEtage,
 } from "./screenerEtage";
 
@@ -121,7 +122,57 @@ describe("executerEtage", () => {
     const cond: ConditionRegle = { kind: "regle", condition: { type: "comparaison", gauche: close, comparateur: ">", droite: cst(150) } };
     const res = await executerEtage({ candidates: [ligne("AAAUSDT")], tf: "4h", conditions: [cond], refSymbol: "BTCUSDT" }, e);
     expect(res.rows).toEqual([]);
+    // Condition mesurée et fausse : aucune note de couverture.
+    expect(res.notes).toEqual([]);
     expect(e.urls[0]).toBe(`${KLINES_URL}?symbol=AAAUSDT&interval=4h&limit=201`);
+  });
+
+  it("symbole non mesuré (200 bougies 1d pour un RS Mansfield 52 sem.) : absent des lignes, compté dans une note", async () => {
+    const e = io((s) => (s === "BTCUSDT" ? serie(400, J1, () => 100) : serie(s === "NEUFUSDT" ? 201 : 400, J1, (i) => 1 + i * 0.01)));
+    const rs: ConditionChamp = { kind: "indicator", fieldId: "rsMansfield", op: ">", value: -1000 };
+    const res = await executerEtage(
+      { candidates: [ligne("NEUFUSDT"), ligne("ANCIENUSDT")], tf: "4h", conditions: [rs], refSymbol: "BTCUSDT" },
+      e,
+    );
+    expect(res.rows.map((r) => r.symbol)).toEqual(["ANCIENUSDT"]);
+    expect(res.notes).toEqual([
+      "1 symbole non mesuré pour « RS Mansfield(364) [1d] » (historique ou volume taker insuffisant) : écarté sans évaluation",
+    ]);
+  });
+
+  it("close > EMA 200 sans EMA (historique court) : non mesuré, et non « faux »", async () => {
+    const e = io(() => serie(150, H4, () => 100));
+    const ema: ConditionRegle = {
+      kind: "regle",
+      condition: { type: "comparaison", gauche: close, comparateur: ">", droite: { type: "indicateur", indicateurId: "ema", params: { length: 200 }, output: "ema" } },
+    };
+    const res = await executerEtage({ candidates: [ligne("AAAUSDT"), ligne("BBBUSDT")], tf: "4h", conditions: [ema], refSymbol: "BTCUSDT" }, e);
+    expect(res.rows).toEqual([]);
+    expect(res.notes).toEqual([
+      "2 symboles non mesurés pour « close > ema(200) » (historique ou volume taker insuffisant) : écartés sans évaluation",
+    ]);
+  });
+
+  it("référence arrêtée 30 bougies plus tôt : aucun calage, force relative indisponible", async () => {
+    const e = io((s) => {
+      const complete = serie(201, H4, (i) => 100 + i);
+      // Bougie 200 en formation, 199 dernière close ; la référence s'arrête à la bougie 169.
+      return s === "BTCUSDT" ? complete.slice(0, 170) : complete;
+    });
+    const rsi: ConditionChamp = { kind: "indicator", fieldId: "rsi", param: 14, op: ">=", value: 0 };
+    const rsZ: ConditionChamp = { kind: "indicator", fieldId: "rsZ", param: 50, op: ">", value: -100 };
+    const res = await executerEtage({ candidates: [ligne("AAAUSDT")], tf: "4h", conditions: [rsi, rsZ], refSymbol: "BTCUSDT" }, e);
+    expect(res.rows).toEqual([]);
+    // Pas de note de calage : le RSI n'a pas été lu 30 bougies en arrière.
+    expect(res.notes).toEqual(["référence BTCUSDT 4h en retard de 30 bougies : force relative non évaluée"]);
+  });
+
+  it("retardReference : bougies closes manquantes à la fin de la référence", () => {
+    const bougies = (n: number) => parserKlines(serie(201, H4, () => 100), MAINTENANT).slice(0, n);
+    expect(retardReference(bougies(200), "4h", MAINTENANT)).toBe(0);
+    expect(retardReference(bougies(199), "4h", MAINTENANT)).toBe(1);
+    expect(retardReference(bougies(170), "4h", MAINTENANT)).toBe(30);
+    expect(retardReference([], "4h", MAINTENANT)).toBe(Number.POSITIVE_INFINITY);
   });
 
   it("deux unités par symbole, chargées paresseusement ; valeurs et ancienneté renvoyées", async () => {

@@ -242,11 +242,18 @@ describe("évaluation sur bougies closes", () => {
 
   it("fenêtre K : vraie si au moins une des K dernières bougies l'est, la plus récente retenue", () => {
     const serie = { etat: [true, false, true, false, false], valeur: [1, 2, 3, 4, 5] };
-    expect(lireFenetre(serie, 1)).toEqual({ vraie: false, valeur: 5 });
-    expect(lireFenetre(serie, 2)).toEqual({ vraie: false, valeur: 5 });
-    expect(lireFenetre(serie, 3)).toEqual({ vraie: true, valeur: 3, barresDepuis: 2 });
-    expect(lireFenetre(serie, 50)).toEqual({ vraie: true, valeur: 3, barresDepuis: 2 });
-    expect(lireFenetre({ etat: [], valeur: [] }, 3)).toEqual({ vraie: false, valeur: undefined });
+    expect(lireFenetre(serie, 1)).toEqual({ vraie: false, mesuree: true, valeur: 5 });
+    expect(lireFenetre(serie, 2)).toEqual({ vraie: false, mesuree: true, valeur: 5 });
+    expect(lireFenetre(serie, 3)).toEqual({ vraie: true, mesuree: true, valeur: 3, barresDepuis: 2 });
+    expect(lireFenetre(serie, 50)).toEqual({ vraie: true, mesuree: true, valeur: 3, barresDepuis: 2 });
+    expect(lireFenetre({ etat: [], valeur: [] }, 3)).toEqual({ vraie: false, mesuree: false, valeur: undefined });
+  });
+
+  it("fenêtre K : état inconnu sur toute la fenêtre = non mesurée, distincte de fausse", () => {
+    // close > EMA sans EMA : la valeur gauche (close) existe, l'état reste inconnu.
+    const serie = { etat: [false, undefined, undefined], valeur: [1, 2, 3] };
+    expect(lireFenetre(serie, 2)).toEqual({ vraie: false, mesuree: false, valeur: 3 });
+    expect(lireFenetre(serie, 3)).toEqual({ vraie: false, mesuree: true, valeur: 3 });
   });
 
   it("flux : RVOL, taker net et pente CVD normalisée lus sur la bougie close", () => {
@@ -264,8 +271,8 @@ describe("évaluation sur bougies closes", () => {
 
   it("donnée absente = indisponible, jamais 0", () => {
     const sansTaker = candles.map(({ buyVolume: _b, sellVolume: _s, ...c }) => c);
-    expect(evaluerCondition(champ("takerNet", ">", -101), sansTaker, ctx)).toEqual({ vraie: false, valeur: undefined });
-    expect(evaluerCondition(champ("cvdPente", ">", -101), sansTaker, ctx)).toEqual({ vraie: false, valeur: undefined });
+    expect(evaluerCondition(champ("takerNet", ">", -101), sansTaker, ctx)).toEqual({ vraie: false, mesuree: false, valeur: undefined });
+    expect(evaluerCondition(champ("cvdPente", ">", -101), sansTaker, ctx)).toEqual({ vraie: false, mesuree: false, valeur: undefined });
     // Un trou de volume taker n'invalide que les fenêtres qui le contiennent.
     const trou = candles.map((c, i) => (i === candles.length - 10 ? { ...c, buyVolume: undefined, sellVolume: undefined } : c));
     const v = valeursChamp(champ("cvdPente", ">", 0, { param: 3 }), trou, ctx);

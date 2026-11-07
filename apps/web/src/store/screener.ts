@@ -43,8 +43,8 @@ import {
 import { windowManagerStore, mirrorOpenState } from "./windowManager";
 
 // Utilitaires du pipeline déplacés vers data/screenerRun.ts ; ré-exportés ici pour
-// les consommateurs existants (store/signaux.ts, store/squeeze.ts) — aucun cycle
-// (screenerRun n'importe rien du store).
+// les consommateurs existants (store/signaux.ts, store/squeeze.ts) — aucun cycle :
+// screenerRun ne lit que store/refSymbol, qui n'importe rien du screener.
 export { mapPool, TICKER_24H_URL, OI_HIST_LIMIT } from "../data/screenerRun";
 
 /** Clé localStorage des presets UTILISATEUR (les livrés sont constants, non persistés). */

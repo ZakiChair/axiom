@@ -598,6 +598,13 @@ export function serieCondition(
 /** Lecture d'une condition dans sa fenêtre K. */
 export interface LectureFenetre {
   vraie: boolean;
+  /**
+   * true si l'état est connu (vrai ou faux) sur au moins une bougie de la fenêtre. false =
+   * condition NON MESURÉE (historique, volume taker ou référence insuffisants), à ne pas
+   * confondre avec une condition fausse. On ne s'appuie pas sur `valeur` : pour
+   * « close > EMA », la valeur gauche (close) existe même quand l'EMA manque.
+   */
+  mesuree: boolean;
   /** Valeur à la bougie déclenchante, sinon à la dernière bougie close (undefined = indisponible). */
   valeur: number | undefined;
   /** Bougies closes depuis la bougie déclenchante (absent si fausse). */
@@ -606,15 +613,19 @@ export interface LectureFenetre {
 
 /**
  * Vraie si l'état l'est sur au moins une des K dernières bougies (closes) ; retient la
- * plus récente. Fausse si elle ne l'est nulle part, valeur indisponible comprise.
+ * plus récente. Fausse si elle ne l'est nulle part ; `mesuree` distingue alors « fausse »
+ * (état connu quelque part dans la fenêtre) de « indisponible » (état inconnu partout).
  */
 export function lireFenetre(serie: SerieCondition, fenetre: number): LectureFenetre {
   const n = serie.etat.length;
   const debut = Math.max(0, n - Math.max(1, fenetre));
+  let mesuree = false;
   for (let i = n - 1; i >= debut; i--) {
-    if (serie.etat[i] === true) return { vraie: true, valeur: serie.valeur[i], barresDepuis: n - 1 - i };
+    const etat = serie.etat[i];
+    if (etat === true) return { vraie: true, mesuree: true, valeur: serie.valeur[i], barresDepuis: n - 1 - i };
+    if (etat === false) mesuree = true;
   }
-  return { vraie: false, valeur: n > 0 ? serie.valeur[n - 1] : undefined };
+  return { vraie: false, mesuree, valeur: n > 0 ? serie.valeur[n - 1] : undefined };
 }
 
 /** Évalue une condition sur les bougies CLOSES de son unité. */

@@ -19,12 +19,13 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 - **Cible** : terminal pour UN utilisateur (ses propres clés). PAS de multi-tenant, PAS d'auth réseau, PAS de SaaS. Crypto d'abord (spot + perp) ; tradfi/commodités en complément.
 - **Renderer-first** : le premier livrable à valeur est un graphe live à l'écran. **AUCUN backend réseau/multi-tenant (Docker/TimescaleDB/Redis interdits). Un daemon localhost mono-process (`apps/daemon`, Bun + SQLite, port 8787) est autorisé depuis la Phase 2 — proxy/cache/persistance/alertes UNIQUEMENT, jamais sur le chemin chaud du renderer (les WS de marché du front restent directs).** Le front parle directement aux WS publics des exchanges (mode mono-utilisateur assumé) et reste **100 % fonctionnel SANS daemon** (feature-detect `/health` + repli localStorage/proxy Vite). Déviation assumée vs roadmap E1 : les proxys Vite restent en dev (dev sans daemon), le daemon est le chemin de PROD + services additionnels.
 - **Chart** : **KLineChart** figé (pas de lightweight-charts, pas d'abstraction `IChartRenderer` « swap de moteur »). L'overlay orderflow se synchronise sur le viewport de KLineChart. Multi-chart 2×2 : un store par slot ; les overlays doivent être scellés au slot (voir plan 2026-08-24, Lot 3).
-- **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**219 indicateurs** depuis le 2026-10-07, cf. « AXIS — confluence de signaux (demande du 7 octobre 2026) » ; 218 au 2026-10-01, 215 au 2026-09-26). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
+- **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**221 indicateurs** depuis le 2026-11-07, cf. « Outils d'analyse et sources (autorisation du 7 novembre 2026) » ; 220 au 2026-10-19 avec AXIS S/R, 219 au 2026-10-07, cf. « AXIS — confluence de signaux (demande du 7 octobre 2026) » ; 218 au 2026-10-01, 215 au 2026-09-26). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
 - **Données dérivées (OI/funding/L-S/liquidations)** : **ACHETER** via un `IDerivedDataProvider` (Coinalyze **câblé**, M6 atteint) — NE PAS construire d'AggregationEngine multi-exchange. Trois couches de liquidations distinctes et étiquetées : heatmap *exécutée*, niveaux **EST.** (modèle levier), niveaux **HL réels** (Hyperliquid, non exhaustif). Depuis le 2026-09-21, la heatmap exécutée reçoit aussi une venue `hyperliquid` **PARTIELLE** (fills des makers suivis, couverture mesurée affichée — cf. « Corrections et extension demandées le 21 septembre 2026 »). Depuis le 2026-09-22, la couche HL réels est aussi une **heatmap temps × prix des instantanés** collectés par le daemon (opt-in, couverture mesurée en % de l'OI — cf. « Revue et extension du 22 septembre 2026 »).
 - **Trading** : **PAS d'exécution d'ordres** — aucune clé de trading. Le paper trading (`PAPER`) est une simulation locale (hors gate G100/K8). Ne rien implémenter qui touche à des clés de trading réelles.
 - **Sources** : **9 identifiants** (`EXCHANGE_IDS` dans `@axiom/types`) — Binance, Bybit, OKX, Hyperliquid, Coinbase, Kraken, Twelve Data, MEXC, synthetic. Ne pas en ajouter sans nécessité démontrée (non-objectif avant G100).
-- **Fournisseurs de capitalisation (exception ACTÉE le 2026-09-01, même statut que WHALES)** : l'historique TOTAL/TOTAL2/TOTAL3 et la fenêtre BPL sont servis par l'endpoint public `api.coinmarketcap.com/data-api` (sans clé, via `/extapi`) — de même, SANS repli, la dominance des stablecoins `STABLE.D` (2026-10-29, cf. section « Dominance des stablecoins ») —, avec repli CryptoCompare/CCData `min-api.cryptocompare.com` (clé personnelle navigateur, route dédiée `/ccdataapi` daemon + Vercel) puis CoinGecko local. `EXCHANGE_IDS` reste à 9 (l'adaptateur de capitalisation est de source `synthetic`). Aucun autre fournisseur sans amendement du contrat (amendements : fournisseurs statistiques publics le 2026-09-06, CryptoQuant BASIC le 2026-09-16 — cf. « Extension autorisée le 16 septembre 2026 »).
+- **Fournisseurs de capitalisation (exception ACTÉE le 2026-09-01, même statut que WHALES)** : l'historique TOTAL/TOTAL2/TOTAL3 et la fenêtre BPL sont servis par l'endpoint public `api.coinmarketcap.com/data-api` (sans clé, via `/extapi`) — de même, SANS repli, la dominance des stablecoins `STABLE.D` (2026-10-29, cf. section « Dominance des stablecoins ») —, avec repli CryptoCompare/CCData `min-api.cryptocompare.com` (clé personnelle navigateur, route dédiée `/ccdataapi` daemon + Vercel) puis CoinGecko local. `EXCHANGE_IDS` reste à 9 (l'adaptateur de capitalisation est de source `synthetic`). Aucun autre fournisseur sans amendement du contrat (amendements : fournisseurs statistiques publics le 2026-09-06, CryptoQuant BASIC le 2026-09-16 — cf. « Extension autorisée le 16 septembre 2026 » —, Wikimedia (pages vues Wikipédia) le 2026-11-07 — cf. « Outils d'analyse et sources (autorisation du 7 novembre 2026) »).
 - **Fournisseurs statistiques publics (exception ACTÉE le 2026-09-06, même statut que les fournisseurs de capitalisation)** : trois sources publiques sans clé API — OCDE (`sdmx.oecd.org`), Eurostat (`ec.europa.eu`), ONS (`www.ons.gov.uk`) — admis en appel DIRECT avec vérification des en-têtes CORS, sans ajout à `shared/extapi-hosts.ts`. Remplacent des miroirs FRED internationaux défaillants (CPI zone euro arrêté en 2023, CPI japonais en 2021, M2 chinois en 2019) avec des `last_updated` trompeurs. `EXCHANGE_IDS` reste à 9 (aucun adaptateur marché n'est impliqué). Cf. `docs/superpowers/specs/2026-09-06-indicateurs-macro-mondiaux-design.md`.
+- **Fournisseur d'attention publique (exception ACTÉE le 2026-11-07, même statut que les fournisseurs statistiques publics)** : pages vues quotidiennes Wikipédia par l'API REST Wikimedia (`https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/…`), sans clé, en appel DIRECT du navigateur (en-tête `Api-User-Agent` générique, repli en requête simple si le pré-vol est refusé), sans ajout à `shared/extapi-hosts.ts` ni au proxy Vercel ou daemon ; hôte exact `https://wikimedia.org` ajouté à `connect-src` (CSP Report-Only de `vercel.json`). **Aucune source défaillante remplacée** : l'exception est nommée comme telle (cf. « Outils d'analyse et sources (autorisation du 7 novembre 2026) »). `EXCHANGE_IDS` reste à 9.
 
 ## Conventions
 
@@ -63,23 +64,23 @@ d'historique (demande du 26 septembre 2026) »). Voir la
 
 ## État actuel (2026-09-04)
 - **Chart** live multi-exchange (spot + perp), multi-grille 1/2h/2v/2×2, orderflow/CVD/footprint, volume profile, fibo, dessins.
-- **219 indicateurs** TS purs dans `@axiom/indicators` (dont 31 stratégies ; AXIS, ajoutée le 2026-10-07, est la première **testée favorable** sur données jamais vues — v1 recalée le matin même, v2 validée le soir, `scripts/axis/`) ; **4 golden tests** pandas-ta (ADX, SuperTrend, Ichimoku, PSAR) — le reste est couvert par tests unitaires/structurels.
+- **221 indicateurs** TS purs dans `@axiom/indicators` (dont 32 stratégies ; AXIS, ajoutée le 2026-10-07, est la première **testée favorable** sur données jamais vues — v1 recalée le matin même, v2 validée le soir, `scripts/axis/` ; AXIS S/R, 220e, le 2026-10-19 ; `primeVol`, 221e, le 2026-11-07) ; **4 golden tests** pandas-ta (ADX, SuperTrend, Ichimoku, PSAR) — le reste est couvert par tests unitaires/structurels.
 - **39 fenêtres** à mnémonique (`WINDOW_REGISTRY`) — dont WHALES (mouvements baleines on-chain + positions top comptes Hyperliquid), ajoutée le 2026-08-25 sur décision utilisateur, et BPL (Bitcoin Power Law), ajoutée le 2026-09-01 avec les séries TOTAL/TOTAL2/TOTAL3 chartables (chantier CAP/BPL) : **écarts ASSUMÉS** au gel « aucune nouvelle fenêtre avant le verdict G100 » (§ ci-dessous).
 - **Daemon** `axiomd` : proxy+cache SQLite, KV/snapshots, candles, alertes (macOS + Telegram), replay dumps Binance, couches GDELT/UCDP, LIQHL Hyperliquid paresseux, collecteur whales (blocs confirmés blockchain.info + Etherscan stables, table `whale_moves`, rétention 30 j). Bind `127.0.0.1:8787`, whitelist `/extapi`, garde Host/Origin/DNS-rebinding.
 - **Vercel** : front + proxy serverless sans secret partagé, whitelist/MIME/DNS durcis ; depuis le 2026-09-25, fonction `api/hlpool.ts` sans secret (pool réduit LIQHL, CDN 6 h). Les clés personnelles restent dans le navigateur. **Exception ACTÉE le 2026-09-14** (demande utilisateur, test communautaire) : une seule variable serveur, `BGEOMETRICS_API_KEY`, portée par `api/proxy.ts` vers bitcoin-data.com quand le client n'envoie aucune clé — clé gratuite et révocable, plafonds de l'offre gratuite (10 req/heure et 15 req/jour) partagés par les visiteurs, jamais exposée au navigateur ; toute autre clé reste personnelle (test structurel `apps/daemon/src/vercelProxy.test.ts`). Toute fonction strictement locale est marquée `UNUSABLE`, toute fenêtre partielle `PARTIAL` ; jamais de pane muet. La clé CryptoQuant (2026-09-16) relève de cette règle : personnelle, saisie dans les Réglages, repli `.env` pour le proxy Vite et le daemon `127.0.0.1` uniquement, JAMAIS de variable serveur sur Vercel (le test structurel continue d'exiger exactement une lecture d'environnement).
 - **Paper trading** (`PAPER`) : moteur de simulation locale présent, hors gate G100.
-- **Gate G100** : code-complete, e2e partiellement automatisés, **verdict manuel ouvert** (voir `docs/superpowers/plans/2026-07-22-gate-g100-qa.md` et plan d'action 2026-08-24). **Aucune nouvelle fenêtre ni fonctionnalité de surface avant le verdict** — des exceptions ACTÉES : le 2026-08-25 (fenêtre WHALES + alerte `whale-flux`, demande utilisateur explicite), le 2026-09-01 (fenêtre BPL + séries TOTAL/TOTAL2/TOTAL3 chartables, chantier CAP/BPL demandé par l'utilisateur) le 2026-09-02 (lot v2.7 « Décider » : alerte composite, backtest en R, coût d'exécution DOM — aucune fenêtre, aucun fournisseur, aucun indicateur, spec `docs/superpowers/specs/2026-09-02-lot-v27-decider-design.md`) et le 2026-09-04 (catalogue positionnement/orderflow et PLAY-POS, cf. Conventions), et le 2026-09-06 (onglet « Indicateurs » de la fenêtre RATE + trois fournisseurs statistiques publics sans clé — OCDE, Eurostat, ONS — au titre du remplacement des miroirs FRED internationaux démantelés ; spec `docs/superpowers/specs/2026-09-06-indicateurs-macro-mondiaux-design.md`), et le 2026-09-07 (fenêtre BPL : horizon de projection porté à +50 ans et navigation zoom/pan du graphe ; synchronisation des vues de la grille multi-chart — unités de temps, zoom/défilement, réticule — plan `docs/superpowers/plans/2026-09-07-synchronisation-multivue.md` ; demandes utilisateur explicites — aucune fenêtre, aucun fournisseur, aucun indicateur nouveau), et le 2026-09-14 (fenêtre BT : section « Tenue par moitié » — découpage walk-forward de lecture du run exécuté, `partagerResultatMoities` dans `@axiom/backtest`, frontière tracée sur l'équité ; excursions MAE/MFE par trade calculées par le moteur sur les barres détenues, colonnes de la table et moyennes de la grille ; demande utilisateur « nouvelle fonction pertinente » — aucune fenêtre, aucun fournisseur, aucun indicateur nouveau ; puis, le même jour, lot ON-CHAIN sur demande utilisateur « nouvelle fonction pertinente on-chain » + « Go » : sections « Mineurs » (Hash Ribbons SMA 30/60 j, hashprice) et « Activité DEX » (volume DEX 24 h, part du volume total) et tuile « Thermocap multiple » dans la fenêtre CHAIN, alerte globale `onchain-seuil` front-only sur six métriques quotidiennes — aucune fenêtre, aucun fournisseur (hôtes déjà autorisés : mempool.space, blockchain.info, Coin Metrics community, DefiLlama, CoinGecko), aucun indicateur graphique nouveau ; enfin, le même jour, chantier « indicateurs gratuits vérifiés » sur « Go pour tous les lots » du propriétaire après recherche sondée — cf. section « Chantier autorisé le 14 septembre 2026 » — aucune fenêtre, aucun fournisseur, aucun hôte, aucun indicateur graphique nouveau), et le 2026-09-16 (fournisseur CryptoQuant BASIC à clé personnelle sur décision du propriétaire : section repliable « Flux takers toutes places » dans DES et sous-section « Production des mineurs cotés » dans la section Mineurs de CHAIN — aucune fenêtre, aucun indicateur graphique, aucune dépendance, aucun hôte `/extapi` ; route dédiée `/cqapi` ; spec `docs/superpowers/specs/2026-09-16-cryptoquant-takers-mineurs-design.md`), et le 2026-09-26 (ratios ÷ marchés et devises, cf. section dédiée) ; le gel reste la règle pour toute autre surface.
+- **Gate G100** : code-complete, e2e partiellement automatisés, **verdict manuel ouvert** (voir `docs/superpowers/plans/2026-07-22-gate-g100-qa.md` et plan d'action 2026-08-24). **Aucune nouvelle fenêtre ni fonctionnalité de surface avant le verdict** — des exceptions ACTÉES : le 2026-08-25 (fenêtre WHALES + alerte `whale-flux`, demande utilisateur explicite), le 2026-09-01 (fenêtre BPL + séries TOTAL/TOTAL2/TOTAL3 chartables, chantier CAP/BPL demandé par l'utilisateur) le 2026-09-02 (lot v2.7 « Décider » : alerte composite, backtest en R, coût d'exécution DOM — aucune fenêtre, aucun fournisseur, aucun indicateur, spec `docs/superpowers/specs/2026-09-02-lot-v27-decider-design.md`) et le 2026-09-04 (catalogue positionnement/orderflow et PLAY-POS, cf. Conventions), et le 2026-09-06 (onglet « Indicateurs » de la fenêtre RATE + trois fournisseurs statistiques publics sans clé — OCDE, Eurostat, ONS — au titre du remplacement des miroirs FRED internationaux démantelés ; spec `docs/superpowers/specs/2026-09-06-indicateurs-macro-mondiaux-design.md`), et le 2026-09-07 (fenêtre BPL : horizon de projection porté à +50 ans et navigation zoom/pan du graphe ; synchronisation des vues de la grille multi-chart — unités de temps, zoom/défilement, réticule — plan `docs/superpowers/plans/2026-09-07-synchronisation-multivue.md` ; demandes utilisateur explicites — aucune fenêtre, aucun fournisseur, aucun indicateur nouveau), et le 2026-09-14 (fenêtre BT : section « Tenue par moitié » — découpage walk-forward de lecture du run exécuté, `partagerResultatMoities` dans `@axiom/backtest`, frontière tracée sur l'équité ; excursions MAE/MFE par trade calculées par le moteur sur les barres détenues, colonnes de la table et moyennes de la grille ; demande utilisateur « nouvelle fonction pertinente » — aucune fenêtre, aucun fournisseur, aucun indicateur nouveau ; puis, le même jour, lot ON-CHAIN sur demande utilisateur « nouvelle fonction pertinente on-chain » + « Go » : sections « Mineurs » (Hash Ribbons SMA 30/60 j, hashprice) et « Activité DEX » (volume DEX 24 h, part du volume total) et tuile « Thermocap multiple » dans la fenêtre CHAIN, alerte globale `onchain-seuil` front-only sur six métriques quotidiennes — aucune fenêtre, aucun fournisseur (hôtes déjà autorisés : mempool.space, blockchain.info, Coin Metrics community, DefiLlama, CoinGecko), aucun indicateur graphique nouveau ; enfin, le même jour, chantier « indicateurs gratuits vérifiés » sur « Go pour tous les lots » du propriétaire après recherche sondée — cf. section « Chantier autorisé le 14 septembre 2026 » — aucune fenêtre, aucun fournisseur, aucun hôte, aucun indicateur graphique nouveau), et le 2026-09-16 (fournisseur CryptoQuant BASIC à clé personnelle sur décision du propriétaire : section repliable « Flux takers toutes places » dans DES et sous-section « Production des mineurs cotés » dans la section Mineurs de CHAIN — aucune fenêtre, aucun indicateur graphique, aucune dépendance, aucun hôte `/extapi` ; route dédiée `/cqapi` ; spec `docs/superpowers/specs/2026-09-16-cryptoquant-takers-mineurs-design.md`), et le 2026-09-26 (ratios ÷ marchés et devises, cf. section dédiée), et le 2026-11-07 (chantier « outils d'analyse et sources » sur « Go pour tes suggestions » du propriétaire : surfaces nouvelles dans des fenêtres existantes — graphe, EQS, DIST, BRIEF, CAP, CORR, OMON, CYCLE —, indicateur `primeVol`, identifiant aux `dvol`, fournisseur Wikimedia en appel direct ; aucune fenêtre nouvelle ; cf. section « Outils d'analyse et sources (autorisation du 7 novembre 2026) ») ; le gel reste la règle pour toute autre surface.
 
 ## Jalons historiques (atteints — ne pas rejouer, ne pas prendre comme périmètre actuel)
 - **M1 — Chart live** (`apps/web`) : Vite+React+TS+Tailwind ; client WS Binance + backfill REST ; rendu KLineChart live ; sélecteur symbole + timeframe ; crosshair. Store marché vanilla. **Atteint.**
-- **M2 — Moteur + 7 indicateurs** (`packages/indicators`) : `IndicatorDef`/`engine.ts` (calcul, helpers SMA/EMA/RMA dans `utils.ts`) ; SMA, EMA, RSI, MACD, Bollinger Bands, Volume, VWAP avec tests vs valeurs de référence (Wilder pour RSI). **Atteint et dépassé** (le catalogue est désormais à 219).
+- **M2 — Moteur + 7 indicateurs** (`packages/indicators`) : `IndicatorDef`/`engine.ts` (calcul, helpers SMA/EMA/RMA dans `utils.ts`) ; SMA, EMA, RSI, MACD, Bollinger Bands, Volume, VWAP avec tests vs valeurs de référence (Wilder pour RSI). **Atteint et dépassé** (le catalogue est désormais à 221).
 - M3 watchlist+persistance locale, M4 spike sync WebGL, M5 CVD+footprint (aggTrade), M6 `IDerivedDataProvider`→Coinalyze : **tous atteints.**
 
 ## Anti-objectifs (NE PAS faire)
 - Ne pas créer de backend **réseau/multi-tenant**, de docker-compose, de schéma DB serveur (le daemon localhost mono-process de la Phase 2 est la SEULE exception, cf. Décisions verrouillées).
-- **Avant le verdict G100** : pas de nouvelle fenêtre, pas de nouveau fournisseur sans remplacement direct d'une source défaillante (exceptions ACTÉES : fournisseurs de capitalisation CMC/CCData, fournisseurs statistiques publics OCDE/Eurostat/ONS le 2026-09-06, et CryptoQuant BASIC le 2026-09-16 sur décision explicite du propriétaire — **sans source défaillante remplacée**, l'exception est nommée comme telle — cf. Décisions verrouillées), pas de migration React/Vite/Zustand/KLineChart majeure (plan 2026-08-24, §12).
+- **Avant le verdict G100** : pas de nouvelle fenêtre, pas de nouveau fournisseur sans remplacement direct d'une source défaillante (exceptions ACTÉES : fournisseurs de capitalisation CMC/CCData, fournisseurs statistiques publics OCDE/Eurostat/ONS le 2026-09-06, CryptoQuant BASIC le 2026-09-16 sur décision explicite du propriétaire — **sans source défaillante remplacée**, l'exception est nommée comme telle — et Wikimedia (pages vues, sans clé, appel direct) le 2026-11-07, au même titre — cf. Décisions verrouillées), pas de migration React/Vite/Zustand/KLineChart majeure (plan 2026-08-24, §12).
 - Ne pas « améliorer » `@axiom/types` ni les configs racine.
-- Ne pas étendre le catalogue d'indicateurs sans nécessité démontrée (le contrat est à 219, pas « plus de 7 » — l'ancien jalon M2 est historique, cf. ci-dessus).
+- Ne pas étendre le catalogue d'indicateurs sans nécessité démontrée (le contrat est à 221, pas « plus de 7 » — l'ancien jalon M2 est historique, cf. ci-dessus).
 
 ### Garde-fous reportés de la roadmap (docs/research/03, §Anti-recommandations)
 Les anti-recommandations #2 (Docker/Redis/TimescaleDB), #3 (proxifier les WS via le daemon) et #6 (abstraction de moteur de chart) sont déjà couvertes ci-dessus et dans les Décisions verrouillées. Les 6 restantes, à respecter tout autant :
@@ -2142,3 +2143,318 @@ le rapport ». Livré comme onglet **« Graphique »** de la fenêtre COT exista
     - `src/chart/orderflow.cadence.test.ts` : erreur non gérée intermittente (WebSocket réelle)
       dans un environnement sans réseau ;
     - `CotWindow.test.tsx` dépend du fuseau (« 14 jours » faux à New York, Pago Pago, Santiago).
+
+## Outils d'analyse et sources (autorisation du 7 novembre 2026)
+
+Le propriétaire répond « Go pour tes suggestions » à l'étude
+`docs/outils-analyse-sources-2026-11-06.md` (51 suggestions vérifiées dans le code et notées).
+Le chantier en retient neuf lots, développés en parallèle sur zones disjointes, revus par un
+agent indépendant puis intégrés en un commit par lot sur `feat/outils-analyse`.
+**39 fenêtres (aucune nouvelle), 221 indicateurs (+ `primeVol`), un identifiant aux nouveau
+(`dvol`), un fournisseur nouveau (Wikimedia, appel direct), aucune dépendance npm, aucun
+secret, pas d'exécution d'ordres ni d'enregistreur continu.** Règles communes : lecture sur
+bougies CLÔTURÉES, séries externes datées à l'instant où elles sont connues, causalité par
+préfixe testée là où elle s'applique, donnée absente = état explicite (« indisponible »,
+« non mesuré ») et libellés honnêtes (« descriptif », « ≈ », couverture affichée).
+
+- **Exceptions ACTÉES.**
+  - Gel G100 : surfaces nouvelles dans des fenêtres existantes, sans nouvelle fenêtre :
+    - graphe : sélecteur « Unité de calcul » de l'éditeur de paramètres, suffixe « [4h] » des
+      légendes et de la liste « Actifs », badge « partiel » (A) ; libellés intrabar du VPVR,
+      de la VPFR et du footprint, POC et zone de valeur sur les colonnes footprint intrabar
+      (B) ; étiquettes ATR/σ de la règle Maj et lignes des bandes RV (D) ;
+    - EQS : « + champ », « + règle », champs Flux et Force relative, unité par condition,
+      fenêtre K, presets « Descriptifs (non validés) » (C) ;
+    - DIST : bouton « Bandes RV » (D) ;
+    - BRIEF : bloc « Historique descriptif » de la largeur (E1), ligne « Régime · coupe
+      transversale » (E2) ;
+    - CAP : tuile « BTC.D hors USDT/USDC/DAI · CMC » (E1) ;
+    - CORR : onglets « Rotation » et « Régime », univers « Top 50 » (E2) ;
+    - OMON : bloc « Maturité constante » de Term IV, métrique « ΔOI » de la Heatmap (F) ;
+    - CYCLE : section « Attention grand public · Wikipédia » (G) ;
+    - CBPREM : correctif de causalité du z et des bandes, pas une extension (H).
+  - Catalogue : **221 indicateurs** (220 depuis AXIS S/R le 2026-10-19 ; les comptes « 219 »
+    restés dans ce contrat et le README dataient d'avant elle). Ajout : `primeVol`
+    (catégorie `volatility`, aux `["dvol"]`, `minTimeframe` 1h, sorties `dvol`, `vrp`,
+    `percentile`). `betaRef` gagne une sortie `alpha` et un paramètre `afficherAlpha` (coupé
+    par défaut), sans nouvelle définition.
+  - `@axiom/types` : `AuxSeriesId` « dvol » (seule modification du paquet) — DVOL Deribit
+    quotidien de BTC et ETH, chaque bougie datée à la fin de son jour, jour en cours exclu,
+    lu en mode clôture (`AUX_SUR_CLOTURE`), TTL 15 min, 365 j.
+  - Fournisseur nouveau : Wikimedia (pages vues Wikipédia), public et sans clé, en appel
+    DIRECT sur le précédent OCDE/Eurostat/ONS (cf. Décisions verrouillées). Hôte exact
+    `https://wikimedia.org` ajouté à `connect-src` (`vercel.json`, CSP Report-Only ;
+    `docs/csp-vercel.md` note aussi que les hôtes OCDE, Eurostat et ONS, appelés en direct
+    depuis le 2026-09-06, n'y figurent pas encore). Aucun ajout à `shared/extapi-hosts.ts`.
+  - Autres hôtes : aucun nouveau. Déjà utilisés : `api.binance.com/api/v3/klines` (EQS jusqu'à
+    `limit=1000` et 2 unités par symbole ; BREADTH à 400 bougies ; intrabar en direct),
+    `fapi.binance.com` via `/extapi` (intrabar perp, prévu mais appelé par aucune vue),
+    `www.deribit.com` `get_volatility_index_data` en 86400 via `/extapi` (DVOL),
+    `/extapi/api.coinmarketcap.com` (tuile CAP, 4 requêtes, mémoire de session 15 min),
+    CoinGecko top 250 (`fetchMarketOverview`), adaptateurs des places (bougies supérieures,
+    bandes RV, CORR).
+  - Clés de stockage nouvelles :
+    - `axiom:corr:regime:v1` : résumé du dernier jour du régime Top 50 (réutilisé 12 h au plus,
+      seulement s'il porte sur la dernière clôture) ;
+    - `axiom:surfaceOptions:<BTC|ETH>:v1` (archive `{ v: 1, points: [{ j, t, v[15] }] }`, 400
+      points au plus) et `axiom:oiStrikes:<BTC|ETH>:<AAAA-MM-JJ>` (J-0…J-7), déclarées dans
+      `PREFIXES_INSTANTANES_OPTIONS` de `store/persist.ts` : ni exportées, ni remplacées, ni
+      purgées par un import ;
+    - `axiom:onchain:attentionWiki:v1:<en|fr>:<actif>` (format compact, ≤ 1 096 vues, TTL 6 h).
+  - Clés existantes enrichies : `axiom:breadth:v1` (champ `historique`, ≈ 9 Ko ; un cache de
+    l'ancien format est recalculé une fois), `axiom:corr:v1` (`univers` « top50 », `onglet`
+    « rotation » et « regime »), `axiom:screener:v1` et `axiom:presetAlerts:v1` (conditions
+    `kind: "regle"`, champs facultatifs `tf` et `fenetre`, anciennes entrées relues telles
+    quelles), session persistée (`SESSION_KEY`, booléen `bandesRv`), paramètre réservé
+    `unite` dans `IndicatorInstance.params` (persisté par les canaux existants, compris dans
+    `computeKey`/`shortHash`).
+  - Daemon (KV, écrit seulement si `daemonPret()` après la sonde) : namespaces
+    `surface-options` (`<devise>:v1`) et `oi-strikes` (`<devise>:<jour>`, élagué au-delà de
+    J-7), clé `attentionWiki:v1:<édition>:<actif>` du namespace `onchain`. Santé : source
+    `wikimedia` (libellé « Wikimedia · pages vues »).
+
+- **A — Indicateurs d'unité supérieure sur le graphe (SUG-1, phase 1).**
+  - Paramètre réservé `unite` (RSI 4h, EMA 1d sur un graphe 1h). `projeterSurUnite`
+    (`@axiom/indicators`, `utils-aux.ts`, prévue pour la phase 2) date chaque valeur à la
+    clôture de sa bougie supérieure ; égalité exacte avec le calcul natif sur le même jeu de
+    bougies.
+  - Couples 1h→4h/1d, 4h→1d/1w, 1d→1w ; places binance, bybit, okx, hyperliquid, mexc,
+    kraken, coinbase (unité présente dans `SUPPORTED_TIMEFRAMES`, Coinbase sans 1w) ; Twelve
+    Data et synthétique exclus. Définitions sans aux ni auxFacultatives, hors
+    `TIMEFRAME_REQUIS` et hors stratégies ; `DEFS_EXCLUES_UNITE` = ichimoku, fractals,
+    pivotHighLow, zigzag (lecture différée), vwap, vwapBands, narrowRange, rollingDrawdown,
+    downsideVariance, returnAutocorrelation (annotations). Garde-fou sur tout le registre
+    (`uniteSuperieure.test.ts`).
+  - Bougies closes et alignées UTC seulement (1w : lundi 00:00), sinon refus durable pour la
+    session (place, symbole, unité) et unité retirée du sélecteur. Une bougie supérieure n'est
+    tenue pour close que 10 s après sa clôture (`MARGE_CLOTURE_MS`).
+  - Réseau : `getAdapter(place).fetchKlines(symbole, unité, { limit: 500 ou amorce })`, une
+    requête par (place, symbole, unité, profondeur), relancée une fois par clôture supérieure
+    au premier recalcul qui suit la marge (aucune minuterie), échec et retard réessayés à 30 s,
+    cache mémoire LRU de 16 entrées. Fenêtre FIXE pour la session : le premier chargement fixe
+    le début, chaque clôture n'ajoute que les nouvelles bougies closes (pas de repeinture des
+    cumulatives) ; elle ne repart qu'après une veille de plus d'environ 500 bougies
+    supérieures, ou si plus de 16 clés distinctes l'évincent. Un rechargement en échec garde la
+    fenêtre et affiche « partiel » avec son motif. Motif « historique trop court » réservé aux
+    places qui servent moins que leur propre plafond (Coinbase 350, OKX 300).
+  - Contrat d'unité commun : refus motivé dans le backtest (`run()`), et
+    `conditionSupporteTimeframe` (`@axiom/alerts`) refuse toute condition qui porte `unite`
+    — alertes du navigateur ET du daemon ; AlertsPanel affiche « non évaluée » avec le motif.
+  - Modules différés `chart/bougiesUnite` (import() par `chart/indicators`) et
+    `chart/uniteSuperieure`. Écarts de zone entérinés : `components/InstanceParamsEditor.tsx`
+    (2 lignes), `chargementInitial.test.ts`.
+  - Fichiers : `chart/{bougiesUnite,uniteSuperieure,uniteParam,SelecteurUnite}.ts(x)`,
+    `chart/indicators.ts`, `chart/overlayLegend.ts`, `chart/paneHeaders.tsx`,
+    `alerts/runtime.ts`, `store/backtest.ts`, `store/indicators.ts`, `AlertsPanel.tsx`,
+    `packages/indicators/src/utils-aux.ts`, `packages/alerts/src/engine.ts`, tests associés.
+- **B — Profil de volume reconstruit en intrabar (SUG-3, phase 1).**
+  - Module différé `data/intrabar.ts` (import() depuis `volumeProfile.ts` et
+    `volumeRangeOverlay.ts`, statique depuis le chunk orderflow). Klines Binance spot (perp
+    prévu via fapi), volume acheteur taker k[9]. VPVR, VPFR et colonnes historiques du
+    footprint remplacent les bougies CLÔTURÉES par leurs sous-bougies quand la somme des
+    volumes retrouve celle de la parente (tolérance 1e-6) ; la bougie en cours garde l'ancien
+    calcul ; une parente n'est remplacée que 2 s après sa clôture.
+  - Constantes : `PLAFOND_REQUETES` = 10 par plage (blocs alignés de 1 000 spot, 1 500
+    perp), `CAPACITE_BLOCS` = 32 (LRU mémoire), baux par surface de 30 s (`BAIL_MS`), bloc
+    sous bail jamais évincé, admission tout ou rien (« cache saturé »), `ANTI_REBOND_MS` =
+    400, `MARGE_CLOTURE_MS` = 2 000, `DELAI_REQUETE_MS` = 15 s, pause globale après échec de
+    1 min doublée jusqu'à 10 min (`REESSAI_MS`), au plus 2 requêtes par surface à chaque
+    clôture de parente. Résolution : la plus fine parmi 1m, 5m, 15m, 1h, 4h, 1d qui divise
+    l'unité du graphe et tient sous le plafond (60 j de 4h passent en 15m). Pas de 1s. Les
+    sous-bougies sont datées à l'ENVOI de la requête (une kline close pendant le transit est
+    écartée et son bloc reste à rafraîchir).
+  - Libellés : « réparti à la minute (1m) · N/M » (et 5m … 1d), « ≈ réparti sur la bougie
+    (motif) » : intrabar Binance seulement, unité calendaire, aucune unité plus fine, plage
+    trop longue, aucune bougie clôturée, intrabar Xm en chargement, indisponible, incomplet,
+    non chargé (cache saturé).
+  - Mesure synthétique (20 tirages, 100 bins, oracle tick) : POC à ±1 bin 35 % (uniforme
+    4h), 65 % (15m), 90 % (1m) ; corrélation du delta par bin 0,23 / 0,44 / 0,79, cible 0,9
+    non atteinte.
+  - Fichiers : `data/intrabar.ts`, `chart/{volumeProfile,volumeRangeOverlay,orderflow,
+    orderflow.calc,ChartInstance}.ts(x)`, tests associés.
+- **C — Screener EQS ouvert (SUG-C4, SUG-12 volet 1, SUG-6 volet 2).**
+  - Conditions lues sur bougies clôturées, amorce calculée dans l'unité de chaque condition
+    (paramètres en jours : `PARAMS_EN_JOURS`, aujourd'hui `rvolSeasonal.jours`), plafond de
+    999 bougies closes avec note « valeurs ≈ » (RVOL saisonnier H1 servi à ≈ 41 jours,
+    libellé à l'appui) ; au plus une unité en plus du run ; fenêtre K de 1 à 50 bougies.
+  - Règles au modèle du backtest (opérandes ajoutés : `ttmSqueeze.on`, `narrowRange.nr`,
+    `narrowRange.inside`) ; champs Flux (RVOL, Taker net, Pente CVD / volume) et Force
+    relative (RS Mansfield 52 sem. en 1d par `disparity` sur le ratio, RS z par
+    `spreadZScore`) ; `refClose` servi par le worker (alignAux à l'ouverture, LOCF), référence
+    `refSymbolStore.refSymbol` chargée une fois par run et par unité, symboles calés sur la
+    dernière bougie commune. Référence en retard de plus d'une bougie au chargement : tenue
+    pour indisponible (note), aucun calage.
+  - Couverture : un symbole arrêté sur une condition NON MESURÉE (état inconnu sur toute la
+    fenêtre K : historique ou volume taker insuffisant) est compté par condition dans une
+    note, distinct d'une condition fausse.
+  - Presets « Descriptifs (non validés) » : `builtin:squeeze-4h-supertrend-1d`,
+    `builtin:flux-anormal`. Un clic sur un résultat pose les instances des conditions de
+    l'unité du run ; ce qui n'est pas posé est dit dans EQS.
+  - Contrat du worker : `WorkerRequest.refSymbol`, `WorkerResponse.result.notes`. Ouvrir EQS
+    charge aussi `store/backtest` (chunk paresseux partagé avec BT, ≈ 8 Ko gzip).
+  - Fichiers : `data/{screenerRegles,screenerOperandes,screenerEtage,screener,screenerRun}.ts`,
+    `workers/screener.worker.ts`, `store/screener.ts`,
+    `components/ScreenerWindow{,Conditions}.tsx`, tests associés.
+- **D — Volatilité attendue contre réalisée (SUG-7).**
+  - `primeVol` : DVOL, VRP ex ante = DVOL − RV des clôtures quotidiennes UTC (proxy, pas la
+    prime réalisée), percentile du DVOL ; « DVOL indisponible (BTC/ETH seulement) » ailleurs,
+    « RV non mesurée (bougies > 1 j ou non alignées sur minuit UTC) » quand aucune clôture
+    quotidienne n'est possible. Hors lot : 3600, spotVolCorr, `TIMEFRAME_REQUIS`.
+  - Bandes RV (DIST, clé `CleOverlayNiveaux` « bandesRv ») : HAR-RV sur Garman-Klass 1d, OLS
+    glissante 500 j, horizons 1 j et 7 j ancrés sur l'ouverture du jour et du lundi UTC,
+    k = quantiles 68,27 / 95,45 % des |z| passés (250 origines, minimum 100 pour le jour,
+    250 exigées pour la semaine), couverture hors échantillon affichée, k tracés dits dans le
+    détail. Minimum ≈ 622 jours contigus pour la bande du jour, ≈ 790 pour la semaine (Kraken,
+    plafonné à 720, n'a que la bande du jour ; la semaine ne bouge jamais dans la semaine).
+    Chargeur 1d dédié (jusqu'à 8 pages, 1 500 jours) ; un historique tronqué par l'échec d'une
+    page sous la profondeur utile est une panne (nouvel essai 5 min), pas un « historique trop
+    court ».
+  - Modules différés `data/harRv` (import() depuis la règle) et `chart/niveaux/bandesRv`
+    (composite paresseux, DistWindow en React.lazy).
+  - Fichiers : `packages/types/src/index.ts`, `packages/indicators/src/volatility/primeVol.ts`,
+    `registry.ts`, `chart/auxProvider.ts`, `chart/measureTool.ts`,
+    `chart/niveaux/{bandesRv,composite}.ts`, `chart/niveauxOverlays.ts`, `data/harRv.ts`,
+    `components/DistWindow.tsx`, `store/persist.ts`, tests associés.
+- **E1 — Largeur du marché historisée et saison des alts (SUG-41, phase 1).**
+  - BREADTH garde 50 requêtes klines, portées de 210 à 400 bougies ; séries journalières
+    sur clôtures fermées (la dernière bougie renvoyée est toujours écartée, quelle que soit
+    l'horloge locale) : % > MM50 et MM200, plus hauts − bas 20 j et 55 j, ligne A/D et
+    oscillateur type McClellan du top 50, alts > BTC sur 90 j et 30 j. Chaque série porte son
+    dénominateur ; un jour non mesuré reste un trou. A/D du jour relibellée « A/D jour ·
+    univers USDT ». Seuils 75/25 = convention, pas un signal ; biais du survivant affiché.
+  - Univers des alts : top 50 BREADTH hors BTC, stables et emballés (listes CORR),
+    EUR/EURI/AEUR/XUSD/BFUSD/RLUSD et or tokenisé PAXG/XAUT. **Arbitrage consigné** : les
+    autres séries gardent l'univers de l'instantané (stables et emballés compris, seuls
+    USDC/FDUSD/TUSD exclus), pour que leur dernier point reste égal à l'instantané.
+  - CAP : tuile « BTC.D hors USDT/USDC/DAI » = BTC ÷ (TOTAL − stables), jambes CMC seules,
+    chargée par import(), Δ30 j des deux dominances, aucun cache persistant.
+  - Fichiers : `data/{breadth,saisonAlts,dominanceStablecoins}.ts`,
+    `components/brief/SectionBreadth.tsx`, `components/McapWindow.tsx`, tests associés.
+- **E2 — Rotation contre BTC et régimes transversaux (SUG-6 volets 1 et 3, SUG-42).**
+  - CORR › Rotation : RS-Ratio / RS-Momentum contre BTC en z-scores sur 52 semaines (14 j de
+    momentum, 364 j de fenêtre, 378 jours consécutifs requis), quadrants, traîne de 8
+    clôtures, actifs non placés listés ; libellés « approximation ouverte, pas le RRG® » et
+    « descriptif ».
+  - CORR › Régime : dispersion transversale lissée 7 j, médiane des corrélations alts/BTC
+    sur 30 j, corrélation moyenne et ratio d'absorption sur 60 j avec plancher
+    Marchenko-Pastur. Seules les paires crypto cotées en dollar entrent dans la coupe (règle
+    de `ratio.ts`), BTC reconnu par sa base et compté comme la référence, un actif compté une
+    fois. Aucun calcul ni résumé persisté sur des séries d'un autre univers.
+  - BRIEF : ligne « Régime · coupe transversale » ; le lien « Détail » bascule l'univers
+    persisté de CORR sur Top 50 et le dit (accepté). `MAX_JOURS` de CORR passe de 260 à 400 ;
+    cache de session à clôtures seules, invalidé au jour UTC suivant.
+  - **Double collecte top 50 maintenue et documentée** : le BRIEF prend le top 50 par
+    capitalisation CoinGecko sur 400 j (≈ 51 requêtes klines au premier BRIEF de chaque jour
+    UTC), BREADTH le top 50 par volume Binance : univers différents, pas de panneau commun.
+  - Fichiers : `data/{rotationRelative,regimeTransversal,corr}.ts`,
+    `components/corr/{CorrRotation,CorrRegime,communCorr}.tsx`, `components/CorrWindow.tsx`,
+    `components/brief/SectionRegimeTransversal.tsx`, `components/BriefWindow.tsx`,
+    `packages/indicators/src/statistical/betaRef.ts`, tests associés.
+- **F — Options : surface à maturité constante et ΔOI par strike (SUG-20, SUG-C8 lot 1).**
+  - Term IV : ATM, RR25 et BF25 à 7, 30 et 90 j (RR10 et BF10 seulement si les ailes sont
+    adossées à au moins 1 M$ d'OI par option d'ancrage), interpolées en delta forward puis en
+    variance totale, sans extrapolation ; historique quotidien, sparkline et percentile 1 an
+    à partir de 90 instantanés, couverture affichée (date en UTC).
+  - Heatmap : métrique « ΔOI » non signée contre J-1 ou J-7, sélecteur d'échéance, top 5 des
+    strikes construits et vidés, date de référence toujours affichée ; causalité jugée contre
+    la réception de la chaîne (`majTs`). Pas d'étiquette sur le graphe (lot 2 exclu).
+  - Règle d'instantané : premier chargement réussi de la chaîne après 08:05 UTC, un par
+    devise et par jour UTC, daté de la réception, jamais réécrit ; la sonde du daemon est
+    attendue avant l'écriture. Un agrégat par jour, pas un enregistreur. Aucune requête
+    nouvelle.
+  - Fichiers : `data/{surfaceConstante,deltaOiStrikes}.ts`,
+    `components/omon/{SurfaceConstante,DeltaOi,VueHeatmap,VueTermIv,dessins,format}.ts(x)`,
+    `components/OptionsWindow.tsx`, `store/persist.ts`, `commands/windowPanels.ts`
+    (mots-clés), tests associés.
+- **G — Attention du grand public : pages vues Wikipédia (SUG-39).**
+  - Table curée actif → article (BTC, ETH, SOL, DOGE ; en, et fr quand le titre est sûr).
+    Chemin `/api/rest_v1/metrics/pageviews/per-article/{en|fr}.wikipedia/all-access/user/
+    <titre encodé>/daily/AAAAMMJJ/AAAAMMJJ`, en-tête `Api-User-Agent` « AxiomTerminal/1.0
+    (personal analysis tool; daily pageviews, cached locally) ».
+  - Lecture descriptive au dernier jour complet : z-score 90 j et 365 j de log(1 + vues)
+    contre les jours strictement précédents, ratio 7 j / 90 j, épisodes de pic au-delà de 3σ
+    (premier jour, un par 30 j ; une étude d'évènements les datera par `disponibleLe`,
+    D+2 00:00 UTC), part des vues contre Bitcoin pour une alt (badge si la série BTC vient
+    d'un cache périmé). Le jour D n'est lu qu'à D+1 ; un jour absent reste « non mesuré ».
+  - Section montée dans le bloc défilant de CYCLE ; code chargé avec la fenêtre.
+  - Fichiers : `data/attentionWiki.ts`, `components/cycle/AttentionWiki.tsx`,
+    `components/CycleWindow.tsx`, `data/dataCockpit.ts`, `vercel.json`, `docs/csp-vercel.md`,
+    tests associés.
+- **H — Prime Coinbase : z-score et bandes causaux (SUG-35, volet a).**
+  - `bandeGlissante` remplace `bandesPremium` : moyenne, σ et z sur (t − 168 h, t], point
+    courant inclus, au moins 30 points et σ non nul, sinon « indisponible ». Bandes tracées
+    point par point ; « z glissant 7 j », descriptif, couverture « sur N pts » dans le
+    bandeau quand la fenêtre est partielle. API de `data/cbprem.ts` : `bandesPremium`
+    supprimée ; `bandeGlissante`, `bandesGlissantes`, `BandeGlissante`, `FENETRE_Z_MS`,
+    `MIN_POINTS_Z` exportés ; `statsPremium` renvoie `zGlissant7j` au lieu de `z30j`.
+  - Fichiers : `data/cbprem.ts`, `components/CbpremWindow.tsx`, tests associés.
+- **Chargement initial.** Tout le code nouveau est différé ; douze modules nouveaux s'ajoutent
+  à `MODULES_DIFFERES` (`chargementInitial.test.ts`). Mesure de l'intégration (Node 22.23.4,
+  zlib 1.3.1) : **1 196 025 / 358 844**, contre 1 188 308 / 355 986 à la base (fac6129),
+  soit +7 717 / +2 858 ; plafonds 1 220 000 / 360 000 inchangés, **marge gzip 1 156**. Les
+  lots pesaient de −16 à +1 085 o gzip chacun ; le gros est `primeVol` dans le chunk
+  `indicators` (≈ 730 o gzip) et le sélecteur d'unité.
+- **Revue et tests.**
+  - Chaque lot a été revu par un agent indépendant (un ou deux tours). À l'intégration : le
+    constat majeur restant (EQS confondait « non mesuré » et « faux ») et les mineurs
+    raisonnables sont corrigés, un commit par lot. Mineurs laissés : minuterie de relance de
+    l'unité supérieure (en-tête corrigé à la place), test d'intégration de la règle Maj, test
+    de rendu de la tuile CAP ; le filtre du runtime web des alertes à `unite` est gardé pour
+    journaliser le motif, bien que `conditionSupporteTimeframe` le couvre désormais.
+  - Typage des 7 projets vert ; indicateurs 1 070, alertes 128, backtest 131, pacte 120,
+    daemon 786 (bun 1.4.4) ; web 469 fichiers / 6 863 tests, dont un seul échec
+    préexistant, reproduit à l'identique sur fac6129 : `GraphiqueCot.test.tsx` dépend de la
+    date réelle (« prochain rapport ven. 6 nov. » attendu le 7 nov.). L'erreur non gérée
+    ORCH-1 (`orderflow.cadence.test.ts`, WebSocket réelle, `wsLoop.ts:134-137`) est elle aussi
+    identique sur fac6129.
+  - Build et budget verts ; e2e hermétiques des zones touchées : 64/64 (niveaux-chart,
+    gate-g6-screener.hermetique, gate-lot3-corr, omon-lectures-options, options-carte,
+    options-fraicheur, revue-cycle, analyse-brief, gate-v25-cap-dominance,
+    revue-outils-avances, dominance-stablecoins, quatre-lots-indicateurs,
+    quatre-lots-alertes, quatre-lots-backtest, multivue, cot-lisibilite). Aucun e2e nouveau.
+- **Limites.**
+  - A : seules les 500 dernières bougies supérieures (ou l'amorce) sont chargées, sans
+    pagination ; définitions sans paramètre (OBV, VWAP…) sans sélecteur en phase 1 ; store
+    d'indicateurs commun aux slots (une instance [4h] sur un slot 4h y est UNUSABLE) ; place
+    en retard : jusqu'à 30 s sans valeur sur la dernière bougie close ; décalage d'horloge
+    client > 10 s non couvert. Phase 2 (alertes, backtest) non faite.
+  - B : split par niveau approché (volume uniforme sur le bas/haut de chaque sous-bougie) ;
+    gain réservé au spot Binance ; une plage froide coûte jusqu'à 10 requêtes en série
+    (≈ 5 à 14 s) ; cache partagé de 32 blocs, en mémoire seulement ; deux surfaces muettes
+    en alternance peuvent s'échanger la place (au plus un plan par silence).
+  - C : parité approchée pour les lissages (amorce heuristique 4 × la longueur, plafond 999),
+    non bornée pour le PSAR ; détection de clôture par l'horloge du client ; jusqu'à 2
+    requêtes klines par symbole (60 symboles) plus 1 de référence par unité ; résultats des
+    presets existants légèrement différents (lecture stricte à la dernière bougie close).
+  - D : Garman-Klass 1d biaisé par les sauts et dépendant de la place ; ≈ 70 à 130 ms de
+    calcul par horizon une fois par jour et par marché, sur le fil principal ; DVOL limité à
+    365 j sans pagination ; `primeVol` sélectionnable hors BTC/ETH (libellé seul) ; règle Maj
+    sans test d'intégration (fonctions pures seules testées).
+  - E1 : biais du survivant non corrigé (top 50 du jour appliqué au passé), une seule place,
+    ≈ 200 jours d'historique ; ligne A/D à niveau arbitraire ; STABLE.D limité à
+    USDT/USDC/DAI (BTC.D hors stables est un minorant) ; tuile CAP sans test de rendu.
+  - E2 : lecture descriptive, aucune étude figée ne valide quadrants ni régimes ; calcul du
+    Régime ≈ 70 à 170 ms sur le fil principal ; Coinbase et les alts de moins de 378 jours
+    restent « non placés » ; actions tokenisées MEXC cotées en USDT comptées comme des alts.
+  - F : aucun rattrapage historique (percentile 1 an après 90 instantanés, J-1 seulement si
+    OMON a été ouvert la veille après 08:05 UTC, historique propre au navigateur sans
+    daemon) ; IV mark modélisée par Deribit, delta non ajusté de la prime ; ΔOI non signé,
+    Deribit seul ; ≈ 160 Ko de localStorage pour les instantanés ΔOI.
+  - G : z-score sensible aux pics passés, seuils ±1,5 conventionnels ; cache de 6 h même si
+    le jour a basculé ; signal concomitant plus que prédictif ; une seule édition par lecture.
+  - H : historique limité à ≈ 30 j en 1h et à BTC/ETH (volets b et c hors lot).
+- **À confirmer au premier usage réel** (aucun réseau externe dans l'environnement du
+  chantier ; aucune vérification sur API réelle ni en navigateur) :
+  - alignement des semaines Kraken, Hyperliquid et MEXC et du jour MEXC (une ouverture non
+    alignée est refusée avec motif) ;
+  - intrabar : validation sur un replay tick BTCUSDT réel, rendu du libellé VPVR sur deux
+    lignes et de la légende du footprint sur écran étroit ;
+  - poids Binance des requêtes klines à `limit=1000` (EQS) ;
+  - bandes RV : critères QLIKE et Diebold-Mariano sur au moins 20 actifs réels, couverture
+    réelle affichée au premier chargement ; plafond de points par appel DVOL Deribit ;
+  - CMC `data-api` : CGU non vérifiées ; convention Blockchaincenter (75 %, 90 j, top 50) ;
+  - Wikimedia : CORS (`Access-Control-Allow-Origin: *`), acceptation d'`Api-User-Agent` au
+    pré-vol, licence CC0, plafond de débit, titres canoniques (en particulier « Solana
+    (blockchain platform) » ; une redirection donnerait une série quasi nulle sans alerte),
+    heure réelle de publication (D+2 retenu par prudence) ;
+  - rendu canvas de CBPREM et géométrie de CYCLE en vrai navigateur.

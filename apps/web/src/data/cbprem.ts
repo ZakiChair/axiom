@@ -13,8 +13,13 @@
 
 const JOUR_MS = 24 * 3_600_000;
 const FENETRE_7J_MS = 7 * JOUR_MS;
-/** Nombre minimal de points pour qu'un z-score soit statistiquement porteur de sens. */
-const MIN_POINTS_Z = 30;
+/**
+ * Fenêtre des statistiques GLISSANTES (bandes ±2σ, z) : 168 h, soit 7 jours de bougies 1h.
+ * Chaque point n'est jugé qu'avec son passé et lui-même, jamais avec la suite de la série.
+ */
+export const FENETRE_Z_MS = 168 * 3_600_000;
+/** Nombre minimal de points DANS la fenêtre pour qu'un z-score soit porteur de sens. */
+export const MIN_POINTS_Z = 30;
 
 export interface PointPremium {
   t: number;
@@ -109,40 +114,81 @@ export function ecartPegDernierPoint(
 }
 
 /**
- * Moyenne et écart-type POPULATION du premium sur TOUTE la série — support des
- * bandes ±2σ du tracé et du z-score. `null` si moins de 30 points (z non porteur
- * de sens) ou si σ == 0 (série constante : bandes dégénérées, z indéfini). PURE.
+ * Statistiques glissantes d'un point : moyenne et écart-type POPULATION du premium sur
+ * la fenêtre causale de ce point, et nombre de points qui la composent.
  */
-export function bandesPremium(
-  serie: readonly PointPremium[],
-): { moyenne: number; sigma: number } | null {
-  if (serie.length < MIN_POINTS_Z) return null;
-  let somme = 0;
-  for (const p of serie) somme += p.premiumPct;
-  const moyenne = somme / serie.length;
-  let variance = 0;
-  for (const p of serie) variance += (p.premiumPct - moyenne) ** 2;
-  const sigma = Math.sqrt(variance / serie.length);
-  if (sigma === 0) return null;
-  return { moyenne, sigma };
+export interface BandeGlissante {
+  moyenne: number;
+  sigma: number;
+  /** Points présents dans la fenêtre : 168 au plus en 1h, moins en début de série ou s'il y a des trous. */
+  n: number;
 }
 
-/** z-score d'un premium `p` relatif aux bandes (moyenne/σ population). PURE. */
-export function zPoint(p: number, bandes: { moyenne: number; sigma: number }): number {
-  return (p - bandes.moyenne) / bandes.sigma;
+/**
+ * Bande CAUSALE au point d'indice `i` : moyenne et σ population des points j ≤ i tels que
+ * t_j > t_i − 168 h, soit le passé des 7 derniers jours PLUS le point courant, jamais un
+ * point postérieur. La fenêtre est temporelle : un trou (heure sans bougie Coinbase, point
+ * omis faute de k) réduit `n` au lieu d'aller chercher plus loin dans le passé.
+ * `null` (« indisponible ») si `i` est hors série, si la fenêtre compte moins de
+ * MIN_POINTS_Z points (début de série, trous) ou si σ est nul (premium constant).
+ * Les écarts sont pris par rapport au point courant puis recentrés (deux passes) : une
+ * fenêtre constante donne un σ EXACTEMENT nul, sans résidu d'arrondi qui fabriquerait un
+ * z géant. Précondition : série triée chrono (garantie par `serieCbprem`). PURE.
+ */
+export function bandeGlissante(serie: readonly PointPremium[], i: number): BandeGlissante | null {
+  const courant = serie[i];
+  if (courant === undefined) return null;
+  const debutT = courant.t - FENETRE_Z_MS;
+  const ref = courant.premiumPct;
+
+  let debut = i + 1;
+  let sommeEcarts = 0;
+  for (let j = i; j >= 0; j--) {
+    const p = serie[j] as PointPremium;
+    if (p.t <= debutT) break; // série triée : tout ce qui précède est hors fenêtre
+    sommeEcarts += p.premiumPct - ref;
+    debut = j;
+  }
+  const n = i + 1 - debut;
+  if (n < MIN_POINTS_Z) return null;
+
+  const moyenneEcarts = sommeEcarts / n;
+  let variance = 0;
+  for (let j = debut; j <= i; j++) {
+    variance += ((serie[j] as PointPremium).premiumPct - ref - moyenneEcarts) ** 2;
+  }
+  const sigma = Math.sqrt(variance / n);
+  if (!(sigma > 0)) return null;
+  return { moyenne: ref + moyenneEcarts, sigma, n };
+}
+
+/**
+ * Bandes causales de TOUTE la série, point par point (même longueur, même ordre) : la
+ * bande du point i ne dépend que des points 0..i, donc ajouter des points à la fin ne
+ * modifie aucune bande déjà calculée (pas de repeinture). Support du tracé ±2σ et du z
+ * de survol. `null` aux points indisponibles. PURE.
+ */
+export function bandesGlissantes(serie: readonly PointPremium[]): (BandeGlissante | null)[] {
+  return serie.map((_, i) => bandeGlissante(serie, i));
+}
+
+/** z-score d'un premium `p` relatif à une bande (moyenne/σ population). PURE. */
+export function zPoint(p: number, bande: { moyenne: number; sigma: number }): number {
+  return (p - bande.moyenne) / bande.sigma;
 }
 
 /**
  * Stats dérivées de la série (déjà triée chrono — précondition garantie par
  * `serieCbprem`) : courant (dernier point), moyenne des 7 jours relatifs au
- * DERNIER point (pas « maintenant »), z-score du courant vs TOUTE la série
- * (écart-type population). z30j est null si la série a moins de 30 points ou si
- * l'écart-type est nul (série constante). Tout est null si la série est vide. PURE.
+ * DERNIER point (pas « maintenant »), z glissant 7 j du courant contre SA bande causale
+ * (`bandeGlissante` au dernier point, donc les mêmes conditions que le tracé : au moins
+ * MIN_POINTS_Z points sur 168 h et σ non nul, sinon null). Tout est null si la série est
+ * vide. PURE.
  */
 export function statsPremium(
   serie: readonly PointPremium[],
-): { courant: number | null; moyenne7j: number | null; z30j: number | null } {
-  if (serie.length === 0) return { courant: null, moyenne7j: null, z30j: null };
+): { courant: number | null; moyenne7j: number | null; zGlissant7j: number | null } {
+  if (serie.length === 0) return { courant: null, moyenne7j: null, zGlissant7j: null };
 
   const dernier = serie[serie.length - 1] as PointPremium;
   const courant = dernier.premiumPct;
@@ -158,9 +204,9 @@ export function statsPremium(
   }
   const moyenne7j = n7 > 0 ? somme7 / n7 : null;
 
-  // z30j réutilise les mêmes bandes que le tracé (mêmes conditions : ≥30 pts, σ≠0).
-  const bandes = bandesPremium(serie);
-  const z30j = bandes === null ? null : zPoint(courant, bandes);
+  // Même bande que le tracé au dernier point : le z affiché coïncide avec celui du survol.
+  const bande = bandeGlissante(serie, serie.length - 1);
+  const zGlissant7j = bande === null ? null : zPoint(courant, bande);
 
-  return { courant, moyenne7j, z30j };
+  return { courant, moyenne7j, zGlissant7j };
 }

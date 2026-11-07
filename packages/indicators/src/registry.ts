@@ -112,6 +112,7 @@ import { rogersSatchellVol } from "./volatility/rogersSatchellVol";
 import { yangZhangVol } from "./volatility/yangZhangVol";
 import { skewKurt } from "./volatility/skewKurt";
 import { corwinSchultz } from "./volatility/corwinSchultz";
+import { primeVol } from "./volatility/primeVol";
 
 // — statistical —
 import { rollingCorrelation } from "./statistical/rollingCorrelation";
@@ -362,6 +363,7 @@ export const INDICATORS: IndicatorDef[] = [
   yangZhangVol,
   skewKurt,
   corwinSchultz,
+  primeVol,
   // statistical (cross-asset vs symbole de référence)
   returnAutocorrelation,
   rollingCorrelation,

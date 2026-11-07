@@ -226,7 +226,10 @@ export type AuxSeriesId =
   | "binanceFundingHourly"
   // Positionnement net des gros comptes HL (%, −100…+100) depuis les instantanés de
   // niveaux collectés par le daemon (`/hl/liqheat`) — échantillon du leaderboard.
-  | "hlWhalesNet";
+  | "hlWhalesNet"
+  // DVOL Deribit quotidien (IV 30 j, %, BTC et ETH seulement) : chaque bougie close est
+  // datée à sa FIN (instant où sa valeur est connue), la bougie du jour en cours est exclue.
+  | "dvol";
 
 /**
  * Séries auxiliaires DÉJÀ alignées sur les bougies (même longueur, même index).

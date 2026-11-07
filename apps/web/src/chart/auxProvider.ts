@@ -56,6 +56,8 @@ import { refSymbolStore } from "../store/refSymbol";
 import { getBgeometricsKey } from "../store/onchain";
 import { extUrl } from "../data/extapi";
 import { normaliserIdentiteFunding } from "../data/fundingIdentity";
+import { fetchDvolHistory } from "../data/deribit";
+import { actifDeribit } from "../data/chaineOptionsCache";
 
 /** État renvoyé par `getAligned` pour l'ensemble des `ids` demandés. */
 export type AuxStatus =
@@ -136,7 +138,9 @@ const TTL_MS: Record<AuxSeriesId, number> = {
   fundingHistOkx: 60_000,
   fundingHistHl: 60_000,
   hlWhalesNet: 60_000,
+  dvol: 15 * 60_000, // DVOL Deribit quotidien : la clôture de la veille entre au plus 15 min après minuit
 };
+const JOUR_MS = 86_400_000;
 /** Durée de mémorisation d'un échec de fetch (anti retry-tempête). */
 const ERROR_TTL_MS = 30_000;
 /** Profondeur d'historique demandée aux fournisseurs (90 jours). */
@@ -168,6 +172,8 @@ const AUX_SUR_CLOTURE: ReadonlySet<AuxSeriesId> = new Set<AuxSeriesId>([
   // l'instantané daemon — tous deux connus À leur ts → alignés sur la clôture.
   "hlFunding",
   "hlWhalesNet",
+  // `dvol` : chaque bougie quotidienne close est datée à sa FIN (instant où elle est connue).
+  "dvol",
 ]);
 
 /**
@@ -615,6 +621,19 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe, e
       // (0/4…3/4) et FUNDX expose l'erreur détaillée via ce même client.
       if (historique.status === "error") return [];
       return historique.points.map((p) => ({ time: p.time, value: p.value ?? Number.NaN, validUntil: p.validUntil }));
+    }
+    case "dvol": {
+      // DVOL Deribit quotidien (BTC et ETH cotés en dollar, mêmes gardes que les bandes
+      // implicites). La bougie datée J 00:00 couvre J : sa clôture n'est connue qu'à J+1 00:00,
+      // d'où le réhorodatage à la fin du jour, et la bougie du jour en cours est écartée (sinon
+      // une bougie 4h ouverte à 00:00 lirait déjà la valeur de 23:59). 365 j : profondeur déjà
+      // servie à VOL (plafond de points par appel non vérifié au-delà).
+      const devise = actifDeribit(exchange, symbol);
+      if (devise === null) return [];
+      const now = Date.now();
+      const pts = await fetchDvolHistory(devise, 365);
+      return toPoints(pts.filter((p) => p.time % JOUR_MS === 0 && p.time + JOUR_MS <= now)
+        .map((p) => ({ time: p.time + JOUR_MS, value: p.value })));
     }
     case "hlWhalesNet": {
       // Positionnement net des gros comptes HL : 100 × (long − short) / (long + short)

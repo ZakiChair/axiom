@@ -17,8 +17,15 @@ const VALID_CATEGORIES = new Set<IndicatorCategory>([
 ]);
 
 describe("registry", () => {
-  it("câble exactement 220 indicateurs", () => {
-    expect(INDICATORS.length).toBe(220);
+  it("câble exactement 221 indicateurs", () => {
+    expect(INDICATORS.length).toBe(221);
+  });
+
+  it("câble la prime de vol sur la seule série DVOL quotidienne", () => {
+    const def = getIndicator("primeVol");
+    expect(def?.category).toBe("volatility");
+    expect(def?.aux).toEqual(["dvol"]);
+    expect(def?.outputs.map((o) => o.key)).toEqual(["dvol", "vrp", "percentile"]);
   });
 
   it("rend les trois nouvelles analyses disponibles sans série auxiliaire", () => {

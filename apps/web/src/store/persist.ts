@@ -442,6 +442,8 @@ interface PersistedSession {
   niveauxOptions: boolean;
   /** Bascule des bandes implicites DVOL sur le chart maître (chart/niveauxOverlays). */
   bandesImplicites: boolean;
+  /** Bascule des bandes RV (HAR-RV, tout actif) sur le chart maître (chart/niveauxOverlays). */
+  bandesRv: boolean;
   /** Bascule de la ligne « Coût Strategy » sur le chart maître (chart/niveauxOverlays). */
   prixRevientTresoreries: boolean;
   macroOverlays: MacroOverlayId[];
@@ -472,6 +474,7 @@ function currentSession(): PersistedSession {
     niveauxClesFamilles: niveauxOverlaysStore.getState().familles,
     niveauxOptions: niveauxOverlaysStore.getState().niveauxOptions,
     bandesImplicites: niveauxOverlaysStore.getState().bandesImplicites,
+    bandesRv: niveauxOverlaysStore.getState().bandesRv,
     prixRevientTresoreries: niveauxOverlaysStore.getState().prixRevient,
     macroOverlays: macroOverlayStore.getState().enabled,
     denominateur: denominateurStore.getState().denominateur,
@@ -534,6 +537,7 @@ function hydrateSession(): void {
   if (Array.isArray(p.niveauxClesFamilles)) niveauxOverlaysStore.getState().setFamilles(p.niveauxClesFamilles);
   if (typeof p.niveauxOptions === "boolean") niveauxOverlaysStore.getState().setActif("niveauxOptions", p.niveauxOptions);
   if (typeof p.bandesImplicites === "boolean") niveauxOverlaysStore.getState().setActif("bandesImplicites", p.bandesImplicites);
+  if (typeof p.bandesRv === "boolean") niveauxOverlaysStore.getState().setActif("bandesRv", p.bandesRv);
   if (typeof p.prixRevientTresoreries === "boolean") niveauxOverlaysStore.getState().setActif("prixRevient", p.prixRevientTresoreries);
 
   if (Array.isArray(p.macroOverlays)) {

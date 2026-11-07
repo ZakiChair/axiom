@@ -14,7 +14,7 @@ import type { Commande } from "../commands/registry";
 import type { FournisseurLignes } from "./niveauxLignes";
 
 /** Overlays pilotés par ce socle (les lots suivants ajoutent leurs clés). */
-export type CleOverlayNiveaux = "niveauxCles" | "niveauxOptions" | "bandesImplicites" | "prixRevient";
+export type CleOverlayNiveaux = "niveauxCles" | "niveauxOptions" | "bandesImplicites" | "bandesRv" | "prixRevient";
 /** Familles des niveaux clés : jour, semaine, mois, trimestre (UTC). */
 export type FamilleNiveauxCles = "J" | "S" | "M" | "T";
 export const FAMILLES_NIVEAUX_CLES: readonly FamilleNiveauxCles[] = ["J", "S", "M", "T"];
@@ -25,6 +25,8 @@ export interface NiveauxOverlaysState {
   niveauxOptions: boolean;
   /** Bandes ±1σ/±2σ jour et semaine du DVOL Deribit (BTC/ETH). */
   bandesImplicites: boolean;
+  /** Bandes ±1σ/±2σ jour et semaine prévues par HAR-RV (tout actif, chart/niveaux/bandesRv). */
+  bandesRv: boolean;
   /** Ligne « Coût Strategy » des trésoreries CoinGecko (BTC). */
   prixRevient: boolean;
   /** Familles affichées — jamais vide, ordre canonique J, S, M, T ; défaut J + S. */
@@ -45,6 +47,7 @@ export const niveauxOverlaysStore: StoreApi<NiveauxOverlaysState> = createStore<
   niveauxCles: false,
   niveauxOptions: false,
   bandesImplicites: false,
+  bandesRv: false,
   prixRevient: false,
   familles: ["J", "S"],
   basculer: (cle) => set({ [cle]: !get()[cle] }),
@@ -62,7 +65,7 @@ export const niveauxOverlaysStore: StoreApi<NiveauxOverlaysState> = createStore<
 
 /** Au moins un overlay de niveaux est allumé (PURE). */
 export function overlaysNiveauxActifs(s: NiveauxOverlaysState): boolean {
-  return s.niveauxCles || s.niveauxOptions || s.bandesImplicites || s.prixRevient;
+  return s.niveauxCles || s.niveauxOptions || s.bandesImplicites || s.bandesRv || s.prixRevient;
 }
 
 /** Identité capturée du slot hôte. */

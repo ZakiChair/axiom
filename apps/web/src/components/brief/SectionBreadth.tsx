@@ -306,7 +306,7 @@ export function SectionBreadth({ breadth, noteFraicheur }: Props) {
               {b.nUnivers < 50 ? `${b.nUnivers}/50 valides` : `${b.nUnivers} valides`}
             </p>
             {b.historique === null ? (
-              <p className="text-[10px] text-text-dim">Historique indisponible (aucune clôture exploitable).</p>
+              <p className="text-[10px] text-text-dim">Historique indisponible.</p>
             ) : (
               <HistoriqueBloc h={b.historique} />
             )}

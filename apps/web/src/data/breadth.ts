@@ -518,13 +518,17 @@ function ecrireCache(value: ResumBreadth): void {
 
 /**
  * Récupère les clôtures 1d FERMÉES et datées d'un symbole (bougie en cours ÉCARTÉE).
- * Rejette sur !ok — l'appelant tolère l'échec (le symbole n'est pas compté).
+ * Sans endTime, /klines renvoie TOUJOURS la bougie en cours en dernier : elle est écartée quelle
+ * que soit l'horloge locale (une horloge en avance la ferait passer pour close), puis le filtre
+ * k[6] < maintenant s'applique au reste. Rejette sur !ok — l'appelant tolère l'échec (le symbole
+ * n'est pas compté).
  */
 async function fetchCloturesJour(symbol: string, nowMs: number): Promise<CloturesDatees> {
   const url = `${KLINES_URL}?symbol=${encodeURIComponent(symbol)}&interval=1d&limit=${KLINE_LIMIT}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`klines ${res.status}`);
-  return { symbol, ...parserKlinesFermees(await res.json(), nowMs) };
+  const brut: unknown = await res.json();
+  return { symbol, ...parserKlinesFermees(Array.isArray(brut) ? brut.slice(0, -1) : brut, nowMs) };
 }
 
 /**

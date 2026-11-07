@@ -493,6 +493,16 @@ describe("fetchBreadth — mêmes requêtes, 400 klines, cache des séries déri
     expect(JSON.parse(brut)).toEqual(r);
   });
 
+  it("horloge locale en avance de 2 h : la bougie du jour, renvoyée en dernier, n'est jamais lue", async () => {
+    installerStockage();
+    installerReseau(); // le serveur est le jour 300 à 23:00 UTC : sa bougie 300 est en cours
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(J0 + 301 * JOUR + 3_600_000); // 01:00 le lendemain, selon le navigateur
+    const r = await fetchBreadth();
+    const h = r?.historique as HistoriqueLargeur;
+    expect(h.debut + (JOURS_HISTORIQUE - 1) * JOUR).toBe(J0 + 299 * JOUR);
+  });
+
   it("un cache antérieur à l'historique est recalculé une fois, sa MM50 sert de tendance ; un historique corrompu aussi", async () => {
     installerStockage();
     const mock = installerReseau();

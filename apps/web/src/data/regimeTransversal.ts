@@ -604,9 +604,9 @@ export function persisterRegimeTop50(res: ResultatRegime, calculeA: number, nAtt
  * session de CORR (aucun doublon si CORR les a déjà chargées), calcul, persistance. Jette si
  * la référence BTC manque (le BRIEF affiche alors « non mesuré »).
  *
- * Collecte PROPRE (top 50 par capitalisation, ~400 j) distincte de celle de BREADTH (top 50
- * par volume, 210 bougies) : breadth.ts est hors du lot E2, la réconciliation (panneau
- * commun ou maintien documenté) relève de l'intégration avec le lot E1.
+ * Collecte PROPRE (top 50 par capitalisation, ~400 j), distincte de celle de BREADTH (top 50
+ * par volume, 400 bougies) : la double collecte est maintenue et documentée (BUILD-CONTRACT,
+ * section « Outils d'analyse et sources » du 7 novembre 2026).
  */
 export async function mesurerRegimeTop50(nowMs: number): Promise<ResumeRegime> {
   const univers = await composerUniversTop(TAILLE_UNIVERS_BRIEF);

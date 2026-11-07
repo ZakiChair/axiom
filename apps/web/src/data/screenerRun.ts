@@ -56,6 +56,11 @@ export interface OptionsRunScreener {
   capIndicateurs: number;
   capPosition: number;
   onProgress?: (done: number, total: number) => void;
+  /**
+   * Référence de force relative figée par l'appelant (alerte de scan). Absente : celle
+   * du graphe au lancement (`refSymbolStore`).
+   */
+  refSymbol?: string;
 }
 
 /** Résultat d'un run : lignes survivantes + notes de couverture (affichées telles quelles). */
@@ -235,8 +240,9 @@ export async function executerScreener(
       tf,
       klineLimit: SCREENER_KLINE_LIMIT,
       indicatorConditions: indicateurs,
-      // Lue au lancement : même référence que les indicateurs croisés du graphe.
-      refSymbol: refSymbolStore.getState().refSymbol,
+      // Figée par l'appelant, sinon lue au lancement : même référence que les indicateurs
+      // croisés du graphe.
+      refSymbol: opts.refSymbol ?? refSymbolStore.getState().refSymbol,
     };
     w.postMessage(request);
   });

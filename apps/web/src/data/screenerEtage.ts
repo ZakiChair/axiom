@@ -2,7 +2,8 @@
  * EQS — boucle de l'étage indicateurs, exécutée par le worker du screener.
  *
  * Pour chaque candidat : klines Binance spot (`/api/v3/klines`, CORS *) à l'unité de
- * chaque condition (au plus deux unités par run), bougie EN FORMATION écartée, volume
+ * chaque condition (au plus deux unités par run), bougie EN FORMATION (dernière kline de
+ * la réponse, quelle que soit l'horloge locale) écartée, volume
  * acheteur taker (k[9]) conservé, nombre de bougies porté à l'amorce des conditions
  * (plafond d'une requête : 1000). La série de référence des champs de force relative
  * (refSymbol, BTCUSDT par défaut) est chargée UNE fois par run et par unité ; les bougies
@@ -13,6 +14,8 @@
  */
 import type { Candle, IndicatorResult, Timeframe } from "@axiom/types";
 import {
+  NOTE_ECARTES_SANS_EVALUATION,
+  NOTE_FORCE_RELATIVE_NON_EVALUEE,
   SCREENER_KLINE_LIMIT,
   type IndicatorCondition,
   type IndicatorValue,
@@ -167,7 +170,10 @@ export async function executerEtage(req: RequeteEtage, io: IoEtage): Promise<Res
     const limite = Math.min(LIMITE_KLINES_BINANCE, (limites.get(tf)?.limite ?? SCREENER_KLINE_LIMIT) + 1);
     const url = `${KLINES_URL}?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(tf)}&limit=${limite}`;
     const raw = await io.lireJson(url);
-    return bougiesCloturees(parserKlines(raw, io.maintenant()));
+    // Sans endTime, la DERNIÈRE kline est la bougie en cours : elle est écartée quelle que
+    // soit l'horloge locale (une horloge en avance la ferait passer pour close), comme
+    // BREADTH (`fetchCloturesJour`). Le filtre k[6] reste pour le reste de la réponse.
+    return bougiesCloturees(parserKlines(Array.isArray(raw) ? raw.slice(0, -1) : raw, io.maintenant()));
   };
 
   // Référence : une seule fois par run et par unité qui la lit.
@@ -184,7 +190,7 @@ export async function executerEtage(req: RequeteEtage, io: IoEtage): Promise<Res
       ref = null;
     }
     if (ref === null) {
-      notes.push(`référence ${req.refSymbol} ${tf} indisponible : force relative non évaluée`);
+      notes.push(`référence ${req.refSymbol} ${tf} indisponible : ${NOTE_FORCE_RELATIVE_NON_EVALUEE}`);
     } else {
       // Référence arrêtée (paire suspendue dont la place sert encore l'historique) : aucun
       // symbole n'est calé sur elle, la force relative est tenue pour indisponible.
@@ -192,7 +198,7 @@ export async function executerEtage(req: RequeteEtage, io: IoEtage): Promise<Res
       if (retard > 1) {
         ref = null;
         notes.push(
-          `référence ${req.refSymbol} ${tf} en retard de ${retard} bougies : force relative non évaluée`,
+          `référence ${req.refSymbol} ${tf} en retard de ${retard} bougies : ${NOTE_FORCE_RELATIVE_NON_EVALUEE}`,
         );
       }
     }
@@ -285,7 +291,7 @@ export async function executerEtage(req: RequeteEtage, io: IoEtage): Promise<Res
     const s = nb > 1 ? "s" : "";
     notes.push(
       `${nb} symbole${s} non mesuré${s} pour « ${libelle} » (historique ou volume taker insuffisant) : ` +
-        `écarté${s} sans évaluation`,
+        `écarté${s} ${NOTE_ECARTES_SANS_EVALUATION}`,
     );
   }
   if (echecs > 0) notes.push(`${echecs} symbole${echecs > 1 ? "s" : ""} sans klines`);

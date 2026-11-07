@@ -467,6 +467,9 @@ export function ScreenerWindow() {
       tf,
       baseConditions,
       indicatorConditions,
+      // Référence de force relative figée : la changer ensuite sur le graphe ne change pas
+      // le sens de l'alerte.
+      refSymbol: refSymbolStore.getState().refSymbol,
       ...(dureeAlerteMs > 0 ? { expireTs: Date.now() + dureeAlerteMs } : {}),
     });
     if (res === "limite") {

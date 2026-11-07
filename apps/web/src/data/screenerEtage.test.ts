@@ -7,7 +7,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { computeIndicator, getIndicator } from "@axiom/indicators";
 import type { Operande } from "@axiom/backtest";
-import type { ConditionChamp, ConditionRegle, ScreenerRow } from "./screener";
+import { notesNonMesures, notesReferenceNonEvaluee, type ConditionChamp, type ConditionRegle, type ScreenerRow } from "./screener";
 import {
   bougiesCloturees,
   executerEtage,
@@ -127,6 +127,16 @@ describe("executerEtage", () => {
     expect(e.urls[0]).toBe(`${KLINES_URL}?symbol=AAAUSDT&interval=4h&limit=201`);
   });
 
+  it("horloge locale en avance d'une bougie : la dernière kline, en cours au serveur, n'est jamais lue", async () => {
+    // Le serveur est à MAINTENANT : sa bougie 200 est en formation et bondit à 200. Le
+    // navigateur avance de 4 h : selon k[6], cette bougie serait déjà close.
+    const e = { ...io(() => serie(201, H4, (i) => (i === 200 ? 200 : 100))), maintenant: () => MAINTENANT + H4 };
+    const cond: ConditionRegle = { kind: "regle", condition: { type: "comparaison", gauche: close, comparateur: ">", droite: cst(150) } };
+    const res = await executerEtage({ candidates: [ligne("AAAUSDT")], tf: "4h", conditions: [cond], refSymbol: "BTCUSDT" }, e);
+    expect(res.rows).toEqual([]);
+    expect(res.notes).toEqual([]);
+  });
+
   it("symbole non mesuré (200 bougies 1d pour un RS Mansfield 52 sem.) : absent des lignes, compté dans une note", async () => {
     const e = io((s) => (s === "BTCUSDT" ? serie(400, J1, () => 100) : serie(s === "NEUFUSDT" ? 201 : 400, J1, (i) => 1 + i * 0.01)));
     const rs: ConditionChamp = { kind: "indicator", fieldId: "rsMansfield", op: ">", value: -1000 };
@@ -151,13 +161,16 @@ describe("executerEtage", () => {
     expect(res.notes).toEqual([
       "2 symboles non mesurés pour « close > ema(200) » (historique ou volume taker insuffisant) : écartés sans évaluation",
     ]);
+    expect(notesNonMesures(res.notes)).toEqual(res.notes);
+    expect(notesReferenceNonEvaluee(res.notes)).toEqual([]);
   });
 
   it("référence arrêtée 30 bougies plus tôt : aucun calage, force relative indisponible", async () => {
     const e = io((s) => {
       const complete = serie(201, H4, (i) => 100 + i);
-      // Bougie 200 en formation, 199 dernière close ; la référence s'arrête à la bougie 169.
-      return s === "BTCUSDT" ? complete.slice(0, 170) : complete;
+      // Bougie 200 en formation, 199 dernière close. La réponse de la référence finit à la
+      // bougie 170 : dernière kline, toujours écartée ; sa dernière close lue est la 169.
+      return s === "BTCUSDT" ? complete.slice(0, 171) : complete;
     });
     const rsi: ConditionChamp = { kind: "indicator", fieldId: "rsi", param: 14, op: ">=", value: 0 };
     const rsZ: ConditionChamp = { kind: "indicator", fieldId: "rsZ", param: 50, op: ">", value: -100 };
@@ -165,6 +178,9 @@ describe("executerEtage", () => {
     expect(res.rows).toEqual([]);
     // Pas de note de calage : le RSI n'a pas été lu 30 bougies en arrière.
     expect(res.notes).toEqual(["référence BTCUSDT 4h en retard de 30 bougies : force relative non évaluée"]);
+    // Contrat avec les alertes de scan : la note est reconnue comme référence non lue.
+    expect(notesReferenceNonEvaluee(res.notes)).toEqual(res.notes);
+    expect(notesNonMesures(res.notes)).toEqual([]);
   });
 
   it("retardReference : bougies closes manquantes à la fin de la référence", () => {
@@ -250,8 +266,9 @@ describe("executerEtage", () => {
     const ratio = (i: number): number => 3 + 0.05 * Math.sin(i / 3);
     const e = io((s) => {
       const complete = serie(n, H4, (i) => (s === "BTCUSDT" ? refVraie(i) : ratio(i) * refVraie(i)));
-      // Réponse de la référence au début du run : la bougie n − 2 n'y figure pas encore.
-      return s === "BTCUSDT" ? complete.slice(0, n - 2) : complete;
+      // Réponse de la référence au début du run : la bougie n − 2 y était encore en cours
+      // (dernière kline, écartée même si l'horloge la dit close au moment de l'évaluation).
+      return s === "BTCUSDT" ? complete.slice(0, n - 1) : complete;
     });
     const rsZ: ConditionChamp = { kind: "indicator", fieldId: "rsZ", param: 50, op: ">", value: -100 };
     const res = await executerEtage(

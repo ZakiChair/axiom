@@ -47,6 +47,25 @@ export const SCREENER_CAP = 60;
  */
 export const SCREENER_POSITION_CAP = 20;
 
+/**
+ * Fins des notes d'EQS qui signalent une évaluation INCOMPLÈTE (écrites par l'étage
+ * indicateurs, lues par les alertes de scan) : référence de force relative indisponible
+ * ou en retard (aucun symbole n'a pu passer les conditions qui la lisent), symboles
+ * écartés sans évaluation (non mesurés). « Non mesuré » n'est pas « faux ».
+ */
+export const NOTE_FORCE_RELATIVE_NON_EVALUEE = "force relative non évaluée";
+export const NOTE_ECARTES_SANS_EVALUATION = "sans évaluation";
+
+/** Notes d'un run qui disent que la référence de force relative n'a pas été lue. */
+export function notesReferenceNonEvaluee(notes: readonly string[]): string[] {
+  return notes.filter((n) => n.endsWith(NOTE_FORCE_RELATIVE_NON_EVALUEE));
+}
+
+/** Notes d'un run qui comptent des symboles écartés sans évaluation. */
+export function notesNonMesures(notes: readonly string[]): string[] {
+  return notes.filter((n) => n.endsWith(NOTE_ECARTES_SANS_EVALUATION));
+}
+
 /** Timeframes proposés à l'étage indicateurs (intervalles NATIFS Binance uniquement). */
 export const SCREENER_TIMEFRAMES: Timeframe[] = ["15m", "1h", "4h", "1d"];
 

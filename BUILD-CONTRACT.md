@@ -2204,8 +2204,8 @@ préfixe testée là où elle s'applique, donnée absente = état explicite (« 
   - Clés existantes enrichies : `axiom:breadth:v1` (champ `historique`, ≈ 9 Ko ; un cache de
     l'ancien format est recalculé une fois), `axiom:corr:v1` (`univers` « top50 », `onglet`
     « rotation » et « regime »), `axiom:screener:v1` et `axiom:presetAlerts:v1` (conditions
-    `kind: "regle"`, champs facultatifs `tf` et `fenetre`, anciennes entrées relues telles
-    quelles), session persistée (`SESSION_KEY`, booléen `bandesRv`), paramètre réservé
+    `kind: "regle"`, champs facultatifs `tf` et `fenetre`, et pour les alertes de scan
+    `refSymbol` facultatif ; anciennes entrées relues telles quelles), session persistée (`SESSION_KEY`, booléen `bandesRv`), paramètre réservé
     `unite` dans `IndicatorInstance.params` (persisté par les canaux existants, compris dans
     `computeKey`/`shortHash`).
   - Daemon (KV, écrit seulement si `daemonPret()` après la sonde) : namespaces
@@ -2287,6 +2287,13 @@ préfixe testée là où elle s'applique, donnée absente = état explicite (« 
   - Couverture : un symbole arrêté sur une condition NON MESURÉE (état inconnu sur toute la
     fenêtre K : historique ou volume taker insuffisant) est compté par condition dans une
     note, distinct d'une condition fausse.
+  - Alertes de scan : la référence de force relative est figée à la création
+    (`AlertePreset.refSymbol`, facultatif ; une alerte antérieure lit celle du graphe au
+    scan). Une référence non lue (indisponible ou en retard) rend le scan en échec (pastille
+    et motif, baseline gardée : son retour ne fait pas « entrer » tout l'ensemble) ; des
+    symboles non mesurés marquent le scan « incomplet » avec la note (champ de session
+    `avertissement`). Marques partagées des notes : `NOTE_FORCE_RELATIVE_NON_EVALUEE`,
+    `NOTE_ECARTES_SANS_EVALUATION` (`data/screener.ts`).
   - Presets « Descriptifs (non validés) » : `builtin:squeeze-4h-supertrend-1d`,
     `builtin:flux-anormal`. Un clic sur un résultat pose les instances des conditions de
     l'unité du run ; ce qui n'est pas posé est dit dans EQS.
@@ -2294,7 +2301,8 @@ préfixe testée là où elle s'applique, donnée absente = état explicite (« 
     charge aussi `store/backtest` (chunk paresseux partagé avec BT, ≈ 8 Ko gzip).
   - Fichiers : `data/{screenerRegles,screenerOperandes,screenerEtage,screener,screenerRun}.ts`,
     `workers/screener.worker.ts`, `store/screener.ts`,
-    `components/ScreenerWindow{,Conditions}.tsx`, tests associés.
+    `components/ScreenerWindow{,Conditions}.tsx`, `store/presetAlerts.ts`,
+    `alerts/runtime.ts`, `components/AlertsPanel.tsx`, tests associés.
 - **D — Volatilité attendue contre réalisée (SUG-7).**
   - `primeVol` : DVOL, VRP ex ante = DVOL − RV des clôtures quotidiennes UTC (proxy, pas la
     prime réalisée), percentile du DVOL ; « DVOL indisponible (BTC/ETH seulement) » ailleurs,
@@ -2423,7 +2431,8 @@ préfixe testée là où elle s'applique, donnée absente = état explicite (« 
     (≈ 5 à 14 s) ; cache partagé de 32 blocs, en mémoire seulement ; deux surfaces muettes
     en alternance peuvent s'échanger la place (au plus un plan par silence).
   - C : parité approchée pour les lissages (amorce heuristique 4 × la longueur, plafond 999),
-    non bornée pour le PSAR ; détection de clôture par l'horloge du client ; jusqu'à 2
+    non bornée pour le PSAR ; la dernière kline de chaque réponse (bougie en cours) est
+    toujours écartée, quelle que soit l'horloge du client, comme pour BREADTH ; jusqu'à 2
     requêtes klines par symbole (60 symboles) plus 1 de référence par unité ; résultats des
     presets existants légèrement différents (lecture stricte à la dernière bougie close).
   - D : Garman-Klass 1d biaisé par les sauts et dépendant de la place ; ≈ 70 à 130 ms de

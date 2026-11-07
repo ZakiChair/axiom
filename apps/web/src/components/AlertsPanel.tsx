@@ -118,6 +118,9 @@ function etatScan(a: AlertePreset, maintenant: number): { classePastille: string
   if (a.dernierScanTs === undefined) {
     return { classePastille: "text-text-dim", classeTexte: "text-text-dim", texte: "aucun scan" };
   }
+  if (a.avertissement !== undefined) {
+    return { classePastille: "text-warn", classeTexte: "text-warn", texte: `scan ${formatHeure(a.dernierScanTs)} incomplet — ${a.avertissement}` };
+  }
   return { classePastille: "text-up", classeTexte: "text-text-dim", texte: `scan ${formatHeure(a.dernierScanTs)}` };
 }
 
@@ -1044,7 +1047,7 @@ export function AlertsPanel() {
                     toutes les {a.periodeMin} min
                   </span>
                 </div>
-                <div className={`truncate text-[10px] ${etatScan(a, maintenant).classeTexte}`}>
+                <div className={`truncate text-[10px] ${etatScan(a, maintenant).classeTexte}`} title={etatScan(a, maintenant).texte}>
                   {etatScan(a, maintenant).texte}
                 </div>
                 {a.expireTs !== undefined && <div className="text-[10px] tabular-nums text-text-dim">Échéance {new Date(a.expireTs).toLocaleString("fr-CH", { dateStyle: "short", timeStyle: "short" })}</div>}

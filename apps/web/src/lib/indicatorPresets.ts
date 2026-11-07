@@ -3,6 +3,7 @@ import type { IndicatorInstance } from "@axiom/types";
 import { getIndicator, resolveParams } from "@axiom/indicators";
 import { indicatorsStore, type ActiveIndicator } from "../store/indicators";
 import { chartCapaciteStore } from "../store/chartCapacite";
+import { uniteDemandee } from "../chart/uniteParam";
 
 export interface PresetAnalyse {
   id: string;
@@ -30,9 +31,14 @@ export const PRESETS_ANALYSE: readonly PresetAnalyse[] = [
   },
 ];
 
-/** Compare les entrées effectives, sans confondre omission d’un défaut et différence de réglage. */
+/**
+ * Compare les entrées effectives, sans confondre omission d’un défaut et différence de réglage.
+ * L’unité de calcul réservée (`params.unite`, hors `def.inputs`) fait partie de l’identité :
+ * une EMA 200 [1d] ne remplace pas l’EMA 200 de l’unité du graphe, ni l’inverse.
+ */
 function memeConfiguration(a: IndicatorInstance, b: IndicatorInstance): boolean {
   if (a.defId !== b.defId) return false;
+  if (uniteDemandee(a.params) !== uniteDemandee(b.params)) return false;
   const def = getIndicator(a.defId);
   if (!def) return false;
   const pa = resolveParams(def, a.params);

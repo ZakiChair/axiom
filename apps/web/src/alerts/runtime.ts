@@ -67,7 +67,7 @@ import { daemonSupporte, detectDaemon, urlDaemon } from "../data/daemon";
 import { coinalyzeProvider, filtrerFrontieres8h } from "../data/coinalyze";
 import { histFunding } from "../data/referentiels";
 import { executerScreener } from "../data/screenerRun";
-import { SCREENER_POSITION_CAP } from "../data/screener";
+import { notesNonMesures, notesReferenceNonEvaluee, SCREENER_POSITION_CAP } from "../data/screener";
 import { extUrl } from "../data/extapi";
 import { AGE_MAX_FLUX_MS } from "../data/onchain/fluxCapitaux.contract";
 import { fluxCapitauxStore, garderFluxCapitauxPourAlertes } from "../store/fluxCapitaux";
@@ -684,13 +684,24 @@ function creerRuntime(): Unsubscribe {
       const res = await executerScreener(alerte.baseConditions, alerte.indicatorConditions, alerte.tf, {
         capIndicateurs: PRESET_CAP_INDICATEURS,
         capPosition: SCREENER_POSITION_CAP,
+        ...(alerte.refSymbol !== undefined ? { refSymbol: alerte.refSymbol } : {}),
       });
       // Ré-validation POST-await : l'alerte a pu être retirée/désactivée pendant le scan en
       // vol — `resyncPreset` a alors déjà purgé son état. Sans ce contrôle, la ligne
       // `dernierEnsemble.set` ci-dessous RESSUSCITERAIT sa baseline (et pourrait déclencher
       // pour une alerte disparue).
       if (!encoreValide()) return;
-      presetAlertsStore.getState().marquerScan(id, Date.now()); // succès : erreur effacée
+      // Référence de force relative non lue : aucun symbole n'a pu passer les conditions
+      // qui la lisent. Ce passage n'est pas un scan vide : échec publié, baseline gardée
+      // (sinon le retour de la référence ferait « entrer » tout l'ensemble d'un coup).
+      const referenceNonEvaluee = notesReferenceNonEvaluee(res.notes);
+      if (referenceNonEvaluee.length > 0) {
+        presetAlertsStore.getState().marquerScan(id, Date.now(), referenceNonEvaluee.join(" · "));
+        return;
+      }
+      // Succès : erreur effacée ; les symboles non mesurés restent visibles.
+      const nonMesures = notesNonMesures(res.notes);
+      presetAlertsStore.getState().marquerScan(id, Date.now(), undefined, nonMesures.length > 0 ? nonMesures.join(" · ") : undefined);
       const courant = res.rows.map((r) => r.symbol);
       const precedent = dernierEnsemble.get(id) ?? null;
       const entrants = diffEntrants(precedent, courant);

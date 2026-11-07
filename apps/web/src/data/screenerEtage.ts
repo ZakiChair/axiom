@@ -111,7 +111,7 @@ export interface RequeteEtage {
   conditions: IndicatorCondition[];
   /** Plancher de bougies closes par unité (défaut SCREENER_KLINE_LIMIT). */
   plancher?: number;
-  /** Symbole de référence des champs de force relative (refSymbolStore). */
+  /** Symbole de référence des champs de force relative (figé par une alerte de scan, sinon refSymbolStore). */
   refSymbol: string;
 }
 

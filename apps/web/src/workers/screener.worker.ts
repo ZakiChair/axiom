@@ -28,7 +28,7 @@ export interface WorkerRequest {
   /** Plancher de bougies closes par unité (élevé à l'amorce des conditions). */
   klineLimit: number;
   indicatorConditions: IndicatorCondition[];
-  /** Référence des champs de force relative (refSymbolStore, BTCUSDT par défaut). */
+  /** Référence des champs de force relative (figée par une alerte de scan, sinon refSymbolStore, BTCUSDT par défaut). */
   refSymbol: string;
 }
 

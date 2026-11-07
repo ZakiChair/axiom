@@ -159,7 +159,7 @@ export function lirePresetAlerts(): AlertePreset[] {
 }
 
 /** Écriture TOLÉRANTE (best-effort : quota / mode privé silencieux). Les champs de
- *  SESSION (`dernierScanTs`, `derniereErreur`) sont retirés : les relire au boot
+ *  SESSION (`dernierScanTs`, `derniereErreur`, `avertissement`) sont retirés : les relire au boot
  *  afficherait l'état d'une session précédente. */
 function ecrirePresetAlerts(alertes: AlertePreset[]): void {
   try {

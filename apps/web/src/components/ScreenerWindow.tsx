@@ -3,13 +3,15 @@
  *
  * Comme DerivativesWindow, ce panneau ne capture pas les clics : le graphe reste
  * interactif. Ouverture via la commande EQS (toggle). Il expose un builder de filtres
- * compact (conditions de base + conditions indicateurs), des presets (livrés + perso),
- * un bouton de run avec progression, et une table de résultats triable (clic = ouvre le
- * chart via `navigateTo` / bus C2, bouton = ajoute à la watchlist).
+ * compact (conditions de base + conditions indicateurs : champs du catalogue et règles
+ * du backtest, lignes dans ScreenerWindowConditions.tsx), des presets (livrés,
+ * descriptifs + perso), un bouton de run avec progression, et une table de résultats
+ * triable (clic = ouvre le chart via `navigateTo` / bus C2 avec les indicateurs des
+ * conditions, bouton = ajoute à la watchlist).
  *
  * Toutes les limites sont affichées honnêtement : le TF ne s'applique qu'aux filtres
- * indicateurs, l'étage indicateurs est plafonné à SCREENER_CAP, et OI/L-S (si demandés)
- * ne couvrent qu'un échantillon top N liquides (badge de couverture).
+ * indicateurs, lus sur bougies closes ; l'étage indicateurs est plafonné à SCREENER_CAP ;
+ * OI/L-S (si demandés) ne couvrent qu'un échantillon top N liquides (badge de couverture).
  */
 import { useMemo, useState } from "react";
 import { useStore } from "zustand";
@@ -22,18 +24,24 @@ import {
 import {
   BASE_FIELDS,
   BUILTIN_PRESETS,
-  getIndicatorField,
-  INDICATOR_FIELDS,
   OPERATORS,
   SCREENER_CAP,
   SCREENER_POSITION_CAP,
   SCREENER_TIMEFRAMES,
   type BaseCondition,
   type BaseField,
-  type IndicatorCondition,
+  type IndicatorValue,
   type Operator,
   type ScreenerRow,
 } from "../data/screener";
+import {
+  besoinReference,
+  PRESETS_DESCRIPTIFS,
+  raisonCondition,
+  raisonConditions,
+} from "../data/screenerRegles";
+import { refSymbolStore } from "../store/refSymbol";
+import { LigneCondition } from "./ScreenerWindowConditions";
 import {
   ouvrirSetupDansChart,
   signauxStore,
@@ -149,64 +157,10 @@ function BaseConditionRow({ index, cond }: { index: number; cond: BaseCondition 
   );
 }
 
-/** Ligne de condition INDICATEUR : champ / (paramètre) / opérateur / valeur / suppression. */
-function IndicatorConditionRow({ index, cond }: { index: number; cond: IndicatorCondition }) {
-  const update = useStore(screenerStore, (s) => s.updateIndicatorCondition);
-  const remove = useStore(screenerStore, (s) => s.removeIndicatorCondition);
-  const spec = getIndicatorField(cond.fieldId);
-  return (
-    <div className="axiom-screener-ligne flex items-center gap-1.5">
-      <Select
-        value={cond.fieldId}
-        onChange={(e) => update(index, { fieldId: e.target.value })}
-        className="min-w-0 flex-1"
-        aria-label="Indicateur"
-      >
-        {INDICATOR_FIELDS.map((f) => (
-          <option key={f.id} value={f.id}>
-            {f.label}
-            {f.unit ? ` (${f.unit})` : ""}
-          </option>
-        ))}
-      </Select>
-      {spec?.paramKey !== undefined && (
-        <Input
-          type="number"
-          value={cond.param ?? spec.defaultParam ?? 0}
-          onChange={(e) => update(index, { param: Number(e.target.value) })}
-          className="w-12 tabular-nums"
-          aria-label={spec.paramKey}
-          title={spec.paramKey}
-        />
-      )}
-      <Select
-        value={cond.op}
-        onChange={(e) => update(index, { op: e.target.value as Operator })}
-        aria-label="Opérateur"
-      >
-        {OPERATORS.map((op) => (
-          <option key={op} value={op}>
-            {op}
-          </option>
-        ))}
-      </Select>
-      <Input
-        type="number"
-        value={cond.value}
-        onChange={(e) => update(index, { value: Number(e.target.value) })}
-        className="w-16 tabular-nums"
-        aria-label="Valeur"
-      />
-      <button
-        type="button"
-        onClick={() => remove(index)}
-        aria-label="Retirer la condition"
-        className="rounded px-1 text-text-dim transition hover:text-down"
-      >
-        ✕
-      </button>
-    </div>
-  );
+/** Valeur d'une condition dans la table : libellé, scalaire, ancienneté du déclenchement. */
+function texteValeur(v: IndicatorValue): string {
+  const depuis = v.barresDepuis !== undefined ? ` (il y a ${v.barresDepuis} b.)` : "";
+  return `${v.label} ${v.value.toFixed(2)}${depuis}`;
 }
 
 // ─────────────────────────── Panneau principal ───────────────────────────
@@ -466,6 +420,10 @@ export function ScreenerWindow() {
   const indicatorConditions = useStore(screenerStore, (s) => s.indicatorConditions);
   const addBase = useStore(screenerStore, (s) => s.addBaseCondition);
   const addIndicator = useStore(screenerStore, (s) => s.addIndicatorCondition);
+  const addRegle = useStore(screenerStore, (s) => s.addRegleCondition);
+  const replaceIndicator = useStore(screenerStore, (s) => s.replaceIndicatorCondition);
+  const removeIndicator = useStore(screenerStore, (s) => s.removeIndicatorCondition);
+  const refSymbol = useStore(refSymbolStore, (s) => s.refSymbol);
   const userPresets = useStore(screenerStore, (s) => s.userPresets);
   const dernierPresetCharge = useStore(screenerStore, (s) => s.dernierPresetCharge);
   const loadPreset = useStore(screenerStore, (s) => s.loadPreset);
@@ -476,6 +434,7 @@ export function ScreenerWindow() {
   const rows = useStore(screenerStore, (s) => s.rows);
   const error = useStore(screenerStore, (s) => s.error);
   const note = useStore(screenerStore, (s) => s.note);
+  const avisGraphe = useStore(screenerStore, (s) => s.avisGraphe);
   const run = useStore(screenerStore, (s) => s.run);
   const cancel = useStore(screenerStore, (s) => s.cancel);
 
@@ -489,6 +448,8 @@ export function ScreenerWindow() {
   const [dureeAlerteMs, setDureeAlerteMs] = useState(0);
 
   const busy = runState === "loading" || runState === "running";
+  // Conditions refusées (unité, fenêtre, sortie non causale, série aux…) : run bloqué.
+  const raisonRefus = useMemo(() => raisonConditions(indicatorConditions, tf), [indicatorConditions, tf]);
 
   /**
    * Crée une alerte de scan à partir du preset chargé + conditions COURANTES du builder.
@@ -496,7 +457,9 @@ export function ScreenerWindow() {
    */
   const creerAlerte = () => {
     if (dernierPresetCharge === null) return;
-    const preset = [...BUILTIN_PRESETS, ...userPresets].find((p) => p.id === dernierPresetCharge);
+    const preset = [...BUILTIN_PRESETS, ...PRESETS_DESCRIPTIFS, ...userPresets].find(
+      (p) => p.id === dernierPresetCharge,
+    );
     if (preset === undefined) return;
     const res = presetAlertsStore.getState().ajouter({
       presetId: preset.id,
@@ -557,7 +520,7 @@ export function ScreenerWindow() {
             {r.symbol}
             {r.indicatorValues && r.indicatorValues.length > 0 && (
               <span className="ml-1 text-[10px] font-normal text-text-dim">
-                {r.indicatorValues.map((v) => `${v.label} ${v.value.toFixed(2)}`).join(" · ")}
+                {r.indicatorValues.map(texteValeur).join(" · ")}
               </span>
             )}
           </button>
@@ -760,6 +723,16 @@ export function ScreenerWindow() {
             ))}
           </div>
 
+          {/* Descriptifs : conditions ouvertes (évènements, flux), jamais présentées comme signaux. */}
+          <div className="text-[9px] uppercase tracking-wide text-text-dim/70">Descriptifs (non validés)</div>
+          <div className="flex flex-wrap gap-1.5">
+            {PRESETS_DESCRIPTIFS.map((p) => (
+              <Bouton key={p.id} onClick={() => loadPreset(p.id)} title={p.description}>
+                {p.name}
+              </Bouton>
+            ))}
+          </div>
+
           {/* Mes presets : seulement si l'utilisateur en a enregistré (comportement conservé). */}
           {userPresets.length > 0 && (
             <>
@@ -867,7 +840,12 @@ export function ScreenerWindow() {
                     ))}
                   </Select>
                 </label>
-                <Bouton onClick={addIndicator}>+ ajouter</Bouton>
+                <Bouton onClick={addIndicator} title="Champ du catalogue : indicateur, flux, force relative">
+                  + champ
+                </Bouton>
+                <Bouton onClick={addRegle} title="Règle du backtest : comparaison ou croisement de deux opérandes">
+                  + règle
+                </Bouton>
               </div>
             }
           >
@@ -876,13 +854,26 @@ export function ScreenerWindow() {
           {indicatorConditions.length === 0 ? (
             <p className="text-[11px] text-text-dim">Aucun filtre indicateur (étage klines ignoré).</p>
           ) : (
-            indicatorConditions.map((c, i) => <IndicatorConditionRow key={i} index={i} cond={c} />)
+            indicatorConditions.map((c, i) => (
+              <LigneCondition
+                key={i}
+                cond={c}
+                tfRun={tf}
+                raison={raisonCondition(c, tf)}
+                onChange={(nc) => replaceIndicator(i, nc)}
+                onRemove={() => removeIndicator(i)}
+              />
+            ))
           )}
           {indicatorConditions.length > 0 && (
             <p className="text-[10px] leading-snug text-text-dim">
-              Évalués sur le TF {tf}, plafond {SCREENER_CAP} symboles/run (les plus liquides).
+              Lus sur bougies closes (bougie en cours exclue), TF {tf} sauf unité propre (une de plus au
+              maximum), plafond {SCREENER_CAP} symboles/run (les plus liquides). Amorce chargée selon les
+              indicateurs, jusqu'à 1000 bougies. Filtres descriptifs, pas des signaux.
+              {besoinReference(indicatorConditions) && ` Force relative contre ${refSymbol} (réf. des indicateurs croisés).`}
             </p>
           )}
+          {raisonRefus !== null && <p className="text-[10px] text-down">{raisonRefus}</p>}
         </section>
 
         {/* Contrôle du run */}
@@ -893,7 +884,12 @@ export function ScreenerWindow() {
                 Annuler
               </Bouton>
             ) : (
-              <Bouton variante="primaire" onClick={run}>
+              <Bouton
+                variante="primaire"
+                onClick={run}
+                disabled={raisonRefus !== null}
+                title={raisonRefus ?? undefined}
+              >
                 Lancer le screen
               </Bouton>
             )}
@@ -931,6 +927,12 @@ export function ScreenerWindow() {
             maxHauteur="40vh"
             vide={runState === "done" ? "Aucun résultat." : "Lancez un screen pour voir les résultats."}
           />
+          {/* Ouverture au graphe : ce qui n'a pas été posé (panneaux pleins, autre unité). */}
+          {avisGraphe !== null && (
+            <p role="status" className="text-[10px] leading-snug text-warn">
+              {avisGraphe}
+            </p>
+          )}
           {(seuils.funding !== null || seuils.deltaOi !== null) && (
             <NoteSource>
               En orange : 10 % les plus extrêmes de l'univers affiché (|funding|, |Δ OI|).

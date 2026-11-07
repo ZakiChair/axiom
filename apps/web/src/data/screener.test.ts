@@ -337,6 +337,9 @@ describe("presets scénario (v1.5)", () => {
         expect(baseIds.has(c.field), `champ base « ${c.field} » (${p.id}) inconnu`).toBe(true);
       }
       for (const c of p.indicatorConditions) {
+        // Les presets historiques n'emploient que des champs du catalogue historique.
+        expect(c.kind).toBe("indicator");
+        if (c.kind !== "indicator") continue;
         expect(
           getIndicatorField(c.fieldId),
           `champ indicateur « ${c.fieldId} » (${p.id}) inconnu`,

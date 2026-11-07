@@ -36,6 +36,7 @@ import {
   type IndicatorCondition,
   type ScreenerRow,
 } from "./screener";
+import { refSymbolStore } from "../store/refSymbol";
 import type { WorkerRequest, WorkerResponse } from "../workers/screener.worker";
 
 /** URL ticker 24 h Binance (univers spot commun screener / signaux / squeeze). */
@@ -217,7 +218,7 @@ export async function executerScreener(
         opts.onProgress?.(msg.done, msg.total);
       } else if (msg.type === "result") {
         w.terminate();
-        resolve({ rows: msg.rows, notes: [...notes, `${msg.rows.length} résultats`] });
+        resolve({ rows: msg.rows, notes: [...notes, ...msg.notes, `${msg.rows.length} résultats`] });
       } else if (msg.type === "error") {
         w.terminate();
         reject(new Error(`Étage indicateurs : ${msg.message}`));
@@ -234,6 +235,8 @@ export async function executerScreener(
       tf,
       klineLimit: SCREENER_KLINE_LIMIT,
       indicatorConditions: indicateurs,
+      // Lue au lancement : même référence que les indicateurs croisés du graphe.
+      refSymbol: refSymbolStore.getState().refSymbol,
     };
     w.postMessage(request);
   });

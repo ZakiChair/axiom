@@ -838,12 +838,23 @@ const ETATS_LOCAUX_NON_EXPORTES: ReadonlySet<string> = new Set([
  */
 const PREFIXE_ARCHIVE_CRYPTOQUANT = "axiom:onchain:cq:";
 
+/**
+ * Instantanés quotidiens d'options d'OMON (chantier du 7 novembre 2026) : archive de la surface à
+ * maturité constante (`axiom:surfaceOptions:<devise>:v1`) et OI par strike J-0…J-7
+ * (`axiom:oiStrikes:<devise>:<jour>`). Données Deribit dérivées (usage personnel), doublées dans
+ * le KV du daemon (namespaces `surface-options` et `oi-strikes`) : jamais exportées, ni remplacées
+ * ni purgées par un import (une sauvegarde ancienne raccourcirait l'historique). Littéraux
+ * volontaires : data/surfaceConstante et data/deltaOiStrikes restent dans le chunk d'OMON.
+ */
+const PREFIXES_INSTANTANES_OPTIONS = ["axiom:surfaceOptions:", "axiom:oiStrikes:"] as const;
+
 /** Clé jamais exportée ni importée, et préservée localement lors d'un import. */
 function resteSurLePoste(cle: string): boolean {
   return (
     estCredentialLocal(cle) ||
     ETATS_LOCAUX_NON_EXPORTES.has(cle) ||
-    cle.startsWith(PREFIXE_ARCHIVE_CRYPTOQUANT)
+    cle.startsWith(PREFIXE_ARCHIVE_CRYPTOQUANT) ||
+    PREFIXES_INSTANTANES_OPTIONS.some((prefixe) => cle.startsWith(prefixe))
   );
 }
 

@@ -13,6 +13,7 @@ import type { OptionPoint } from "../../data/deribit";
 import type { PointTermIv } from "../../data/termIv";
 import type { SegmentVolForward } from "../../data/volForward";
 import { intensiteCellule, type GrilleOi } from "../../data/oiHeatmap";
+import type { CelluleDeltaOi } from "../../data/deltaOiStrikes";
 import { formatUsd } from "../../lib/format";
 import { lireTokenCanvas, POLICE_CANVAS, rgbaTokenCanvas } from "../../lib/canvasTokens";
 import { indicesVisibles, valeurVersPixel, type Domaine } from "../../lib/domaineAxe";
@@ -201,16 +202,20 @@ export const HEATMAP_PAD_B = 22;
  * Dessine la heatmap OI/GEX : axe X ordinal = échéances (triées), axe Y ordinal = strikes de la
  * bande utile (ordonnés DÉCROISSANT, strike haut en haut, spot au milieu). Chaque cellule est un
  * `fillRect` teinté par `intensiteCellule` — métriques OI et Volume : rampe neutre → `--accent` ;
- * métrique GEX : signe porté par la teinte `--up`/`--down`, intensité = |gex|. Marqueur ◆ du max pain
- * par colonne, ligne horizontale pointillée du spot. DPR et tokens du thème lus au dessin.
+ * métrique GEX : signe porté par la teinte `--up`/`--down`, intensité = |gex|. Métrique ΔOI : OI en
+ * hausse `--accent`, en baisse `--ui-amber` (teintes non directionnelles : le ΔOI n'est pas signé),
+ * intensité = |Δ| ; point au centre des cellules dont un instrument est nouveau. Marqueur ◆ du max
+ * pain par colonne, ligne horizontale pointillée du spot. DPR et tokens du thème lus au dessin.
+ * `deltaOi` (clé « échéance|strike ») n'est lu qu'en métrique ΔOI ; null = aucune référence.
  */
 export function dessinerHeatmapOi(
   canvas: HTMLCanvasElement,
   grille: GrilleOi,
   bandeDesc: number[],
-  metrique: "oi" | "gex" | "volume",
+  metrique: "oi" | "gex" | "volume" | "doi",
   spot: number,
   survol: SurvolHeatmap | null,
+  deltaOi: { cellules: ReadonlyMap<string, CelluleDeltaOi>; deltaAbsMax: number } | null = null,
 ): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
@@ -243,17 +248,44 @@ export function dessinerHeatmapOi(
     ctx.fillText("Pas d'open interest à afficher…", padL, padT + plotH / 2);
     return;
   }
+  if (metrique === "doi" && deltaOi === null) {
+    ctx.fillStyle = couleurDim;
+    ctx.fillText("ΔOI non mesuré : aucun instantané de référence pour ce jour.", padL, padT + plotH / 2);
+    return;
+  }
 
   const colW = plotW / echeances.length;
   const rowH = plotH / bandeDesc.length;
   const indexEcheance = new Map(echeances.map((e, i) => [e, i]));
   const indexBande = new Map(bandeDesc.map((s, i) => [s, i]));
 
+  // ΔOI : cellules de la variation (mêmes axes que la grille courante ; un strike hors bande n'est
+  // pas tracé mais reste dans le top 5). Point central = instrument nouveau (Δ = OI entier).
+  if (metrique === "doi" && deltaOi !== null) {
+    for (const c of deltaOi.cellules.values()) {
+      const ci = indexEcheance.get(c.expiryMs);
+      const ri = indexBande.get(c.strike);
+      if (ci === undefined || ri === undefined || c.delta === null || c.delta === 0) continue;
+      const intensite = intensiteCellule(Math.abs(c.delta), deltaOi.deltaAbsMax);
+      if (intensite <= 0) continue;
+      ctx.fillStyle = c.delta > 0
+        ? rgbaTokenCanvas("--accent", 0.1 + 0.85 * intensite, "#38bdf8")
+        : rgbaTokenCanvas("--ui-amber", 0.1 + 0.85 * intensite, "#f59e0b");
+      ctx.fillRect(padL + ci * colW, padT + ri * rowH, colW, rowH);
+      if (c.nouveau) {
+        ctx.fillStyle = couleurDim;
+        ctx.beginPath();
+        ctx.arc(padL + (ci + 0.5) * colW, padT + (ri + 0.5) * rowH, Math.max(1, Math.min(2, rowH / 4, colW / 4)), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
   const vMax =
     metrique === "oi" ? grille.oiMax : metrique === "gex" ? grille.gexAbsMax : grille.volumeMax;
 
-  // Cellules teintées par intensité.
-  for (const c of grille.cellules) {
+  // Cellules teintées par intensité (métriques OI, |GEX| et Volume ; ΔOI tracé ci-dessus).
+  for (const c of metrique === "doi" ? [] : grille.cellules) {
     const ci = indexEcheance.get(c.expiryMs);
     const ri = indexBande.get(c.strike);
     if (ci === undefined || ri === undefined) continue;

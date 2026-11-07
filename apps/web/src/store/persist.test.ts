@@ -55,6 +55,8 @@ import {
   decisionsReconcile,
 } from "./persist";
 import type { SnapshotKv } from "../data/daemon";
+import { cleLocaleSurface } from "../data/surfaceConstante";
+import { cleLocaleOi } from "../data/deltaOiStrikes";
 
 const CHART_KEY = "axiom:chartState:v1";
 const WATCH_KEY = "axiom:watchlist:v1";
@@ -713,6 +715,19 @@ describe("importerSauvegarde — remplacement des clés axiom:*", () => {
     expect(localStorage.getItem("axiom:notes:v1")).toBe("autres notes");
   });
 
+  it("ne supprime ni ne remplace les instantanés d'options d'OMON (surface, OI par strike)", () => {
+    // Clés produites par les modules eux-mêmes : le littéral de persist.ts ne peut pas dériver.
+    const surface = cleLocaleSurface("BTC");
+    const oi = cleLocaleOi("ETH", "2026-11-06");
+    localStorage.setItem(surface, '{"v":1,"points":[]}');
+    localStorage.setItem(oi, "instantane-local");
+
+    expect(importerSauvegarde(JSON.stringify({ "axiom:notes:v1": "notes importées", [oi]: "instantane-etranger" }))).toBe(true);
+    expect(localStorage.getItem(surface)).toBe('{"v":1,"points":[]}');
+    expect(localStorage.getItem(oi)).toBe("instantane-local");
+    expect(localStorage.getItem("axiom:notes:v1")).toBe("notes importées");
+  });
+
   it("refuse un JSON invalide, un tableau ou un objet sans clé axiom: (aucun changement)", () => {
     localStorage.setItem("axiom:garde:v1", "intact");
 
@@ -787,6 +802,15 @@ describe("exporterSauvegarde — périmètre réel du fichier téléchargé", ()
     const dump = await capturerExport();
     expect(dump["axiom:onchain:bg:abonnement-refuse"]).toBeUndefined();
     expect(dump["axiom:onchain:bg:abonnement-generation"]).toBeUndefined();
+    expect(dump[CHART_KEY]).toBe("{}");
+  });
+  it("n'embarque pas les instantanés d'options d'OMON (données Deribit dérivées, KV daemon)", async () => {
+    localStorage.setItem(cleLocaleSurface("BTC"), '{"v":1,"points":[]}');
+    localStorage.setItem(cleLocaleOi("BTC", "2026-11-06"), "{}");
+    localStorage.setItem(CHART_KEY, "{}");
+    const dump = await capturerExport();
+    expect(dump[cleLocaleSurface("BTC")]).toBeUndefined();
+    expect(dump[cleLocaleOi("BTC", "2026-11-06")]).toBeUndefined();
     expect(dump[CHART_KEY]).toBe("{}");
   });
   it("n'embarque jamais la clé CryptoQuant personnelle", async () => {

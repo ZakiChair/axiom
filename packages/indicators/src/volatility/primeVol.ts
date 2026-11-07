@@ -90,11 +90,17 @@ export const primeVol: IndicatorDef = {
         percentile[i] = (sous / N) * 100;
       }
     }
+    // Bougies plus longues qu'un jour, ou grille qui ne tombe jamais sur minuit UTC : aucune
+    // clôture quotidienne possible, attendre n'y changera rien (≠ historique trop court).
+    const pas = n >= 2 ? candles[n - 1]!.time - candles[n - 2]!.time : Number.NaN;
+    const rvImpossible = pas > JOUR || (pas > 0 && (JOUR % pas !== 0 || candles[n - 1]!.time % pas !== 0));
     const texte =
       dvol[n - 1] === undefined
         ? "DVOL indisponible (BTC/ETH seulement)"
         : vrp[n - 1] === undefined
-          ? `RV : ${L + 1} clôtures UTC consécutives requises`
+          ? rvImpossible
+            ? "RV non mesurée (bougies > 1 j ou non alignées sur minuit UTC)"
+            : `RV : ${L + 1} clôtures UTC consécutives requises`
           : percentile[n - 1] === undefined
             ? `Percentile : ${N} j de DVOL requis`
             : `VRP ex ante, percentile ${N} j`;

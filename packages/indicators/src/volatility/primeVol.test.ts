@@ -92,11 +92,16 @@ describe("primeVol — DVOL, VRP = DVOL − RV, percentile du DVOL", () => {
     const decalees = calc(jours(40, 3_600_000), 40);
     expect(decalees.series.vrp?.every((v) => v === undefined)).toBe(true);
     expect(decalees.series.dvol?.[30]).toBeDefined();
-    expect(decalees.annotations?.labels?.[0]?.texte).toBe("RV : 6 clôtures UTC consécutives requises");
+    // Attendre ne changera rien : le libellé ne parle pas de clôtures « requises ».
+    expect(decalees.annotations?.labels?.[0]?.texte).toBe("RV non mesurée (bougies > 1 j ou non alignées sur minuit UTC)");
     const hebdo: Candle[] = Array.from({ length: 30 }, (_, k) => ({ time: T0 + k * 7 * JOUR, open: 1, high: 2, low: 1, close: 1 + k / 100, volume: 1 }));
-    const r = computeIndicator(primeVol, hebdo, { longueurRv: 5, fenetre: 20 }, { dvol: hebdo.map(() => 50) }).series;
+    const res = computeIndicator(primeVol, hebdo, { longueurRv: 5, fenetre: 20 }, { dvol: hebdo.map(() => 50) });
+    const r = res.series;
     expect(r.vrp?.every((v) => v === undefined)).toBe(true);
     expect(r.percentile?.every((v) => v === undefined)).toBe(true);
+    expect(res.annotations?.labels?.[0]?.texte).toBe("RV non mesurée (bougies > 1 j ou non alignées sur minuit UTC)");
+    // Historique simplement trop court : l'attente suffit, le libellé le dit.
+    expect(calc(jours(4), 4).annotations?.labels?.[0]?.texte).toBe("RV : 6 clôtures UTC consécutives requises");
   });
 
   it("un jour manquant rompt la chaîne : RV et percentile repartent de zéro", () => {

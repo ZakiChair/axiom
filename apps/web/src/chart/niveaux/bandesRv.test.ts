@@ -96,10 +96,19 @@ describe("chargerHistoriqueJour — pages vers le passé", () => {
     expect(appels).toHaveLength(2);
   });
 
-  it("échec de la première page : rejet ; d'une suivante : historique partiel gardé", async () => {
+  it("échec de la première page : rejet ; d'une suivante : historique partiel gardé s'il suffit aux deux bandes", async () => {
     await expect(chargerHistoriqueJour("binance", "BTCUSDT", 1500, adaptateur(3000, { echecPage: 1 }).adapter)).rejects.toThrow("HTTP 500");
     const partiel = await chargerHistoriqueJour("binance", "BTCUSDT", 1500, adaptateur(3000, { echecPage: 2 }).adapter);
     expect(partiel).toHaveLength(1000);
+  });
+
+  it("page suivante en échec sous la profondeur utile (Coinbase, 350) : panne, pas « historique trop court »", async () => {
+    await expect(chargerHistoriqueJour("coinbase", "BTC-USD", 1500, adaptateur(3000, { echecPage: 2 }).adapter)).rejects.toThrow(
+      "bougies 1d incomplètes (350 reçues, page 2 en échec : HTTP 500)",
+    );
+    // La source le traite comme une panne : bougies indisponibles, nouvel essai dans 5 min.
+    _viderCacheBandesRv();
+    expect(await chargerBandesRv("coinbase", "BTC-USD", NOW, (e, s) => chargerHistoriqueJour(e, s, 1500, adaptateur(3000, { echecPage: 2 }).adapter))).toBeNull();
   });
 });
 
@@ -133,6 +142,24 @@ describe("calculerBandesRv — ancres, origines et bandes", () => {
     expect(lendemain.prevision.sigma).toBe(mercredi.prevision.sigma);
     expect(lendemain.prevision.k1).toBe(mercredi.prevision.k1);
     expect(lendemain.plus2).toBe(mercredi.plus2);
+  });
+
+  it("historique glissant plafonné : 720 jours (Kraken) sans bande semaine ; au-delà du calibrage complet, semaine immobile", () => {
+    // Chaque jour, la place sert les N dernières bougies : le début du segment avance d'un jour.
+    const jeudi = NOW + JOUR;
+    const avecJeudi = historique(1101, jeudi);
+    const kraken = calculerBandesRv(bougies.slice(-721), NOW);
+    expect(kraken.historique).toBe(720);
+    expect(kraken.jour).not.toBeNull();
+    expect(kraken.semaine).toBeNull(); // calibrage partiel : la bande glisserait dans la semaine
+    const mercredi = calculerBandesRv(bougies.slice(-821), NOW).semaine!;
+    const lendemain = calculerBandesRv(avecJeudi.slice(-821), jeudi).semaine!;
+    // Mêmes origines et mêmes issues : égalité aux arrondis des sommes cumulées près (la dérive
+    // relevée en revue avec un calibrage partiel était de l'ordre de 1e-2 sur k₁).
+    expect(lendemain.prevision.sigma).toBeCloseTo(mercredi.prevision.sigma, 12);
+    expect(lendemain.prevision.k1).toBeCloseTo(mercredi.prevision.k1, 12);
+    expect(lendemain.prevision.k2).toBeCloseTo(mercredi.prevision.k2, 12);
+    expect(lendemain.plus2).toBeCloseTo(mercredi.plus2, 6);
   });
 
   it("bougie de la veille absente (pas encore publiée) : bande du jour null, semaine intacte", () => {
@@ -295,7 +322,7 @@ describe("creerSourceBandesRv — source d'un slot", () => {
     const source = creerSourceBandesRv(CTX, { charger, maintenant: () => NOW, disponible: () => true, toast, marche: marcheFactice([]) });
     const unsub = source.subscribe(() => {});
     await vi.waitFor(() => expect(toast).toHaveBeenCalledTimes(1));
-    expect(toast.mock.calls[0]![0]).toBe("Bandes RV : bandes jour et semaine : historique trop court (400 jours clos contigus, ≈ 640 requis)");
+    expect(toast.mock.calls[0]![0]).toBe("Bandes RV : bandes jour et semaine : historique trop court (400 jours clos contigus, ≈ 790 requis)");
     expect(source.getLignes()).toEqual([]);
     await vi.advanceTimersByTimeAsync(5 * 60_000);
     expect(charger).toHaveBeenCalledTimes(1);

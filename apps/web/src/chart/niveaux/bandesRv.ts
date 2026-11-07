@@ -4,7 +4,9 @@
  * l'ouverture du jour UTC (horizon 1 j, « J ») et du lundi UTC (horizon 7 j, « S »).
  *
  * σ = prévision HAR-RV (data/harRv.ts) de la variance de Garman-Klass 1d, faite à la clôture de la
- * veille (jour) ou du dimanche (semaine) : la bande ne bouge pas avant la prochaine ancre. « ±1σ »
+ * veille (jour) ou du dimanche (semaine) : la bande ne bouge pas avant la prochaine ancre, même sur
+ * une place qui sert un historique glissant plafonné (la semaine exige un calibrage complet de
+ * 250 origines, soit ≈ 790 jours contigus : Kraken, plafonné à 720, n'a que la bande du jour). « ±1σ »
  * et « ±2σ » sont les quantiles 68,3 % et 95,4 % des écarts standardisés passés (k calibrés hors
  * échantillon, jamais 1 et 2 gaussiens) ; la couverture hors échantillon est publiée pour la
  * fenêtre DIST (infobulle et note). Ce n'est PAS une borne, et ce n'est pas la bande VaR de DIST
@@ -45,14 +47,18 @@ const PAGE_1D: Partial<Record<ExchangeId, number>> = {
   hyperliquid: 1500,
 };
 const PAGES_MAX = 8;
+/** Jours clos contigus qu'il faut pour les deux bandes (la semaine est la plus exigeante). */
+const PROFONDEUR_UTILE = historiqueRequis(7) + 6;
 const REESSAI_MS = 5 * 60_000;
 const MARGE_JOUR_MS = 5_000;
 
 /**
  * Bougies 1d de `symbol`, pages successives vers le passé (`endTime` = plus ancienne − 1) jusqu'à
  * `jours` bougies, une page vide ou qui ne recule plus (Kraken ignore `endTime`). Échec de la
- * première page : rejet ; d'une suivante : l'historique déjà obtenu est gardé. Trié, sans doublon,
- * bougie du jour en cours comprise (son ouverture sert d'ancre).
+ * première page : rejet ; d'une suivante : l'historique déjà obtenu est gardé s'il suffit aux deux
+ * bandes, sinon rejet (« bougies 1d incomplètes ») : une panne passagère ne doit pas passer pour un
+ * historique trop court, refusé jusqu'au lendemain. Trié, sans doublon, bougie du jour en cours
+ * comprise (son ouverture sert d'ancre).
  */
 export async function chargerHistoriqueJour(
   exchange: ExchangeId,
@@ -69,6 +75,11 @@ export async function chargerHistoriqueJour(
       lot = await adapter.fetchKlines(symbol, "1d", fin === undefined ? { limit: page } : { limit: page, endTime: fin - 1 });
     } catch (erreur) {
       if (fin === undefined) throw erreur;
+      // Bougie du jour en cours comprise : PROFONDEUR_UTILE jours clos + 1.
+      if (parTemps.size < Math.min(jours, PROFONDEUR_UTILE + 1)) {
+        const motif = erreur instanceof Error ? erreur.message : String(erreur);
+        throw new Error(`bougies 1d incomplètes (${parTemps.size} reçues, page ${p + 1} en échec : ${motif})`);
+      }
       break;
     }
     const plusAncienne = lot.reduce((m, b) => Math.min(m, b.time), Number.POSITIVE_INFINITY);
@@ -210,13 +221,16 @@ export function detailBandesRv(info: InfoBandesRv | null): string | null {
       morceaux.push(`${nom} indisponible ;`);
       continue;
     }
-    const { sigma, couverture: c } = bande.prevision;
+    const { sigma, k1, k2, couverture: c } = bande.prevision;
     const couverture = c.n === 0
       ? "couverture non mesurée"
       : `couverture hors échantillon ±1σ ${pctEntier(c.dans1 / c.n)}, ±2σ ${pctEntier(c.dans2 / c.n)} (n = ${c.n} ${fenetres})`;
     const amp = amplitude === null ? "amplitude consommée non mesurée" : `amplitude consommée ${pctEntier(amplitude)}`;
     const filtre = bande.prevision.filtre ? ", prévision remplacée par la moyenne 22 j" : "";
-    morceaux.push(`${nom} σ ${pct1(sigma)}${filtre}, ${couverture}, ${amp} ;`);
+    // Les lignes « ±1σ » et « ±2σ » sont tracées à k₁·σ et k₂·σ (k calibrés, loin de 1 et 2 sur
+    // des queues épaisses) : les k sont dits pour que σ ne soit pas lu comme la demi-largeur tracée.
+    const ks = `lignes à ${k1.toFixed(2).replace(".", ",")}σ et ${k2.toFixed(2).replace(".", ",")}σ`;
+    morceaux.push(`${nom} σ ${pct1(sigma)} (${ks})${filtre}, ${couverture}, ${amp} ;`);
   }
   if (info.manque !== null) morceaux.push(`(${info.manque})`);
   return morceaux.join(" ").replace(/ ;$/, ".").replace(/ ; \(/, " (");
@@ -333,12 +347,12 @@ export function creerSourceBandesRv(ctx: ContexteNiveaux, deps: DepsSourceBandes
             majAmplitudes();
             onChange();
             const absentes = [resultat.jour === null ? "jour" : null, resultat.semaine === null ? "semaine" : null].filter((x) => x !== null);
-            const court = resultat.historique < historiqueRequis(7) + 6;
+            const court = resultat.historique < PROFONDEUR_UTILE;
             if (absentes.length === 0) manque = null;
             else {
               const s = absentes.length > 1 ? "s" : "";
               manque = court
-                ? `bande${s} ${absentes.join(" et ")} : historique trop court (${resultat.historique} jours clos contigus, ≈ ${historiqueRequis(7) + 6} requis)`
+                ? `bande${s} ${absentes.join(" et ")} : historique trop court (${resultat.historique} jours clos contigus, ≈ ${PROFONDEUR_UTILE} requis)`
                 : `bande${s} ${absentes.join(" et ")} incalculable${s} (bougie 1d de la veille ou ouverture absente)`;
               if (court) delai = msAvantProchainJourUtc(now) + MARGE_JOUR_MS;
             }

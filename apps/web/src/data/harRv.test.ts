@@ -189,7 +189,12 @@ describe("evaluerHorizon — calibrage hors échantillon", () => {
     expect(evaluerHorizon(court, 1, court.length - 1)).toBeNull();
     const juste = bougies(requis, regime, normale);
     expect(evaluerHorizon(juste, 1, juste.length - 1)).not.toBeNull();
-    expect(historiqueRequis(7)).toBe(634);
+    // Semaine : calibrage complet (250 origines), indépendant du début du segment.
+    expect(historiqueRequis(7)).toBe(784);
+    const semaineCourte = bougies(historiqueRequis(7) - 1, regime, normale);
+    expect(evaluerHorizon(semaineCourte, 7, semaineCourte.length - 1)).toBeNull();
+    const semaineJuste = bougies(historiqueRequis(7), regime, normale);
+    expect(evaluerHorizon(semaineJuste, 7, semaineJuste.length - 1)).not.toBeNull();
   });
 
   it("bougie invalide dans le segment ou origine hors série → null", () => {

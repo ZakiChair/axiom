@@ -45,7 +45,7 @@ describe("DistWindow — Bandes RV", () => {
     infoBandesRvStore.setState({ info: { marche: "SOLUSDT (binance)", calcul: CALCUL, amplitudes: { jour: 0.63, semaine: null }, manque: null } });
     const html = decoder(renderToStaticMarkup(<DistWindow />));
     expect(html).toContain("Bandes RV (HAR, amplitude statistique, pas une borne) — SOLUSDT (binance) :");
-    expect(html).toContain("jour σ 2,1 %, couverture hors échantillon ±1σ 69 %, ±2σ 95 % (n = 400 jours), amplitude consommée 63 %");
+    expect(html).toContain("jour σ 2,1 % (lignes à 0,90σ et 1,90σ), couverture hors échantillon ±1σ 69 %, ±2σ 95 % (n = 400 jours), amplitude consommée 63 %");
     expect(html).toContain("semaine σ 5,6 %");
     expect(html).toContain("amplitude consommée non mesurée");
     expect(html).toMatch(/title="[^"]*SOLUSDT \(binance\) : jour σ 2,1 %[^"]*"[^>]*aria-pressed="true"[^>]*>● Bandes RV</);

@@ -175,9 +175,20 @@ export interface PrevisionHorizon {
   couverture: Couverture;
 }
 
+/**
+ * Origines de calibrage exigées pour l'horizon h. Au-delà d'un jour, le calibrage COMPLET
+ * (CALIBRAGE) : la bande de la semaine est recalculée chaque jour sur un segment dont le début
+ * peut glisser (place à historique plafonné, Kraken 720 j) ; avec moins de CALIBRAGE origines,
+ * ses k dépendraient de ce début et la bande bougerait dans la semaine. À un jour, la bande
+ * change chaque jour de toute façon : CALIBRAGE_MIN suffit.
+ */
+export function calibrageRequis(h: number): number {
+  return h > 1 ? CALIBRAGE : CALIBRAGE_MIN;
+}
+
 /** Jours contigus requis pour une bande d'horizon h prévue sur le dernier jour clos. */
 export function historiqueRequis(h: number): number {
-  return FENETRE_HAR + 2 * h + 20 + CALIBRAGE_MIN;
+  return FENETRE_HAR + 2 * h + 20 + calibrageRequis(h);
 }
 
 /**
@@ -222,7 +233,7 @@ export function evaluerHorizon(segment: readonly Candle[], h: number, origine: n
         rs.push(ratio[s]!);
       }
     }
-    if (zs.length < CALIBRAGE_MIN) return null;
+    if (zs.length < calibrageRequis(h)) return null;
     return { k1: quantile(zs, NOMINAL_1), k2: quantile([...zs], NOMINAL_2), a: quantile(rs, 0.5) };
   };
   const couverture: Couverture = { n: 0, dans1: 0, dans2: 0 };

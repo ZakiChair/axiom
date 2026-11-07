@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { BandeauUnivers, type UniversTransversal } from "./communCorr";
+import { BandeauUnivers, seriesPourUnivers, type UniversTransversal } from "./communCorr";
 import { classerUniversTransversal } from "../../data/rotationRelative";
 
 function univers(symboles: string[]): UniversTransversal {
@@ -39,5 +39,29 @@ describe("BandeauUnivers", () => {
     );
     expect(html).not.toContain("Écartés");
     expect(html).not.toContain("comptés comme la référence");
+  });
+});
+
+describe("seriesPourUnivers — jamais les séries d'un autre univers", () => {
+  const series = new Map([["ETHUSDT", []]]);
+  const pret = { statut: "pret" as const, series, chargeA: 1, signature: "ETHUSDT|SOLUSDT" };
+
+  it("sert les séries chargées pour la même signature", () => {
+    expect(seriesPourUnivers(pret, "ETHUSDT|SOLUSDT")).toBe(pret);
+  });
+
+  it("univers changé, effet pas encore relancé : « chargement », aucun résultat (donc rien de persisté)", () => {
+    const vu = seriesPourUnivers(pret, "ETHUSDT|SOLUSDT|ADAUSDT");
+    expect(vu).toEqual({ statut: "chargement", series: null, chargeA: null });
+    expect(seriesPourUnivers({ ...pret, signature: null }, null).statut).toBe("chargement");
+  });
+});
+
+describe("BandeauUnivers — figé ou non", () => {
+  it("top N : figé jusqu'à « Recalculer » ; watchlist : suit la watchlist", () => {
+    const w = univers(["ETHUSDT", "BTCUSDT"]);
+    expect(renderToStaticMarkup(<BandeauUnivers univers={w} nCharges={1} dernierJour={null} />)).toContain("suit la watchlist");
+    const top = renderToStaticMarkup(<BandeauUnivers univers={{ ...w, estTop: true }} nCharges={1} dernierJour={null} />);
+    expect(top).toContain("figé jusqu&#x27;à « Recalculer »");
   });
 });

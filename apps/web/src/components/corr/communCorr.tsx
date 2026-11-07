@@ -44,27 +44,44 @@ export interface SeriesUnivers {
   chargeA: number | null;
 }
 
+/** État chargé, avec la signature des symboles qu'il couvre. */
+export interface SeriesSignees extends SeriesUnivers {
+  signature: string | null;
+}
+
+const EN_CHARGEMENT: SeriesUnivers = { statut: "chargement", series: null, chargeA: null };
+
+/**
+ * PURE — séries servies pour l'univers de `signature` : celles d'un AUTRE univers (rendu qui
+ * suit un changement d'univers, avant que l'effet ne relance le chargement) valent
+ * « chargement ». Sans cette garde, Régime calculait et persistait un résumé « Top 50 » mesuré
+ * sur les séries de l'univers précédent.
+ */
+export function seriesPourUnivers(etat: SeriesSignees, signature: string | null): SeriesUnivers {
+  return etat.signature !== null && etat.signature === signature ? etat : EN_CHARGEMENT;
+}
+
 /**
  * Charge les séries de l'univers ET de la référence BTC par `chargerSeries` (cache de
  * session partagé avec la matrice : aucun refetch au changement d'onglet ; requêtes en vol
  * dédoublonnées). `nonce` = « Recalculer » (le parent a déjà vidé le cache).
  */
 export function useSeriesUnivers(symbols: readonly string[] | null, nonce: number): SeriesUnivers {
-  const [etat, setEtat] = useState<SeriesUnivers>({ statut: "chargement", series: null, chargeA: null });
+  const [etat, setEtat] = useState<SeriesSignees>({ ...EN_CHARGEMENT, signature: null });
   const signature = symbols === null ? null : symbols.join("|");
   useEffect(() => {
     if (signature === null) return;
     let ignore = false;
-    setEtat({ statut: "chargement", series: null, chargeA: null });
+    setEtat({ ...EN_CHARGEMENT, signature: null });
     const liste = signature.length === 0 ? [] : signature.split("|");
     void chargerSeries([...liste, REFERENCE_ROTATION]).then((series) => {
-      if (!ignore) setEtat({ statut: "pret", series, chargeA: Date.now() });
+      if (!ignore) setEtat({ statut: "pret", series, chargeA: Date.now(), signature });
     });
     return () => {
       ignore = true;
     };
   }, [signature, nonce]);
-  return etat;
+  return seriesPourUnivers(etat, signature);
 }
 
 /**
@@ -86,7 +103,8 @@ export function BandeauUnivers({
     <div className="mb-2 space-y-0.5 text-[11px] text-text-dim">
       <p>
         Univers : <span className="text-text">{univers.libelle}</span> · composé le{" "}
-        {formatDateHeure(univers.composeA)}, figé jusqu'à « Recalculer » · {nCharges}/{univers.alts.length} alts
+        {formatDateHeure(univers.composeA)}, {univers.estTop ? "figé jusqu'à « Recalculer »" : "suit la watchlist"} ·{" "}
+        {nCharges}/{univers.alts.length} alts
         chargés · BTC = référence ({REFERENCE_ROTATION})
         {dernierJour !== null && <> · dernière clôture {dateJourUtc(dernierJour)} (UTC)</>}
       </p>

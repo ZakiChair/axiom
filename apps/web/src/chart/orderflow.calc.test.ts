@@ -10,6 +10,7 @@ import {
   buildCvdSpotPerpBuckets,
   buildFootprintBar,
   buildFootprintBarApprochee,
+  buildFootprintBarIntrabar,
   computeCvd,
   sourceFournitCvd,
   type FpCell,
@@ -129,6 +130,40 @@ describe("buildFootprintBarApprochee", () => {
 
   it("renvoie null pour une bougie sans volume (rien à dessiner)", () => {
     expect(buildFootprintBarApprochee(1_000, { low: 100, high: 102, volume: 0 }, 1)).toBeNull();
+  });
+});
+
+describe("buildFootprintBarIntrabar", () => {
+  // Bougie 100 → 104 (bucket 1) dont tout le volume acheteur s'est fait en bas et tout le
+  // vendeur en haut : deux sous-bougies le disent, la répartition uniforme l'efface.
+  const sous = [
+    { low: 100, high: 101, volume: 10, buyVolume: 8, sellVolume: 2 },
+    { low: 103, high: 104, volume: 4, buyVolume: 1, sellVolume: 3 },
+  ];
+
+  it("répartit chaque sous-bougie sur SON [bas, haut] avec SON split, puis additionne", () => {
+    const bar = buildFootprintBarIntrabar(1_000, sous, 1);
+    expect(bar).not.toBeNull();
+    expect(bar!.rows.map((r) => r.price)).toEqual([100, 101, 103, 104]); // rien à 102
+    expect(bar!.rows[0]?.buyVol).toBeCloseTo(4, 10); // 8 / 2 niveaux
+    expect(bar!.rows[3]?.sellVol).toBeCloseTo(1.5, 10); // 3 / 2 niveaux
+    expect(bar!.delta).toBeCloseTo(8 + 1 - 2 - 3, 10); // delta de bougie conservé (Σ taker)
+    expect(bar!.poc).toBe(100); // le POC suit le volume, pas le milieu de la mèche
+  });
+
+  it("diffère de la répartition uniforme de la bougie entière (même volume total)", () => {
+    const intra = buildFootprintBarIntrabar(1_000, sous, 1);
+    const uni = buildFootprintBarApprochee(1_000, { low: 100, high: 104, volume: 14, buyVolume: 9, sellVolume: 5 }, 1);
+    const total = (rows: { buyVol: number; sellVol: number }[]) => rows.reduce((s, r) => s + r.buyVol + r.sellVol, 0);
+    expect(total(intra!.rows)).toBeCloseTo(total(uni!.rows), 10);
+    expect(uni!.rows).toHaveLength(5);
+    expect(new Set(uni!.rows.map((r) => r.buyVol.toFixed(6))).size).toBe(1); // uniforme
+    expect(new Set(intra!.rows.map((r) => r.buyVol.toFixed(6))).size).toBeGreaterThan(1);
+  });
+
+  it("renvoie null sans volume (aucune sous-bougie exploitable)", () => {
+    expect(buildFootprintBarIntrabar(1_000, [], 1)).toBeNull();
+    expect(buildFootprintBarIntrabar(1_000, [{ low: 100, high: 101, volume: 0 }], 1)).toBeNull();
   });
 });
 

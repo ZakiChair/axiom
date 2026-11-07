@@ -7,7 +7,11 @@
  * Source : les bougies OHLCV déjà en mémoire (marketStore) — donc GRATUIT et
  * valable pour TOUTES les sources (Binance/Kraken/Coinbase), pas seulement le flux
  * tick. Le volume d'une bougie est réparti uniformément sur son intervalle
- * [low, high] dans les bins de prix (approximation VP standard).
+ * [low, high] dans les bins de prix (approximation VP standard). Sur Binance, les
+ * bougies CLÔTURÉES sont remplacées par leurs sous-bougies (data/intrabar.ts, chargé à
+ * la demande) : chaque sous-bougie est répartie sur SON [low, high] — le libellé affiche
+ * la résolution réelle (« réparti à la minute (1m) ») et la couverture, ou le motif du
+ * repli « ≈ réparti sur la bougie ».
  *
  * Rendu : Canvas 2D superposé au pane prix, ancré au bord DROIT, synchronisé au
  * viewport via convertToPixel + subscribeAction + rAF (même technique éprouvée que
@@ -16,6 +20,7 @@
 import { ActionType, DomPosition } from "klinecharts";
 import type { Chart, Point } from "klinecharts";
 import type { Candle } from "@axiom/types";
+import type { ClientIntrabar } from "../data/intrabar";
 import { marketStore } from "../store/market";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 
@@ -174,6 +179,8 @@ export class VolumeProfileController {
   private dirty = true;
   private resizeObserver: ResizeObserver | null = null;
   private unsubMarket: (() => void) | null = null;
+  /** Sous-bougies Binance (module différé, chargé à la première activation). */
+  private intrabar: ClientIntrabar | null = null;
 
   private readonly markDirty = (): void => {
     this.dirty = true;
@@ -215,6 +222,14 @@ export class VolumeProfileController {
     // scroll/zoom/tick ne le signale autrement, d'où l'observer dédié.
     this.resizeObserver = new ResizeObserver(this.markDirty);
     this.resizeObserver.observe(this.container);
+    // Import différé : le chemin initial ne porte que cet appel.
+    void import("../data/intrabar")
+      .then(({ creerClientIntrabar }) => {
+        if (!this.running || this.intrabar !== null) return;
+        this.intrabar = creerClientIntrabar(this.markDirty);
+        this.markDirty();
+      })
+      .catch(() => {}); // chunk indisponible : l'ancien calcul reste, libellé « ≈ »
     this.loop();
   }
 
@@ -228,6 +243,8 @@ export class VolumeProfileController {
     this.unsubMarket = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    this.intrabar?.dispose();
+    this.intrabar = null;
     this.clearCanvas();
   }
 
@@ -289,13 +306,17 @@ export class VolumeProfileController {
     if (!main) return;
     const { left, top, width, height } = main;
 
-    const candles = marketStore.getState().candles;
+    const market = marketStore.getState();
+    const candles = market.candles;
     const range = this.chart.getVisibleRange();
     const from = Math.max(0, range.from);
     const to = Math.min(candles.length, range.to);
     if (to - from < 2) return;
 
-    const vp = computeVolumeProfile(candles, from, to, BIN_COUNT);
+    const vue = this.intrabar?.vue(market, candles, from, to);
+    const vp = vue
+      ? computeVolumeProfile(vue.bougies, 0, vue.bougies.length, BIN_COUNT)
+      : computeVolumeProfile(candles, from, to, BIN_COUNT);
     if (vp === null) return;
 
     const up = lireTokenCanvas("--up", "#10b981");
@@ -369,5 +390,6 @@ export class VolumeProfileController {
     ctx.textAlign = "right";
     ctx.textBaseline = "top";
     ctx.fillText("Profil Vol (plage visible) · POC", xRight - 4, top + 4);
+    ctx.fillText(vue?.libelle ?? "≈ réparti sur la bougie", xRight - 4, top + 17);
   }
 }

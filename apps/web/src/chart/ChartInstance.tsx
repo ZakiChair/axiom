@@ -95,6 +95,7 @@ import { RevenueController } from "./revenue";
 import { MacroController } from "./macro";
 import { DerivativesChartController } from "./derivatives";
 import { bindChart, unbindChart, setFocusChart, redrawFibOverlays, restoreDrawings, purgeChartDrawings } from "./drawing";
+import { declarerMarcheVpfr } from "./volumeRangeOverlay";
 import { fibStore } from "./fibonacci";
 import { createRafThrottle, type RafThrottle } from "./rafThrottle";
 import { bindPriceAlertMenu } from "./priceAlertMenu";
@@ -982,6 +983,7 @@ export function ChartInstance({
     // tracké par référence d'INSTANCE — inchangée — n'est pas perturbé) → aucun
     // `updateChartMeta` dédié nécessaire. Le focus reprend la main si ce slot est le focus.
     bindChart(chart, { exchange, symbol, timeframe }, slot);
+    declarerMarcheVpfr(chart, { exchange, symbol, timeframe }); // source intrabar des VPFR
     if (chartLayoutStore.getState().focus === slot) setFocusChart(slot);
 
     // Indicateurs : abonnement qui CAPTURE `exchange` (recréé à chaque changement de données

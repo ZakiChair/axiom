@@ -10,6 +10,11 @@
  * (createTrackedOverlay dans drawing.ts) — par overlay, donc sûr en multi-chart.
  * L'échelle passe par `convertToPixel` (exacte aussi en échelle log/%), pas par
  * interpolation entre les 2 points cliqués (dégénérée si tracé quasi horizontal).
+ *
+ * Intrabar : sur Binance, les bougies CLÔTURÉES de la plage sont remplacées par leurs
+ * sous-bougies (data/intrabar.ts, importé au premier rendu). L'identité de marché du
+ * chart hôte est déclarée par ChartInstance (`declarerMarcheVpfr`). Libellé au-dessus du
+ * cadre : résolution réelle et couverture, ou motif du repli « ≈ ».
  */
 import { registerOverlay } from "klinecharts";
 import type {
@@ -17,6 +22,7 @@ import type {
   OverlayFigure,
 } from "klinecharts";
 import type { Candle } from "@axiom/types";
+import type { ClientIntrabar, IdentiteIntrabar } from "../data/intrabar";
 import { computeVolumeProfile } from "./volumeProfile";
 import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 
@@ -94,6 +100,7 @@ interface VpfrChart {
     points: { value: number },
     finder: { paneId: string }
   ) => unknown;
+  overrideOverlay?: (override: { name: string; styles: object }) => unknown;
 }
 
 function isVpfrChart(x: unknown): x is VpfrChart {
@@ -103,6 +110,47 @@ function isVpfrChart(x: unknown): x is VpfrChart {
     typeof (x as VpfrChart).getDataList === "function" &&
     typeof (x as VpfrChart).convertToPixel === "function"
   );
+}
+
+// ───────────────────────────── Intrabar (différé) ─────────────────────────────
+
+/** Identité de marché de chaque chart hôte (posée par ChartInstance). */
+const marches = new WeakMap<object, IdentiteIntrabar>();
+
+/** Déclare l'identité de marché d'un chart : la VPFR en déduit sa source intrabar. */
+export function declarerMarcheVpfr(chart: object, marche: IdentiteIntrabar): void {
+  marches.set(chart, marche);
+}
+
+let moduleIntrabar: typeof import("../data/intrabar") | null = null;
+let chargementIntrabar: Promise<void> | null = null;
+/** Un client par overlay (anti-rebond propre à sa plage), libéré avec l'overlay. */
+const clients = new WeakMap<object, ClientIntrabar>();
+
+/** Redessine les VPFR du chart (styles vides : extendData, le chart, reste inchangé). */
+function redessinerVpfr(chart: VpfrChart): void {
+  chart.overrideOverlay?.({ name: VPFR_NAME, styles: {} });
+}
+
+function clientIntrabar(overlay: object, chart: VpfrChart): ClientIntrabar | null {
+  if (moduleIntrabar === null) {
+    chargementIntrabar ??= import("../data/intrabar").then(
+      (m) => {
+        moduleIntrabar = m;
+        redessinerVpfr(chart);
+      },
+      () => {
+        chargementIntrabar = null; // chunk indisponible : ancien calcul, libellé « ≈ »
+      }
+    );
+    return null;
+  }
+  let client = clients.get(overlay);
+  if (client === undefined) {
+    client = moduleIntrabar.creerClientIntrabar(() => redessinerVpfr(chart));
+    clients.set(overlay, client);
+  }
+  return client;
 }
 
 /** y (pane prix, relatif) d'un prix via l'échelle réelle du chart. */
@@ -139,6 +187,7 @@ function buildFigures(params: OverlayCreateFiguresCallbackParams): OverlayFigure
   if (range === null) return [];
 
   const candles: Candle[] = [];
+  const derniere = dataList.length - 1; // bougie en cours : jamais remplacée par l'intrabar
   for (let i = range.from; i <= range.to; i++) {
     const raw = dataList[i];
     if (raw === undefined) continue;
@@ -158,12 +207,16 @@ function buildFigures(params: OverlayCreateFiguresCallbackParams): OverlayFigure
         volume: typeof raw.volume === "number" ? raw.volume : 0,
         ...(typeof raw.buyVolume === "number" ? { buyVolume: raw.buyVolume } : {}),
         ...(typeof raw.sellVolume === "number" ? { sellVolume: raw.sellVolume } : {}),
+        ...(i === derniere ? { closed: false } : {}),
       });
     }
   }
   if (candles.length === 0) return [];
 
-  const vp = computeVolumeProfile(candles, 0, candles.length, BIN_COUNT);
+  const marche = marches.get(chart);
+  const vue = marche ? clientIntrabar(overlay, chart)?.vue(marche, candles, 0, candles.length) : undefined;
+  const profilees = vue?.bougies ?? candles;
+  const vp = computeVolumeProfile(profilees, 0, profilees.length, BIN_COUNT);
   if (vp === null) return [];
 
   const yTop0 = pixelY(chart, vp.priceMax);
@@ -205,6 +258,19 @@ function buildFigures(params: OverlayCreateFiguresCallbackParams): OverlayFigure
       styles: { style: "dashed", size: 1, color: textDim, dashedValue: [4, 4] },
     });
   }
+  // Mode de répartition du volume, au-dessus du cadre.
+  figures.push({
+    type: "text",
+    ignoreEvent: true,
+    attrs: {
+      x: startX + 2,
+      y: Math.min(yTop0, yBot0) - 2,
+      text: vue?.libelle ?? "≈ réparti sur la bougie",
+      baseline: "bottom",
+      align: "left",
+    },
+    styles: { color: textDim, size: 9, backgroundColor: "transparent" },
+  });
 
   // 2) Barres horizontales buy/sell ancrées au bord droit de la plage.
   for (let b = 0; b < vp.bins.length; b++) {

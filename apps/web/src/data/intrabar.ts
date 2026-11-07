@@ -12,7 +12,8 @@
  * Garde-fous :
  *  - Causalité : seules les bougies parentes CLÔTURÉES (`closed !== false` et fin passée)
  *    sont remplacées ; la bougie en cours garde l'ancien calcul. Une sous-bougie n'est
- *    retenue que si elle était close à l'instant du téléchargement (horodatage connu).
+ *    retenue que si elle était close à l'ENVOI de la requête (horodatage connu, relevé
+ *    avant le transit).
  *  - Contrôle de cohérence : une parente n'est remplacée que si la somme des volumes de
  *    ses sous-bougies retrouve son volume (à 1e-6 près) et si leurs extrêmes tiennent dans
  *    les siens ; sinon repli explicite sur l'ancien calcul (couverture affichée).
@@ -539,12 +540,15 @@ export class ChargeurIntrabar {
     const url =
       plan.source.marche === "spot" ? `${URL_SPOT}?${q}` : extUrl("fapi.binance.com", `fapi/v1/klines?${q}`);
     this.requetes += 1;
+    // Instant relevé AVANT l'envoi : une kline encore ouverte quand le serveur a répondu et
+    // close pendant le transit serait sinon tenue pour close (volume partiel). Conservateur :
+    // une kline close entre l'envoi et la réponse est écartée, et rechargée au rendu suivant.
+    const chargeA = this.maintenant();
     // Délai maximal : l'abandon suit le chemin d'échec (pause, libellé « indisponible »).
     const res = await this.fetchFn(url, { signal: AbortSignal.timeout(DELAI_REQUETE_MS) });
     if (!res.ok) throw new Error(`Binance klines ${res.status}`);
     const brut: unknown = await res.json();
     if (!Array.isArray(brut)) throw new Error("Binance klines : réponse inattendue");
-    const chargeA = this.maintenant();
     const bougies: Candle[] = [];
     let precedent = -Infinity;
     for (const ligne of brut) {

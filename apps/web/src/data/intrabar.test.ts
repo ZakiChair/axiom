@@ -124,10 +124,10 @@ const DUREES: Record<string, number> = { "1m": MIN, "5m": 5 * MIN, "15m": 15 * M
 
 /**
  * Doublure de `fetch` façon Binance : sert [startTime, endTime] à l'unité demandée,
- * bougie en cours COMPRISE (comme l'API), au plus `limit` lignes. Relève les URL et le
- * nombre maximal de requêtes simultanées.
+ * bougie en cours COMPRISE (comme l'API), au plus `limit` lignes, après `latenceMs` de
+ * transit (0 : microtâche). Relève les URL et le nombre maximal de requêtes simultanées.
  */
-function serveur(horloge: () => number = () => MAINTENANT) {
+function serveur(horloge: () => number = () => MAINTENANT, latenceMs = 0) {
   const urls: string[] = [];
   let enVol = 0;
   let maxEnVol = 0;
@@ -136,7 +136,11 @@ function serveur(horloge: () => number = () => MAINTENANT) {
     urls.push(url);
     enVol += 1;
     maxEnVol = Math.max(maxEnVol, enVol);
-    await Promise.resolve();
+    // Latence simulée (minuterie factice) : sans elle, chaque plan serait entièrement en
+    // cache avant que le minuteur suivant parte, et la réservation des blocs en vol
+    // ne serait jamais exercée.
+    if (latenceMs > 0) await new Promise((r) => setTimeout(r, latenceMs));
+    else await Promise.resolve();
     const q = new URL(url, "http://local").searchParams;
     const duree = DUREES[q.get("interval") ?? ""] ?? MIN;
     const debut = Number(q.get("startTime"));
@@ -436,6 +440,43 @@ describe("ChargeurIntrabar", () => {
     expect(chargeur.lire(recent).aCharger).toEqual(recent.blocs);
   });
 
+  it("kline close PENDANT le transit : écartée, et le bloc reste à rafraîchir (instant relevé avant l'envoi)", async () => {
+    // Requête partie 500 ms avant la clôture P de la parente 08:00–12:00 ; réponse générée
+    // à l'envoi (kline 11:59 encore ouverte, volume partiel), reçue 3 s après P. Le bloc
+    // 1m [21:20, 14:00) couvre la plage du plan et la parente en cours.
+    const P = Date.UTC(2026, 10, 7, 12, 0, 0);
+    let maintenant = P - 500;
+    const fetchFn = vi.fn(async (input: string | URL | Request) => {
+      const genereA = maintenant;
+      const q = new URL(String(input), "http://local").searchParams;
+      const lignes: unknown[] = [];
+      for (let t = Number(q.get("startTime")); t <= Number(q.get("endTime")) && t <= genereA; t += MIN) {
+        const m = agreger(t, MIN, genereA);
+        lignes.push(ligne(t + MIN > genereA ? { ...m, volume: m.volume / 2 } : m, MIN));
+      }
+      maintenant = P + 3_000; // transit
+      return new Response(JSON.stringify(lignes), { status: 200 });
+    });
+    const chargeur = new ChargeurIntrabar({ fetch: fetchFn as unknown as typeof fetch, maintenant: () => maintenant });
+    const avant = parentes(H4, 3, maintenant); // 00:00, 04:00, 08:00 (en cours)
+    const planAvant = planDe(avant, 0, avant.length, maintenant);
+    expect(planAvant.resolution).toBe("1m");
+    expect(planAvant.blocs).toHaveLength(1);
+    await chargeur.charger(planAvant);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(maintenant).toBe(P + 3_000);
+
+    // La parente 08:00–12:00 est close depuis plus que la marge, dans le même bloc.
+    const apres = parentes(H4, 3, maintenant);
+    const plan = planDe(apres, 0, apres.length, maintenant);
+    expect(plan.blocs).toEqual(planAvant.blocs);
+    const lecture = chargeur.lire(plan);
+    // La kline 11:59, ouverte quand la réponse a été produite, n'a pas été retenue…
+    expect(lecture.sous.some((c) => c.time === P - MIN)).toBe(false);
+    // … et le bloc est redemandé : seul le rafraîchissement explique cette requête.
+    expect(lecture.aCharger).toEqual(plan.blocs);
+  });
+
   it("bloc chargé avant la clôture d'une parente : rafraîchi quand la plage s'étend", async () => {
     let maintenant = MAINTENANT;
     const srv = serveur(() => maintenant);
@@ -709,6 +750,26 @@ describe("borne de requêtes avec plusieurs surfaces (cache partagé saturé)", 
     expect(quatrieme?.couvertes).toBe(0);
     expect(quatrieme?.bougies).toHaveLength(quatrieme?.total ?? -1); // ancien calcul, jamais 0
     expect(quatrieme?.libelle).toBe(`≈ réparti sur la bougie (intrabar ${resolution} non chargé, cache saturé)`);
+  });
+
+  it("réponses à 1 s de latence : les blocs en vol sont réservés, aucun bloc sous bail évincé", async () => {
+    vi.useFakeTimers({ now: MAINTENANT, toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const srv = serveur(() => Date.now(), 1_000);
+    const chargeur = new ChargeurIntrabar({ fetch: srv.fetchFn, maintenant: () => Date.now() });
+    const surfaces = quatreGraphes4h(chargeur);
+    const plans = surfaces.map(planSurface);
+    const admises = plans.slice(0, 3).reduce((n, p) => n + p.blocs.length, 0);
+    // Quatre surfaces rendues au même instant, puis chaque seconde pendant 10 min.
+    for (let t = 0; t < 10 * 60_000; t += 1_000) {
+      for (const r of surfaces.map(rendu)) r();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(chargeur.taille).toBeLessThanOrEqual(CAPACITE_BLOCS);
+    }
+    // Chaque bloc des trois plans admis n'est téléchargé qu'une fois : aucun n'a été évincé.
+    expect(chargeur.requetes).toBe(admises);
+    expect(chargeur.requetes).toBeLessThanOrEqual(CAPACITE_BLOCS);
+    for (const s of surfaces.slice(0, 3)) expect(complete(s)).toBe(true);
+    expect(surfaces[3]?.derniere?.libelle).toBe("≈ réparti sur la bougie (intrabar 5m non chargé, cache saturé)");
   });
 
   it("quel que soit le nombre de surfaces : huit graphes, jamais plus de requêtes que la capacité", async () => {

@@ -476,6 +476,19 @@ describe("calculerSurUnite — couverture", () => {
     expect((await charger(demande(candles, "ema", { length: 20, unite: "4h" }))).partiel).toBeNull();
   });
 
+  it("place plafonnée (Coinbase sert 350 bougies) : profondeur insuffisante, pas « historique trop court »", async () => {
+    // La place détient 2 000 bougies 4h mais n'en sert que 350 par requête.
+    const serie = marche(LUNDI, 4 * H, 2000);
+    fetchKlines.mockImplementation(async (_s: string, _u: Timeframe, opts?: { limit?: number }) =>
+      reponse(serie, 4 * H, Date.now(), Math.min(opts?.limit ?? 500, 350)),
+    );
+    const bloc = LUNDI + 1500 * 4 * H;
+    vi.setSystemTime(bloc + 2.5 * H);
+    const candles = graphe1h(bloc - 1300 * H);
+    const etat = await charger(demande(candles, "ema", { length: 300, unite: "4h" }, { exchange: "coinbase" }));
+    expect(etat.partiel).toBe("349 bougies 4h chargées : profondeur insuffisante pour le début du graphe");
+  });
+
   it("historique long : pas « partiel »", async () => {
     servir(marche(LUNDI, J, 800), "1d");
     vi.setSystemTime(LUNDI + 700 * J + 12 * H);

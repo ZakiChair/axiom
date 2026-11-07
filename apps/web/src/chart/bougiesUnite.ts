@@ -17,7 +17,10 @@
  *     bougie supérieure, lue par chaque bougie du graphe à sa propre clôture.
  *
  * Réseau : une requête par (place, symbole, unité, profondeur), partagée entre instances
- * et graphes, relancée UNE fois par clôture supérieure, `MARGE_CLOTURE_MS` après elle. Une
+ * et graphes, relancée UNE fois par clôture supérieure, au premier recalcul de l'instance
+ * qui suit cette clôture et sa marge `MARGE_CLOTURE_MS` (aucune minuterie : le recalcul
+ * vient d'un tick ou d'une clôture du graphe ; sur une paire muette, la bougie close du
+ * graphe peut donc rester sans valeur plus longtemps que la marge). Une
  * bougie du graphe déjà close dont la clôture atteint une bougie supérieure pas encore
  * reçue reste SANS valeur (jamais l'ancienne valeur prolongée, qui changerait ensuite) ;
  * seule la bougie en formation du graphe montre provisoirement la dernière valeur connue,
@@ -49,6 +52,13 @@ export const MARGE_CLOTURE_MS = 10_000;
 const ERREUR_TTL_MS = 30_000;
 /** Place en retard sur une clôture (bougie close pas encore servie) : un essai toutes les 30 s. */
 const RELANCE_RETARD_MS = 30_000;
+/**
+ * Bougies servies au plus par requête, pour les places qui plafonnent sous la profondeur
+ * demandée (adaptateur Coinbase : 350 ; OKX : 300 par requête). Une réponse pleine à ce
+ * plafond ne dit rien de l'historique de la place : le motif « historique trop court » n'est
+ * retenu que si elle a servi MOINS que min(profondeur demandée, plafond).
+ */
+const PLAFOND_REQUETE: Partial<Record<ExchangeId, number>> = { coinbase: 350, okx: 300 };
 /** Borne mémoire du cache (entrées les moins récemment lues évincées). */
 const MAX_ENTREES = 16;
 /** Le 1er janvier 1970 était un jeudi : les semaines du lundi sont décalées de 4 jours. */
@@ -175,7 +185,7 @@ function lancer(e: Entree, exchange: ExchangeId, symbol: string, unite: Timefram
         // Premier chargement, ou longue veille : seul cas où le début de la fenêtre change.
         if (closes.length === 0) throw new Error(`aucune bougie ${unite} close reçue`);
         bougies = closes;
-        e.historiqueCourt = brutes.length < limite;
+        e.historiqueCourt = brutes.length < Math.min(limite, PLAFOND_REQUETE[exchange] ?? limite);
       } else {
         bougies = suite.length > 0 ? [...detenues, ...suite] : detenues;
       }

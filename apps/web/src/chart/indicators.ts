@@ -44,7 +44,7 @@ import {
   indicatorsStore,
   type ActiveIndicator,
 } from "../store/indicators";
-import { suffixeUnite, uniteDemandee } from "./uniteParam";
+import { uniteDemandee } from "./uniteParam";
 
 /** Point d'indicateur côté KLineChart : clé d'output -> valeur finie. */
 type AxiomPoint = Record<string, number>;
@@ -107,7 +107,7 @@ function raisonSansValeur(def: IndicatorDef, params: ActiveIndicator["params"], 
  * « [1d] » quand l'instance est calculée sur une unité supérieure (`params.unite`).
  */
 export function libelleInstance(def: IndicatorDef, params: ActiveIndicator["params"]): string {
-  return `${formatInstanceLabel(def, params)}${suffixeUnite(params)}`;
+  return formatInstanceLabel(def, params); // suffixe d'unité compris
 }
 
 type ModuleUnite = typeof import("./bougiesUnite");

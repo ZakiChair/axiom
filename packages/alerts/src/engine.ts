@@ -101,10 +101,23 @@ export function evaluerAlertes(defs: AlertDef[], ctx: ContexteAlerte): ResultatE
   return { declenchements, defs: out, modifie };
 }
 
-/** Une condition importée reste non évaluable si son indicateur exige un autre TF. */
+/**
+ * Paramètre réservé « unite » d'une instance du graphe (SUG-1, phase 1 : graphe seul ; cf.
+ * apps/web/src/chart/uniteParam.ts). Ni le navigateur ni le daemon ne chargent l'unité
+ * supérieure pour une alerte : la condition calculerait en silence sur les bougies de son
+ * propre intervalle. Toute valeur présente compte, même vide.
+ */
+const CLE_UNITE_GRAPHE = "unite";
+
+/**
+ * Une condition importée reste non évaluable si son indicateur exige un autre TF, ou s'il
+ * porte le paramètre « unite » réservé au graphe (alertes du navigateur ET du daemon).
+ */
 export function conditionSupporteTimeframe(c: Condition, timeframe: Timeframe | undefined): boolean {
   if (c.type === "composite") return c.conditions.every((part) => conditionSupporteTimeframe(part, timeframe));
-  return c.type !== "indicateur-seuil" && c.type !== "indicateur-croisement" || supportsIndicatorTimeframe(c.indicateurId, timeframe);
+  if (c.type !== "indicateur-seuil" && c.type !== "indicateur-croisement") return true;
+  if (c.params?.[CLE_UNITE_GRAPHE] !== undefined) return false;
+  return supportsIndicatorTimeframe(c.indicateurId, timeframe);
 }
 
 /** Aiguille vers l'évaluateur de la condition. */

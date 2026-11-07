@@ -40,6 +40,7 @@ import { useExpirationClock } from "../alerts/useExpirationClock";
 import { IS_VERCEL } from "../lib/deployment";
 import { formatHeure } from "../lib/format";
 import { navigateTo } from "../lib/navigation";
+import { motifUniteHorsGraphe, uniteImbriquee } from "../chart/uniteParam";
 import {
   cibleAlerte,
   construireConditionCroisement,
@@ -408,7 +409,9 @@ export function AlertsPanel() {
           const derniere = d.declenchements[d.declenchements.length - 1];
           const whaleUnusable = IS_VERCEL && d.condition.type === "whale-flux";
           const frontOnly = estFrontOnly(d);
-          const timeframeUnusable = !conditionSupporteTimeframe(d.condition, d.timeframe);
+          // Paramètre « unité » réservé au graphe (import, définition persistée) : badge dédié.
+          const unite = uniteImbriquee(d.condition);
+          const timeframeUnusable = unite === null && !conditionSupporteTimeframe(d.condition, d.timeframe);
           return (
             <div
               key={d.id}
@@ -436,6 +439,7 @@ export function AlertsPanel() {
                   <span className="flex shrink-0 items-center gap-1">
                     {whaleUnusable && <Badge ton="down">UNUSABLE</Badge>}
                     {timeframeUnusable && <Badge ton="down" title="RVOL saisonnier : recréer cette alerte sur le graphique 1h.">1h requis</Badge>}
+                    {unite !== null && <Badge ton="down" title={motifUniteHorsGraphe(unite, "alerte")}>non évaluée</Badge>}
                     {frontOnly && (
                       <Badge ton="neutre" title="Évaluée seulement app ouverte (CVD / régime)">
                         front-only

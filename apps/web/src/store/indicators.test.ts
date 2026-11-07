@@ -49,6 +49,15 @@ describe("formatInstanceLabel", () => {
     expect(formatInstanceLabel(macd, { fast: 12, slow: 26, signal: 9 })).toBe("MACD (12, 26, 9)");
   });
 
+  it("suffixe l'unité supérieure (« [1d] ») : liste « Actifs » des menus comprise (SUG-1)", () => {
+    const ema = getIndicator("ema");
+    if (!ema) throw new Error("def ema absente du registre");
+    expect(formatInstanceLabel(ema, { length: 50, unite: "1d" })).toBe("EMA (50) [1d]");
+    const vwap = getIndicator("vwap");
+    if (!vwap) throw new Error("def vwap absente du registre");
+    expect(formatInstanceLabel(vwap, { unite: "4h" })).toBe("VWAP [4h]");
+  });
+
   it("retombe sur le nom seul quand l'indicateur n'a pas d'input", () => {
     const vwap = getIndicator("vwap");
     if (!vwap) throw new Error("def vwap absente du registre");

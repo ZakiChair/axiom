@@ -33,7 +33,14 @@ describe("CBPREM — libellés du z glissant 7 j", () => {
     const html = rendu(serie);
     expect(html).toMatch(/Z glissant 7j <span[^>]*>1\.68<\/span>/);
     expect(html).not.toContain("Z 30j");
-    expect(html).toContain("bandes ±2σ et z glissants 7 j, passé seul, descriptifs");
+    expect(html).toContain("bandes ±2σ et z glissants 7 j (passé et point courant, sans données futures), descriptifs");
+    // 30 points dans la fenêtre de 168 h : couverture partielle dite dans le bandeau.
+    expect(html).toMatch(/Z glissant 7j <span[^>]*>1\.68<\/span><span[^>]*> sur 30 pts<\/span>/);
+  });
+
+  it("fenêtre pleine (168 points) : pas de mention de couverture", () => {
+    const serie = Array.from({ length: 200 }, (_, k) => ({ t: k * HEURE_MS, premiumPct: Math.sin(k) }));
+    expect(rendu(serie)).not.toContain(" pts</span>");
   });
 
   it("dit « indisponible » quand la série est trop courte pour un z", () => {

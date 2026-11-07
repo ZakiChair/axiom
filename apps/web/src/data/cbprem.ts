@@ -14,10 +14,11 @@
 const JOUR_MS = 24 * 3_600_000;
 const FENETRE_7J_MS = 7 * JOUR_MS;
 /**
- * Fenêtre des statistiques GLISSANTES (bandes ±2σ, z) : 168 h, soit 7 jours de bougies 1h.
+ * Fenêtre des statistiques GLISSANTES (bandes ±2σ, z) : 168 h, soit 7 jours de bougies 1h
+ * (même durée que « Moy 7j », bornes (t − 7 j, t] ici contre [t − 7 j, t] pour la moyenne).
  * Chaque point n'est jugé qu'avec son passé et lui-même, jamais avec la suite de la série.
  */
-export const FENETRE_Z_MS = 168 * 3_600_000;
+export const FENETRE_Z_MS = FENETRE_7J_MS;
 /** Nombre minimal de points DANS la fenêtre pour qu'un z-score soit porteur de sens. */
 export const MIN_POINTS_Z = 30;
 

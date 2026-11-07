@@ -371,6 +371,8 @@ export function CbpremWindow() {
   // Bandes glissantes causales (168 h, point par point) : partagées entre le tracé ±2σ et le
   // z du survol. Mémoïsées sur la série ; la dernière est celle du z courant (statsPremium).
   const bandes = useMemo(() => bandesGlissantes(serie), [serie]);
+  // Points de la fenêtre du dernier z (168 en 1h quand elle est pleine).
+  const couvertureZ = bandes.at(-1)?.n ?? null;
   const moyenne7j = stats?.moyenne7j ?? null;
 
   // Run auto au PREMIER open (FloatingWindow ne monte l'enfant que si ouvert). La garde
@@ -486,6 +488,10 @@ export function CbpremWindow() {
             {/* Pas encore de run : tiret ; run fait mais z non calculable : état explicite. */}
             {stats === null || stats.zGlissant7j !== null ? formatDec(stats?.zGlissant7j ?? null, 2) : "indisponible"}
           </span>
+          {/* Couverture : fenêtre partielle (début de série, trous) dite dans le bandeau, pas seulement au survol. */}
+          {stats?.zGlissant7j != null && couvertureZ !== null && couvertureZ < 168 && (
+            <span className="tabular-nums"> sur {couvertureZ} pts</span>
+          )}
         </span>
         <span className="text-text-dim" title="(USDT/USD − 1) × 100 au dernier point aligné, source Kraken">
           Écart USDT/USD <span className="tabular-nums text-text">{formatPct(ecartPegPct, 3)}</span>
@@ -544,7 +550,7 @@ export function CbpremWindow() {
             {mode === "ajuste"
               ? "Coinbase vs Binance × USDT/USD Kraken · klines 1h · 30 j — peg neutralisé"
               : "Coinbase vs Binance · klines 1h · 30 j · USD vs USDT — inclut l'écart de peg"}
-            {" · bandes ±2σ et z glissants 7 j, passé seul, descriptifs"}
+            {" · bandes ±2σ et z glissants 7 j (passé et point courant, sans données futures), descriptifs"}
           </NoteSource>
           <Fraicheur loading={enCours} majTs={majTs} />
         </div>

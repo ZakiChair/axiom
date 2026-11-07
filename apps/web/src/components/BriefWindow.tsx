@@ -75,6 +75,7 @@ import { SectionChapeau } from "./brief/SectionChapeau";
 import { SectionRegime } from "./brief/SectionRegime";
 import { SectionFluxCapitaux } from "./brief/SectionFluxCapitaux";
 import { SectionBreadth } from "./brief/SectionBreadth";
+import { SectionRegimeTransversal } from "./brief/SectionRegimeTransversal";
 import { SectionSession } from "./brief/SectionSession";
 import { SectionWatchlist } from "./brief/SectionWatchlist";
 import { SectionSqueeze } from "./brief/SectionSqueeze";
@@ -393,6 +394,8 @@ export function BriefWindow() {
 
         {/* Régime — largeur de marché (breadth) : jauges MM50/MM200, A/D, tendance MM50. */}
         <SectionBreadth breadth={breadth} noteFraicheur={noteFraicheur} />
+        {/* Régime transversal (top 50) : une ligne, détail dans CORR › Régime. */}
+        <SectionRegimeTransversal refreshToken={analyseRefreshToken} />
 
         {/* 0) Review de session (soir) — stores locaux portfolio + alertes + éco passés. */}
         <SectionSession session={session} eco={eco} noteFraicheur={noteFraicheur} />

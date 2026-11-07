@@ -5,6 +5,8 @@
  *   1. TOTAL   — capitalisation de toutes les cryptos (reconstruite, cf. data/mcap.ts) ;
  *   2. TOTAL3  — hors BTC et ETH (le « risque alt » au sens TradingView) ;
  *   3. DOMINANCES — BTC.D, ETH.D, alts et n'importe quelle pièce du top 100.
+ * Au-dessus, une tuile « BTC.D hors USDT/USDC/DAI » (SUG-41) calculée sur les seules jambes
+ * CoinMarketCap (global + pièces), chargée à la demande — jamais mélangée à la reconstruction.
  *
  * Présentation PURE (patron NETLIQ/CBPREM) : les séries vivent dans `mcapStore`
  * (vanilla) ; seul le survol est local à React. Tracé canvas en px CSS sous
@@ -25,6 +27,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { dominance, dominanceAlts, serieDifference } from "../data/mcap";
+import type { PointBtcHorsStables } from "../data/dominanceStablecoins";
 import { formatPourcentage, formatUsd } from "../lib/format";
 import { lireTokenCanvas, rgbaTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import {
@@ -48,6 +51,7 @@ import {
   MenuDeroulant,
   NoteSource,
   PERIODES_STANDARD,
+  TuileStat,
   Vide,
   BoutonRafraichir,
 } from "./ui";
@@ -363,6 +367,101 @@ function AjoutDominance({ desactive }: { desactive: boolean }) {
   );
 }
 
+// ─────────────────────────── Tuile BTC.D hors stables (CMC) ───────────────────────────
+
+type EtatBtcHorsStables =
+  | { statut: "chargement" }
+  | { statut: "erreur"; message: string }
+  | { statut: "pret"; points: PointBtcHorsStables[]; variation: { horsStables: number; brute: number } | null };
+
+/** Mini-courbe 90 j (SVG, décorative : la valeur est écrite à côté). */
+function SparklineBtcHorsStables({ valeurs }: { valeurs: readonly number[] }) {
+  const largeur = 72;
+  const hauteur = 18;
+  if (valeurs.length < 2) return null;
+  const min = Math.min(...valeurs);
+  const max = Math.max(...valeurs);
+  const etendue = max - min || 1;
+  const pas = largeur / (valeurs.length - 1);
+  const points = valeurs
+    .map((v, i) => `${(i * pas).toFixed(1)},${(hauteur - ((v - min) / etendue) * hauteur).toFixed(1)}`)
+    .join(" ");
+  return (
+    <svg width={largeur} height={hauteur} className="shrink-0" aria-hidden="true">
+      <polyline points={points} fill="none" stroke="var(--accent)" strokeWidth={1.2} strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** Variation en points, signée (« +1.2 pt »). */
+function formatPoints(v: number): string {
+  return `${v > 0 ? "+" : ""}${v.toFixed(1)} pt`;
+}
+
+/**
+ * Tuile « BTC.D hors USDT/USDC/DAI » = BTC ÷ (TOTAL − USDT − USDC − DAI), jambes CoinMarketCap
+ * UNIQUEMENT (global et pièces du même fournisseur, jamais les courbes CoinGecko de la fenêtre ni
+ * le BTC.D BGeometrics). Module chargé par `import()` au montage (budget initial) ; panne CMC →
+ * « indisponible » explicite, aucun repli. Répond à « une baisse de BTC.D n'est-elle qu'une fuite
+ * vers les stables ? » en mettant côte à côte les variations sur 30 j des deux dominances.
+ */
+function TuileBtcHorsStables() {
+  const [etat, setEtat] = useState<EtatBtcHorsStables>({ statut: "chargement" });
+  useEffect(() => {
+    let vivant = true;
+    import("../data/dominanceStablecoins")
+      .then(async (module) => {
+        const points = await module.chargerBtcHorsStables();
+        return { points, variation: module.variationBtcHorsStables(points, 30) };
+      })
+      .then(({ points, variation }) => {
+        if (vivant) setEtat({ statut: "pret", points, variation });
+      })
+      .catch((erreur: unknown) => {
+        if (vivant) setEtat({ statut: "erreur", message: erreur instanceof Error ? erreur.message : String(erreur) });
+      });
+    return () => {
+      vivant = false;
+    };
+  }, []);
+
+  const label = "BTC.D hors USDT/USDC/DAI · CMC";
+  const definition =
+    "BTC ÷ (TOTAL − USDT − USDC − DAI), CoinMarketCap uniquement. Les autres stables (USDe, FDUSD, PYUSD, USDS…) restent au dénominateur : valeur minorée.";
+  if (etat.statut === "chargement") {
+    return <TuileStat label={label} valeur="…" title={definition} />;
+  }
+  const dernier = etat.statut === "pret" ? etat.points[etat.points.length - 1] : undefined;
+  if (etat.statut === "erreur" || dernier === undefined) {
+    return (
+      <TuileStat
+        label={label}
+        valeur="indisponible"
+        title={etat.statut === "erreur" ? etat.message : "CoinMarketCap n'a renvoyé aucun point exploitable."}
+        pied={<span>Aucun repli : jambes CMC uniquement.</span>}
+      />
+    );
+  }
+  const { points, variation } = etat;
+  return (
+    <TuileStat
+      label={label}
+      valeur={formatPourcentage(dernier.btcDHorsStables, 1)}
+      title={definition}
+      extra={<SparklineBtcHorsStables valeurs={points.map((p) => p.btcDHorsStables)} />}
+      pied={
+        <span>
+          brute {formatPourcentage(dernier.btcD, 1)} · USDT+USDC+DAI {formatPourcentage(dernier.stableD, 1)}
+          {variation === null
+            ? " · Δ30 j indisponible"
+            : ` · Δ30 j ${formatPoints(variation.horsStables)} (brute ${formatPoints(variation.brute)})`}
+          {` · au ${new Date(dernier.t).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", timeZone: "UTC" })}`}
+        </span>
+      }
+    />
+  );
+}
+
 // ─────────────────────────── Fenêtre ───────────────────────────
 
 export function McapWindow() {
@@ -438,6 +537,8 @@ export function McapWindow() {
 
       <div className="flex min-h-0 flex-1 flex-col px-4 py-3">
         {proOuvert && <div className="mb-2 shrink-0"><DefillamaProPanel /></div>}
+        {/* BTC.D hors stables : CMC, indépendante de la reconstruction CoinGecko ci-dessous. */}
+        <div className="mb-2 shrink-0 sm:max-w-md"><TuileBtcHorsStables /></div>
         {backfill.enCours ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
             <Chargement

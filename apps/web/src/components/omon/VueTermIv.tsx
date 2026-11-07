@@ -5,6 +5,7 @@
  * Bloc TOUJOURS monté, masqué en CSS via `visible` — convention de montage des canvases d'OMON
  * (cf. VueSmile / VueHeatmap). TOUTE la logique (state, mémos, effets, handlers) reste dans
  * l'orchestrateur ; ce fichier ne reçoit que des props. ZÉRO changement de rendu.
+ * Bloc « maturité constante » (SurfaceConstante.tsx, chantier du 7 novembre 2026) sous la courbe.
  */
 import type { PointTermIv } from "../../data/termIv";
 import type { PointMouvementAttendu } from "../../data/mouvementAttendu";
@@ -15,6 +16,17 @@ import { Badge, ErreurBloc, NoteSource, Fraicheur, InfobulleGraphe } from "../ui
 import { TableTriable, type ColonneTable } from "../TableTriable";
 import { joursAvant, TERMIV_PAD_L, TERMIV_PAD_R } from "./dessins";
 import { formatUsdExact } from "./format";
+import { SurfaceConstanteBloc } from "./SurfaceConstante";
+import type { LectureHistorique, LectureMaturite } from "../../data/surfaceConstante";
+
+/** Données du bloc « maturité constante » (calculées par l'orchestrateur). */
+export interface DonneesSurfaceConstante {
+  lectures: LectureMaturite[];
+  couverture: LectureHistorique["couverture"];
+  daemon: boolean;
+  nbEcheancesRetenues: number;
+  nbEcheancesEcartees: number;
+}
 
 /** « ±x » sauf valeur absente (jamais « ±— »). */
 function plusMoins(texte: string): string {
@@ -128,6 +140,9 @@ interface Props {
   segments: SegmentVolForward[];
   /** Fin de couverture du calendrier ECO chargé (`finCouvertureCalendrier`), null sans source datée. */
   finCouvertureEco: number | null;
+  /** Surface à maturité constante et son historique ; null hors vue ou sans chaîne. */
+  surface: DonneesSurfaceConstante | null;
+  nowMs: number;
 }
 
 export function VueTermIv({
@@ -143,6 +158,8 @@ export function VueTermIv({
   mouvements,
   segments,
   finCouvertureEco,
+  surface,
+  nowMs,
 }: Props) {
   const pointSurvol = survolTermIv === null ? undefined : termIvPoints[survolTermIv];
   // Retrouvé par échéance, pas par index : les deux listes n'omettent pas les mêmes échéances.
@@ -254,6 +271,8 @@ export function VueTermIv({
           σ fwd
         </span>
       </div>
+
+      {surface !== null && <SurfaceConstanteBloc {...surface} nowMs={nowMs} />}
 
       <div className="mt-3">
         <div className="mb-1 text-[11px] text-text-dim">Mouvement attendu d&apos;ici chaque échéance</div>

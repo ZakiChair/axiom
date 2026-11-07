@@ -18,3 +18,22 @@ export function formatUsdExact(v: number | null | undefined): string {
   const decimales = Math.abs(v) < 1000 && !Number.isInteger(v) ? 2 : 0;
   return `$${v.toLocaleString("en-US", { maximumFractionDigits: decimales })}`;
 }
+
+/** Écart en points d'IV signé (« +1.25 pt », « −0.40 pt »), « — » si absent. */
+export function formatPointsIv(v: number | null | undefined, dec = 2): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) return "—";
+  const signe = v > 0 ? "+" : v < 0 ? "−" : "";
+  return `${signe}${Math.abs(v).toFixed(dec)} pt`;
+}
+
+/** Date et heure UTC compactes « 06/11 09:12 UTC » (instantanés quotidiens), « — » si absent. */
+export function formatDateHeureUtc(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms)) return "—";
+  const iso = new Date(ms).toISOString();
+  return `${iso.slice(8, 10)}/${iso.slice(5, 7)} ${iso.slice(11, 16)} UTC`;
+}
+
+/** Jour UTC « AAAA-MM-JJ » → « 06/11 ». */
+export function formatJourUtc(jour: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(jour) ? `${jour.slice(8, 10)}/${jour.slice(5, 7)}` : "—";
+}

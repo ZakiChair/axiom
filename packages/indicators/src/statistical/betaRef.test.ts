@@ -173,7 +173,119 @@ describe("betaRef", () => {
         default: "close",
         options: ["open", "high", "low", "close", "hl2", "hlc3", "ohlc4"],
       },
+      { key: "afficherAlpha", name: expect.any(String), type: "boolean", default: false },
     ]);
-    expect(betaRef.outputs.map((o) => o.key)).toEqual(["beta", "one"]);
+    expect(betaRef.outputs.map((o) => o.key)).toEqual(["beta", "one", "alpha"]);
+  });
+});
+
+/**
+ * Alpha résiduel cumulé (SUG-6 volet 1) : résidu[j] = r[j] − beta[j-1]·rRef[j], cumulé.
+ * β EX ANTE (slot précédent) : premier résidu à j = length + 1 (beta défini dès i = length).
+ */
+describe("betaRef — alpha résiduel cumulé", () => {
+  /** Rendements de référence variés (variance non nulle sur toute fenêtre de 10). */
+  const ryLong = Array.from({ length: 29 }, (_, k) => 0.01 * ((k % 4) - 1.5) + 0.002 * (k % 3));
+
+  it("actif = référence × c (r = rRef) : alpha nul partout où il est défini", () => {
+    const refClose = pricesFromReturns(100, ryLong);
+    const closes = refClose.map((p) => 3 * p); // X = 3·BTC : rendements identiques
+    const { series } = betaRef.calc(
+      candlesFromCloses(closes),
+      { length: 10, afficherAlpha: true },
+      makeCtx(closes, refClose)
+    );
+    expect(series.alpha?.[10]).toBeUndefined(); // beta[9] indéfini : pas de β ex ante
+    for (let j = 11; j < closes.length; j++) expect(series.alpha?.[j]).toBeCloseTo(0, 12);
+  });
+
+  it("r = 2·rRef : β = 2, résidu nul, alpha nul (le levier n'est pas de l'alpha)", () => {
+    const refClose = pricesFromReturns(100, ryLong);
+    const closes = pricesFromReturns(100, ryLong.map((r) => 2 * r));
+    const { series } = betaRef.calc(
+      candlesFromCloses(closes),
+      { length: 10, afficherAlpha: true },
+      makeCtx(closes, refClose)
+    );
+    for (let j = 11; j < closes.length; j++) expect(series.alpha?.[j]).toBeCloseTo(0, 12);
+  });
+
+  it("r = rRef + a (dérive constante) : β = 1, alpha = a × nombre de résidus cumulés", () => {
+    const a = 0.003;
+    const refClose = pricesFromReturns(100, ryLong);
+    const closes = pricesFromReturns(100, ryLong.map((r) => r + a));
+    const { series } = betaRef.calc(
+      candlesFromCloses(closes),
+      { length: 10, afficherAlpha: true },
+      makeCtx(closes, refClose)
+    );
+    expect(series.beta?.[10]).toBeCloseTo(1, 12);
+    expect(series.alpha?.[11]).toBeCloseTo(a, 12);
+    expect(series.alpha?.[12]).toBeCloseTo(2 * a, 12);
+    expect(series.alpha?.[29]).toBeCloseTo(19 * a, 12);
+  });
+
+  it("causalité par préfixe : ajouter des bougies ne change aucun alpha passé", () => {
+    const rx = Array.from({ length: 59 }, (_, k) => 0.02 * Math.sin(k * 1.3) + 0.004 * Math.cos(k * 0.7));
+    const ry = Array.from({ length: 59 }, (_, k) => 0.015 * Math.sin(k * 0.9 + 1) + 0.003 * ((k % 5) - 2));
+    const closes = pricesFromReturns(100, rx);
+    const refClose = pricesFromReturns(50, ry);
+    const complet = betaRef.calc(candlesFromCloses(closes), { length: 10, afficherAlpha: true }, makeCtx(closes, refClose)).series;
+    const k = 37;
+    const prefixe = betaRef.calc(
+      candlesFromCloses(closes.slice(0, k)),
+      { length: 10, afficherAlpha: true },
+      makeCtx(closes.slice(0, k), refClose.slice(0, k))
+    ).series;
+    expect(prefixe.alpha?.some((v) => v !== undefined)).toBe(true);
+    for (let j = 0; j < k; j++) expect(prefixe.alpha?.[j]).toBe(complet.alpha?.[j]);
+  });
+
+  it("trou de refClose : alpha indéfini sur le trou, puis segment NOUVEAU (pas de 0 inventé)", () => {
+    const rx = Array.from({ length: 29 }, (_, k) => 0.01 * ((k % 3) - 1) + 0.001);
+    const closes = pricesFromReturns(100, rx);
+    const refFull = pricesFromReturns(100, ryLong);
+    const refHole: Array<number | undefined> = [...refFull];
+    refHole[12] = undefined; // invalide rRef[12] et rRef[13] ; beta indéfini sur [12..22]
+    const { series } = betaRef.calc(
+      candlesFromCloses(closes),
+      { length: 10, afficherAlpha: true },
+      makeCtx(closes, refHole)
+    );
+    expect(series.alpha?.[11]).toBeDefined(); // segment initial (résidu de 11)
+    for (let j = 12; j <= 23; j++) expect(series.alpha?.[j]).toBeUndefined();
+    // j = 24 : premier résidu du segment suivant = r[24] − beta[23]·rRef[24] SEUL.
+    const r24 = Math.log(closes[24]! / closes[23]!);
+    const y24 = Math.log(refFull[24]! / refFull[23]!);
+    expect(series.alpha?.[24]).toBeCloseTo(r24 - series.beta![23]! * y24, 12);
+  });
+
+  it("refClose absent : alpha entièrement indéfini", () => {
+    const closes = pricesFromReturns(100, ryLong);
+    const { series } = betaRef.calc(candlesFromCloses(closes), { length: 10, afficherAlpha: true }, makeCtx(closes));
+    expect(series.alpha).toEqual(new Array(closes.length).fill(undefined));
+  });
+});
+
+describe("betaRef — affichage de l'alpha (revue du 2026-11-07)", () => {
+  const ry = Array.from({ length: 29 }, (_, k) => 0.01 * ((k % 4) - 1.5) + 0.002 * (k % 3));
+  const refClose = pricesFromReturns(100, ry);
+  const closes = pricesFromReturns(100, ry.map((r) => r + 0.003));
+
+  it("option coupée par défaut : alpha entièrement indéfini (l'échelle du pane reste celle du β)", () => {
+    const { series } = betaRef.calc(candlesFromCloses(closes), { length: 10 }, makeCtx(closes, refClose));
+    expect(series.alpha).toEqual(new Array(closes.length).fill(undefined));
+    expect(series.beta?.[10]).toBeCloseTo(1, 12);
+  });
+
+  it("le β ne dépend pas de l'option", () => {
+    const sans = betaRef.calc(candlesFromCloses(closes), { length: 10 }, makeCtx(closes, refClose)).series;
+    const avec = betaRef.calc(
+      candlesFromCloses(closes),
+      { length: 10, afficherAlpha: true },
+      makeCtx(closes, refClose)
+    ).series;
+    expect(avec.beta).toEqual(sans.beta);
+    expect(avec.alpha?.[11]).toBeCloseTo(0.003, 12);
   });
 });

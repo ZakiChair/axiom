@@ -3,7 +3,9 @@
  *
  * Maintenir Shift et glisser trace un rectangle (vert hausse / rouge baisse) du
  * point de départ au curseur, avec une étiquette : écart %, Δ prix signé, nombre
- * de bougies et durée. Relâcher (ou Échap / perte de focus) efface tout. Répétable.
+ * de bougies et durée, puis |Δ| en ATR(14) et en σ de l'horizon, mesurés sur les
+ * bougies closes jusqu'au départ (module `data/harRv` chargé à la première mesure).
+ * Relâcher (ou Échap / perte de focus) efface tout. Répétable.
  *
  * Rendu IMPÉRATIF (deux <div> mutés au mousemove, hors render-loop React) — même
  * esprit que PaneHeaders / liquidationHeat.
@@ -83,6 +85,11 @@ interface DragEnCours {
   startRelY: number;
   /** true si déclenché par le mode armé (bouton « Règle »), false si Shift+glisser. */
   viaToolbar: boolean;
+  /** Dernière position du curseur (redessin quand la volatilité arrive). */
+  curX?: number;
+  curY?: number;
+  /** Δ en ATR(14) et en σ de l'horizon, une fois la volatilité du départ calculée. */
+  enVol?: (fin: PointMesure) => string;
 }
 
 /** Contrôleur impératif de l'outil de mesure, attaché à UNE instance de graphe. */
@@ -170,7 +177,17 @@ export class MeasureTool {
     e.stopPropagation();
     // Shift prioritaire sur le mode armé : un Shift-drag reste un Shift-drag même si
     // l'outil « Règle » est sélectionné (jamais annulé par un changement d'outil).
-    this.drag = { debut, startRelX: x, startRelY: y, viaToolbar: arme && !e.shiftKey };
+    const drag: DragEnCours = { debut, startRelX: x, startRelY: y, viaToolbar: arme && !e.shiftKey };
+    this.drag = drag;
+    // Volatilité connue au départ : bougies jusqu'à lui, la dernière du graphe (en cours) exclue.
+    const donnees = this.chart.getDataList();
+    void import("../data/harRv")
+      .then(({ volatiliteAvant, mesureEnVolatilite }) => {
+        const vol = volatiliteAvant(donnees, Math.min(debut.dataIndex, donnees.length - 2));
+        drag.enVol = (fin) => mesureEnVolatilite(vol, debut.prix, fin.prix, Math.abs(fin.dataIndex - debut.dataIndex));
+        if (this.drag === drag && drag.curX !== undefined && drag.curY !== undefined) this.dessiner(drag.curX, drag.curY);
+      })
+      .catch(() => {});
     this.container.style.userSelect = "none";
     window.addEventListener("mousemove", this.onMouseMove, { capture: true });
     window.addEventListener("mouseup", this.onMouseUp, { capture: true });
@@ -205,6 +222,8 @@ export class MeasureTool {
     if (!d) return;
     const fin = this.pointDepuisPixel(curX, curY);
     if (!fin) return;
+    d.curX = curX;
+    d.curY = curY;
     const m = calculerMesure(d.debut, fin);
     const teinte = m.hausse ? "var(--up)" : "var(--down)";
 
@@ -224,7 +243,8 @@ export class MeasureTool {
     this.label.style.borderColor = teinte;
     this.label.textContent =
       `${formatPct(m.pct)}  ${formaterDeltaPrix(m.deltaPrix)}  ` +
-      `${m.nBougies} b · ${formaterDuree(m.dureeMs)}`;
+      `${m.nBougies} b · ${formaterDuree(m.dureeMs)}` +
+      (d.enVol ? `  ${d.enVol(fin)}` : "");
   }
 
   private annuler(): void {

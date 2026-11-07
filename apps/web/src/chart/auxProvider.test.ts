@@ -45,6 +45,10 @@ vi.mock("../data/daemon", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../data/daemon")>();
   return { ...actual, hlLiqHeatGet: vi.fn() };
 });
+vi.mock("../data/deribit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../data/deribit")>();
+  return { ...actual, fetchDvolHistory: vi.fn() };
+});
 
 import { AuxProvider } from "./auxProvider";
 import { coinalyzeProvider, fetchLiquidationHistory } from "../data/coinalyze";
@@ -62,6 +66,7 @@ import { registerHyperliquidCoin } from "../data/symbol";
 import { chargerFundingVenue } from "../data/fundingHistory";
 import { binanceAdapter } from "../data/binance";
 import { refSymbolStore } from "../store/refSymbol";
+import { fetchDvolHistory } from "../data/deribit";
 
 const oiMock = vi.mocked(coinalyzeProvider.fetchOpenInterestHistory);
 const fundingMock = vi.mocked(coinalyzeProvider.fetchFundingRateHistory);
@@ -899,5 +904,52 @@ describe("AuxProvider — séries strictes du lot C", () => {
     expect(p.getAligned(r, () => {})).toEqual({ status: "ready", aux: {
       fundingHistBybit: [0.0001, undefined, undefined], fundingHistOkx: [undefined, undefined, undefined],
     } });
+  });
+});
+
+describe("AuxProvider — DVOL quotidien (prime de vol)", () => {
+  const J = 86_400_000;
+  const H4 = 4 * 3_600_000;
+  const D0 = Date.UTC(2026, 10, 2);
+  const dvolMock = vi.mocked(fetchDvolHistory);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(D0 + 2 * J + 10 * 3_600_000); // J2 10:00 UTC
+    dvolMock.mockResolvedValue([
+      { time: D0, value: 50 },
+      { time: D0 + J, value: 52 },
+      { time: D0 + 2 * J, value: 99 }, // bougie du jour en cours : clôture inconnue
+    ]);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("date chaque bougie close à la fin de son jour, lue à la clôture ; le jour en cours est écarté", async () => {
+    const candleTimes = Array.from({ length: 11 }, (_, k) => D0 + 4 * H4 + k * H4); // J0 16:00 → J2 08:00
+    const r = { exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "4h" as const, ids: ["dvol" as const], candleTimes };
+    const p = new AuxProvider();
+    await new Promise<void>((resolve) => p.getAligned(r, resolve));
+    expect(dvolMock).toHaveBeenCalledWith("BTC", 365);
+    expect(p.getAligned(r, () => {})).toEqual({
+      status: "ready",
+      // J0 16:00 → rien ; J0 20:00 (finit à minuit) → clôture J0 ; J1 20:00 → clôture J1 ; jamais 99.
+      aux: { dvol: [undefined, 50, 50, 50, 50, 50, 50, 52, 52, 52, 52] },
+    });
+  });
+
+  it("BTC et ETH cotés en dollar seulement : SOL ou BTCEUR → série vide sans appel Deribit", async () => {
+    const p = new AuxProvider();
+    for (const symbol of ["SOLUSDT", "BTCEUR"]) {
+      const r = { exchange: "binance" as const, symbol, timeframe: "1d" as const, ids: ["dvol" as const], candleTimes: [D0, D0 + J] };
+      await new Promise<void>((resolve) => p.getAligned(r, resolve));
+      expect(p.getAligned(r, () => {})).toEqual({ status: "ready", aux: { dvol: [undefined, undefined] } });
+    }
+    expect(dvolMock).not.toHaveBeenCalled();
+    const eth = { exchange: "binance" as const, symbol: "ETHUSDT", timeframe: "1d" as const, ids: ["dvol" as const], candleTimes: [D0] };
+    await new Promise<void>((resolve) => p.getAligned(eth, resolve));
+    expect(dvolMock).toHaveBeenCalledWith("ETH", 365);
   });
 });

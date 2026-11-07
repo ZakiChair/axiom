@@ -13,14 +13,19 @@
  * Deux étages de filtres :
  *  1. FILTRES DE BASE (sans klines) : volume 24h, |Δ24h|, prix, funding, OI Δ%, L/S —
  *     évalués ici, sur le résultat du ticker (+ enrichissement position si demandé).
- *  2. FILTRES INDICATEURS (RSI / EMA / MACD sur un TF choisi) : évalués dans un Web
- *     Worker (screener.worker.ts) sur les CANDIDATS retenus par l'étage 1, plafonnés
- *     à `SCREENER_CAP` symboles (une requête klines par symbole, débit ~10 req/s).
+ *  2. FILTRES INDICATEURS (champs du catalogue et règles au modèle du backtest, sur le
+ *     TF du run et au plus une unité de plus) : évalués sur bougies CLÔTURÉES dans un
+ *     Web Worker (screener.worker.ts → screenerEtage.ts) sur les CANDIDATS retenus par
+ *     l'étage 1, plafonnés à `SCREENER_CAP` symboles (une requête klines par symbole et
+ *     par unité, débit ~10 req/s).
  *
  * Ce module ne fait AUCUN fetch : il n'expose que des types, constantes et fonctions
  * pures (parsing, comparaison, sélection). Les effets réseau vivent dans store/worker.
+ * Il est sur le chemin de chargement initial (alerts/runtime) : la logique des
+ * conditions ouvertes vit dans screenerRegles.ts, chargé à la demande.
  */
 import type { Candle, Timeframe } from "@axiom/types";
+import type { Condition } from "@axiom/backtest";
 
 // ─────────────────────────── Constantes de run ───────────────────────────
 
@@ -42,10 +47,32 @@ export const SCREENER_CAP = 60;
  */
 export const SCREENER_POSITION_CAP = 20;
 
+/**
+ * Fins des notes d'EQS qui signalent une évaluation INCOMPLÈTE (écrites par l'étage
+ * indicateurs, lues par les alertes de scan) : référence de force relative indisponible
+ * ou en retard (aucun symbole n'a pu passer les conditions qui la lisent), symboles
+ * écartés sans évaluation (non mesurés). « Non mesuré » n'est pas « faux ».
+ */
+export const NOTE_FORCE_RELATIVE_NON_EVALUEE = "force relative non évaluée";
+export const NOTE_ECARTES_SANS_EVALUATION = "sans évaluation";
+
+/** Notes d'un run qui disent que la référence de force relative n'a pas été lue. */
+export function notesReferenceNonEvaluee(notes: readonly string[]): string[] {
+  return notes.filter((n) => n.endsWith(NOTE_FORCE_RELATIVE_NON_EVALUEE));
+}
+
+/** Notes d'un run qui comptent des symboles écartés sans évaluation. */
+export function notesNonMesures(notes: readonly string[]): string[] {
+  return notes.filter((n) => n.endsWith(NOTE_ECARTES_SANS_EVALUATION));
+}
+
 /** Timeframes proposés à l'étage indicateurs (intervalles NATIFS Binance uniquement). */
 export const SCREENER_TIMEFRAMES: Timeframe[] = ["15m", "1h", "4h", "1d"];
 
-/** Nombre de bougies récupérées par symbole (couvre l'amorce RSI/EMA/MACD avec marge). */
+/**
+ * Plancher de bougies CLÔTURÉES récupérées par symbole et par unité. Le worker l'élève
+ * selon l'amorce des conditions (data/screenerEtage.ts), dans la limite Binance de 1000.
+ */
 export const SCREENER_KLINE_LIMIT = 200;
 
 // ─────────────────────────── Univers (ticker 24h) ───────────────────────────
@@ -87,6 +114,11 @@ export interface ScreenerRow {
 export interface IndicatorValue {
   label: string;
   value: number;
+  /**
+   * Bougies clôturées écoulées depuis celle qui a rendu la condition vraie (0 = dernière
+   * bougie close). Absent : valeur lue sur la dernière bougie close.
+   */
+  barresDepuis?: number;
 }
 
 /**
@@ -269,9 +301,13 @@ export interface BaseCondition {
 /**
  * Champ screené par un filtre INDICATEUR : rattaché à un `IndicatorDef` de
  * @axiom/indicators, avec la clé de sortie lue et la manière d'en dériver un scalaire.
- *  - "last"    : dernière valeur définie de la série (RSI, histogramme MACD, ADX…) ;
- *  - "distPct" : écart en % entre le dernier close et la valeur (prix vs EMA) ;
- *  - "lastPct" : dernière valeur définie × 100 (ratio brut exposé en %, ex. BB bandwidth).
+ *  - "last"        : valeur de la série (RSI, histogramme MACD, ADX…) ;
+ *  - "distPct"     : écart en % entre le close et la valeur (prix vs EMA) ;
+ *  - "lastPct"     : valeur × 100 (ratio brut exposé en %, ex. BB bandwidth) ;
+ *  - "penteNorm"   : variation de la série sur N bougies ÷ volume de ces N bougies, en %
+ *                    (pente du CVD normalisée par le volume) ;
+ *  - "rsMansfield" : `disparity` posé sur le ratio close ÷ close de la référence.
+ * Le worker lit ces valeurs sur les bougies CLÔTURÉES (data/screenerRegles.ts).
  */
 export interface IndicatorFieldSpec {
   id: string;
@@ -283,8 +319,21 @@ export interface IndicatorFieldSpec {
   /** input principal configurable (ex. « length »), s'il existe. */
   paramKey?: string;
   defaultParam?: number;
-  derive: "last" | "distPct" | "lastPct";
+  derive: "last" | "distPct" | "lastPct" | "penteNorm" | "rsMansfield";
   unit: string;
+  /**
+   * true : le paramètre règle la DÉRIVATION (fenêtre de pente), pas le def ; il n'est
+   * jamais passé à computeIndicator.
+   */
+  paramDerivation?: boolean;
+  /** Donnée exigée en plus de l'OHLCV : volume taker (k[9] Binance) ou série de référence. */
+  besoin?: "taker" | "ref";
+  /** Unité imposée quelle que soit celle du run (RS Mansfield 52 semaines : 1d). */
+  tfImpose?: Timeframe;
+  /** Famille d'affichage dans le sélecteur (absente = indicateurs historiques). */
+  famille?: "flux" | "force-relative";
+  /** Phrase d'aide (title natif) : libellé honnête, couverture, statut descriptif. */
+  aide?: string;
 }
 
 /** Catalogue curé des champs indicateurs screenables (RSI / EMA / MACD). */
@@ -344,8 +393,20 @@ export function getIndicatorField(id: string): IndicatorFieldSpec | undefined {
   return INDICATOR_FIELDS.find((f) => f.id === id);
 }
 
-/** Une condition indicateur : `champ(param) op valeur`, évaluée sur le TF du run. */
-export interface IndicatorCondition {
+/**
+ * Lecture commune aux conditions indicateurs, toujours sur bougies CLÔTURÉES :
+ *  - `tf` : unité propre de la condition (au plus UNE unité en plus de celle du run,
+ *    ex. run 4h + filtre Supertrend 1d) ; absente = unité du run ;
+ *  - `fenetre` : K ≥ 1, vraie si elle l'est sur AU MOINS UNE des K dernières bougies
+ *    closes de son unité ; absente = 1 (dernière bougie close seulement).
+ */
+interface LectureCondition {
+  tf?: Timeframe;
+  fenetre?: number;
+}
+
+/** Une condition sur un champ du catalogue : `champ(param) op valeur`. */
+export interface ConditionChamp extends LectureCondition {
   kind: "indicator";
   fieldId: string;
   /** surcharge du paramètre principal (ex. length) ; défaut si absent. */
@@ -353,6 +414,21 @@ export interface IndicatorCondition {
   op: Operator;
   value: number;
 }
+
+/**
+ * Une règle au modèle de conditions du backtest (@axiom/backtest) : comparaison ou
+ * croisement de deux opérandes (prix, constante, sortie d'indicateur).
+ */
+export interface ConditionRegle extends LectureCondition {
+  kind: "regle";
+  condition: Condition;
+}
+
+/**
+ * Condition de l'étage indicateurs. Le nom historique est gardé : les alertes de preset
+ * persistées (store/presetAlerts.ts) et leur runtime transportent ce type sans le lire.
+ */
+export type IndicatorCondition = ConditionChamp | ConditionRegle;
 
 export type ScreenerCondition = BaseCondition | IndicatorCondition;
 
@@ -458,8 +534,8 @@ export function lastClose(candles: Candle[]): number | undefined {
   return last !== undefined && Number.isFinite(last.close) ? last.close : undefined;
 }
 
-/** Libellé compact d'une condition indicateur pour l'affichage (« RSI(14) »). */
-export function indicatorConditionLabel(cond: IndicatorCondition): string {
+/** Libellé compact d'une condition sur un champ historique (« RSI(14) »). */
+export function indicatorConditionLabel(cond: ConditionChamp): string {
   const spec = getIndicatorField(cond.fieldId);
   if (spec === undefined) return cond.fieldId;
   const p = cond.param ?? spec.defaultParam;

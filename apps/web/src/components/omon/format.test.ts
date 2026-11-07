@@ -1,6 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { formatStrike, graduationsLisibles } from "./dessins";
-import { formatUsdExact } from "./format";
+import { formatDateHeureUtc, formatJourUtc, formatPointsIv, formatUsdExact } from "./format";
+
+describe("formats des instantanés quotidiens", () => {
+  it("points d'IV signés avec le moins typographique", () => {
+    expect(formatPointsIv(1.254)).toBe("+1.25 pt");
+    expect(formatPointsIv(-0.4)).toBe("−0.40 pt");
+    expect(formatPointsIv(0)).toBe("0.00 pt");
+    expect(formatPointsIv(null)).toBe("—");
+    expect(formatPointsIv(Number.NaN)).toBe("—");
+  });
+
+  it("date et heure en UTC quel que soit le fuseau local", () => {
+    expect(formatDateHeureUtc(Date.parse("2026-11-06T09:12:30Z"))).toBe("06/11 09:12 UTC");
+    expect(formatDateHeureUtc(null)).toBe("—");
+    expect(formatJourUtc("2026-10-31")).toBe("31/10");
+    expect(formatJourUtc("x")).toBe("—");
+  });
+});
 
 describe("formatUsdExact", () => {
   it("distingue les petits strikes fractionnaires (ETF : 44,5 et 45)", () => {

@@ -6,6 +6,11 @@
  * SKEW 25Δ (risk reversal — fonction pure, data/skew.ts) et DVOL (indice de volatilité
  * implicite) si disponible. Sélecteurs devise (BTC/ETH) + échéance.
  *
+ * Instantanés quotidiens (chantier du 7 novembre 2026) : au premier chargement réussi après
+ * 08:05 UTC, un instantané par devise et par jour UTC de la surface à maturité constante (vue
+ * Term IV, data/surfaceConstante) et de l'OI par strike (métrique ΔOI de la heatmap,
+ * data/deltaOiStrikes) — localStorage, doublé dans le KV du daemon s'il est présent.
+ *
  * Données LENTES (~1 min) : elles vivent dans le state React ; le smile est redessiné
  * impérativement au canvas. Le polling ne tourne QUE fenêtre ouverte. Dégradation gracieuse :
  * chaîne d'options et DVOL récupérés indépendamment (Promise.allSettled), pas d'erreur en boucle.
@@ -45,6 +50,23 @@ import { useOptionsDeribit } from "../hooks/useOptionsDeribit";
 import { ivRank } from "../data/ivRank";
 import { bandeStrikes, construireGrilleOi, type GrilleOi } from "../data/oiHeatmap";
 import {
+  ARCHIVE_VIDE,
+  capturerSurfaceDuJour,
+  couvertureArchive,
+  jourUtc,
+  lireArchiveSurface,
+  lireSurfaceHistorique,
+  surfaceMaturiteConstante,
+  type LectureArchive,
+} from "../data/surfaceConstante";
+import {
+  calculerDeltaOi,
+  capturerInstantaneOi,
+  lireReferencesOi,
+  topStrikesDeltaOi,
+  type ReferencesOi,
+} from "../data/deltaOiStrikes";
+import {
   CBOE_TICKERS,
   SOUS_JACENT_ETF,
   cboeExpiries,
@@ -79,8 +101,9 @@ import {
 // Sous-vues présentationnelles (JSX extrait, découpe v1.9) — toute la logique reste ici.
 import { VueSmile, type SurvolSmile } from "./omon/VueSmile";
 import { VueGexDex, type LectureEtf } from "./omon/VueGexDex";
-import { VueHeatmap } from "./omon/VueHeatmap";
-import { VueTermIv } from "./omon/VueTermIv";
+import { VueHeatmap, type MetriqueHeatmap } from "./omon/VueHeatmap";
+import { VueTermIv, type DonneesSurfaceConstante } from "./omon/VueTermIv";
+import type { ChoixReferenceOi } from "./omon/DeltaOi";
 import { ResumeMarcheOptions } from "./omon/ResumeMarcheOptions";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
@@ -203,8 +226,13 @@ export function OptionsWindow() {
   const [vue, setVue] = useState<"smile" | "gexdex" | "heatmap" | "termiv">("smile");
   const [classe, setClasse] = useState<"crypto" | "actions">("crypto");
   const [metrique, setMetrique] = useState<"gex" | "dex">("gex");
-  // Métrique de la heatmap : open interest, |GEX| (murs de gamma) OU volume 24h. État dédié à la vue heatmap.
-  const [heatmapMetrique, setHeatmapMetrique] = useState<"oi" | "gex" | "volume">("oi");
+  // Métrique de la heatmap : open interest, |GEX| (murs de gamma), volume 24h OU ΔOI depuis un
+  // instantané daté (J-1 ou J-7). État dédié à la vue heatmap.
+  const [heatmapMetrique, setHeatmapMetrique] = useState<MetriqueHeatmap>("oi");
+  const [refOiChoix, setRefOiChoix] = useState<ChoixReferenceOi>("j1");
+  // Instantanés quotidiens (ΔOI : références J-1/J-7 ; surface : archive), étiquetés par devise.
+  const [refsOi, setRefsOi] = useState<{ devise: Devise; refs: ReferencesOi } | null>(null);
+  const [archiveSurface, setArchiveSurface] = useState<{ devise: Devise; lecture: LectureArchive } | null>(null);
   const [survolHeatmap, setSurvolHeatmap] = useState<SurvolHeatmap | null>(null);
   // Index du point de term structure survolé (null = aucun) — pilote l'infobulle et l'anneau.
   const [survolTermIv, setSurvolTermIv] = useState<number | null>(null);
@@ -428,6 +456,35 @@ export function OptionsWindow() {
     setSurvolTermIv(null);
   }, [devise, expiry, portee, cboeTicker]);
 
+  // ─────────────────────────── Instantanés quotidiens (ΔOI, surface à maturité constante) ───────────────────────────
+
+  // Références ΔOI J-1/J-7 et archive de la surface : relues à l'ouverture, au changement de devise
+  // ou de jour UTC, et après une capture. Sonde du daemon mémoïsée 60 s (patron TERM).
+  const jourCourant = jourUtc(nowMs);
+  const [versionInstantanes, setVersionInstantanes] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    let ignore = false;
+    const d = devise;
+    void lireReferencesOi(d, Date.now()).then((refs) => { if (!ignore) setRefsOi({ devise: d, refs }); });
+    void lireArchiveSurface(d).then((lecture) => { if (!ignore) setArchiveSurface({ devise: d, lecture }); });
+    return () => { ignore = true; };
+  }, [open, devise, jourCourant, versionInstantanes]);
+
+  // Premier chargement réussi après 08:05 UTC : un instantané par devise et par jour UTC, daté de
+  // la réception de la chaîne (majTs) ; rien avant 08:05, jamais réécrit. Captures mémorisées par
+  // session : les cycles suivants ne relisent pas le stockage. Le compteur est incrémenté même si
+  // l'effet a été relancé entre-temps (la relance ne recapture pas : sans lui, rien ne serait relu).
+  useEffect(() => {
+    if (!open || majTs === null || chain.length === 0) return;
+    void Promise.all([
+      capturerSurfaceDuJour(devise, chain, spotChaine, majTs),
+      capturerInstantaneOi(devise, chain, majTs),
+    ]).then(([archive, oiEcrit]) => {
+      if (archive !== null || oiEcrit) setVersionInstantanes((v) => v + 1);
+    });
+  }, [open, devise, majTs, chain, spotChaine]);
+
   // ─────────────────────────── Heatmap OI strike × échéance ───────────────────────────
 
   // Flux du jour (métriques d'en-tête Smile, agrégées sur TOUTE la chaîne — lecture globale du
@@ -469,15 +526,42 @@ export function OptionsWindow() {
   // consomment EXACTEMENT le même ordre.
   const bandeOiDesc = useMemo(() => [...bandeOi].sort((a, b) => b - a), [bandeOi]);
 
+  // ΔOI contre l'instantané J-1 ou J-7 de la devise affichée (fonction pure, nowMs au bord :
+  // échéances réglées exclues ; référence strictement antérieure à la réception de la chaîne,
+  // majTs). null = aucune référence.
+  const refsOiDevise = refsOi?.devise === devise ? refsOi.refs : null;
+  const refOi = refsOiDevise === null ? null : refOiChoix === "j1" ? refsOiDevise.j1 : refsOiDevise.j7;
+  const deltaOi = useMemo(
+    () =>
+      vue === "heatmap" && heatmapMetrique === "doi" && refOi !== null && majTs !== null
+        ? calculerDeltaOi(chain, refOi, spotChaine, nowMs, majTs)
+        : null,
+    [vue, heatmapMetrique, refOi, chain, spotChaine, nowMs, majTs],
+  );
+  const deltaOiCarte = useMemo(
+    () => (deltaOi === null ? null : {
+      cellules: new Map(deltaOi.cellules.map((c) => [`${c.expiryMs}|${c.strike}`, c])),
+      deltaAbsMax: deltaOi.deltaAbsMax,
+    }),
+    [deltaOi],
+  );
+  const topDeltaOi = useMemo(
+    () => (deltaOi === null || expiry === null ? null : topStrikesDeltaOi(deltaOi, expiry)),
+    [deltaOi, expiry],
+  );
+  const celluleDeltaSurvol = survolHeatmap && deltaOiCarte
+    ? (deltaOiCarte.cellules.get(`${survolHeatmap.expiryMs}|${survolHeatmap.strike}`) ?? null)
+    : null;
+
   // Redessine la heatmap (données/vue/métrique/thème/survol). Le thème repeint via majTs (les
   // tokens sont lus au dessin) ; survol pilote le liseré.
   useEffect(() => {
     if (!open || vue !== "heatmap") return;
     const canvas = heatmapCanvasRef.current;
     if (canvas && grilleOi) {
-      dessinerHeatmapOi(canvas, grilleOi, bandeOiDesc, heatmapMetrique, spotChaine, survolHeatmap);
+      dessinerHeatmapOi(canvas, grilleOi, bandeOiDesc, heatmapMetrique, spotChaine, survolHeatmap, deltaOiCarte);
     } else if (canvas) canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
-  }, [open, vue, grilleOi, bandeOiDesc, heatmapMetrique, spotChaine, survolHeatmap, majTs]);
+  }, [open, vue, grilleOi, bandeOiDesc, heatmapMetrique, spotChaine, survolHeatmap, majTs, deltaOiCarte]);
 
   // Cellule survolée : inverse la géométrie (colonne/ligne depuis les pixels) vers échéance/strike.
   const onSurvolHeatmap = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -534,6 +618,25 @@ export function OptionsWindow() {
     () => (vue === "termiv" ? termStructureIv(chain, spotChaine, nowMs) : []),
     [vue, chain, spotChaine, nowMs],
   );
+
+  // Surface à maturité constante (7/30/90 j) et lectures de son historique quotidien — même garde
+  // de vue ; fonctions pures de data/surfaceConstante, nowMs injecté au bord.
+  const surfaceCourante = useMemo(
+    () => (vue === "termiv" && chain.length > 0 ? surfaceMaturiteConstante(chain, spotChaine, nowMs) : null),
+    [vue, chain, spotChaine, nowMs],
+  );
+  const donneesSurface = useMemo<DonneesSurfaceConstante | null>(() => {
+    if (surfaceCourante === null) return null;
+    const lecture = archiveSurface?.devise === devise ? archiveSurface.lecture : null;
+    const archive = lecture?.archive ?? ARCHIVE_VIDE;
+    return {
+      lectures: lireSurfaceHistorique(surfaceCourante, archive, nowMs),
+      couverture: couvertureArchive(archive, nowMs),
+      daemon: lecture?.daemon ?? false,
+      nbEcheancesRetenues: surfaceCourante.nbEcheancesRetenues,
+      nbEcheancesEcartees: surfaceCourante.nbEcheancesEcartees,
+    };
+  }, [surfaceCourante, archiveSurface, devise, nowMs]);
 
   // Mouvement attendu par échéance (straddle ATM au forward + EM IV) — même garde de vue que la
   // term structure ; fonction pure de data/mouvementAttendu, nowMs injecté au bord.
@@ -655,10 +758,10 @@ export function OptionsWindow() {
           </div>
         )}
 
-        {/* En heatmap : bascule devise + métrique OI ↔ |GEX| (pas de sélecteur d'échéance —
-            la heatmap couvre toutes les échéances) */}
+        {/* En heatmap : bascule devise + métrique OI ↔ |GEX| ↔ Volume ↔ ΔOI (la carte couvre toutes
+            les échéances ; en ΔOI, référence J-1/J-7 et échéance du top 5) */}
         {vue === "heatmap" && (
-          <div className="mb-3 flex items-center gap-2">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
             <Segmente
               options={DEVISES.map((d) => ({ id: d, label: d }))}
               actif={devise}
@@ -669,10 +772,37 @@ export function OptionsWindow() {
                 { id: "oi", label: "OI" },
                 { id: "gex", label: "|GEX|" },
                 { id: "volume", label: "Volume" },
+                { id: "doi", label: "ΔOI", title: "Variation d'OI depuis un instantané quotidien (non signée)" },
               ] as const}
               actif={heatmapMetrique}
               onChange={setHeatmapMetrique}
             />
+            {heatmapMetrique === "doi" && (
+              <>
+                <Segmente
+                  options={[
+                    { id: "j1", label: "J-1" },
+                    { id: "j7", label: "J-7" },
+                  ] as const}
+                  actif={refOiChoix}
+                  onChange={setRefOiChoix}
+                />
+                <Select
+                  value={expiry ?? ""}
+                  onChange={(e) => setExpiry(Number(e.target.value))}
+                  aria-label="Échéance du top 5 ΔOI"
+                  className="min-w-0 flex-1"
+                >
+                  {echeances.length === 0 && <option value="">—</option>}
+                  {echeances.map((e) => (
+                    <option key={e.expiryMs} value={e.expiryMs}>
+                      {new Date(e.expiryMs).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "2-digit", timeZone: "UTC" })}{" "}
+                      · {joursAvant(e.expiryMs)}
+                    </option>
+                  ))}
+                </Select>
+              </>
+            )}
           </div>
         )}
 
@@ -823,6 +953,15 @@ export function OptionsWindow() {
           celluleSurvol={celluleSurvol}
           grilleOi={grilleOi}
           primeCellule={primeCellule}
+          deltaOi={{
+            devise,
+            choix: refOiChoix,
+            refs: refsOiDevise,
+            resultat: deltaOi,
+            top: topDeltaOi,
+            expiryMs: expiry,
+            celluleSurvol: celluleDeltaSurvol,
+          }}
         />
 
         {/* ─────────── Vue TERM IV — bloc TOUJOURS monté, cf. VueTermIv ─────────── */}
@@ -839,6 +978,8 @@ export function OptionsWindow() {
           mouvements={mouvements}
           segments={segmentsFwd}
           finCouvertureEco={finCouvertureEco}
+          surface={donneesSurface}
+          nowMs={nowMs}
         />
       </div>
     </>

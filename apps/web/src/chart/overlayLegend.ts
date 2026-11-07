@@ -22,7 +22,7 @@
 import type { Chart } from "klinecharts";
 import { ActionType, DomPosition } from "klinecharts";
 import { getIndicator } from "@axiom/indicators";
-import { indicatorsStore, formatInstanceLabel, type ActiveIndicator } from "../store/indicators";
+import { indicatorsStore, type ActiveIndicator } from "../store/indicators";
 import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
 import { estReglable } from "./legendeReglable";
 import {
@@ -35,7 +35,7 @@ import {
   majPastille,
   adapterCiblesTactiles,
 } from "./legendeControles";
-import { abonnerStatutsIndicateurs, statutIndicateur } from "./indicators";
+import { abonnerStatutsIndicateurs, libelleInstance, statutIndicateur } from "./indicators";
 import { majBadgeStatut } from "./paneHeaders";
 
 const CANDLE_PANE_ID = "candle_pane";
@@ -58,7 +58,7 @@ export function overlayIndicators(indicators: readonly ActiveIndicator[]): Entre
     if (!def || def.pane !== "overlay") continue;
     result.push({
       instanceId: inst.instanceId,
-      label: formatInstanceLabel(def, inst.params),
+      label: libelleInstance(def, inst.params),
       couleurIdx: inst.couleurIdx,
       reglable: estReglable(def),
     });

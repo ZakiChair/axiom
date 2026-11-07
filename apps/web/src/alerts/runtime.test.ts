@@ -106,7 +106,7 @@ beforeEach(() => {
   urlDaemonMock.mockReset();
   urlDaemonMock.mockImplementation((chemin: string) => chemin);
   executerScreenerMock.mockReset();
-  executerScreenerMock.mockResolvedValue({ rows: [] });
+  executerScreenerMock.mockResolvedValue({ rows: [], notes: [] });
   chargerOnchainMock.mockReset();
   chargerOnchainMock.mockImplementation(() => new Promise(() => {}));
   coinalyzeFundingMock.mockClear();
@@ -873,7 +873,7 @@ describe("alertes de preset : pas de garde de visibilité, état de scan observa
     Object.defineProperty(NotificationMock, "permission", { value: "granted" });
     vi.stubGlobal("Notification", NotificationMock);
     vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" }));
-    executerScreenerMock.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ symbol: "BTCUSDT" }, { symbol: "ETHUSDT" }] });
+    executerScreenerMock.mockResolvedValueOnce({ rows: [], notes: [] }).mockResolvedValueOnce({ rows: [{ symbol: "BTCUSDT" }, { symbol: "ETHUSDT" }], notes: [] });
     presetAlertsStore.setState({ alertes: [{ ...ALERTE, expireTs: now + 2 * 3_600_000 }] });
     const arreterJournal = alertsStore.subscribe((state, precedent) => {
       if (state.journal.length > precedent.journal.length) vi.setSystemTime(now + 2 * 3_600_000);
@@ -892,9 +892,9 @@ describe("alertes de preset : pas de garde de visibilité, état de scan observa
     vi.useFakeTimers();
     vi.setSystemTime(now);
     let rejeterAncien!: (raison: Error) => void;
-    let resoudreNouveau!: (valeur: { rows: Array<{ symbol: string }> }) => void;
-    const ancien = new Promise<{ rows: Array<{ symbol: string }> }>((_resolve, reject) => { rejeterAncien = reject; });
-    const nouveau = new Promise<{ rows: Array<{ symbol: string }> }>((resolve) => { resoudreNouveau = resolve; });
+    let resoudreNouveau!: (valeur: { rows: Array<{ symbol: string }>; notes: string[] }) => void;
+    const ancien = new Promise<{ rows: Array<{ symbol: string }>; notes: string[] }>((_resolve, reject) => { rejeterAncien = reject; });
+    const nouveau = new Promise<{ rows: Array<{ symbol: string }>; notes: string[] }>((resolve) => { resoudreNouveau = resolve; });
     executerScreenerMock.mockImplementationOnce(() => ancien).mockImplementationOnce(() => nouveau);
     presetAlertsStore.setState({ alertes: [{ ...ALERTE, expireTs: now + 1_000 }] });
     stop = demarrerAlertes();
@@ -907,7 +907,7 @@ describe("alertes de preset : pas de garde de visibilité, état de scan observa
     expect(presetAlertsStore.getState().alertes[0]?.derniereErreur).toBeUndefined();
     await vi.advanceTimersByTimeAsync(15 * 60_000);
     expect(executerScreenerMock).toHaveBeenCalledTimes(2);
-    resoudreNouveau({ rows: [] });
+    resoudreNouveau({ rows: [], notes: [] });
     await Promise.resolve();
     expect(presetAlertsStore.getState().alertes[0]?.derniereErreur).toBeUndefined();
   });
@@ -931,6 +931,56 @@ describe("alertes de preset : pas de garde de visibilité, état de scan observa
       expect(presetAlertsStore.getState().alertes[0]?.derniereErreur).toContain("réseau HS");
     });
     expect(presetAlertsStore.getState().alertes[0]?.dernierScanTs).toBeGreaterThan(0);
+  });
+
+  it("transmet la référence figée dans l'alerte, et seulement elle", async () => {
+    presetAlertsStore.setState({ alertes: [{ ...ALERTE, refSymbol: "ETHUSDT" }, { ...ALERTE, id: "p2" }] });
+    stop = demarrerAlertes();
+    await vi.waitFor(() => expect(executerScreenerMock).toHaveBeenCalledTimes(2));
+    const options = executerScreenerMock.mock.calls.map((appel) => appel[3] as { refSymbol?: string });
+    expect(options[0]?.refSymbol).toBe("ETHUSDT");
+    // Alerte antérieure, sans référence figée : le run lit celle du graphe.
+    expect(options[1]).not.toHaveProperty("refSymbol");
+  });
+
+  it("référence non évaluée : échec publié, baseline gardée, pas d'entrée en masse à son retour", async () => {
+    const now = Date.UTC(2026, 10, 7, 12);
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    executerScreenerMock
+      .mockResolvedValueOnce({ rows: [{ symbol: "AAAUSDT" }], notes: [] })
+      .mockResolvedValueOnce({ rows: [], notes: ["référence BTCUSDT 1h indisponible : force relative non évaluée"] })
+      .mockResolvedValueOnce({ rows: [{ symbol: "AAAUSDT" }, { symbol: "BBBUSDT" }], notes: [] });
+    presetAlertsStore.setState({ alertes: [ALERTE] });
+    stop = demarrerAlertes();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(presetAlertsStore.getState().alertes[0]?.derniereErreur).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    expect(presetAlertsStore.getState().alertes[0]?.derniereErreur).toBe("référence BTCUSDT 1h indisponible : force relative non évaluée");
+    expect(alertsStore.getState().journal).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    expect(presetAlertsStore.getState().alertes[0]?.derniereErreur).toBeUndefined();
+    // Seul BBB entre : AAA était déjà dans l'ensemble avant la panne de la référence.
+    expect(alertsStore.getState().journal.map((d) => d.message)).toEqual(["EQS Momentum : BBBUSDT entre dans le scan"]);
+  });
+
+  it("symboles non mesurés : scan compté, couverture incomplète publiée puis effacée", async () => {
+    const now = Date.UTC(2026, 10, 7, 12);
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const note = "3 symboles non mesurés pour « rsZ(50) > -100 » (historique ou volume taker insuffisant) : écartés sans évaluation";
+    executerScreenerMock
+      .mockResolvedValueOnce({ rows: [], notes: ["funding indisponible", note, "0 résultats"] })
+      .mockResolvedValueOnce({ rows: [], notes: ["0 résultats"] });
+    presetAlertsStore.setState({ alertes: [ALERTE] });
+    stop = demarrerAlertes();
+    await vi.advanceTimersByTimeAsync(0);
+    const alerte = presetAlertsStore.getState().alertes[0];
+    expect(alerte?.derniereErreur).toBeUndefined();
+    expect(alerte?.avertissement).toBe(note);
+    expect(alerte?.dernierScanTs).toBe(now);
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    expect(presetAlertsStore.getState().alertes[0]?.avertissement).toBeUndefined();
   });
 });
 
@@ -1105,5 +1155,56 @@ describe("funding — séries sans marché perp (inertes, aucune requête)", () 
     urls.length = 0;
     await vi.advanceTimersByTimeAsync(3 * 60_000);
     expect(urls.filter((url) => url.includes("premiumIndex"))).toEqual([]);
+  });
+});
+
+describe("paramètre « unité » refusé hors du graphe (SUG-1, phase 1)", () => {
+  const maintenant = Date.now();
+  /** 40 clôtures en hausse : RSI 14 défini (100), l'alerte se calibre à la première passe. */
+  const hausse = (n: number) => Array.from({ length: n }, (_v, i) => bougie(maintenant - (n - i) * 60_000, 100 + i, true));
+  const rsiDef: AlertDef = {
+    id: "rsi-natif",
+    symbol: "BTCUSDT",
+    source: "binance",
+    condition: { type: "indicateur-seuil", indicateurId: "rsi", params: { length: 14 }, output: "rsi", comparateur: ">", valeur: 70 },
+    actif: true,
+    declenchements: [],
+  };
+  const rsiUnite: AlertDef = {
+    ...rsiDef,
+    id: "rsi-4h",
+    condition: { type: "indicateur-seuil", indicateurId: "rsi", params: { length: 14, unite: "4h" }, output: "rsi", comparateur: ">", valeur: 70 },
+  };
+  const compositeUnite: AlertDef = {
+    ...rsiDef,
+    id: "composite-1d",
+    condition: {
+      type: "composite",
+      conditions: [
+        { type: "variation-pct", fenetreMs: 60_000, seuilPct: -50 },
+        { type: "indicateur-seuil", indicateurId: "ema", params: { length: 20, unite: "1d" }, output: "ema", comparateur: ">", valeur: 0 },
+      ],
+    },
+  };
+
+  it("une alerte importée avec une unité n'est jamais évaluée ; motif journalisé une seule fois", () => {
+    const avertir = vi.spyOn(console, "warn").mockImplementation(() => {});
+    alertsStore.setState({ defs: [rsiDef, rsiUnite, compositeUnite], journal: [] });
+    marketStore.setState({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1m", candles: hausse(40) });
+    stop = demarrerAlertes();
+    marketStore.setState({ candles: [...hausse(40), bougie(maintenant, 200, true)] });
+    marketStore.setState({ candles: [...hausse(40), bougie(maintenant, 200, true), bougie(maintenant + 60_000, 210, true)] });
+
+    const defs = alertsStore.getState().defs;
+    expect(defs.find((d) => d.id === "rsi-natif")?.arme).toBeDefined(); // évaluée normalement
+    expect(defs.find((d) => d.id === "rsi-4h")?.arme).toBeUndefined(); // jamais calibrée
+    expect(defs.find((d) => d.id === "composite-1d")?.arme).toBeUndefined();
+    expect(alertsStore.getState().journal.every((j) => j.alertId === "rsi-natif")).toBe(true);
+
+    const motifs = avertir.mock.calls.map((args) => String(args[0])).filter((m) => m.includes("réservé au graphe"));
+    expect(motifs).toEqual([
+      "[AXIOM] alerte rsi-4h non évaluée : Paramètre « unité » [4h] réservé au graphe : l'alerte calculerait sur ses propres bougies, sans unité supérieure. Retire ce paramètre.",
+      "[AXIOM] alerte composite-1d non évaluée : Paramètre « unité » [1d] réservé au graphe : l'alerte calculerait sur ses propres bougies, sans unité supérieure. Retire ce paramètre.",
+    ]);
   });
 });

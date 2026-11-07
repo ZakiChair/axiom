@@ -67,12 +67,13 @@ import { daemonSupporte, detectDaemon, urlDaemon } from "../data/daemon";
 import { coinalyzeProvider, filtrerFrontieres8h } from "../data/coinalyze";
 import { histFunding } from "../data/referentiels";
 import { executerScreener } from "../data/screenerRun";
-import { SCREENER_POSITION_CAP } from "../data/screener";
+import { notesNonMesures, notesReferenceNonEvaluee, SCREENER_POSITION_CAP } from "../data/screener";
 import { extUrl } from "../data/extapi";
 import { AGE_MAX_FLUX_MS } from "../data/onchain/fluxCapitaux.contract";
 import { fluxCapitauxStore, garderFluxCapitauxPourAlertes } from "../store/fluxCapitaux";
 import { enrichirDeclenchement } from "../data/decisionDossier";
 import { capturerLectures } from "../store/analyseMultidomaine";
+import { motifUniteHorsGraphe, uniteImbriquee } from "../chart/uniteParam";
 
 /** Types de condition évalués sur la clôture de bougie (nécessitent les bougies). */
 const TYPES_BOUGIE = new Set(["variation-pct", "indicateur-seuil", "indicateur-croisement"]);
@@ -123,8 +124,30 @@ const PRESET_COOLDOWN_MS = 6 * 3_600_000;
 /** Cap indicateurs réduit pour un scan d'alerte (échantillon plus léger que le run UI). */
 const PRESET_CAP_INDICATEURS = 30;
 
+/** Alertes déjà signalées pour un paramètre « unité » (un avertissement par alerte). */
+const unitesSignalees = new Set<string>();
+
+/**
+ * Écarte d'un lot les alertes dont un indicateur porte le paramètre réservé « unité »
+ * (SUG-1, phase 1 : graphe seul). Importée telle quelle, l'alerte calculerait sur les
+ * bougies de son propre intervalle en ignorant l'unité : elle n'est pas évaluée, et le
+ * motif est journalisé une fois. Passage obligé de toute évaluation (`appliquerResultat`).
+ */
+function sansUniteSuperieure(lot: AlertDef[]): AlertDef[] {
+  return lot.filter((def) => {
+    const unite = uniteImbriquee(def.condition);
+    if (unite === null) return true;
+    if (!unitesSignalees.has(def.id)) {
+      unitesSignalees.add(def.id);
+      console.warn(`[AXIOM] alerte ${def.id} non évaluée : ${motifUniteHorsGraphe(unite, "alerte")}`);
+    }
+    return false;
+  });
+}
+
 /** Applique une passe d'évaluation : persiste les defs modifiées, journalise + notifie. */
-function appliquerResultat(lot: AlertDef[], ctx: ContexteAlerte): void {
+function appliquerResultat(lotBrut: AlertDef[], ctx: ContexteAlerte): void {
+  const lot = sansUniteSuperieure(lotBrut);
   if (lot.length === 0) return;
   const res = evaluerAlertes(lot, ctx);
   if (!res.modifie) return;
@@ -661,13 +684,24 @@ function creerRuntime(): Unsubscribe {
       const res = await executerScreener(alerte.baseConditions, alerte.indicatorConditions, alerte.tf, {
         capIndicateurs: PRESET_CAP_INDICATEURS,
         capPosition: SCREENER_POSITION_CAP,
+        ...(alerte.refSymbol !== undefined ? { refSymbol: alerte.refSymbol } : {}),
       });
       // Ré-validation POST-await : l'alerte a pu être retirée/désactivée pendant le scan en
       // vol — `resyncPreset` a alors déjà purgé son état. Sans ce contrôle, la ligne
       // `dernierEnsemble.set` ci-dessous RESSUSCITERAIT sa baseline (et pourrait déclencher
       // pour une alerte disparue).
       if (!encoreValide()) return;
-      presetAlertsStore.getState().marquerScan(id, Date.now()); // succès : erreur effacée
+      // Référence de force relative non lue : aucun symbole n'a pu passer les conditions
+      // qui la lisent. Ce passage n'est pas un scan vide : échec publié, baseline gardée
+      // (sinon le retour de la référence ferait « entrer » tout l'ensemble d'un coup).
+      const referenceNonEvaluee = notesReferenceNonEvaluee(res.notes);
+      if (referenceNonEvaluee.length > 0) {
+        presetAlertsStore.getState().marquerScan(id, Date.now(), referenceNonEvaluee.join(" · "));
+        return;
+      }
+      // Succès : erreur effacée ; les symboles non mesurés restent visibles.
+      const nonMesures = notesNonMesures(res.notes);
+      presetAlertsStore.getState().marquerScan(id, Date.now(), undefined, nonMesures.length > 0 ? nonMesures.join(" · ") : undefined);
       const courant = res.rows.map((r) => r.symbol);
       const precedent = dernierEnsemble.get(id) ?? null;
       const entrants = diffEntrants(precedent, courant);

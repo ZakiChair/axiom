@@ -20,7 +20,7 @@ droits de l’opérateur ; certains historiques exigent une clé ou un abonnemen
 
 | | |
 |---|---|
-| **Lire le prix** | orderflow / CVD / footprint, profil de volume, heatmap de liquidations (exécutées, estimées, niveaux réels Hyperliquid), **219 indicateurs** testés |
+| **Lire le prix** | orderflow / CVD / footprint, profil de volume, heatmap de liquidations (exécutées, estimées, niveaux réels Hyperliquid), **221 indicateurs** testés |
 | **Lire le contexte** | **39 fenêtres** à mnémonique : calendrier éco, news, corrélations, on-chain, mouvements de baleines, treemap, options, COT (synthèse + graphique hebdomadaire de l'exposition de chaque catégorie de traders), taux (dont 24 familles macro sur 8 zones) & liquidité Fed, saisonnalité, stablecoins, cycle halving… |
 | **Décider** | screener, playbooks 1-clic, alertes (dont composite ET), backtest en R (stop ATR / sizing risque), coût d’exécution L2 (DOM), stress-test, étude d’évènements, journal, paper trading |
 | **Ne pas décrocher** | alertes onglet fermé (macOS + Telegram optionnel), replay sur dumps officiels Binance, panneau de santé des sources |
@@ -42,7 +42,7 @@ Deux partis pris structurent le produit :
 1. **Le chemin chaud reste direct.** Le front parle **directement** aux WebSockets des exchanges ;
    le daemon `axiomd` ne prend en charge que le lent (APIs à quota, cache, persistance SQLite,
    alertes). L’UI reste utilisable **sans** daemon.
-2. **Les calculs sont du TypeScript pur et testés.** Les 219 indicateurs vivent dans
+2. **Les calculs sont du TypeScript pur et testés.** Les 221 indicateurs vivent dans
    `@axiom/indicators` — pas de WASM, pas de service Python — et sont couverts par des tests
    unitaires et structurels, dont **4 indicateurs comparés à un oracle `pandas-ta`** (ADX,
    SuperTrend, Ichimoku, PSAR ; `scripts/golden/`), des oracles analytiques ATR/RSI/Bollinger/RVOL
@@ -57,7 +57,7 @@ d’Electron.
 ```
 packages/
   types/         @axiom/types       — contrat de données partagé
-  indicators/    @axiom/indicators  — 219 indicateurs TS pur + golden tests
+  indicators/    @axiom/indicators  — 221 indicateurs TS pur + golden tests
   alerts/        @axiom/alerts      — moteur d’alertes pur (front + daemon)
   backtest/      @axiom/backtest    — moteur de backtest pur
 apps/
@@ -140,7 +140,7 @@ Finnhub, Etherscan v2, CoinDesk Data/CCData, CoinGecko et DefiLlama Pro) restent
 navigateur. OI et funding du graphe disposent d'un repli Binance sans
 clé ; NVT utilise directement les charts publics Blockchain.com.
 
-Le catalogue compte 219 indicateurs. Une entrée impossible pour la source, le symbole ou
+Le catalogue compte 221 indicateurs. Une entrée impossible pour la source, le symbole ou
 le timeframe courant est désactivée et marquée **UNUSABLE** au lieu de produire un pane vide.
 Les fonctions intrinsèquement locales sont également nommées : REPLAY et WHALES sont
 **UNUSABLE** sur Vercel ; l'historique LIQ et les couches GDELT/UCDP de GLOBE sont **PARTIAL**.
@@ -149,9 +149,9 @@ Les snapshots, LIQHL, les alertes baleines et les notifications onglet fermé n�
 
 ## Fonctionnalités (aperçu)
 
-- **Chart** : multi-grille (1 / 2h / 2v / 2×2), orderflow / CVD / footprint, volume profile, fibo, dessins, 219 indicateurs
+- **Chart** : multi-grille (1 / 2h / 2v / 2×2), orderflow / CVD / footprint, volume profile (intrabar Binance), fibo, dessins, 221 indicateurs, calcul sur une unité supérieure (EMA 1d sur un graphe 1h)
 - **Terminal** : palette ⌘K, raccourcis, workspaces, fenêtres flottantes + snap + taskbar
-- **Sources** : Binance, Bybit, OKX, Coinbase, Kraken, MEXC, Deribit, Twelve Data, Coinalyze, FRED, etc.
+- **Sources** : Binance, Bybit, OKX, Coinbase, Kraken, MEXC, Deribit, Twelve Data, Coinalyze, FRED, Wikimedia (pages vues Wikipédia), etc.
 - **Panneaux** : 39 fenêtres — DES, FUNDX, LIQ, ECO, NEWS, CORR, CHAIN, MAP, PORT, NOTE, EQS, TERM, OMON, DOM, BT, REPLAY, RATE, COT, SEAG, VOL, FUND, BRIEF, GLOBE, STBL, SQZ, CBPREM, NETLIQ, DATA, DIST, EXPY, PAPER, MINE, WHALES, CYCLE, BPL, EVTS, SCEN, CAP, SECT
 - **Daemon** : proxy+cache, KV/candles SQLite, alertes (macOS + Telegram optionnel), replay dumps Binance, couches GDELT/UCDP, collecte des mouvements baleines (BTC + stables)
 
@@ -276,6 +276,37 @@ toutes les 6 h — jour férié). Les colonnes CFTC sont lues dans la réponse r
 avant d'être demandées ; une catégorie introuvable est dite absente et un
 contrôle vérifie que la somme des nets de toutes les catégories vaut 0 à chaque
 rapport (alerte au-dessus du graphe sinon).
+
+### Outils d'analyse et sources (7 novembre 2026)
+
+Neuf ajouts tirés de l'[étude du 6 novembre](docs/outils-analyse-sources-2026-11-06.md), tous
+**descriptifs** : lecture sur bougies closes, aucune valeur inventée, couverture affichée.
+
+- **Graphe** : un indicateur peut être calculé sur une **unité supérieure** (« Unité de
+  calcul » dans l'éditeur de paramètres : RSI 4h ou EMA 1d sur un graphe 1h, légende
+  « [4h] », badge « partiel » si l'historique supérieur ne couvre pas le début du graphe).
+  Le **VPVR**, la **VPFR** et le footprint historique se reconstruisent en **intrabar**
+  Binance spot (« réparti à la minute (1m) · N/M », « ≈ réparti sur la bougie » ailleurs).
+  La règle Maj donne l'écart en ATR et en σ.
+- **EQS** : conditions au modèle du backtest (« + règle »), champs de flux (RVOL, taker
+  net, pente du CVD) et de force relative (RS Mansfield 52 sem., RS z), une unité par
+  condition, fenêtre « dans les K dernières bougies » ; les symboles non mesurés sont
+  comptés, pas confondus avec un échec du filtre.
+- **DIST › Bandes RV** : amplitude prévue du jour et de la semaine pour tout actif (HAR-RV,
+  quantiles calibrés hors échantillon) ; indicateur **Prime de vol** (DVOL, VRP ex ante,
+  percentile ; BTC et ETH).
+- **BRIEF** : historique de la largeur du marché (% > MM50/MM200, plus hauts − bas, A/D,
+  McClellan, saison des alts) et ligne de régime transversal ; **CAP** : BTC.D hors
+  stablecoins.
+- **CORR** : onglets **Rotation** (RS-Ratio / RS-Momentum contre BTC, « pas le RRG® ») et
+  **Régime** (dispersion, corrélations, ratio d'absorption), univers Top 50.
+- **OMON** : surface à **maturité constante** (ATM, RR, BF à 7/30/90 j, historique quotidien)
+  et **ΔOI par strike** contre J-1 / J-7.
+- **CYCLE** : attention du grand public (pages vues Wikipédia, z-score, épisodes de pic) ;
+  **CBPREM** : z et bandes ±2σ désormais causaux (fenêtre glissante de 7 jours).
+
+Limites et points à confirmer : section « Outils d'analyse et sources (autorisation du
+7 novembre 2026) » de `BUILD-CONTRACT.md`.
 
 ### Historique des décisions et nouveaux indicateurs
 

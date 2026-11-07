@@ -6,7 +6,8 @@
  * l'accès par l'espace de noms du chunk les garde en clair dans l'entrée.)
  * Le budget de chargement initial est bloquant (BUILD-CONTRACT) : ce module est chargé par
  * un `import()` mémorisé depuis data/mcapCandles.ts et inscrit dans MODULES_DIFFERES
- * (chargementInitial.test.ts). Seuls l'identifiant, les prédicats, le libellé et les alias
+ * (chargementInitial.test.ts). La tuile CAP « BTC.D hors USDT/USDC/DAI » le charge aussi par
+ * `import()` au montage de la fenêtre (`chargerBtcHorsStables`, SUG-41). Seuls l'identifiant, les prédicats, le libellé et les alias
  * restent statiques (data/mcap.ts). Un seul import de VALEUR de ce fichier depuis un module
  * du chemin initial le ramènerait dans le chunk d'entrée sans aucune erreur de build.
  *
@@ -200,18 +201,79 @@ export function dominanceSurTotal(
   const sortie: PointSerie[] = [];
   for (const { t, total } of globaux) {
     if (!Number.isFinite(total) || total <= 0) continue;
-    let somme = 0;
-    for (const piece of pieces) {
-      const contribution = contributionPiece(piece, t, toleranceMs);
-      if (contribution === null) {
-        somme = Number.NaN;
-        break;
-      }
-      somme += contribution;
-    }
-    if (Number.isFinite(somme) && somme > 0) sortie.push({ t, v: (100 * somme) / total });
+    const somme = sommeStables(pieces, t, toleranceMs);
+    if (somme !== null && somme > 0) sortie.push({ t, v: (100 * somme) / total });
   }
   return sortie;
+}
+
+/** Σ des contributions des pièces à l'instant `t` (USD) ; null si l'une est inconnue. */
+function sommeStables(pieces: readonly SeriePiece[], t: number, toleranceMs: number): number | null {
+  let somme = 0;
+  for (const piece of pieces) {
+    const contribution = contributionPiece(piece, t, toleranceMs);
+    if (contribution === null) return null;
+    somme += contribution;
+  }
+  return Number.isFinite(somme) ? somme : null;
+}
+
+/** Point de la tuile CAP « BTC.D hors USDT/USDC/DAI » (toutes valeurs en %, jambes CMC). */
+export interface PointBtcHorsStables {
+  /** Minuit UTC (instantané global de 00:00). */
+  t: number;
+  /** BTC.D brute CMC : 100 × (TOTAL − TOTAL2) / TOTAL. */
+  btcD: number;
+  /** STABLE.D : 100 × (USDT + USDC + DAI) / TOTAL. */
+  stableD: number;
+  /** BTC.D hors stables : 100 × BTC / (TOTAL − USDT − USDC − DAI). */
+  btcDHorsStables: number;
+}
+
+/**
+ * BTC.D hors USDT/USDC/DAI pour chaque point global CMC : BTC = TOTAL − TOTAL2 (capitalisation
+ * « altcoins » CMC), stables = Σ des trois pièces au même instant (mêmes règles que STABLE.D :
+ * 0 avant le lancement, report borné, sinon inconnue). Aucun point si TOTAL n'est pas fini ou
+ * ≤ 0, si BTC n'est pas strictement positif, si une pièce est inconnue ou si les stables
+ * égalent ou dépassent TOTAL. Les AUTRES stables (USDe, FDUSD, PYUSD, USDS…) restent au
+ * dénominateur : la correction est un minorant. PURE.
+ */
+export function dominanceBtcHorsStables(
+  globaux: readonly { t: number; total: number; total2: number }[],
+  pieces: readonly SeriePiece[],
+  toleranceMs: number,
+): PointBtcHorsStables[] {
+  const sortie: PointBtcHorsStables[] = [];
+  for (const { t, total, total2 } of globaux) {
+    if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(total2)) continue;
+    const btc = total - total2;
+    const stables = sommeStables(pieces, t, toleranceMs);
+    if (!(btc > 0) || stables === null || stables >= total) continue;
+    sortie.push({
+      t,
+      btcD: (100 * btc) / total,
+      stableD: (100 * stables) / total,
+      btcDHorsStables: (100 * btc) / (total - stables),
+    });
+  }
+  return sortie;
+}
+
+/**
+ * Variation en points sur `jours` jours de BTC.D hors stables et de BTC.D brute : dernier point
+ * contre le point daté EXACTEMENT `jours` jours avant ; null si l'un manque (pas d'interpolation).
+ * Une BTC.D brute qui baisse pendant que la version hors stables tient = fuite vers les stables,
+ * pas vers les alts. PURE.
+ */
+export function variationBtcHorsStables(
+  points: readonly PointBtcHorsStables[],
+  jours: number,
+): { horsStables: number; brute: number } | null {
+  const dernier = points[points.length - 1];
+  if (dernier === undefined) return null;
+  const depart = points.find((p) => p.t === dernier.t - jours * JOUR_MS);
+  if (depart === undefined) return null;
+  return { horsStables: dernier.btcDHorsStables - depart.btcDHorsStables, brute: dernier.btcD - depart.btcD };
 }
 
 /**
@@ -357,6 +419,55 @@ function chargerPageDominance(
     if (pagesEnCours.get(cle) === promesse) pagesEnCours.delete(cle);
   });
   pagesEnCours.set(cle, promesse);
+  return promesse;
+}
+
+// ─────────────────────────── BTC.D hors stables (tuile CAP) ───────────────────────────
+
+/** Profondeur de la tuile CAP (sparkline et variation sur 30 j). */
+const JOURS_BTC_HORS_STABLES = 90;
+/** Mémoire de session : une réouverture de CAP dans les 15 min ne relance pas les 4 requêtes. */
+const TTL_BTC_HORS_STABLES_MS = 15 * 60_000;
+
+const MESSAGE_BTC_HORS_STABLES_INDISPONIBLE =
+  "BTC.D hors USDT/USDC/DAI indisponible : CoinMarketCap public ne répond pas — aucun repli (jambes CMC uniquement, jamais mélangées à CoinGecko ou BGeometrics)";
+
+let memoBtcHorsStables: { ts: number; promesse: Promise<PointBtcHorsStables[]> } | null = null;
+
+/**
+ * Série journalière BTC.D hors USDT/USDC/DAI des 90 derniers jours : page global CMC 1d (TOTAL
+ * et TOTAL2 du même instantané de 00:00) + trois pièces en 1d, alignées sur 00:00 comme STABLE.D
+ * (même amorce : 2 jours de report + la ligne de D−1). 4 requêtes, AUCUN cache persistant (le
+ * localStorage n'est pas alourdi par les pièces depuis 2015) ; mémoire de session de 15 min.
+ * Panne CMC → erreur explicite, aucun repli sur une autre source.
+ */
+export function chargerBtcHorsStables(deps: DepsDominance = {}): Promise<PointBtcHorsStables[]> {
+  const charger = async (): Promise<PointBtcHorsStables[]> => {
+    const fin = alignerTemps((deps.maintenant ?? Date.now)(), "1d");
+    const debut = fin - (JOURS_BTC_HORS_STABLES - 1) * JOUR_MS;
+    const amorce = debut - tolerancePiece("1d") - JOUR_MS;
+    try {
+      const [globaux, bruts] = await Promise.all([
+        chargerGlobauxCmc(debut, fin, "1d", { fetcher: deps.fetcher }),
+        Promise.all(PIECES.map((nom) => chargerPiece(nom, amorce, fin, "1d", deps))),
+      ]);
+      return dominanceBtcHorsStables(globaux, seriesPieces(bruts, "1d"), tolerancePiece("1d"));
+    } catch (cause) {
+      throw new Error(MESSAGE_BTC_HORS_STABLES_INDISPONIBLE, { cause });
+    }
+  };
+  if (Object.keys(deps).length > 0) return charger();
+  const maintenant = Date.now();
+  if (memoBtcHorsStables !== null && maintenant - memoBtcHorsStables.ts < TTL_BTC_HORS_STABLES_MS) {
+    return memoBtcHorsStables.promesse;
+  }
+  const promesse = charger();
+  const memo = { ts: maintenant, promesse };
+  memoBtcHorsStables = memo;
+  // Un échec n'est pas mémorisé : la prochaine ouverture réessaie.
+  promesse.catch(() => {
+    if (memoBtcHorsStables === memo) memoBtcHorsStables = null;
+  });
   return promesse;
 }
 

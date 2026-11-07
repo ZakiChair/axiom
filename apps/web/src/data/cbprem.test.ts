@@ -5,8 +5,11 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  bandesPremium,
+  bandeGlissante,
+  bandesGlissantes,
   ecartPegDernierPoint,
+  FENETRE_Z_MS,
+  MIN_POINTS_Z,
   serieCbprem,
   serieCbpremAjustee,
   statsPremium,
@@ -14,7 +17,13 @@ import {
   type PointPremium,
 } from "./cbprem";
 
-const JOUR_MS = 24 * 3_600_000;
+const HEURE_MS = 3_600_000;
+const JOUR_MS = 24 * HEURE_MS;
+
+/** Série horaire t = k h, valeur fournie par `valeur(k)`. */
+function serieHoraire(longueur: number, valeur: (k: number) => number): PointPremium[] {
+  return Array.from({ length: longueur }, (_, k) => ({ t: k * HEURE_MS, premiumPct: valeur(k) }));
+}
 
 describe("serieCbprem — alignement par openTime", () => {
   it("ne garde que les points communs (Map), tolère le désordre d'entrée, trie chrono en sortie", () => {
@@ -204,7 +213,7 @@ describe("ecartPegDernierPoint — écart de peg USDT/USD au dernier point align
 
 describe("statsPremium", () => {
   it("série vide → tout à null", () => {
-    expect(statsPremium([])).toEqual({ courant: null, moyenne7j: null, z30j: null });
+    expect(statsPremium([])).toEqual({ courant: null, moyenne7j: null, zGlissant7j: null });
   });
 
   it("courant = dernier point de la série (déjà triée chrono)", () => {
@@ -229,74 +238,141 @@ describe("statsPremium", () => {
     expect(stats.moyenne7j).toBeCloseTo(6.5, 9);
   });
 
-  it("z30j = null si moins de 30 points", () => {
-    const serie: PointPremium[] = Array.from({ length: 29 }, (_, k) => ({
-      t: k,
-      premiumPct: k,
-    }));
-    expect(statsPremium(serie).z30j).toBeNull();
+  it("zGlissant7j = null sur une série courte (moins de MIN_POINTS_Z points)", () => {
+    expect(MIN_POINTS_Z).toBe(30);
+    expect(statsPremium(serieHoraire(29, (k) => k)).zGlissant7j).toBeNull();
   });
 
-  it("z30j = null si l'écart-type est nul (série constante), même avec >=30 points", () => {
-    const serie: PointPremium[] = Array.from({ length: 30 }, (_, k) => ({
-      t: k,
-      premiumPct: 3.5,
-    }));
-    expect(statsPremium(serie).z30j).toBeNull();
+  it("zGlissant7j = null si σ est nul (premium constant), même avec ≥ 30 points", () => {
+    expect(statsPremium(serieHoraire(30, () => 3.5)).zGlissant7j).toBeNull();
+    // 0,1 n'est pas représentable : une moyenne naïve vaut 0,10000000000000005 sur 30 points et
+    // laisserait un σ résiduel ≈ 4e-17, donc un z de ±1 fabriqué. Le σ doit être EXACTEMENT nul.
+    expect(statsPremium(serieHoraire(30, () => 0.1)).zGlissant7j).toBeNull();
+    expect(statsPremium(serieHoraire(168, () => -0.0421)).zGlissant7j).toBeNull();
   });
 
-  it("z30j = z-score du courant vs toute la série (stdev POPULATION), exact à 30 points", () => {
-    // Série 1..30 (30 points, valeur = son rang). Population : moyenne=15.5,
-    // variance=(30²-1)/12=74.91666..., stdev=8.65544144839919.
-    // Courant = dernier = 30 → z=(30-15.5)/8.65544144839919 = 1.6752467319482305.
-    const serie: PointPremium[] = Array.from({ length: 30 }, (_, k) => ({
-      t: k,
-      premiumPct: k + 1,
-    }));
-    const stats = statsPremium(serie);
+  it("zGlissant7j exact quand toute la série tient dans 168 h (série 1..30 horaire)", () => {
+    // 30 points sur 29 h : la fenêtre du dernier point les contient tous. Population :
+    // moyenne = 15.5, σ = √((30² − 1) / 12) = 8.65544144839919 ; z(30) = 1.6752467319482305.
+    const stats = statsPremium(serieHoraire(30, (k) => k + 1));
     expect(stats.courant).toBe(30);
-    expect(stats.z30j).toBeCloseTo(1.6752467319482305, 9);
+    expect(stats.zGlissant7j).toBeCloseTo(1.6752467319482305, 9);
+  });
+
+  it("zGlissant7j ne lit que les 168 dernières heures : le passé plus ancien est ignoré", () => {
+    // 200 points horaires : k < 32 valent 1e6 (dont k = 31, situé EXACTEMENT à t − 168 h, donc
+    // exclu), puis 1..168. Fenêtre du dernier point = k 32..199 = valeurs 1..168 : moyenne = 84.5,
+    // σ = √((168² − 1) / 12) = 48.496563452132015, z(168) = 1.7217714835076454. Un seul point
+    // à 1e6 dans la fenêtre ferait exploser σ.
+    const serie = serieHoraire(200, (k) => (k < 32 ? 1e6 : k - 31));
+    expect(statsPremium(serie).zGlissant7j).toBeCloseTo(1.7217714835076454, 9);
+  });
+
+  it("zGlissant7j = z du dernier point contre la DERNIÈRE bande du tracé (même source)", () => {
+    const serie = serieHoraire(120, (k) => Math.sin(k / 4) + k / 50);
+    const derniere = bandesGlissantes(serie).at(-1);
+    expect(derniere).not.toBeNull();
+    expect(derniere).toBeDefined();
+    if (derniere === null || derniere === undefined) return;
+    expect(statsPremium(serie).zGlissant7j).toBe(zPoint(serie.at(-1)!.premiumPct, derniere));
   });
 });
 
-describe("bandesPremium — moyenne / écart-type population de toute la série", () => {
-  it("moins de 30 points → null", () => {
-    const serie: PointPremium[] = Array.from({ length: 29 }, (_, k) => ({
-      t: k,
-      premiumPct: k,
-    }));
-    expect(bandesPremium(serie)).toBeNull();
+describe("bandeGlissante / bandesGlissantes — moyenne et σ causaux sur 168 h", () => {
+  it("indice hors série → null ; bandesGlissantes garde la longueur et l'ordre de la série", () => {
+    const serie = serieHoraire(40, (k) => k % 7);
+    expect(bandeGlissante(serie, -1)).toBeNull();
+    expect(bandeGlissante(serie, 40)).toBeNull();
+    expect(bandeGlissante([], 0)).toBeNull();
+    expect(bandesGlissantes([])).toEqual([]);
+    expect(bandesGlissantes(serie)).toHaveLength(40);
   });
 
-  it("écart-type nul (série constante) → null, même avec >=30 points", () => {
-    const serie: PointPremium[] = Array.from({ length: 30 }, (_, k) => ({
-      t: k,
-      premiumPct: 3.5,
-    }));
-    expect(bandesPremium(serie)).toBeNull();
+  it("début de série : indisponible tant que la fenêtre a moins de 30 points, puis n croît jusqu'à 168", () => {
+    const bandes = bandesGlissantes(serieHoraire(200, (k) => k % 7));
+    for (let i = 0; i < MIN_POINTS_Z - 1; i++) expect(bandes[i]).toBeNull();
+    expect(bandes[MIN_POINTS_Z - 1]?.n).toBe(MIN_POINTS_Z);
+    expect(bandes[100]?.n).toBe(101);
+    expect(FENETRE_Z_MS).toBe(168 * HEURE_MS);
+    // i = 168 : t > 0 → k = 1..168 ; le point k = 0, à t − 168 h exactement, est exclu.
+    expect(bandes[168]?.n).toBe(168);
+    expect(bandes[199]?.n).toBe(168);
   });
 
-  it("moyenne et σ population exacts sur 30 points (série 1..30)", () => {
-    // Mêmes valeurs consacrées que le test z30j : moyenne=15.5,
-    // stdev POPULATION = 8.65544144839919.
-    const serie: PointPremium[] = Array.from({ length: 30 }, (_, k) => ({
-      t: k,
-      premiumPct: k + 1,
-    }));
-    const bandes = bandesPremium(serie);
-    expect(bandes?.moyenne).toBeCloseTo(15.5, 9);
-    expect(bandes?.sigma).toBeCloseTo(8.65544144839919, 9);
+  it("moyenne et σ population exacts sur la fenêtre (le point courant inclus)", () => {
+    // Même série que le test de statsPremium : fenêtre du dernier point = valeurs 1..168.
+    const serie = serieHoraire(200, (k) => (k < 32 ? 1e6 : k - 31));
+    const bande = bandeGlissante(serie, 199);
+    expect(bande?.n).toBe(168);
+    expect(bande?.moyenne).toBeCloseTo(84.5, 9);
+    expect(bande?.sigma).toBeCloseTo(48.496563452132015, 9);
+  });
+
+  it("trous : la fenêtre est temporelle, un trou la vide au lieu de remonter plus loin", () => {
+    // 40 points horaires (k = 0..39), 150 h sans bougie, puis 20 points (t = 190 h..209 h).
+    // Fenêtre du dernier point : t > 41 h → seuls les 20 points récents → indisponible,
+    // alors que la série compte 60 points.
+    const avant = serieHoraire(40, (k) => k % 5);
+    const apres = Array.from({ length: 20 }, (_, m) => ({ t: (190 + m) * HEURE_MS, premiumPct: m % 3 }));
+    const serie = [...avant, ...apres];
+    expect(bandeGlissante(serie, 39)?.n).toBe(40);
+    expect(bandeGlissante(serie, serie.length - 1)).toBeNull();
+    expect(statsPremium(serie).zGlissant7j).toBeNull();
+  });
+
+  it("σ nul : fenêtre constante → null ; dès qu'un point diffère, la bande redevient calculable", () => {
+    const serie = serieHoraire(41, (k) => (k < 40 ? 0.1 : 0.2));
+    const bandes = bandesGlissantes(serie);
+    for (let i = 0; i < 40; i++) expect(bandes[i]).toBeNull();
+    // 41 points : 40 × 0,1 et 1 × 0,2 → moyenne = 0.1 + 0.1 / 41, σ = 0.1 × √40 / 41.
+    expect(bandes[40]?.moyenne).toBeCloseTo(0.1 + 0.1 / 41, 12);
+    expect(bandes[40]?.sigma).toBeCloseTo((0.1 * Math.sqrt(40)) / 41, 12);
+  });
+
+  it("causalité par préfixe : ajouter des points ne modifie aucune bande ni aucun z passé", () => {
+    // Série irrégulière : oscillations, pics isolés et trous (k multiples de 23, plage 250..289).
+    const serie: PointPremium[] = [];
+    for (let k = 0; k < 480; k++) {
+      if (k % 23 === 0 || (k >= 250 && k < 290)) continue;
+      const pic = k % 97 === 0 ? 0.4 : 0;
+      serie.push({ t: k * HEURE_MS, premiumPct: 0.05 * Math.sin(k / 5) + 0.02 * Math.cos(k / 17) + pic });
+    }
+    const complete = bandesGlissantes(serie);
+    let disponibles = 0;
+    for (let n = 1; n <= serie.length; n++) {
+      const prefixe = serie.slice(0, n);
+      expect(bandesGlissantes(prefixe)).toEqual(complete.slice(0, n));
+      const bande = complete[n - 1] ?? null;
+      const attendu = bande === null ? null : zPoint(prefixe[n - 1]!.premiumPct, bande);
+      expect(statsPremium(prefixe).zGlissant7j).toBe(attendu);
+      if (bande !== null) disponibles++;
+    }
+    // Le test porte bien sur des bandes calculées, pas seulement sur des null.
+    expect(disponibles).toBeGreaterThan(300);
+  });
+
+  it("un pic final ne repeint pas le passé : seules la bande et le z du pic le voient", () => {
+    const base = serieHoraire(100, (k) => 0.1 + 0.01 * Math.sin(k));
+    const avecPic = [...base, { t: 100 * HEURE_MS, premiumPct: 5 }];
+    const bandesBase = bandesGlissantes(base);
+    const bandesPic = bandesGlissantes(avecPic);
+    expect(bandesPic.slice(0, 100)).toEqual(bandesBase);
+    // Le pic entre dans sa propre fenêtre (point courant inclus) : z élevé mais borné par √(n − 1).
+    const z = statsPremium(avecPic).zGlissant7j;
+    expect(z).not.toBeNull();
+    expect(z!).toBeGreaterThan(9);
+    expect(z!).toBeLessThanOrEqual(Math.sqrt(100) + 1e-9);
   });
 });
 
-describe("zPoint — z-score d'un premium vs des bandes", () => {
+describe("zPoint — z-score d'un premium vs une bande", () => {
   it("z exact : (p − moyenne) / σ", () => {
-    const bandes = { moyenne: 15.5, sigma: 8.65544144839919 };
-    // Cohérent avec z30j de la série 1..30 : zPoint(30) = 1.6752467319482305.
-    expect(zPoint(30, bandes)).toBeCloseTo(1.6752467319482305, 9);
+    const bande = { moyenne: 15.5, sigma: 8.65544144839919 };
+    // Cohérent avec la série 1..30 : zPoint(30) = 1.6752467319482305.
+    expect(zPoint(30, bande)).toBeCloseTo(1.6752467319482305, 9);
     // La moyenne elle-même a un z de 0.
-    expect(zPoint(15.5, bandes)).toBeCloseTo(0, 9);
+    expect(zPoint(15.5, bande)).toBeCloseTo(0, 9);
     // Signe négatif si p < moyenne.
-    expect(zPoint(15.5 - 8.65544144839919, bandes)).toBeCloseTo(-1, 9);
+    expect(zPoint(15.5 - 8.65544144839919, bande)).toBeCloseTo(-1, 9);
   });
 });

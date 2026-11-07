@@ -15,12 +15,15 @@ import {
   abonnerDominance,
   alignerJournalier,
   bougiesDominance,
+  chargerBtcHorsStables,
   chargerStablesJournalieres,
   CLE_CACHE_STABLES,
   contributionPiece,
+  dominanceBtcHorsStables,
   dominanceSurTotal,
   IDS_STABLECOINS_CMC,
   LANCEMENTS_STABLECOINS_CMC,
+  variationBtcHorsStables,
   type PointBrut,
   type SeriePiece,
 } from "./dominanceStablecoins";
@@ -1223,5 +1226,88 @@ describe("chemin de PRODUCTION (aucune dépendance injectée, module neuf) : dé
     const issues = await Promise.allSettled([30, 20, 10, 0].map((decalage) => bougies("1h", { endTime: fin - decalage * HEURE, limit: 3 })));
 
     expect(issues.map((issue) => issue.status)).toEqual(["rejected", "rejected", "fulfilled", "fulfilled"]);
+  });
+});
+
+// ─────────────────────────── BTC.D hors USDT/USDC/DAI (tuile CAP, SUG-41) ───────────────────────────
+
+describe("dominanceBtcHorsStables — BTC ÷ (TOTAL − stables), jambes CMC", () => {
+  const pieces = (usdt: number, usdc: number, dai: number): SeriePiece[] => [
+    { lancement: LANCEMENTS_STABLECOINS_CMC.USDT, points: [{ t: J28, v: usdt }] },
+    { lancement: LANCEMENTS_STABLECOINS_CMC.USDC, points: [{ t: J28, v: usdc }] },
+    { lancement: LANCEMENTS_STABLECOINS_CMC.DAI, points: [{ t: J28, v: dai }] },
+  ];
+
+  it("BTC = TOTAL − TOTAL2 ; stables = Σ des trois pièces au même instant", () => {
+    const [point, ...reste] = dominanceBtcHorsStables([{ t: J28, total: 1e12, total2: 0.41e12 }], pieces(60e9, 30e9, 10e9), 2 * JOUR);
+    expect(reste).toEqual([]);
+    expect(point?.t).toBe(J28);
+    expect(point?.btcD).toBeCloseTo(59, 9);
+    expect(point?.stableD).toBeCloseTo(10, 9);
+    expect(point?.btcDHorsStables).toBeCloseTo((100 * 590) / 900, 9); // 65,56 %
+  });
+
+  it("aucun point plutôt qu'un point faux : TOTAL invalide, BTC ≤ 0, pièce inconnue, stables ≥ TOTAL", () => {
+    const p = pieces(60e9, 30e9, 10e9);
+    expect(dominanceBtcHorsStables([
+      { t: J28, total: 0, total2: 0 },
+      { t: J28, total: Number.NaN, total2: 1 },
+      { t: J28, total: 1e12, total2: Number.NaN },
+      { t: J28, total: 1e12, total2: 1e12 }, // BTC nul
+      { t: J28 + 3 * JOUR, total: 1e12, total2: 0.4e12 }, // pièces muettes depuis 3 jours
+    ], p, 2 * JOUR)).toEqual([]);
+    expect(dominanceBtcHorsStables([{ t: J28, total: 90e9, total2: 10e9 }], p, 2 * JOUR)).toEqual([]);
+  });
+
+  it("avant le lancement des pièces, leur contribution vaut exactement 0 : BTC.D hors stables = BTC.D", () => {
+    const avant = LANCEMENTS_STABLECOINS_CMC.USDT - JOUR;
+    const [point] = dominanceBtcHorsStables([{ t: avant, total: 5e9, total2: 0.5e9 }], pieces(1, 1, 1), 2 * JOUR);
+    expect(point?.stableD).toBe(0);
+    expect(point?.btcDHorsStables).toBeCloseTo(point?.btcD ?? Number.NaN, 12);
+  });
+});
+
+describe("variationBtcHorsStables — Δ sur N jours au point exact, sinon null", () => {
+  const point = (t: number, btcD: number, btcDHorsStables: number) => ({ t, btcD, stableD: 10, btcDHorsStables });
+
+  it("dernier point contre le point daté exactement N jours avant", () => {
+    const v = variationBtcHorsStables([point(J28 - 30 * JOUR, 60, 66), point(J28 - JOUR, 58, 65), point(J28, 57.5, 66.5)], 30);
+    expect(v?.horsStables).toBeCloseTo(0.5, 9);
+    expect(v?.brute).toBeCloseTo(-2.5, 9); // BTC.D brute baisse, hors stables tient : fuite vers les stables
+  });
+
+  it("point de départ absent ou série vide → null (aucune interpolation)", () => {
+    expect(variationBtcHorsStables([point(J28 - 29 * JOUR, 60, 66), point(J28, 57, 66)], 30)).toBeNull();
+    expect(variationBtcHorsStables([], 30)).toBeNull();
+  });
+});
+
+describe("chargerBtcHorsStables — page CMC 1d des 90 derniers jours, sans cache persistant", () => {
+  it("4 requêtes CMC (global 1d + une par pièce, amorce de 3 jours), 90 points, rien d'écrit dans localStorage", async () => {
+    const cmc = serveur({ global: (debut, fin) => grille(debut, fin, JOUR, () => 1e12), pieces: piecesDixPourcent(J28) });
+    const points = await chargerBtcHorsStables({ fetcher: cmc.fetcher, maintenant: () => MAINTENANT });
+    expect(cmc.mock).toHaveBeenCalledTimes(4);
+    const globaux = cmc.appels().filter((url) => url.pathname.includes("global-metrics"));
+    expect(globaux).toHaveLength(1);
+    expect(globaux[0]?.searchParams.get("interval")).toBe("1d");
+    expect(secondes(globaux[0], "timeStart")).toBe(J29 - 89 * JOUR);
+    expect(secondes(globaux[0], "timeEnd")).toBe(J29);
+    for (const id of IDS) {
+      const [appel] = cmc.appelsPiece(id);
+      expect(secondes(appel, "timeStart")).toBe(J29 - 89 * JOUR - 3 * JOUR);
+      expect(appel?.searchParams.get("interval")).toBe("1d");
+    }
+    expect(points).toHaveLength(90);
+    expect(points.at(-1)?.t).toBe(J29); // barre du jour : V1 (ligne du 28/10), comme STABLE.D
+    expect(points.every((p) => Math.abs(p.btcDHorsStables - (100 * 590) / 900) < 1e-9)).toBe(true);
+    expect(stockage.size).toBe(0);
+  });
+
+  it("panne CMC : erreur explicite, cause conservée, aucun repli", async () => {
+    const cmc = serveur({ global: (debut, fin) => grille(debut, fin, JOUR, () => 1e12), pieces: { 825: pieceConstante(825, 60e9), 3408: pieceConstante(3408, 30e9) } });
+    const erreur = await chargerBtcHorsStables({ fetcher: cmc.fetcher, maintenant: () => MAINTENANT }).catch((e: unknown) => e);
+    expect(erreur).toBeInstanceOf(Error);
+    expect((erreur as Error).message).toMatch(/^BTC\.D hors USDT\/USDC\/DAI indisponible : CoinMarketCap public ne répond pas — aucun repli/);
+    expect(String((erreur as Error).cause)).toContain("CoinMarketCap public erreur 500");
   });
 });

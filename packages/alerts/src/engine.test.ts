@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import type { Candle } from "@axiom/types";
 import { computeIndicator, getIndicator } from "@axiom/indicators";
-import { alerteActiveAuTemps, echeanceAlerteValide, estFrontOnly, evaluerAlertes, prochaineEcheanceAlerte, typesDeDef, validerComposite } from "./engine";
+import { alerteActiveAuTemps, conditionSupporteTimeframe, echeanceAlerteValide, estFrontOnly, evaluerAlertes, prochaineEcheanceAlerte, typesDeDef, validerComposite } from "./engine";
 import type { AlertDef, Condition, ConditionSimple, ContexteAlerte } from "./types";
 
 /** Bougie plate (open=high=low=close) au temps `time`. */
@@ -66,6 +66,26 @@ describe("contrat de timeframe RVOL saisonnier", () => {
   });
   it("évalue le RVOL H1 et laisse les autres indicateurs hérités inchangés", () => {
     expect(evaluerAlertes([def(condition, { timeframe: "1h", arme: true })], { maintenant: 10, dernierPrix: 100, candles }).declenchements).toHaveLength(1);
+  });
+});
+
+describe("paramètre « unite » réservé au graphe (SUG-1, phase 1)", () => {
+  const candles = Array.from({ length: 40 }, (_, i) => candle(i * 60_000, 100 + i));
+  const sma: Condition = { type: "indicateur-seuil", indicateurId: "sma", params: { length: 3 }, output: "sma", comparateur: ">", valeur: 0 };
+  const smaUnite: Condition = { ...sma, params: { length: 3, unite: "4h" } };
+  it("n'évalue jamais une condition qui porte une unité, seule ou en composite (navigateur et daemon)", () => {
+    expect(conditionSupporteTimeframe(sma, "1m")).toBe(true);
+    expect(conditionSupporteTimeframe(smaUnite, "1m")).toBe(false);
+    expect(conditionSupporteTimeframe({ ...smaUnite, params: { unite: "" } }, "1m")).toBe(false);
+    const croisement: Condition = { type: "indicateur-croisement", indicateurId: "macd", params: { unite: "1d" }, outputA: "macd", outputB: "signal", sens: "hausse" };
+    expect(conditionSupporteTimeframe(croisement, "1h")).toBe(false);
+    for (const c of [smaUnite, { type: "composite", conditions: [smaUnite, { type: "prix-croise", niveau: 90, sens: "hausse" }] }] as Condition[]) {
+      const a = def(c, { timeframe: "1m" });
+      const result = evaluerAlertes([a], { maintenant: 10, dernierPrix: 200, candles });
+      expect(result.declenchements).toHaveLength(0);
+      expect(result.defs[0]).toBe(a); // jamais calibrée
+    }
+    expect(evaluerAlertes([def(sma, { timeframe: "1m" })], { maintenant: 10, dernierPrix: 200, candles }).defs[0]!.arme).toBeDefined();
   });
 });
 

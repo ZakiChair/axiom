@@ -33,15 +33,25 @@ Chaque exécutant lit la conception et `BUILD-CONTRACT.md` avant son lot.
 - Aucun chiffre de performance dans l'interface. Mention exacte des signaux précoces :
   `signal précoce non mesuré — lecture indicative, jamais une promesse`.
 - Budget d'entrée bloquant : 1 220 000 octets bruts, 360 000 gzip. Départ : 1 188 293 / 354 533.
-  Sous 3 000 de marge gzip, libérer des octets avant de livrer.
+  Sous 3 000 de marge gzip, libérer des octets avant de livrer. Les lots 1, 3 et 4 lancent
+  `pnpm --filter @axiom/web build` (le budget y est vérifié) et relèvent la taille d'entrée au rapport.
+- Commandes : chemins littéraux, jamais de variable shell dans une commande qui lance `bun`, le
+  gestionnaire de versions ou un script ; une commande composée qui le nomme est refusée par
+  l'isolement du worktree : la découper en commandes simples.
 - Coût d'un calcul complet à 3 000 bougies : sous 10 ms sur le poste du propriétaire
   (2,9 ms aujourd'hui).
 - Un lot ne touche que ses fichiers. Un fichier hors lot qui doit changer se signale au rapport.
 - Branche `feat/axis-sr-zones-fortes`, worktree `.worktrees/axis-sr-zones-fortes`. Ne rien
   reprendre de `feat/axis-toutes-unites`. Ni fusion, ni poussée, ni déploiement sans accord
   explicite du propriétaire.
-- Messages de commit en français, à l'impératif, terminés par
-  `Co-Authored-By: Claude <noreply@anthropic.com>`.
+- Messages de commit en français, à l'impératif, terminés par la ligne
+  `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- Exceptions autorisées par la conception (§5) au contrat de build : `@axiom/types` reçoit
+  exactement deux champs **optionnels**, `creux?: boolean` sur `MarqueurAnnotation` et
+  `ancrageX?: "centre" | "droite"` sur `LabelAnnotation`, rien d'autre ; `stratAxisSr.amorceBougies`
+  = 3000 (`stratAxis` reste à 1500) ; `REFCLOSE_LIMIT` = 3000.
+- L'app web lit les **sources** de `@axiom/indicators` (`exports: ./src/index.ts`) : tout lot qui
+  change une définition d'indicateur lance aussi `pnpm --filter @axiom/web test`.
 
 ## Points de revue
 
@@ -75,11 +85,11 @@ l'utilisateur. Chacune a son test dans le lot propriétaire.
 | `apps/web/src/chart/auxProvider.ts` (+ test), `extensionSession.test.ts` | profondeur 3 000 | 4 |
 | `BUILD-CONTRACT.md`, `docs/axis-2026-10-07.md`, `README.md` | documents | 5 |
 
-Ordre : lots 1 et 2 en parallèle (fichiers disjoints), puis 3, 4, 5, 6.
+Ordre : lots 1, 2, 3, 4, 5, 6, l'un après l'autre : un seul implémenteur à la fois dans le worktree.
 
 ---
 
-### Lot 1 — Rendu : triangle creux et étiquette ancrée à droite (développeur web)
+### Task 1 — Lot 1 : Rendu : triangle creux et étiquette ancrée à droite (développeur web)
 
 **Fichiers**
 - Modifier : `packages/types/src/index.ts` (`MarqueurAnnotation`, `LabelAnnotation`)
@@ -171,7 +181,7 @@ it("ruban long : seuls les points de la fenêtre visible (± 1 bougie) sont parc
 
 ---
 
-### Lot 2 — Moteur : pistes de zones et réactions en une passe (développeur paquets)
+### Task 2 — Lot 2 : Moteur : pistes de zones et réactions en une passe (développeur paquets)
 
 **Fichiers**
 - Créer : `packages/indicators/src/strategy/fixtures/btcusdt4h.ts`
@@ -191,6 +201,11 @@ export const REARMEMENT_REACTION_AXIS = 4;
 /** Zones fortes désactivées gardées pour le tracé (les plus récentes). */
 export const MAX_ZONES_CASSEES_AXIS = 12;
 
+export interface ZoneSrAxis {
+  // … champs existants inchangés, plus :
+  /** Rang de création (0, 1, 2…), unique : la même zone porte le même id quel que soit `fin`. */
+  id: number;
+}
 export interface ReactionZoneSrAxis {
   idx: number;          // bougie de décision, ≤ fin
   sens: 1 | -1;         // +1 réaction sur support, −1 sur résistance
@@ -198,7 +213,8 @@ export interface ReactionZoneSrAxis {
   zone: ZoneSrAxis;
 }
 export interface PisteZoneSrAxis {
-  /** Dernier état connu (à `fin` si active, à `finIdx` sinon) ; `nature` = rôle par position à cette bougie. */
+  /** Dernier état : à `fin` si active ; au moment de la désactivation sinon (après une éventuelle
+   *  fusion de la même bougie). `nature` = rôle par position face à close[`finIdx`]. */
   zone: ZoneSrAxis;
   active: boolean;
   /** Dernière bougie où la zone était active (`fin` si elle l'est encore). */
@@ -226,19 +242,16 @@ export function zonesSrAxis(
   n'est pas modifié.
 
 - [ ] **Étape 2 — tests en échec, `stratAxisSr.reactions.test.ts`.** L'oracle et le générateur
-  ci-dessous sont la référence de la conception (§4.5, §6.1) : les recopier tels quels.
+  ci-dessous sont la référence de la conception (§4.5, §6.1) : les recopier tels quels. Le
+  réarmement se compte par zone, donc par `id` : une clé dérivée du niveau ne convient pas, le
+  niveau d'une zone se déplace à chaque fusion.
 
 ```ts
-const cleZone = (z: ZoneSrAxis, candles: Candle[]): string => {
-  const o = candles[z.deIdx]!;
-  return `${z.deIdx}:${Math.abs(z.niveau - o.high) <= Math.abs(z.niveau - o.low) ? "h" : "b"}`;
-};
-
 /** Référence lente : zones connues après i − 1 (moteur relancé à chaque bougie), règle appliquée telle quelle. */
 function reactionsNaives(candles: Candle[], g: number, forceMin: number, fin: number): string[] {
   const flux = fluxAxis(candles, undefined, 20, 6);
   const atr = rma(trueRange(candles), 14);
-  const dernier = new Map<string, number>();
+  const dernier = new Map<number, number>();
   const out: string[] = [];
   for (let i = 1; i <= fin; i++) {
     const c = candles[i]!;
@@ -252,10 +265,9 @@ function reactionsNaives(candles: Candle[], g: number, forceMin: number, fin: nu
         ? c.low <= z.haut && c.close > z.haut && position >= 0.5
         : c.high >= z.bas && c.close < z.bas && position <= 0.5;
       if (!reagit) continue;
-      const cle = cleZone(z, candles);
-      if (i - (dernier.get(cle) ?? -99) < 4) continue;
-      dernier.set(cle, i);
-      out.push(`${i}:${support ? 1 : -1}:${cle}`);
+      if (i - (dernier.get(z.id) ?? -99) < 4) continue;
+      dernier.set(z.id, i);
+      out.push(`${i}:${support ? 1 : -1}:${z.id}`);
     }
   }
   return out.sort();
@@ -264,7 +276,7 @@ function reactionsNaives(candles: Candle[], g: number, forceMin: number, fin: nu
 /** Moteur en une passe, mêmes entrées, même format trié. */
 const reactionsMoteur = (candles: Candle[], g: number, forceMin: number, fin: number) => {
   const r = zonesSrAxis(candles, fluxAxis(candles, undefined, 20, 6), rma(trueRange(candles), 14), g, 0.5, 1.5, 4, fin, forceMin);
-  return { r, texte: r.reactions.map((e) => `${e.idx}:${e.sens}:${cleZone(e.zone, candles)}`).sort() };
+  return { r, texte: r.reactions.map((e) => `${e.idx}:${e.sens}:${e.zone.id}`).sort() };
 };
 const court = (r: ReactionZoneSrAxis[]) => r.map((e) => `${e.idx}${e.sens > 0 ? "S" : "R"}`).join(" ");
 
@@ -294,18 +306,19 @@ function serieSynthetique(n: number, graine: number): Candle[] {
 
   | Test | Entrées | Attendu |
   | --- | --- | --- |
-  | synthétique | `serieSynthetique(600, 7)`, g = 3, seuil 3, fin 599 | `syn[0].close` ≈ 98.95512335933745 ; texte = oracle ; 112 évènements (58 S, 54 R) ; début `32S 39S 46R 48S 56S 60R 62S 64R` ; fin `555R 576S 585R 599S` ; 21 évènements sur zone inversée ; pistes : 3 actives, 7 désactivées |
+  | synthétique | `serieSynthetique(600, 7)`, g = 3, seuil 3, fin 599 | `syn[0].close` ≈ 98.95512335933745 ; texte = oracle ; 112 évènements (58 S, 54 R) ; début `32S 39S 46R 48S 56S 60R 62S 64R` ; fin `555R 576S 585R 599S` ; 21 évènements sur zone inversée ; pistes : 3 actives, 5 désactivées de `finIdx` `[555, 496, 407, 236, 184]` |
   | fixture dorée | `golden/fixture-ohlcv.json`, g = 5, fin 298 | seuil 6 : aucun évènement ; seuil 2 : texte = oracle et `73S 86S 92S 98S 102S 125R 130R 139R 147S 153S 161R 173S 188S 192R` |
   | BTC, tranche | `bougiesBtcusdt4h().slice(-1200)`, g = 5, seuil 6, fin 1199 | texte = oracle ; 50 évènements (32 S, 18 R) — délai du test 30 s |
   | BTC, référence | `bougiesBtcusdt4h()`, g = 5, seuil 6, fin 2999 | 122 évènements (62 S, 60 R) ; trois premiers idx 250, 262, 280 ; supports ≥ 2700 : `2733 2750 2766 2798 2803 2809 2853 2860 2896 2901 2904 2916 2928 2946 2957 2961 2974 2980 2985 2988` ; résistances ≥ 2700 : `2754 2761 2767 2811 2821 2824 2835 2838 2850 2859 2954` |
   | BTC, zones citées | même appel | évènement 2733 : zone `{ nature: "support", touches: 4, rejetsVolume: 2, inversions: 0, force: 6, deIdx: 2581, confirmationIdx: 2586 }`, bas ≈ 75592.65, haut ≈ 76529.83 ; évènement 2761 : `{ nature: "resistance", touches: 9, rejetsVolume: 6, inversions: 1, force: 15.5, deIdx: 951 }` |
-  | BTC, pistes | même appel | 20 actives dont 8 de force ≥ 6 ; 12 désactivées, `finIdx` = `[2986, 2954, 2858, 2784, 2692, 2631, 2591, 2568, 2558, 2275, 2168, 2084]` ; active la plus proche du close 77582.02 parmi les fortes : support [75626.55 – 76601.83], 5 touches, 2 rejets, `confirmationIdx` 2586 ; résistance [85314.76 – 86430.38], 12 touches, 7 rejets, inversée, `confirmationIdx` 956 ; résistance [86702.87 – 87649.68], 8 touches, 4 rejets, inversée |
+  | BTC, pistes | même appel | 20 actives dont 8 de force ≥ 6 ; 12 désactivées (les plus récentes des 27 zones fortes désactivées), `finIdx` = `[2986, 2954, 2858, 2692, 2591, 2568, 2558, 2275, 2168, 2084, 1997, 1922]` ; active la plus proche du close 77582.02 parmi les fortes : support [75626.55 – 76601.83], 5 touches, 2 rejets, `confirmationIdx` 2586 ; résistance [85314.76 – 86430.38], 12 touches, 7 rejets, inversée, `confirmationIdx` 956 ; résistance [86702.87 – 87649.68], 8 touches, 4 rejets, inversée |
   | pistes, forme | BTC tranche | pour chaque piste : `evolution[0].idx === zone.confirmationIdx`, idx strictement croissants, dernière entrée = `zone.bas`/`zone.haut` ; active ⇒ `finIdx === fin` |
   | causalité, préfixe | BTC tranche, k ∈ {300, 700, 1100} | réactions du préfixe `slice(0, k + 1)` (fin = k) = réactions de la série entière d'idx ≤ k |
   | causalité, futur altéré | BTC tranche, mêmes k, bougies > k remplacées par `{ ...c, high: 1e12 + i, low: 1, close: 1e12 - i, volume: 1e12 }` | réactions d'idx ≤ k inchangées |
-  | causalité, bandes | BTC tranche | pour chaque piste active et chaque entrée `e` de son `evolution` : la zone de même `cleZone` dans `zonesSrAxis(…, 48, e.idx).zones` a `bas`/`haut` égaux à ceux de `e` |
+  | causalité, bandes | BTC tranche | pour chaque piste active et chaque entrée `e` de son `evolution` : la zone de même `id` dans `zonesSrAxis(…, 48, e.idx).zones` existe et a `bas`/`haut` égaux à ceux de `e` (53 entrées vérifiées) |
+| identifiants | BTC tranche, k ∈ {300, 700, 1100} | ids uniques dans `zonesSrAxis(…, 48, k).zones` ; une zone de même id à `fin` = k et à `fin` = 1199 a mêmes `deIdx` et `confirmationIdx` ; id croissant avec `confirmationIdx` |
   | existant inchangé | fixture dorée, seuils 2 et 50 | `zones`, `support`, `resistance`, `supportHaut`, `resistanceBas` identiques pour les deux seuils |
-  | sans volume | BTC tranche, `volume: 0`, sans `buyVolume`/`sellVolume` | texte = oracle ; 21 évènements ; `rejetsVolume === 0` sur toutes les pistes |
+  | sans volume | BTC tranche, `volume: 0`, sans `buyVolume`/`sellVolume` | texte = oracle ; 21 évènements ; `rejetsVolume === 0` sur toutes les pistes ; aucun `NaN` dans les bornes |
   | série courte | `[]`, 1 bougie, 8 bougies | `reactions` et `pistes` vides, `support.length === n`, aucune exception |
   | bougies plates | synthétique où `i % 50 === 25` ⇒ `open = high = low = close` | texte = oracle ; 112 évènements ; aucun sur une bougie plate |
   | échelle | BTC tranche, prix × 1e-9 | même liste `idx:sens` qu'à l'échelle 1 |
@@ -317,20 +330,23 @@ function serieSynthetique(n: number, graine: number): Candle[] {
     et **avant** les cassures de la bougie `i`, appliquer la règle du §4.5 aux zones actives ;
     rôle = `z.niveau <= candles[i − 1].close` ; réarmement par zone (`REARMEMENT_REACTION_AXIS`) ;
     l'évènement garde une copie de la zone, `nature` mise au rôle ;
+  - chaque zone reçoit son `id` à la création (compteur partant de 0) ;
   - chaque zone tient son `evolution` : une entrée à sa création (bougie de confirmation), une
     à chaque fusion qui change ses bornes (au plus une par bougie, la dernière remplace) ;
   - à la désactivation (cassure ou plafond du vivier) pendant la bougie `i` : `finIdx = i − 1`,
-    et la zone rejoint les « cassées » si sa force atteint alors `forceZoneForte` ;
+    et la zone rejoint les « cassées » si sa force, à cet instant, atteint `forceZoneForte` ;
   - les chemins de sortie anticipée (`maxZonesSr ≤ 0`, série trop courte) rendent aussi
     `reactions` et `pistes`.
 
 - [ ] **Étape 5 — vérifier** : le fichier de l'étape 2 passe ; `stratAxisSr.test.ts` et
-  `stratAxis.test.ts` passent **sans modification** ; `pnpm --filter @axiom/indicators typecheck` → 0 erreur.
+  `stratAxis.test.ts` passent **sans modification** (le champ `id` ajouté aux zones ne doit casser
+  aucune assertion existante) ; `pnpm --filter @axiom/indicators test` et `typecheck` → vert ;
+  `pnpm --filter @axiom/web test` → vert.
 - [ ] **Étape 6 — commit** : `Suivre les zones d'AXIS S/R en une passe : pistes et réactions sur zone forte`.
 
 ---
 
-### Lot 3 — Définition : réglages, sorties, amorce, tracé, alerte (développeur paquets)
+### Task 3 — Lot 3 : Définition : réglages, sorties, amorce, tracé, alerte (développeur paquets)
 
 **Fichiers**
 - Modifier : `packages/indicators/src/strategy/stratAxisSr.ts` (en-tête, définition `stratAxisSr`, aides de tracé)
@@ -431,7 +447,10 @@ AXIS S/R réaction sur support fort [75592.65 – 76529.83] — 4 touches, 2 rej
 
 - [ ] **Étape 3 — test en échec, `packages/alerts/src/engine.axisSr.test.ts`**, sur le modèle de
   `engine.axis.test.ts` (même pilote `declenchements`, préfixes croissants, bougies closes) :
-  `bougiesBtcusdt4h()` importé de `../../indicators/src/strategy/fixtures/btcusdt4h`, condition
+  les bougies viennent du JSON, importé comme le fait déjà `engine.axis.test.ts`
+  (`import fixtureBtc from "../../indicators/src/strategy/fixtures/btcusdt-4h-3000.json"`), puis
+  converties en `Candle` dans le test (`sellVolume = volume − buyVolume`, `closed: true`). Importer
+  `fixtures/btcusdt4h.ts` depuis `packages/alerts` casse `tsc` (TS6059 : hors `rootDir`). Condition
   `{ type: "indicateur-seuil", indicateurId: "stratAxisSr", params: {}, output: "reactionSupport", comparateur: ">=", valeur: 1 }`,
   première évaluation à l'idx 2700 → déclenchements exactement aux 20 supports ≥ 2700 du lot 2 ;
   même test sur `reactionResistance` → les 11 résistances ≥ 2700. Délai 60 s par test.
@@ -440,12 +459,14 @@ AXIS S/R réaction sur support fort [75592.65 – 76529.83] — 4 touches, 2 rej
   textes ; mettre à jour l'en-tête du fichier (points 2 et 3 de la liste, plus les signaux
   précoces et la profondeur de 3 000 bougies).
 - [ ] **Étape 6 — vérifier** : `pnpm --filter @axiom/indicators test`, `pnpm --filter @axiom/alerts test`,
-  les deux `typecheck` → tout vert ; `stratAxis.test.ts` non modifié.
+  `pnpm --filter @axiom/web test`, et les trois `typecheck` → tout vert ; `stratAxis.test.ts` non
+  modifié. Un test web qui épingle l'ancien nombre de réglages ou de sorties d'AXIS S/R se met à
+  jour dans ce lot (fichier nommé au rapport).
 - [ ] **Étape 7 — commit** : `Tracer les zones d'AXIS S/R par force et marquer les réactions sur zone forte`.
 
 ---
 
-### Lot 4 — Profondeur : 3 000 bougies pour AXIS S/R et sa référence (développeur web)
+### Task 4 — Lot 4 : Profondeur : 3 000 bougies pour AXIS S/R et sa référence (développeur web)
 
 **Fichiers**
 - Modifier : `apps/web/src/chart/auxProvider.ts` (`REFCLOSE_LIMIT`, chargement de `refClose`)
@@ -465,7 +486,13 @@ expect(amorceMinimale(["stratAxis"])).toBe(1500);
 expect(limitePageAmorce(500, 3000, 500)).toBe(500);
 expect(limitePageAmorce(2800, 3000, 500)).toBe(200);
 expect(REFCLOSE_LIMIT).toBeGreaterThanOrEqual(3000); // la référence couvre l'amorce la plus longue
+expect(PLAFOND_BOUGIES_GRAPHE).toBeGreaterThanOrEqual(3000); // data/profondeurHistorique.ts : 20 000
 ```
+
+  Plus un test « l'extension compte en BOUGIES : 500 → 3 000 en cinq pages de 500 (AXIS S/R) »,
+  copie du test existant à 1 500 avec `bougiesMin: amorceMinimale(["stratAxisSr"])` : 5 pages,
+  `limits` = `[500, 500, 500, 500, 500]`, tampon de 3 000 bougies, puis 0 page au second appel
+  (plafond actuel de 8 pages par extension, `MAX_PAGES_SESSION`).
 
 - [ ] **Étape 2 — tests en échec, `auxProvider.test.ts`** : remplacer le test « la source
   complète (≥ 1 500 bougies) couvre l'amorce en deux pages fusionnées » par les deux suivants
@@ -490,7 +517,7 @@ expect(REFCLOSE_LIMIT).toBeGreaterThanOrEqual(3000); // la référence couvre l'
 
 ---
 
-### Lot 5 — Documents (orchestrateur)
+### Task 5 — Lot 5 : Documents (orchestrateur)
 
 **Fichiers** : `BUILD-CONTRACT.md`, `docs/axis-2026-10-07.md`, `README.md`.
 
@@ -508,7 +535,7 @@ expect(REFCLOSE_LIMIT).toBeGreaterThanOrEqual(3000); // la référence couvre l'
 
 ---
 
-### Lot 6 — Preuves et revue finale (orchestrateur et réviseur)
+### Task 6 — Lot 6 : Preuves et revue finale (orchestrateur et réviseur)
 
 - [ ] `pnpm check` → `==> [ci] OK` ; relever les comptes de tests et le budget d'entrée
   (départ 1 188 293 / 354 533 ; marge gzip ≥ 3 000 exigée).

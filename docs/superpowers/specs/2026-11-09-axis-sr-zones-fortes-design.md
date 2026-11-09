@@ -343,7 +343,7 @@ Pour `i ≤ fin` : 1 si la bougie porte au moins un évènement de ce sens, 0 si
      le premier à l'index 250), dont 115 depuis l'index 400 (59 et 56) et 31 depuis l'index
      2 728 (2026-09-16T16:00Z) ; aucune bougie ne porte les deux sens ; un seul évènement tombe
      sur une bougie de signal confirmé (2 850) ;
-   - 29 zones fortes désactivées sur la période, dont les 12 plus récentes restent tracées ;
+   - 27 zones fortes désactivées sur la période, dont les 12 plus récentes restent tracées ;
    - premiers évènements depuis l'index 2 728 : 2 733 support, 2 750 support, 2 754 résistance,
      2 761 résistance, 2 766 support ;
    - signaux confirmés depuis l'index 2 728 : achat 2 740, vente 2 850, achat 2 937, vente 2 942.

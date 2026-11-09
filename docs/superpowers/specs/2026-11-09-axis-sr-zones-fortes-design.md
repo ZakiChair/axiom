@@ -317,8 +317,9 @@ Pour `i ≤ fin` : 1 si la bougie porte au moins un évènement de ce sens, 0 si
 
 1. **Oracle naïf.** Un test compare l'implémentation en une passe à une référence lente écrite
    dans le test : pour chaque bougie `i`, zones = `zonesSrAxis(…, maxZonesSr ≥ 24, fin = i − 1)`,
-   puis règle du §4.5 appliquée telle quelle. Mêmes évènements : sur le cas de référence BTC
-   du point 4 (la référence lente y prend moins d'une seconde), sur la fixture dorée existante
+   puis règle du §4.5 appliquée telle quelle. Mêmes évènements : sur les 1 200 dernières
+   bougies du cas de référence du point 4 (la référence lente y prend une demi-seconde ; près
+   de six sur les 3 000, d'où la tranche), sur la fixture dorée existante
    (300 bougies : abaisser `forceZoneForte` à 2 si le seuil 6 n'y produit rien) et sur une série
    synthétique qui produit au moins une réaction sur support fort, une sur résistance forte, un
    réarmement refusé puis accepté, une inversion, une désactivation.
@@ -332,14 +333,17 @@ Pour `i ≤ fin` : 1 si la bougie porte au moins un évènement de ce sens, 0 si
    `3db483de16113c976b95d1141f91828f32c8b5bcbe31e35aa631b227a73f42f2` ; colonnes `time`, `open`,
    `high`, `low`, `close`, `volume`, `buyVolume` ; `sellVolume = volume − buyVolume` ; toutes les
    bougies `closed: true`, donc `fin` = 2 999). Réglages par défaut, `refClose` = les closes de
-   la série (BTC est sa propre référence). Le constructeur peut déplacer le fichier, pas le
+   la série (convention du test ; dans l'application, la référence d'un graphe BTC est ETHUSDT). Le constructeur peut déplacer le fichier, pas le
    modifier. Les évènements se comptent par zone ; ici le compte par (bougie, sens) est le même.
    - 8 zones fortes actives à la dernière bougie, dont
      résistance [85 314,76 – 86 430,38] 12 touches, 7 rejets, inversée ;
      résistance [86 702,87 – 87 649,68] 8 touches, 4 rejets, inversée ;
      support [75 626,55 – 76 601,83] 5 touches, 2 rejets ;
-   - 115 évènements de réaction depuis l'index 400 (59 sur support, 56 sur résistance), 31
-     depuis l'index 2 728 (2026-09-16T16:00Z), aucune bougie portant les deux sens ;
+   - 122 évènements de réaction depuis la première bougie (62 sur support, 60 sur résistance,
+     le premier à l'index 250), dont 115 depuis l'index 400 (59 et 56) et 31 depuis l'index
+     2 728 (2026-09-16T16:00Z) ; aucune bougie ne porte les deux sens ; un seul évènement tombe
+     sur une bougie de signal confirmé (2 850) ;
+   - 29 zones fortes désactivées sur la période, dont les 12 plus récentes restent tracées ;
    - premiers évènements depuis l'index 2 728 : 2 733 support, 2 750 support, 2 754 résistance,
      2 761 résistance, 2 766 support ;
    - signaux confirmés depuis l'index 2 728 : achat 2 740, vente 2 850, achat 2 937, vente 2 942.

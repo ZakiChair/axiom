@@ -6,6 +6,9 @@
  * jamais au montage. Culling par visibleRange : on ne dessine que ce qui
  * intersecte [de, a) ; un ruban n'est parcouru que sur [de − 1, a].
  * Ordre : rubans (fond) → segments → marqueurs → labels centrés → labels à droite.
+ * Tout trait plein remet le pointillé à zéro (`setLineDash([])`) : sur candle_pane,
+ * KLineChart trace la ligne du dernier prix en pointillé [4, 4] juste avant le draw
+ * du pont, sans la refermer d'un save/restore.
  */
 import type { AnnotationsIndicateur, CibleAnnotation, LabelAnnotation } from "@axiom/types";
 import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
@@ -86,7 +89,7 @@ export function dessinerAnnotationsPane(
     if (s.cible !== cible) continue;
     if (s.aIdx < fenetre.de || s.deIdx >= fenetre.a) continue;
     ctx.save();
-    if (s.trait === "pointille") ctx.setLineDash([4, 4]);
+    ctx.setLineDash(s.trait === "pointille" ? [4, 4] : []);
     ctx.strokeStyle = couleurAnnotation(s.couleur);
     ctx.lineWidth = 1.5;
     ctx.beginPath();
@@ -103,6 +106,7 @@ export function dessinerAnnotationsPane(
     const y = axes.convertirY(m.valeur);
     const creux = m.creux === true;
     const t = creux ? DEMI_TRIANGLE_CREUX : DEMI_TRIANGLE;
+    if (creux) ctx.setLineDash([]); // contour plein, même après la ligne du dernier prix
     ctx.beginPath();
     if (m.forme === "triangleHaut") {
       ctx.moveTo(x, y - t);
@@ -115,8 +119,9 @@ export function dessinerAnnotationsPane(
     }
     ctx.closePath();
     if (creux) {
-      // Signal précoce : contour seul. `lineWidth` reste posé, comme `fillStyle` et `font`
-      // ailleurs ici : KLineChart encadre déjà le `draw` du pont d'un save/restore.
+      // Signal précoce : contour seul. `lineWidth` et le pointillé remis à zéro restent posés,
+      // comme `fillStyle` et `font` ailleurs ici : KLineChart encadre déjà le `draw` du pont
+      // d'un save/restore.
       ctx.strokeStyle = couleurAnnotation(m.couleur);
       ctx.lineWidth = 1.5;
       ctx.stroke();

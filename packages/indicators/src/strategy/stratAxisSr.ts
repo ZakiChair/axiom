@@ -78,12 +78,20 @@ export const ZONE_SR_ATR_DEFAUT = 0.5;
 export const MAX_ZONES_SR_DEFAUT = 4;
 /** Plafond du vivier interne de zones S/R actives suivies au fil des bougies. */
 export const MAX_POOL_ZONES_AXIS = 24;
+/** Force à partir de laquelle une zone S/R est forte (seuil par défaut). */
+export const FORCE_ZONE_FORTE_DEFAUT = 6;
+/** Bougies minimales entre deux réactions d'une même zone. */
+export const REARMEMENT_REACTION_AXIS = 4;
+/** Zones fortes désactivées gardées pour le tracé (les plus récentes). */
+export const MAX_ZONES_CASSEES_AXIS = 12;
 
 /** Rôle d'une zone de structure par rapport au cours (« support » ≤ cours, « resistance » > cours). */
 export type NatureZoneSrAxis = "support" | "resistance";
 
 /** Zone future de support ou de résistance détectée causalement par `zonesSrAxis`. */
 export interface ZoneSrAxis {
+  /** Rang de création (0, 1, 2…), unique : la même zone porte le même id quel que soit `fin`. */
+  id: number;
   /** Rôle courant face au prix. */
   nature: NatureZoneSrAxis;
   /** Niveau central de la zone (moyenne des pivots fusionnés). */
@@ -110,6 +118,28 @@ export interface ZoneSrAxis {
   force: number;
 }
 
+/** Réaction sur une zone forte, décidée à la clôture de `idx` avec les zones connues après `idx − 1`. */
+export interface ReactionZoneSrAxis {
+  /** Bougie de décision, ≤ fin. */
+  idx: number;
+  /** +1 réaction sur support, −1 sur résistance. */
+  sens: 1 | -1;
+  /** État de la zone après la bougie idx − 1 ; `nature` = rôle par position face à close[idx − 1]. */
+  zone: ZoneSrAxis;
+}
+
+/** Vie d'une zone pour son tracé : zone active à `fin`, ou zone forte désactivée. */
+export interface PisteZoneSrAxis {
+  /** Dernier état : à `fin` si active ; au moment de la désactivation sinon (après une éventuelle
+   *  fusion de la même bougie). `nature` = rôle par position face à close[`finIdx`]. */
+  zone: ZoneSrAxis;
+  active: boolean;
+  /** Dernière bougie où la zone était active (`fin` si elle l'est encore). */
+  finIdx: number;
+  /** Bornes connues à la clôture : 1re entrée à `confirmationIdx`, puis une entrée par bougie où elles changent. */
+  evolution: Array<{ idx: number; bas: number; haut: number }>;
+}
+
 /** Sortie du moteur causal de zones de support et de résistance d'AXIS S/R. */
 export interface ResultatSrAxis {
   /** Futures zones actives retenues à la borne `fin`, triées par proximité au close[fin]. */
@@ -122,6 +152,11 @@ export interface ResultatSrAxis {
   supportHaut: Array<number | undefined>;
   /** Borne basse de la résistance active la plus proche à chaque bougie i. */
   resistanceBas: Array<number | undefined>;
+  /** Réactions sur zone forte (conception AXIS S/R, §4.5), par idx croissant. */
+  reactions: ReactionZoneSrAxis[];
+  /** Zones actives à `fin` (confirmationIdx croissant), puis au plus MAX_ZONES_CASSEES_AXIS zones
+   *  fortes au moment de leur désactivation (finIdx décroissant). */
+  pistes: PisteZoneSrAxis[];
 }
 
 /**
@@ -132,7 +167,13 @@ export interface ResultatSrAxis {
  * volume fort (`rvol ≥ seuilRvol`), et inversé une fois de polarité (R↔S) en cas de
  * cassure franche d'une zone renforcée (≥ 2 touches ou rejet sur volume fort ;
  * invalidée sinon). Les bougies > `fin` reportent le dernier support/résistance
- * décidé (anti-repaint). PURE.
+ * décidé (anti-repaint).
+ *
+ * Dans la même passe, sans relancer le moteur : les réactions sur zone forte
+ * (`force ≥ forceZoneForte`), décidées à la clôture de i avec les zones telles
+ * qu'après la bougie i − 1 et réarmées par zone après `REARMEMENT_REACTION_AXIS`
+ * bougies ; les pistes des zones (actives à `fin`, puis les fortes désactivées les
+ * plus récentes) avec leurs bornes connues à chaque clôture. PURE.
  */
 export function zonesSrAxis(
   candles: Candle[],
@@ -142,7 +183,8 @@ export function zonesSrAxis(
   zoneSrAtr = ZONE_SR_ATR_DEFAUT,
   seuilRvol = 1.5,
   maxZonesSr = MAX_ZONES_SR_DEFAUT,
-  fin = candles.length - 2
+  fin = candles.length - 2,
+  forceZoneForte = FORCE_ZONE_FORTE_DEFAUT
 ): ResultatSrAxis {
   const n = candles.length;
   const g = Math.max(2, Math.round(pivotSr));
@@ -152,8 +194,56 @@ export function zonesSrAxis(
   const resistance: Array<number | undefined> = new Array(n).fill(undefined);
   const supportHaut: Array<number | undefined> = new Array(n).fill(undefined);
   const resistanceBas: Array<number | undefined> = new Array(n).fill(undefined);
-  interface ZoneInterne extends ZoneSrAxis { active: boolean }
+  interface ZoneInterne extends ZoneSrAxis {
+    active: boolean;
+    /** Bornes connues à la clôture : une entrée à la confirmation, puis une par bougie où elles changent. */
+    evolution: Array<{ idx: number; bas: number; haut: number }>;
+    /** Bougie de la dernière réaction de la zone (réarmement). */
+    derniereReaction: number;
+  }
   const vivier: ZoneInterne[] = [];
+  const reactions: ReactionZoneSrAxis[] = [];
+  /** Zones fortes au moment de leur désactivation, dans l'ordre où elles sont désactivées. */
+  const cassees: Array<{ z: ZoneInterne; finIdx: number }> = [];
+
+  /** Copie publique d'une zone, sans l'état interne du suivi. */
+  const zonePublique = (z: ZoneInterne, nature: NatureZoneSrAxis): ZoneSrAxis => ({
+    id: z.id,
+    nature,
+    niveau: z.niveau,
+    bas: z.bas,
+    haut: z.haut,
+    demiLargeur: z.demiLargeur,
+    deIdx: z.deIdx,
+    confirmationIdx: z.confirmationIdx,
+    dernierIdx: z.dernierIdx,
+    touches: z.touches,
+    rejetsVolume: z.rejetsVolume,
+    inversions: z.inversions,
+    force: z.force,
+  });
+  /** Sortie du vivier pendant la bougie i (cassure ou plafond) : la zone est figée, active jusqu'à i − 1. */
+  const desactiver = (z: ZoneInterne, i: number): void => {
+    z.active = false;
+    if (z.force >= forceZoneForte) cassees.push({ z, finIdx: i - 1 });
+  };
+  /** Bornes connues à la clôture de i : au plus une entrée par bougie (la dernière fusion remplace). */
+  const noterBornes = (z: ZoneInterne, i: number): void => {
+    const derniere = z.evolution[z.evolution.length - 1];
+    if (derniere?.idx === i) {
+      derniere.bas = z.bas;
+      derniere.haut = z.haut;
+    } else if (derniere?.bas !== z.bas || derniere?.haut !== z.haut) {
+      z.evolution.push({ idx: i, bas: z.bas, haut: z.haut });
+    }
+  };
+  // Base de la demi-largeur à chaque bougie : l'ATR 14, à défaut l'amplitude de la bougie (au moins
+  // 0,2 % du close). Calculée avant la boucle, dans un tableau de nombres, pour que celle-ci ne lise
+  // jamais `atr[p]`, tantôt indéfini, tantôt nombre : JavaScriptCore (Bun, Safari) recompilait alors
+  // la passe sans fin, jusqu'à 7 ms au lieu de 0,9 ms.
+  const basesAtr = Float64Array.from(candles, (cb: Candle | undefined, k) =>
+    atr[k] ?? (cb === undefined ? 0 : Math.max(cb.high - cb.low, cb.close * 0.002))
+  );
 
   for (let i = 0; i < n; i++) {
     if (i > fin) {
@@ -167,6 +257,26 @@ export function zonesSrAxis(
     }
     const c = candles[i];
     if (c === undefined) continue;
+
+    // Réactions sur zone forte, décidées avec le vivier tel qu'après la bougie i − 1 : avant
+    // l'enregistrement du pivot p = i − g et avant les cassures de la bougie i. Rôle par position
+    // face à close[i − 1] ; une bougie plate (amplitude nulle) ne réagit jamais.
+    const closePrec = i > 0 ? candles[i - 1]?.close : undefined;
+    const amplitude = c.high - c.low;
+    if (closePrec !== undefined && amplitude > 0) {
+      const position = (c.close - c.low) / amplitude;
+      for (const z of vivier) {
+        if (!z.active || z.force < forceZoneForte || i - z.derniereReaction < REARMEMENT_REACTION_AXIS) continue;
+        const surSupport = z.niveau <= closePrec;
+        const reagit = surSupport
+          ? c.low <= z.haut && c.close > z.haut && position >= 0.5
+          : c.high >= z.bas && c.close < z.bas && position <= 0.5;
+        if (!reagit) continue;
+        z.derniereReaction = i;
+        reactions.push({ idx: i, sens: surSupport ? 1 : -1, zone: zonePublique(z, surSupport ? "support" : "resistance") });
+      }
+    }
+
     if (i >= 2 * g) {
       const p = i - g;
       const cp = candles[p];
@@ -184,8 +294,7 @@ export function zonesSrAxis(
           if (cg.high >= cp.high || cd.high > cp.high) pHaut = false;
           if (cg.low <= cp.low || cd.low < cp.low) pBas = false;
         }
-        const baseAtr = atr[p] ?? Math.max(cp.high - cp.low, cp.close * 0.002);
-        const demi = Math.max(cp.close * 0.0005, kAtr * baseAtr);
+        const demi = Math.max(cp.close * 0.0005, kAtr * basesAtr[p]!);
         const volFort = (flux[p]?.rvol ?? 0) >= seuilRvol ? 1 : 0;
         const enregistrer = (prixPivot: number, nature: NatureZoneSrAxis): void => {
           let proche: ZoneInterne | undefined;
@@ -207,8 +316,10 @@ export function zonesSrAxis(
             proche.haut = proche.niveau + proche.demiLargeur;
             proche.dernierIdx = i;
             proche.force = proche.touches + proche.rejetsVolume + (proche.inversions > 0 ? 0.5 : 0);
+            noterBornes(proche, i);
           } else {
             vivier.push({
+              id: vivier.length,
               nature,
               niveau: prixPivot,
               bas: prixPivot - demi,
@@ -222,9 +333,11 @@ export function zonesSrAxis(
               inversions: 0,
               force: 1 + volFort,
               active: true,
+              evolution: [{ idx: i, bas: prixPivot - demi, haut: prixPivot + demi }],
+              derniereReaction: -Infinity,
             });
             const actives = vivier.filter((z) => z.active);
-            if (actives.length > MAX_POOL_ZONES_AXIS && actives[0] !== undefined) actives[0].active = false;
+            if (actives.length > MAX_POOL_ZONES_AXIS && actives[0] !== undefined) desactiver(actives[0], i);
           }
         };
         if (pHaut) enregistrer(cp.high, "resistance");
@@ -241,7 +354,7 @@ export function zonesSrAxis(
           z.dernierIdx = i;
           z.force = z.touches + z.rejetsVolume + 0.5;
         } else {
-          z.active = false;
+          desactiver(z, i);
         }
       } else if (z.nature === "support" && c.close < z.bas - z.demiLargeur) {
         if (z.inversions === 0 && (z.touches >= 2 || z.rejetsVolume >= 1)) {
@@ -250,7 +363,7 @@ export function zonesSrAxis(
           z.dernierIdx = i;
           z.force = z.touches + z.rejetsVolume + 0.5;
         } else {
-          z.active = false;
+          desactiver(z, i);
         }
       }
     }
@@ -275,13 +388,25 @@ export function zonesSrAxis(
     }
   }
 
+  // Pistes : zones actives à la dernière bougie décidée, puis les zones fortes désactivées les plus
+  // récentes. Une zone désactivée n'évolue plus : son état final est celui de sa désactivation.
+  const pistes: PisteZoneSrAxis[] = [];
+  const ajouterPiste = (z: ZoneInterne, active: boolean, finIdx: number): void => {
+    const ref = candles[finIdx]?.close;
+    if (ref === undefined) return;
+    pistes.push({ zone: zonePublique(z, z.niveau <= ref ? "support" : "resistance"), active, finIdx, evolution: z.evolution });
+  };
+  const derniereDecidee = Math.min(fin, n - 1);
+  for (const z of vivier) if (z.active) ajouterPiste(z, true, derniereDecidee);
+  for (const { z, finIdx } of cassees.slice(-MAX_ZONES_CASSEES_AXIS).reverse()) ajouterPiste(z, false, finIdx);
+
   const prixRef = candles[fin]?.close;
   if (capZones <= 0 || fin < 2 * g || prixRef === undefined) {
-    return { zones: [], support, resistance, supportHaut, resistanceBas };
+    return { zones: [], support, resistance, supportHaut, resistanceBas, reactions, pistes };
   }
   const actives: ZoneSrAxis[] = vivier
     .filter((z) => z.active)
-    .map(({ active: _a, ...z }) => ({ ...z, nature: z.niveau <= prixRef ? "support" : "resistance" }));
+    .map((z) => zonePublique(z, z.niveau <= prixRef ? "support" : "resistance"));
   const supports = actives.filter((z) => z.nature === "support").sort((a, b) => prixRef - a.niveau - (prixRef - b.niveau));
   const resistances = actives.filter((z) => z.nature === "resistance").sort((a, b) => a.niveau - prixRef - (b.niveau - prixRef));
   const demiCap = Math.ceil(capZones / 2);
@@ -295,7 +420,7 @@ export function zonesSrAxis(
   const zones = retenues
     .sort((a, b) => Math.abs(a.niveau - prixRef) - Math.abs(b.niveau - prixRef))
     .slice(0, capZones);
-  return { zones, support, resistance, supportHaut, resistanceBas };
+  return { zones, support, resistance, supportHaut, resistanceBas, reactions, pistes };
 }
 
 const pct = (v: number, decimales: number): string => `${v > 0 ? "+" : ""}${v.toFixed(decimales)} %`;

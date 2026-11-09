@@ -313,6 +313,8 @@ export interface MarqueurAnnotation {
   couleur: string;
   cible: CibleAnnotation;
   info?: string;
+  /** true = triangle au trait, non rempli, plus petit (signal précoce). Absent = rendu actuel. */
+  creux?: boolean;
 }
 
 /** Étiquette texte ancrée à une bougie. `position` : "dessous" = sous le point (haussières). */
@@ -326,6 +328,9 @@ export interface LabelAnnotation {
   /** Diagnostic dans un pane : placement fixe sous le bord haut, hors axe de valeur. */
   ancrageY?: "valeur" | "haut-pane";
   info?: string;
+  /** "droite" = texte à droite de la bougie, aligné à gauche, centré verticalement sur `valeur`
+   *  (`position` ignorée). Absent ou "centre" = rendu actuel. */
+  ancrageX?: "centre" | "droite";
 }
 
 /**

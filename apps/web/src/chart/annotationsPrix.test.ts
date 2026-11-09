@@ -125,6 +125,45 @@ describe("AnnotationsPrix", () => {
     expect(figure?.styles.backgroundColor).toBe("transparent");
   });
 
+  it("figure marqueur creux : un seul polygone au trait, demi-base 4, jamais rempli", () => {
+    const figures = capture.template?.createPointFigures?.({
+      overlay: { extendData: { genre: "marqueur", forme: "triangleHaut", couleur: "--up", creux: true } },
+      coordinates: [{ x: 30, y: 100 }],
+    } as unknown as OverlayCreateFiguresCallbackParams);
+    expect(figures).toEqual([
+      {
+        type: "polygon",
+        attrs: { coordinates: [{ x: 30, y: 96 }, { x: 26, y: 104 }, { x: 34, y: 104 }] },
+        // canvasTokens mocké sur son repli : la couleur résolue de --up est UP_REPLI.
+        styles: { style: "stroke", borderColor: "#10b981", borderSize: 1.5 },
+      },
+    ]);
+  });
+
+  it("figure label ancré à droite : x + 8, aligné à gauche, centré sur la valeur, fond transparent", () => {
+    const figures = capture.template?.createPointFigures?.({
+      overlay: { extendData: { genre: "label", texte: "R forte · 12", couleur: "--down", dessous: false, droite: true } },
+      coordinates: [{ x: 30, y: 100 }],
+    } as unknown as OverlayCreateFiguresCallbackParams);
+    expect(figures).toHaveLength(1);
+    const [figure] = figures as OverlayFigure[];
+    expect(figure?.type).toBe("text");
+    expect(figure?.attrs).toEqual({ x: 38, y: 100, text: "R forte · 12", align: "left", baseline: "middle" });
+    expect(figure?.styles.backgroundColor).toBe("transparent");
+  });
+
+  it("appliquer : transmet `creux` du marqueur et l'ancrage à droite du label à l'overlay", () => {
+    const annots = {
+      marqueurs: [{ idx: 5, valeur: 7, forme: "triangleBas", couleur: "--down", cible: "prix", creux: true }],
+      labels: [{ idx: 5, valeur: 7, texte: "R forte · 12", couleur: "--down", cible: "prix", ancrageX: "droite" }],
+    };
+    ann.appliquer("inst1", defSepare, annots as never, candles);
+    expect(chart.crees.map((o) => o.extendData)).toEqual([
+      { genre: "marqueur", forme: "triangleBas", couleur: "--down", creux: true, info: undefined },
+      { genre: "label", texte: "R forte · 12", couleur: "--down", dessous: false, droite: true, info: undefined },
+    ]);
+  });
+
   it("arité des points : 2 pour un segment, 1 pour un marqueur et un label", () => {
     const mixte = {
       segments: [{ deIdx: 1, deValeur: 8, aIdx: 5, aValeur: 7, trait: "plein", couleur: "--up", cible: "prix" }],

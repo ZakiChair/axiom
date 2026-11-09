@@ -54,8 +54,8 @@ function repliPour(token: string): string {
 /** Données portées par chaque overlay, discriminées par genre. */
 type ExtendAnnotation =
   | { genre: "segment"; trait: "plein" | "pointille"; couleur: string; info?: string }
-  | { genre: "marqueur"; forme: "triangleHaut" | "triangleBas"; couleur: string; info?: string }
-  | { genre: "label"; texte: string; couleur: string; dessous: boolean; info?: string };
+  | { genre: "marqueur"; forme: "triangleHaut" | "triangleBas"; couleur: string; creux?: boolean; info?: string }
+  | { genre: "label"; texte: string; couleur: string; dessous: boolean; droite?: boolean; info?: string };
 
 // ── Tooltip flottant singleton (DOM, pas canvas : var(--…) résolu nativement) ──
 
@@ -125,12 +125,27 @@ export function ensureAnnotationOverlayRegistered(): void {
         ];
       }
       if (ext.genre === "marqueur") {
-        const t = 6;
+        // Mêmes tailles qu'annotationsPane.ts : demi-base 6 (plein) ou 4 (creux, contour seul).
+        const creux = ext.creux === true;
+        const t = creux ? 4 : 6;
         const pts =
           ext.forme === "triangleHaut"
             ? [{ x: c0.x, y: c0.y - t }, { x: c0.x - t, y: c0.y + t }, { x: c0.x + t, y: c0.y + t }]
             : [{ x: c0.x, y: c0.y + t }, { x: c0.x - t, y: c0.y - t }, { x: c0.x + t, y: c0.y - t }];
-        return [{ type: "polygon", attrs: { coordinates: pts }, styles: { style: "fill", color: couleur } }];
+        const styles = creux
+          ? { style: "stroke", borderColor: couleur, borderSize: 1.5 }
+          : { style: "fill", color: couleur };
+        return [{ type: "polygon", attrs: { coordinates: pts }, styles }];
+      }
+      if (ext.droite === true) {
+        // Ancré à droite : 8 px après la bougie comme annotationsPane.ts, `dessous` ignoré.
+        return [
+          {
+            type: "text",
+            attrs: { x: c0.x + 8, y: c0.y, text: ext.texte, align: "left", baseline: "middle" },
+            styles: { color: couleur, size: 10, backgroundColor: "transparent" },
+          },
+        ];
       }
       return [
         {
@@ -221,7 +236,13 @@ export class AnnotationsPrix {
         groupId: ANNOTATION_GROUP,
         lock: true,
         points: [{ timestamp: t0, value: m.valeur }],
-        extendData: { genre: "marqueur", forme: m.forme, couleur: m.couleur, info: m.info } satisfies ExtendAnnotation,
+        extendData: {
+          genre: "marqueur",
+          forme: m.forme,
+          couleur: m.couleur,
+          creux: m.creux,
+          info: m.info,
+        } satisfies ExtendAnnotation,
       });
     }
     for (const l of (annotations.labels ?? []).filter((x) => x.cible === "prix")) {
@@ -237,6 +258,7 @@ export class AnnotationsPrix {
           texte: l.texte,
           couleur: l.couleur,
           dessous: l.position === "dessous",
+          droite: l.ancrageX === "droite",
           info: l.info,
         } satisfies ExtendAnnotation,
       });

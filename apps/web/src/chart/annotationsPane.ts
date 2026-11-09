@@ -4,9 +4,10 @@
  * la cible locale du pane : "prix" pour un def overlay (candle_pane), "pane" pour
  * un def à pane séparé. Couleurs = tokens CSS résolus AU DESSIN (canvasTokens),
  * jamais au montage. Culling par visibleRange : on ne dessine que ce qui
- * intersecte [de, a). Ordre : rubans (fond) → segments → marqueurs → labels.
+ * intersecte [de, a) ; un ruban n'est parcouru que sur [de − 1, a].
+ * Ordre : rubans (fond) → segments → marqueurs → labels centrés → labels à droite.
  */
-import type { AnnotationsIndicateur, CibleAnnotation } from "@axiom/types";
+import type { AnnotationsIndicateur, CibleAnnotation, LabelAnnotation } from "@axiom/types";
 import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 
 /** Replis RVB (thème dark) des tokens usuels des annotations — contexte sans DOM / token absent.
@@ -37,8 +38,14 @@ export interface AxesPane {
 
 /** Demi-base des triangles (même taille que les triangles CVD S/P d'orderflow.ts). */
 const DEMI_TRIANGLE = 6;
+/** Demi-base des triangles creux (signaux précoces), plus petits que les pleins. */
+const DEMI_TRIANGLE_CREUX = 4;
 /** Décalage vertical des labels par rapport au pivot (px). */
 const DECALAGE_LABEL = 8;
+/** Décalage horizontal des labels ancrés à droite de leur bougie (px). */
+const DECALAGE_LABEL_DROITE = 8;
+/** Écart vertical minimal entre deux labels ancrés à droite (px). */
+const ECART_LABELS_DROITE = 11;
 /** Sous la rangée de légende et ses contrôles flottants du pane. */
 const HAUT_LABEL_PANE = 32;
 
@@ -54,15 +61,20 @@ export function dessinerAnnotationsPane(
     for (const r of annotations.rubans ?? []) {
       const fin = r.deIdx + r.hauts.length - 1;
       if (fin < fenetre.de || r.deIdx >= fenetre.a) continue;
+      // Seuls les indices visibles, plus une bougie de chaque côté pour que les bords du
+      // polygone sortent de l'écran : un ruban de milliers de bougies ne coûte, à chaque
+      // image, que la largeur de la fenêtre.
+      const premier = Math.max(r.deIdx, fenetre.de - 1);
+      const dernier = Math.min(fin, fenetre.a);
       ctx.beginPath();
-      for (let k = 0; k < r.hauts.length; k++) {
-        const x = axes.convertirX(r.deIdx + k);
-        const y = axes.convertirY(r.hauts[k] ?? 0);
-        if (k === 0) ctx.moveTo(x, y);
+      for (let i = premier; i <= dernier; i++) {
+        const x = axes.convertirX(i);
+        const y = axes.convertirY(r.hauts[i - r.deIdx] ?? 0);
+        if (i === premier) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
-      for (let k = r.bas.length - 1; k >= 0; k--) {
-        ctx.lineTo(axes.convertirX(r.deIdx + k), axes.convertirY(r.bas[k] ?? 0));
+      for (let i = dernier; i >= premier; i--) {
+        ctx.lineTo(axes.convertirX(i), axes.convertirY(r.bas[i - r.deIdx] ?? 0));
       }
       ctx.closePath();
       ctx.fillStyle = rgbaTokenCanvas(r.couleur, r.alpha, repliPour(r.couleur));
@@ -89,7 +101,8 @@ export function dessinerAnnotationsPane(
     if (m.idx < fenetre.de || m.idx >= fenetre.a) continue;
     const x = axes.convertirX(m.idx);
     const y = axes.convertirY(m.valeur);
-    const t = DEMI_TRIANGLE;
+    const creux = m.creux === true;
+    const t = creux ? DEMI_TRIANGLE_CREUX : DEMI_TRIANGLE;
     ctx.beginPath();
     if (m.forme === "triangleHaut") {
       ctx.moveTo(x, y - t);
@@ -101,13 +114,26 @@ export function dessinerAnnotationsPane(
       ctx.lineTo(x + t, y - t);
     }
     ctx.closePath();
-    ctx.fillStyle = couleurAnnotation(m.couleur);
-    ctx.fill();
+    if (creux) {
+      // Signal précoce : contour seul. `lineWidth` reste posé, comme `fillStyle` et `font`
+      // ailleurs ici : KLineChart encadre déjà le `draw` du pont d'un save/restore.
+      ctx.strokeStyle = couleurAnnotation(m.couleur);
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = couleurAnnotation(m.couleur);
+      ctx.fill();
+    }
   }
 
+  const aDroite: Array<{ label: LabelAnnotation; y: number }> = [];
   for (const l of annotations.labels ?? []) {
     if (l.cible !== cible) continue;
     if (l.idx < fenetre.de || l.idx >= fenetre.a) continue;
+    if (l.ancrageX === "droite") {
+      aDroite.push({ label: l, y: axes.convertirY(l.valeur) });
+      continue;
+    }
     const x = axes.convertirX(l.idx);
     const hautPane = cible === "pane" && l.ancrageY === "haut-pane";
     const y = hautPane ? HAUT_LABEL_PANE : axes.convertirY(l.valeur);
@@ -117,5 +143,19 @@ export function dessinerAnnotationsPane(
     ctx.textBaseline = hautPane || dessous ? "top" : "bottom";
     ctx.fillStyle = couleurAnnotation(l.couleur);
     ctx.fillText(l.texte, x, hautPane ? y : dessous ? y + DECALAGE_LABEL : y - DECALAGE_LABEL);
+  }
+
+  // Labels ancrés à droite (étiquettes de zone), après les centrés : de haut en bas, chacun
+  // repoussé sous le précédent s'il en est à moins de ECART_LABELS_DROITE px.
+  aDroite.sort((p, q) => p.y - q.y);
+  let yPrecedent = Number.NEGATIVE_INFINITY;
+  for (const { label, y: yValeur } of aDroite) {
+    const y = yValeur < yPrecedent + ECART_LABELS_DROITE ? yPrecedent + ECART_LABELS_DROITE : yValeur;
+    ctx.font = "10px sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = couleurAnnotation(label.couleur);
+    ctx.fillText(label.texte, axes.convertirX(label.idx) + DECALAGE_LABEL_DROITE, y);
+    yPrecedent = y;
   }
 }

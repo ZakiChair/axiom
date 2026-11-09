@@ -2,7 +2,8 @@
  * dessinerAnnotationsPane — testé avec un contexte canvas FACTICE qui enregistre
  * les opérations (pattern vi.mock des tests chart existants) et des axes idx*10 /
  * valeur*2. On vérifie le tri par cible, le culling par visibleRange, le pointillé
- * (setLineDash [4,4]) et le polygone fermé du ruban.
+ * (setLineDash [4,4]), le polygone fermé du ruban et son découpage à la fenêtre,
+ * le triangle creux et les étiquettes ancrées à droite.
  *
  * `canvasTokens` est mocké sur son repli : les tests tournent en environnement
  * node (pas de `getComputedStyle`/`document`) — même pattern que position.test.ts.
@@ -110,5 +111,51 @@ describe("dessinerAnnotationsPane", () => {
     expect(convertirY).not.toHaveBeenCalled();
     expect(ctx.ops).toContain("fillText(0/4 venues,60,32)");
     expect(ctx.textBaseline).toBe("top");
+  });
+
+  it("marqueur creux : contour seul, demi-base 4, jamais rempli", () => {
+    const ctx = fauxCtx();
+    dessinerAnnotationsPane(ctx, { marqueurs: [
+      { idx: 3, valeur: 50, forme: "triangleHaut", couleur: "--up", cible: "prix", creux: true },
+      { idx: 5, valeur: 50, forme: "triangleBas", couleur: "--down", cible: "prix", creux: true },
+    ] }, "prix", AXES, FENETRE);
+    expect(ctx.ops).toEqual([
+      "beginPath", "moveTo(30,96)", "lineTo(26,104)", "lineTo(34,104)", "closePath", "stroke",
+      "beginPath", "moveTo(50,104)", "lineTo(46,96)", "lineTo(54,96)", "closePath", "stroke",
+    ]);
+  });
+
+  it("étiquettes ancrées à droite : à x + 8, centrées sur la valeur, écartées d'au moins 11 px", () => {
+    const ctx = fauxCtx();
+    dessinerAnnotationsPane(ctx, { labels: [
+      { idx: 9, valeur: 52, texte: "R forte · 8", couleur: "--down", cible: "prix", ancrageX: "droite" },
+      { idx: 9, valeur: 50, texte: "R forte · 12", couleur: "--down", cible: "prix", ancrageX: "droite" },
+      { idx: 9, valeur: 80, texte: "S fort · 5", couleur: "--up", cible: "prix", ancrageX: "droite" },
+    ] }, "prix", AXES, FENETRE);
+    expect(ctx.ops).toEqual(["fillText(R forte · 12,98,100)", "fillText(R forte · 8,98,111)", "fillText(S fort · 5,98,160)"]);
+    expect(ctx.textAlign).toBe("left");
+    expect(ctx.textBaseline).toBe("middle");
+  });
+
+  it("étiquette ancrée à droite : dessinée après les étiquettes centrées, `position` ignorée", () => {
+    const ctx = fauxCtx();
+    dessinerAnnotationsPane(ctx, { labels: [
+      { idx: 9, valeur: 50, texte: "R forte · 12", couleur: "--down", cible: "prix", ancrageX: "droite", position: "dessous" },
+      { idx: 4, valeur: 5, texte: "Div ▲", couleur: "--up", cible: "prix" },
+    ] }, "prix", AXES, FENETRE);
+    // Centrée : y = 10 - 8 (dessus par défaut). À droite : y = 100, sans décalage « dessous ».
+    expect(ctx.ops).toEqual(["fillText(Div ▲,40,2)", "fillText(R forte · 12,98,100)"]);
+  });
+
+  it("ruban long : seuls les points de la fenêtre visible (± 1 bougie) sont parcourus", () => {
+    const ctx = fauxCtx();
+    const n = 3000;
+    dessinerAnnotationsPane(ctx, { rubans: [
+      { deIdx: 0, hauts: new Array<number>(n).fill(60), bas: new Array<number>(n).fill(50), couleur: "--up", alpha: 0.2 },
+    ] }, "prix", AXES, { de: 1000, a: 1010 });
+    // 12 indices (999 à 1010) à l'aller et au retour : 1 moveTo + 23 lineTo, jamais 6 000.
+    expect(ctx.ops.filter((o) => o.startsWith("moveTo")).length).toBe(1);
+    expect(ctx.ops.filter((o) => o.startsWith("lineTo")).length).toBe(23);
+    expect(ctx.ops[1]).toBe("moveTo(9990,120)");
   });
 });

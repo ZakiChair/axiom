@@ -117,16 +117,18 @@ export interface LabelAnnotation {
   existants : x = idx × 10, y = valeur × 2)
 
 ```ts
-it("marqueur creux : contour seul, demi-base 4, jamais rempli", () => {
+it("marqueur creux : contour plein (pointillé hérité remis à zéro), demi-base 4, jamais rempli", () => {
   const ctx = fauxCtx();
   dessinerAnnotationsPane(ctx, { marqueurs: [
     { idx: 3, valeur: 50, forme: "triangleHaut", couleur: "--up", cible: "prix", creux: true },
     { idx: 5, valeur: 50, forme: "triangleBas", couleur: "--down", cible: "prix", creux: true },
   ] }, "prix", AXES, FENETRE);
   expect(ctx.ops).toEqual([
-    "beginPath", "moveTo(30,96)", "lineTo(26,104)", "lineTo(34,104)", "closePath", "stroke",
-    "beginPath", "moveTo(50,104)", "lineTo(46,96)", "lineTo(54,96)", "closePath", "stroke",
+    "setLineDash()", "beginPath", "moveTo(30,96)", "lineTo(26,104)", "lineTo(34,104)", "closePath", "stroke",
+    "setLineDash()", "beginPath", "moveTo(50,104)", "lineTo(46,96)", "lineTo(54,96)", "closePath", "stroke",
   ]);
+  expect(ctx.lineWidth).toBe(1.5);
+  expect(ctx.strokeStyle).toBe("#ef4444"); // repli de --down, dernier marqueur dessiné
 });
 
 it("étiquettes ancrées à droite : à x + 8, centrées sur la valeur, écartées d'au moins 11 px", () => {
@@ -166,8 +168,15 @@ it("ruban long : seuls les points de la fenêtre visible (± 1 bougie) sont parc
 - [ ] **Étape 3 — lancer** : `pnpm --filter @axiom/web exec vitest run src/chart/annotationsPane.test.ts src/chart/annotationsPrix.test.ts` → les nouveaux tests échouent.
 - [ ] **Étape 4 — types** : ajouter les deux champs optionnels ci-dessus.
 - [ ] **Étape 5 — `annotationsPane.ts`** : constantes `DEMI_TRIANGLE_CREUX = 4`,
-  `DECALAGE_LABEL_DROITE = 8`, `ECART_LABELS_DROITE = 11`. Marqueur creux : même tracé de
-  triangle à demi-base 4, `lineWidth` 1,5, `stroke()` sans `fill()`, sans `save`/`restore`.
+  `DECALAGE_LABEL_DROITE = 8`, `ECART_LABELS_DROITE = 11`. Marqueur creux : `ctx.setLineDash([])`
+  d'abord, puis même tracé de triangle à demi-base 4, `lineWidth` 1,5, `stroke()` sans `fill()`,
+  sans `save`/`restore`. Raison : sur le pane prix, KLineChart trace la ligne du dernier prix en
+  pointillé [4, 4] juste avant les indicateurs, sans la refermer ; un trait plein qui ne remet
+  pas le pointillé à zéro en hérite (constaté au navigateur le 9 novembre, revue du lot 1).
+  Segments « plein » : même remise à zéro, `ctx.setLineDash([])` dans leur `save`/`restore` (les
+  bords des zones fortes du lot 3 sont des segments pleins). Le test existant « segment plein
+  cible prix : … sans setLineDash » devient « … pointillé hérité remis à zéro » et attend
+  `setLineDash()` juste après `save`.
   Étiquettes « droite » : dessinées après les étiquettes centrées ; triées par y croissant ;
   un y plus proche que 11 px du précédent est porté à `y précédent + 11` ; police
   `10px sans-serif`. Rubans : ne parcourir que les indices de `max(deIdx, fenetre.de − 1)` à

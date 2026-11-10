@@ -236,7 +236,7 @@ export interface ResultatSrAxis {
   /** Évènements du §4.5, par idx croissant. */
   reactions: ReactionZoneSrAxis[];
   /** Zones actives à `fin` (confirmationIdx croissant), puis au plus MAX_ZONES_CASSEES_AXIS zones
-   *  fortes au moment de leur désactivation (finIdx décroissant). */
+   *  fortes à leur dernière bougie active, la clôture de finIdx (finIdx décroissant). */
   pistes: PisteZoneSrAxis[];
 }
 export function zonesSrAxis(
@@ -343,7 +343,8 @@ function serieSynthetique(n: number, graine: number): Candle[] {
   - chaque zone tient son `evolution` : une entrée à sa création (bougie de confirmation), une
     à chaque fusion qui change ses bornes (au plus une par bougie, la dernière remplace) ;
   - à la désactivation (cassure ou plafond du vivier) pendant la bougie `i` : `finIdx = i − 1`,
-    et la zone rejoint les « cassées » si sa force, à cet instant, atteint `forceZoneForte` ;
+    et la zone rejoint les « cassées » si sa force à la clôture de `finIdx` (avant les fusions de
+    la bougie qui la casse) atteint `forceZoneForte` (décision du 10 novembre, remarque L3-5) ;
   - les chemins de sortie anticipée (`maxZonesSr ≤ 0`, série trop courte) rendent aussi
     `reactions` et `pistes`.
 

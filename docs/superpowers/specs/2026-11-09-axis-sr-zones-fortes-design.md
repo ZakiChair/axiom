@@ -207,7 +207,10 @@ est ≤ au close de référence, résistance sinon.
 1. **Toutes** les zones fortes actives.
 2. Parmi les zones faibles actives, les `maxZonesSr` plus proches du close de `fin`, avec le
    partage actuel : moitié supports, moitié résistances, complété par les plus proches restantes.
-3. Les **12 zones fortes désactivées les plus récentes** (fortes au moment de leur désactivation).
+3. Les **12 zones fortes désactivées les plus récentes** : fortes à leur dernière bougie active,
+   c'est-à-dire à la clôture de la bougie qui précède leur désactivation (décision du
+   10 novembre 2026 : une zone faible pendant toute sa vie visible n'est pas tracée en
+   « forte cassée » parce qu'une fusion de la bougie qui la casse l'a renforcée).
 4. `maxZonesSr` = 0 : aucune zone tracée, ni forte, ni faible, ni désactivée. Les signaux
    précoces, eux, suivent leur propre réglage.
 

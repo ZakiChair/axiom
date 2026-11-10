@@ -150,9 +150,19 @@ const LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000;
  * `amorceBougies` = 3000 ; AXIS : 1 500) — sinon le garde-fou de régime ne s'appliquerait
  * pas à la moitié ancienne de l'historique. Au-delà (scroll historique) les bougies plus
  * anciennes restent `undefined` (LOCF sans antériorité) — dégradation gracieuse cohérente
- * avec la clé sans composante de plage.
+ * avec la clé sans composante de plage. Même dégradation si une page suivante échoue : les
+ * pages déjà reçues sont servies (série partielle, bougies récentes seules).
  */
 export const REFCLOSE_LIMIT = 3000;
+/** Bougies par appel `klines` de Binance (plafond de l'API). */
+const REFCLOSE_PAGE = 1000;
+/**
+ * Appels au plus par chargement de `refClose` : les pages pleines qui couvrent REFCLOSE_LIMIT,
+ * plus une (4). Borne défensive pour une source qui ne se comporterait pas comme Binance
+ * (pages courtes sans fin) ; Binance s'arrête avant (3 pages pleines, ou une page sans bougie
+ * nouvelle).
+ */
+const REFCLOSE_APPELS_MAX = Math.ceil(REFCLOSE_LIMIT / REFCLOSE_PAGE) + 1;
 /** Intervalle d'agrégation Coinalyze pour OI/funding (cf. COINALYZE_INTERVALS). */
 const COINALYZE_INTERVAL = "1hour";
 /** Durée du bucket `COINALYZE_INTERVAL`, en ms. */
@@ -475,18 +485,20 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe, e
       // simple GARDE de support (sous-minute / 3M-6M-12M → série vide, comme perpDelta).
       // `symbol` porte déjà le refSymbol (résolu dans getAligned, cohérent avec la clé).
       // Dégradation gracieuse (patron perpDelta) : refSymbol invalide (HTTP 4xx → throw de
-      // fetchKlines) / échec réseau → série VIDE, jamais d'état `error` qui masquerait les
-      // autres séries de la requête.
+      // fetchKlines) / échec réseau → les pages déjà reçues : série VIDE si la première
+      // échoue, partielle (bougies récentes) si c'est une suivante ; jamais d'état `error`
+      // qui masquerait les autres séries de la requête.
       if (timeframeToFapiInterval(timeframe) === undefined) return [];
+      // Binance plafonne à 1 000 klines par appel : pages successives, la première sans
+      // borne, les suivantes depuis la plus ancienne reçue, jusqu'à REFCLOSE_LIMIT (amorce
+      // d'AXIS S/R), une page sans bougie nouvelle (source plus courte : tout ce qu'elle a)
+      // ou REFCLOSE_APPELS_MAX appels, en une seule entrée de cache. Sur un doublon, la page
+      // la plus récente prime.
+      const closes = new Map<number, number>();
       try {
-        // Binance plafonne à 1 000 klines par appel : pages successives, la première sans
-        // borne, les suivantes depuis la plus ancienne reçue, jusqu'à REFCLOSE_LIMIT (amorce
-        // d'AXIS S/R) ou une page sans bougie nouvelle (source plus courte : tout ce qu'elle
-        // a), en une seule entrée de cache. Sur un doublon, la page la plus récente prime.
-        const closes = new Map<number, number>();
         let plusAncienne = Infinity;
-        while (closes.size < REFCLOSE_LIMIT) {
-          const limit = Math.min(1000, REFCLOSE_LIMIT - closes.size);
+        for (let appel = 0; appel < REFCLOSE_APPELS_MAX && closes.size < REFCLOSE_LIMIT; appel++) {
+          const limit = Math.min(REFCLOSE_PAGE, REFCLOSE_LIMIT - closes.size);
           const page = await binanceAdapter.fetchKlines(
             symbol,
             timeframe,
@@ -500,10 +512,10 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe, e
           }
           if (closes.size === avant) break;
         }
-        return toPoints([...closes].map(([time, value]) => ({ time, value })));
       } catch {
-        return [];
+        // Page en échec : on sert celles déjà reçues (aucune si c'était la première).
       }
+      return toPoints([...closes].map(([time, value]) => ({ time, value })));
     }
     case "stablecoins": {
       const s = await stablecoinsSupplyProvider.fetchSeries();

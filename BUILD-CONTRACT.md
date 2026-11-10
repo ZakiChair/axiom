@@ -2077,7 +2077,12 @@ la référence visuelle « vue C » approuvée par le propriétaire ; plan :
   - `REFCLOSE_LIMIT` = 3 000 dans `chart/auxProvider.ts` (1 500 avant). La constante vaut pour
     toute définition qui lit la référence, `refClose` ou `refCloseStrict` (même cache) : AXIS,
     AXIS S/R et les sept indicateurs statistiques à référence reçoivent jusqu'à 3 000 bougies de
-    référence, par pages de 1 000, en quatre appels au plus.
+    référence, par pages de 1 000, en quatre appels au plus. Effet visible sur ces sept
+    indicateurs : sur un tampon de plus de 1 500 bougies (AXIS S/R affiché, ou défilement
+    arrière), leurs courbes s'étendent jusqu'à 3 000 bougies en arrière, là où elles restaient
+    indéfinies au-delà des 1 500 plus récentes (Corrélation roulante sur le cas de référence :
+    1 450 valeurs au lieu de 0 sur les 1 500 bougies anciennes). Leurs valeurs n'y ont pas été
+    vérifiées.
 - **Zones classées par force.**
   - Force : touches + rejets sur volume fort + 0,5 si la zone est inversée (formule inchangée).
     Une zone est forte si sa force atteint `forceZoneForte` (réglage nouveau, défaut 6, de 2 à
@@ -2096,13 +2101,20 @@ la référence visuelle « vue C » approuvée par le propriétaire ; plan :
     médiane pointillée disparaît. `maxZonesSr` = 0 : aucune zone tracée, ni forte, ni faible, ni
     cassée ; les triangles creux et les sorties restent.
   - Infobulle d'une zone : « forte » ou « faible », rôle, bornes, niveau, écart au cours,
-    touches, rejets, inversion, puis « touches comptées sur N bougies ». Sa ligne n'est montrée
-    que si elle trouve place dans l'infobulle du graphe (3 lignes au plus) : après les marqueurs
-    à 3 bougies ou moins du réticule, les zones dont la bande couvre la bougie survolée, quelle
-    que soit la hauteur du réticule, les fortes puis les faibles, chaque groupe rangé par
-    proximité au cours de la dernière bougie décidée, même quand la bougie survolée est ancienne.
-    Sur le cas de référence, aux réglages par défaut, 6 des 12 zones actives tracées n'y
-    paraissent à aucune bougie, dont les 4 faibles.
+    touches, rejets, inversion, puis « touches comptées sur N bougies ». L'infobulle du graphe a
+    3 lignes au plus : après les marqueurs à 3 bougies ou moins du réticule viennent les zones
+    dont la bande couvre la bougie survolée, rangées par distance verticale de leur bande au
+    réticule (`chart/indicators.ts`, `createTooltipDataSource`) : la bande sous le réticule
+    d'abord. À égalité, ou réticule sur un autre pane que celui des prix, l'ordre du tracé : les
+    fortes par proximité au cours de la dernière bougie décidée, puis les faibles. Sur le cas de
+    référence, aux réglages par défaut, chacune des 12 zones actives tracées a sa ligne, en tête
+    des lignes de zone, le réticule au milieu de sa bande, sauf quand trois marqueurs proches
+    prennent les trois lignes (281 des 11 473 bougies couvertes par les 12 bandes). Avant la
+    revue finale, les rubans suivaient l'ordre du tracé seul, et 6 de ces 12 zones, dont les
+    4 faibles, n'avaient de ligne à aucune bougie. Ce tri vit dans le pont commun à tous les
+    indicateurs, hors de la liste de fichiers du plan ; la seule autre définition à rubans
+    porteurs d'info, la prime spot/perp, n'en est pas changée : ses rubans ne se chevauchent
+    jamais.
 - **Signal précoce** (réglage nouveau `signauxPrecoces`, défaut vrai, libellé « Signaux précoces
   sur zone forte (non mesurés) »).
   - Réaction décidée à la clôture de la bougie i, avec les zones connues après i − 1. Sur un
@@ -2112,10 +2124,14 @@ la référence visuelle « vue C » approuvée par le propriétaire ; plan :
   - Triangle creux, plus petit que le triangle plein : sous le plus bas pour un support (`--up`),
     au-dessus du plus haut pour une résistance (`--down`). Au plus un par bougie et par sens,
     aucun sur une bougie de signal confirmé, les 120 plus récents.
-  - Infobulle, réticule à 3 bougies ou moins : sens, bornes et décompte de la zone, ce que la
-    bougie a fait, puis la mention exacte :
-    « signal précoce non mesuré — lecture indicative, jamais une promesse ».
-    Aucun chiffre de performance dans l'interface.
+  - Infobulle, réticule à 3 bougies ou moins : d'abord la mention exacte, juste après
+    « AXIS S/R » :
+    « signal précoce non mesuré — lecture indicative, jamais une promesse »,
+    puis sens, bornes et décompte de la zone et ce que la bougie a fait. L'infobulle ne revient
+    pas à la ligne et coupe au bord du graphe une ligne de 223 à 249 caractères : en tête, la
+    mention tient dans les 412 premiers pixels (thème par défaut). Placée en fin de ligne
+    jusqu'à la revue finale, elle n'était entière pour aucun triangle au bureau en 1 440 px,
+    panneau de droite ouvert. Aucun chiffre de performance dans l'interface.
 - **Sorties pour les alertes.** `reactionSupport` (« Réaction sur support fort ») et
   `reactionResistance` (« Réaction sur résistance forte »), masquées : 1 sur une bougie close qui
   réagit dans ce sens, 0 sinon, indéfinies sur la bougie en formation. Elles ne dépendent ni de
@@ -2132,10 +2148,12 @@ la référence visuelle « vue C » approuvée par le propriétaire ; plan :
     d'erreur.
   - Source plus courte : tout ce qu'elle a.
 - **Effet sur les signaux confirmés.** La référence couvre désormais 3 000 bougies. Sur les
-  bougies plus anciennes que les 1 500 dernières, les signaux d'AXIS et d'AXIS S/R passent donc
+  bougies de la 1 500e à la 3 000e plus récente, les signaux d'AXIS et d'AXIS S/R passent donc
   sous le garde-fou de régime quand l'historique chargé est assez long (AXIS S/R affiché, ou
   défilement arrière). Avant, ils y restaient ceux de la v2, faute de référence. C'est
-  l'intention de la conception (§3.6).
+  l'intention de la conception (§3.6). Au-delà des 3 000 plus récentes (défilement arrière), et
+  sur la partie non reçue si une page de la référence échoue, ils restent ceux de la v2, et
+  l'infobulle le dit (« référence indisponible »).
 - **Limites connues.**
   - Zones et triangles creux dépendent de la première bougie chargée : charger plus d'historique
     les redessine. Ce n'est pas un repaint : rien de ce qui est décidé à une bougie ne lit une
@@ -2150,30 +2168,55 @@ la référence visuelle « vue C » approuvée par le propriétaire ; plan :
       (« stratAxisSr(reactionSupport) >= 1 »).
   - Un triangle creux peut tomber sur la bougie même qui désactive sa zone, une bougie après la
     fin de la bande : la décision lit l'état de la veille.
+  - Un triangle creux ancien peut citer une zone forte cassée qui n'est plus tracée (seules les
+    12 plus récentes le sont) ; son infobulle en donne les bornes. Cas de référence : 51 des
+    120 triangles (bougies 262 à 1 810).
   - L'infobulle du graphe a 3 lignes au plus. Les triangles creux y passent avant les forts
     mouvements et les retournements ↺ : près d'un triangle creux, la ligne d'un fort mouvement
     peut n'apparaître qu'une bougie plus loin, celle d'un ↺ jusqu'à trois (cas de référence, case
-    « Détecter les retournements » cochée). Les lignes de zone passent après tous les marqueurs
-    et s'évincent entre elles : une zone faible, ou une zone forte moins proche du cours que trois
-    autres, peut n'y paraître à aucune bougie (voir l'infobulle d'une zone, plus haut).
-- **« Non mesuré ».** Les signaux précoces n'ont passé aucun test. Une mesure rapide hors
-  protocole, sur BTC seul (conception, §9), ne leur trouve aucun avantage ; aucun de ses chiffres
-  ne paraît dans l'interface. Chaque triangle creux porte la mention ci-dessus, et le libellé du
-  réglage dit « non mesurés ».
+    « Détecter les retournements » cochée). Les lignes de zone passent après tous les marqueurs :
+    quand trois marqueurs sont à 3 bougies ou moins du réticule, aucune zone n'y a de ligne, même
+    réticule sur sa bande (voir l'infobulle d'une zone, plus haut).
+  - L'infobulle ne revient pas à la ligne : une ligne plus large que le graphe est coupée à son
+    bord. Au bureau, la mention d'un triangle creux, en tête, reste entière ; la fin de sa ligne
+    (ce que la bougie a fait) peut manquer, par exemple en 1 440 px panneau de droite ouvert. Au
+    téléphone, chaque ligne est coupée vers le 55e caractère, après « non mesuré » pour un
+    triangle creux, et la première ligne de toute infobulle d'indicateur passe sous le bandeau du
+    symbole (`candle.tooltip.offsetTop` de 36 px dans `chart/ChartInstance.tsx`, calé sur le
+    bandeau du bureau ; défaut antérieur, hors des fichiers de ce chantier) : la ligne d'un
+    triangle creux, le plus souvent la première, n'y est alors pas lisible.
+- **« Non mesuré ».** Les signaux précoces n'ont été soumis à aucun test sur données jamais vues.
+  Une mesure rapide hors protocole, sur BTC seul et sans valeur probante (conception, §9), ne
+  leur trouve aucun avantage ; aucun de ses chiffres ne paraît dans l'interface. Chaque triangle
+  creux porte la mention ci-dessus, et le libellé du réglage dit « non mesurés ».
 - **Budget.**
-  - Chargement initial : **1 193 254 / 356 315** à `169cd36`, dans `pnpm check` (Node 26.7.0,
-    zlib 1.2.12).
-  - Soit +4 961 / +1 782 depuis le départ de la branche, mesuré le 9 novembre
-    (1 188 293 / 354 533). Marge gzip 3 685, au-dessus des 3 000 exigés.
-  - Calcul complet d'AXIS S/R à 3 000 bougies, médiane de 30 calculs : ≈ 2 ms sous Bun et
-    ≈ 2,9 ms sous V8, sous le plafond de 10 ms. La conception relevait 2,9 ms sous Bun avant le
-    chantier.
+  - Chargement initial : **1 193 707 / 356 429** après la vague finale de corrections, dans
+    `pnpm check` (Node 26.7.0, zlib 1.2.12).
+  - Soit +5 414 / +1 896 depuis le départ de la branche, mesuré le 9 novembre
+    (1 188 293 / 354 533). Marge gzip 3 571, au-dessus des 3 000 exigés.
+  - Calcul complet d'AXIS S/R à 3 000 bougies, sous le plafond de 10 ms avant comme après.
+    Avant le chantier (`a2043a1`) et après la vague finale, même protocole (un calcul
+    d'échauffement, puis médiane de 30 calculs, cinq essais, chaque version dans son
+    processus) :
+    - sous V8 (Node 26.7.0) : environ 1,6 ms avant (1,51 à 1,60 ms) et 2,6 ms après (2,56 à
+      2,74 ms), soit environ 60 % de plus ; au premier essai, 2,3 à 2,5 ms avant, 2,8 à 3,0 ms
+      après ;
+    - sous Bun 1.3.11 (JavaScriptCore) : l'ancien code oscillait de 1,5 à 5,8 ms d'un essai à
+      l'autre ; le nouveau donne 1,8 à 2,1 ms, et 3,3 à 3,5 ms au premier essai.
 - **Revue et tests.**
-  - Revue indépendante de chaque lot : conformité, plus des angles contradictoires (rendu,
-    équivalence au moteur relancé, non-régression, tracé, identité des signaux, pagination). Les
-    corrections arbitrées ont été regroupées en un lot 4b, revu à son tour.
-  - `pnpm check` vert à `169cd36` : typage des 7 projets ; indicateurs 229 fichiers / 1 078
-    tests, alertes 129, backtest 131, pacte 120, daemon 786, web 430 fichiers / 6 382 tests.
+  - Revue indépendante des lots 1 à 5 et 4b : conformité, plus des angles contradictoires
+    (rendu, équivalence au moteur relancé, non-régression, tracé, identité des signaux,
+    pagination, exactitude et rédaction de la documentation). Les corrections arbitrées des
+    lots 1 à 4 ont été regroupées en un lot 4b, revu à son tour.
+  - Revue finale du diff complet depuis `a2043a1`, en quatre angles : conception, exactitude du
+    calcul, application réelle au navigateur (captures au bureau en 1 440 × 900 et au téléphone
+    en 390 × 844), tests et documentation. Chaque remarque importante a été soumise à une
+    vérification contradictoire (conception, reproduction, impact), puis corrigée dans une vague
+    finale : infobulle des zones et des triangles creux, repli de `forceZoneForte`, ligne
+    « résistance » de la mesure rapide, documentation.
+  - `pnpm check` vert après la vague finale : typage des 7 projets ; indicateurs 229 fichiers /
+    1 078 tests, alertes 129, backtest 131, pacte 120, daemon 786, web 430 fichiers / 6 388
+    tests.
   - Tests ajoutés :
     - le moteur en une passe égale une référence lente qui relance le moteur à chaque bougie ;
     - cas de référence BTCUSDT 4h de 3 000 bougies, versé au dépôt
@@ -2183,6 +2226,9 @@ la référence visuelle « vue C » approuvée par le propriétaire ; plan :
       0, 1 ou 8 bougies, prix × 1e-9 ;
     - une alerte de seuil tire exactement aux 31 réactions depuis l'index 2 700
       (`packages/alerts/src/engine.axisSr.test.ts`) ;
-    - extension de 500 à 3 000 bougies, pagination de `refClose`.
-  - À compléter au lot 6 : `pnpm check:e2e`, captures du graphe réel (bureau et téléphone),
-    revue finale du diff complet.
+    - extension de 500 à 3 000 bougies, pagination de `refClose` ;
+    - infobulle du graphe : rubans rangés par distance verticale au réticule
+      (`apps/web/src/chart/indicators.tooltip.test.ts`) ; réserve en tête des 120 triangles
+      creux.
+  - Reste avant la fusion : `pnpm check:e2e`, que ni la revue finale ni la vague finale n'ont
+    relancé.

@@ -107,7 +107,7 @@ actuelle disparaît : les bords la remplacent.
 Les étiquettes sont abrégées pour tenir dans la marge droite existante du graphe (80 px, défaut
 de klinecharts), sur bureau comme sur téléphone. La vue C approuvée les écrivait en toutes
 lettres dans une marge de 190 px qui n'existe pas dans l'outil ; le libellé complet figure dans
-l'infobulle de la zone.
+l'infobulle de la zone, le réticule posé sur sa bande (précisé le 10 novembre 2026, voir §4.7).
 
 ### 3.2 Signal précoce
 
@@ -259,21 +259,36 @@ Pour `i ≤ fin` : 1 si la bougie porte au moins un évènement de ce sens, 0 si
 
 ### 4.7 Textes de survol
 
-- Triangle creux : sens (support ou résistance), bornes de la zone, touches, rejets sur volume
-  fort, inversion éventuelle, ce que la bougie a fait (entrée dans la zone, clôture au-dessus
-  ou au-dessous), puis la réserve **« signal précoce non mesuré — lecture indicative, jamais
-  une promesse »**. Aucun chiffre de performance.
+- Triangle creux : d'abord la réserve **« signal précoce non mesuré — lecture indicative, jamais
+  une promesse »**, juste après « AXIS S/R », puis sens (support ou résistance), bornes de la
+  zone, touches, rejets sur volume fort, inversion éventuelle, ce que la bougie a fait (entrée
+  dans la zone, clôture au-dessus ou au-dessous). Aucun chiffre de performance. (Décision du
+  10 novembre 2026, revue finale : la réserve venait en dernier. L'infobulle ne revient pas à la
+  ligne et coupe au bord du pane une ligne de 223 à 249 caractères : au bureau, en 1 440 px
+  panneau de droite ouvert, la mention n'était entière pour aucun triangle ; au téléphone,
+  « non mesuré » n'était lisible pour aucun. En tête, elle tient dans les 412 premiers pixels
+  (thème par défaut). Reste, hors chantier : au téléphone, la première ligne de toute infobulle
+  d'indicateur passe sous le bandeau du symbole.)
 - Zone : le texte actuel (bornes, niveau, écart au cours, touches, rejets, inversion), précédé
   de « forte » ou « faible ».
 - L'infobulle du pane n'affiche que **3 lignes** (`chart/indicators.ts`, `createTooltipDataSource`),
   prises dans cet ordre : segments dont l'arrivée est à 3 bougies ou moins du réticule,
-  marqueurs à 3 bougies ou moins, puis rubans couvrant la bougie, chacun dans l'ordre de son
+  marqueurs à 3 bougies ou moins, chacun dans l'ordre de son tableau, puis rubans couvrant la
+  bougie, rangés par distance verticale de leur bande au réticule (0 dans la bande) quand le
+  réticule est sur le pane de l'indicateur. À égalité, ou réticule sur un autre pane, l'ordre du
   tableau. En conséquence :
   - les bords de zone, s'ils sont des segments, ne portent **pas** d'info ;
   - les triangles creux sont rangés après les signaux confirmés et **avant** les forts
     mouvements, pour ne pas être évincés ;
-  - les zones fortes les plus proches du cours viennent en tête des rubans ; les zones faibles
-    suivent ; les zones désactivées ne portent pas d'info.
+  - le réticule posé sur la bande d'une zone active met sa ligne en tête des lignes de zone ;
+    à égalité ou hors du pane des prix, les zones fortes les plus proches du cours passent avant
+    les faibles ; les zones désactivées ne portent pas d'info.
+
+  (Décision du 10 novembre 2026, revue finale : les rubans étaient pris dans l'ordre du tableau
+  seul. Sur le cas de référence, 6 des 12 zones actives tracées, dont les 4 faibles, n'avaient de
+  ligne à aucune bougie, et le réticule posé sur une bande donnait le texte de trois autres zones.
+  Le tri touche le pont commun à tous les indicateurs, hors de la liste de fichiers du plan ; il
+  ne change rien à l'indicateur de prime spot/perp, dont les rubans ne se chevauchent pas.)
 
 ---
 
@@ -423,6 +438,15 @@ n'améliore rien.
 Ces chiffres décrivent le passé d'un actif. Ils ne valident ni n'invalident rien, et ne
 paraissent nulle part dans l'interface. Les scripts de la maquette étaient jetables et ne sont
 pas dans le dépôt.
+
+(Note du 10 novembre 2026, revue finale : le rendement est signé dans le sens du signal, positif
+si le prix est allé dans le sens annoncé, de l'open de la bougie i + 1 à celui de la bougie
+i + 7. Recalculée ainsi sur la fixture du §6.4 depuis l'index 400, avec la règle livrée, la
+mesure redonne à l'identique la dérive, les deux lignes de retournement, la ligne support et les
+16 achats et 16 ventes confirmés. La ligne résistance donne **56 | −0,24 % | 43 %** : le
+brouillon de la maquette retenait une réaction à la bougie 1 090 là où la règle livrée la décide
+à 1 089, même nombre d'évènements ; avec 1 090, on retrouve −0,19 % et 45 %. La conclusion ne
+change pas.)
 
 **Suite envisagée, hors de ce lot** : chercher une définition de la force qui tienne (autres
 sources du §2), et la juger sur les bougies à venir, seul terrain jamais vu qui reste.

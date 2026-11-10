@@ -417,10 +417,13 @@ export function zonesTraceesAxis(
 ```
 AXIS zone forte de support [75626.55 – 76601.83] (niveau 76114.19, -1.89 % du cours) — 5 touches, 2 rejets sur volume fort — touches comptées sur 3000 bougies
 AXIS zone forte de résistance [85314.76 – 86430.38] (niveau 85872.57, +10.69 % du cours) — 12 touches, 7 rejets sur volume fort, polarité inversée — touches comptées sur 3000 bougies
-AXIS S/R réaction sur support fort [75592.65 – 76529.83] — 4 touches, 2 rejets sur volume fort ; la bougie est entrée dans la zone et a clôturé au-dessus ; signal précoce non mesuré — lecture indicative, jamais une promesse
+AXIS S/R signal précoce non mesuré — lecture indicative, jamais une promesse — réaction sur support fort [75592.65 – 76529.83] — 4 touches, 2 rejets sur volume fort ; la bougie est entrée dans la zone et a clôturé au-dessus
 ```
 
-  (« faible » à la place de « forte » ; « résistance forte … a clôturé au-dessous » pour l'autre sens.)
+  (« faible » à la place de « forte » ; « résistance forte … a clôturé au-dessous » pour l'autre sens.
+  Amendé le 10 novembre 2026, revue finale : la réserve ouvre le texte des triangles creux, au lieu
+  de le clore, pour rester lisible quand l'infobulle coupe la ligne au bord du graphe ; conception
+  §4.7.)
 
 - [ ] **Étape 1 — mettre à jour `stratAxisSr.test.ts`**
   - contrat : `amorceBougies` = `AMORCE_AXIS_SR` = 3000 et `stratAxis.amorceBougies` = `AMORCE_AXIS` ;

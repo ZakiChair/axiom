@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Candle, IndicatorResult, MarqueurAnnotation } from "@axiom/types";
-import { computeIndicator } from "../engine";
+import { buildCalcContext, computeIndicator, resolveParams } from "../engine";
 import { rma, trueRange } from "../utils";
 import { MAX_SIGNAUX_AXIS, fluxAxis } from "./stratAxis";
 import { ALPHA_ZONE_CASSEE, alphaZoneForte, stratAxisSr, zonesSrAxis, zonesTraceesAxis } from "./stratAxisSr";
@@ -24,7 +24,7 @@ const zonesBtc = (pivotSr: number, zoneSrAtr: number, forceZoneForte: number) =>
   zonesSrAxis(btc, fluxBtc, atrBtc, pivotSr, zoneSrAtr, 1.5, 4, 2999, forceZoneForte);
 
 /** Calcul complet tel que le graphe le fait : `refClose` = les closes de la série, unité 4h. */
-const calculer = (bougies: Candle[], params: Record<string, number | boolean> = {}): IndicatorResult =>
+const calculer = (bougies: Candle[], params: Record<string, number | boolean | string> = {}): IndicatorResult =>
   computeIndicator(stratAxisSr, bougies, params, { refClose: bougies.map((c) => c.close) }, "4h");
 const creux = (res: IndicatorResult): MarqueurAnnotation[] => (res.annotations?.marqueurs ?? []).filter((m) => m.creux === true);
 /** Signaux confirmés (▲/▼ pleins) : ni creux, ni forts mouvements (`--accent`). */
@@ -233,6 +233,10 @@ describe("stratAxisSr — triangles creux des réactions sur zone forte", () => 
     expect(sans.annotations?.marqueurs).toEqual((defaut.annotations?.marqueurs ?? []).filter((m) => m.creux !== true));
   });
 
+  it("signauxPrecoces : seul le booléen faux masque les triangles creux ; la chaîne « false », 0 ou une chaîne vide les gardent", () => {
+    for (const v of ["false", 0, ""]) expect(creux(calculer(btc, { signauxPrecoces: v })), JSON.stringify(v)).toEqual(creux(defaut));
+  });
+
   it("maxZonesSr = 0 : ni ruban, ni bord, ni étiquette de zone ; les 120 triangles creux et les sorties restent", () => {
     const zero = calculer(btc, { maxZonesSr: 0 });
     expect(zero.annotations?.rubans).toBeUndefined();
@@ -266,11 +270,24 @@ describe("stratAxisSr — entrées limites du tracé", () => {
     expect(res.series.reactionResistance?.slice(0, 2999)).toEqual(defaut.series.reactionResistance?.slice(0, 2999));
   });
 
-  it("prix très petits (× 1e-9) : mêmes triangles creux, bornes lisibles dans l'infobulle des zones", () => {
+  it("prix très petits (× 1e-9) : mêmes triangles creux, mêmes sorties de réaction, bornes lisibles dans l'infobulle des zones", () => {
     const minuscule = btc.map((c) => ({ ...c, open: c.open * 1e-9, high: c.high * 1e-9, low: c.low * 1e-9, close: c.close * 1e-9 }));
     const res = calculer(minuscule);
     expect(creux(res).map((m) => m.idx)).toEqual(creux(defaut).map((m) => m.idx));
+    expect(res.series.reactionSupport).toEqual(defaut.series.reactionSupport);
+    expect(res.series.reactionResistance).toEqual(defaut.series.reactionResistance);
     expect(res.annotations?.rubans?.[0]?.info).toContain("[0.00007563 – 0.00007660]");
+  });
+
+  it("forceZoneForte non fini (NaN, ±Infinity, texte non numérique) reçu sans résolution des réglages : repli sur 6, même résultat", () => {
+    // `computeIndicator` remplace déjà un réglage non fini par son défaut (`resolveParams`) ; ici `calc` est appelée
+    // directement, comme par un appelant qui ne résout pas les réglages.
+    const ctx = { ...buildCalcContext(btc), aux: auxBtc, timeframe: "4h" as const };
+    const avec = (forceZoneForte: number | string): IndicatorResult =>
+      stratAxisSr.calc(btc, { ...resolveParams(stratAxisSr, {}), forceZoneForte }, ctx);
+    const seuil6 = avec(6);
+    expect(seuil6).toEqual(defaut);
+    for (const v of [NaN, Infinity, -Infinity, "abc"]) expect(avec(v), String(v)).toEqual(seuil6);
   });
 
   it("historique vide ou très court (0, 1, 8 bougies) : aucune exception, séries de la bonne longueur, ni zone ni triangle creux", () => {

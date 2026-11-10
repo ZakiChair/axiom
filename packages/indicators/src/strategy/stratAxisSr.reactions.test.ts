@@ -21,8 +21,19 @@ import {
 } from "./stratAxisSr";
 import { bougiesBtcusdt4h } from "./fixtures/btcusdt4h";
 
-/** Référence lente : zones connues après i − 1 (moteur relancé à chaque bougie), règle appliquée telle quelle. */
-function reactionsNaives(candles: Candle[], g: number, forceMin: number, fin: number): string[] {
+/** Réarmement refusé : la condition de réaction remplie par une zone forte à moins de 4 bougies de son évènement précédent. */
+interface RefusReaction {
+  idx: number;
+  id: number;
+  /** Bougie de l'évènement précédent de la zone. */
+  precedent: number;
+}
+
+/**
+ * Référence lente : zones connues après i − 1 (moteur relancé à chaque bougie), règle appliquée telle quelle.
+ * `refus`, s'il est fourni, reçoit chaque réarmement refusé.
+ */
+function reactionsNaives(candles: Candle[], g: number, forceMin: number, fin: number, refus?: RefusReaction[]): string[] {
   const flux = fluxAxis(candles, undefined, 20, 6);
   const atr = rma(trueRange(candles), 14);
   const dernier = new Map<number, number>();
@@ -39,7 +50,11 @@ function reactionsNaives(candles: Candle[], g: number, forceMin: number, fin: nu
         ? c.low <= z.haut && c.close > z.haut && position >= 0.5
         : c.high >= z.bas && c.close < z.bas && position <= 0.5;
       if (!reagit) continue;
-      if (i - (dernier.get(z.id) ?? -99) < 4) continue;
+      const precedent = dernier.get(z.id) ?? -99;
+      if (i - precedent < 4) {
+        refus?.push({ idx: i, id: z.id, precedent });
+        continue;
+      }
       dernier.set(z.id, i);
       out.push(`${i}:${support ? 1 : -1}:${z.id}`);
     }
@@ -92,11 +107,12 @@ describe("zonesSrAxis — réactions sur zone forte : le moteur en une passe ren
     expect(MAX_ZONES_CASSEES_AXIS).toBe(12);
   });
 
-  it("série synthétique (graine 7, g = 3, seuil 3) : supports et résistances forts, zones inversées, réarmement par zone, désactivations", () => {
+  it("série synthétique (graine 7, g = 3, seuil 3) : supports et résistances forts, zones inversées, réarmement par zone refusé puis accepté, désactivations", () => {
     const syn = serieSynthetique(600, 7);
     expect(syn[0]!.close).toBeCloseTo(98.95512335933745, 12);
     const { r, texte } = reactionsMoteur(syn, 3, 3, 599);
-    expect(texte).toEqual(reactionsNaives(syn, 3, 3, 599));
+    const refus: RefusReaction[] = [];
+    expect(texte).toEqual(reactionsNaives(syn, 3, 3, 599, refus));
     expect(r.reactions).toHaveLength(112);
     expect(r.reactions.filter((e) => e.sens === 1)).toHaveLength(58);
     expect(r.reactions.filter((e) => e.sens === -1)).toHaveLength(54);
@@ -111,6 +127,18 @@ describe("zonesSrAxis — réactions sur zone forte : le moteur en une passe ren
     const ecarts = [...parZone.values()].flatMap((idx) => idx.slice(1).map((v, k) => v - idx[k]!));
     expect(ecarts.length).toBeGreaterThan(0);
     expect(Math.min(...ecarts)).toBeGreaterThanOrEqual(REARMEMENT_REACTION_AXIS);
+
+    // Réarmement refusé puis accepté (§6.1) : 68 fois, une zone forte remplit la condition de réaction à moins de
+    // 4 bougies de son évènement précédent, et le moteur ne rend rien. Ainsi la zone 0, qui réagit à 64, est refusée
+    // à 67 (3 bougies) et réagit de nouveau à 68 (4 bougies).
+    expect(refus).toHaveLength(68);
+    for (const { idx, id, precedent } of refus) {
+      expect(idx - precedent, `zone ${id} à ${idx}`).toBeLessThan(REARMEMENT_REACTION_AXIS);
+      expect(r.reactions.some((e) => e.idx === idx && e.zone.id === id), `zone ${id} à ${idx}`).toBe(false);
+    }
+    expect(refus).toContainEqual({ idx: 67, id: 0, precedent: 64 });
+    const zone0 = r.reactions.filter((e) => e.zone.id === 0).map((e) => e.idx);
+    expect(zone0.filter((idx) => idx >= 64 && idx <= 68)).toEqual([64, 68]);
 
     expect(r.pistes.filter((p) => p.active)).toHaveLength(3);
     expect(r.pistes.filter((p) => !p.active).map((p) => p.finIdx)).toEqual([555, 496, 407, 236, 184]);
@@ -216,6 +244,46 @@ describe("zonesSrAxis — cas de référence : 3 000 bougies BTCUSDT 4h, réglag
     expect(resistances[1]).toMatchObject({ touches: 8, rejetsVolume: 4, inversions: 1 });
     expect(resistances[1]?.bas).toBeCloseTo(86702.87, 2);
     expect(resistances[1]?.haut).toBeCloseTo(87649.68, 2);
+  });
+});
+
+describe("zonesSrAxis — zones fortes cassées : fortes à la clôture de leur dernière bougie active (finIdx)", () => {
+  const fluxBtc = fluxAxis(btc, undefined, 20, 6);
+  const atrBtc = rma(trueRange(btc), 14);
+  /** BTC, pivots 2, zones de ± 0,2 × ATR, arrêté à `fin`. */
+  const finesBtc = (fin: number, seuil: number) => zonesSrAxis(btc, fluxBtc, atrBtc, 2, 0.2, 1.5, 4, fin, seuil);
+
+  it("une zone faible à finIdx, renforcée par une fusion de la bougie qui la casse, n'est pas cassée (BTC, pivots 2, ± 0,2 × ATR, seuil 8 : zone 354)", () => {
+    // À la clôture de 2876, sa dernière bougie active : force 7,5, faible au seuil 8.
+    expect(finesBtc(2876, 8).pistes.find((p) => p.zone.id === 354)).toMatchObject({ active: true, finIdx: 2876, zone: { touches: 6, force: 7.5 } });
+    // La bougie 2877 lui fusionne un pivot (force 8,5) puis la casse. Au seuil 7, où elle était forte à 2876, sa piste
+    // cassée garde l'état d'après cette fusion, dont l'entrée d'évolution à finIdx + 1.
+    const auSeuil7 = finesBtc(2999, 7).pistes.find((p) => !p.active && p.zone.id === 354);
+    expect(auSeuil7).toMatchObject({ finIdx: 2876, zone: { touches: 7, force: 8.5 } });
+    expect(auSeuil7?.evolution.at(-1)?.idx).toBe(2877);
+    // Au seuil 8, faible pendant toute sa vie visible : pas de piste cassée.
+    const cassees = finesBtc(2999, 8).pistes.filter((p) => !p.active);
+    expect(cassees).toHaveLength(MAX_ZONES_CASSEES_AXIS);
+    expect(cassees.map((p) => p.zone.id)).not.toContain(354);
+  });
+
+  it("chaque piste cassée était forte à la clôture de son finIdx (moteur relancé à fin = finIdx)", () => {
+    const cas: Array<[string, Candle[], number, number, number]> = [
+      ["BTC, réglages par défaut", btc, 5, 0.5, 6],
+      ["BTC, pivots 2, ± 0,2 × ATR, seuil 8", btc, 2, 0.2, 8],
+      ["synthétique, graine 7", serieSynthetique(600, 7), 3, 0.5, 3],
+    ];
+    for (const [nom, bougies, g, kAtr, seuil] of cas) {
+      const flux = fluxAxis(bougies, undefined, 20, 6);
+      const atr = rma(trueRange(bougies), 14);
+      const cassees = zonesSrAxis(bougies, flux, atr, g, kAtr, 1.5, 4, bougies.length - 1, seuil).pistes.filter((p) => !p.active);
+      expect(cassees.length, nom).toBeGreaterThan(0);
+      for (const p of cassees) {
+        const aFinIdx = zonesSrAxis(bougies, flux, atr, g, kAtr, 1.5, 4, p.finIdx, seuil).pistes.find((q) => q.zone.id === p.zone.id);
+        expect(aFinIdx?.active, `${nom}, zone ${p.zone.id}`).toBe(true);
+        expect(aFinIdx?.zone.force, `${nom}, zone ${p.zone.id}`).toBeGreaterThanOrEqual(seuil);
+      }
+    }
   });
 });
 

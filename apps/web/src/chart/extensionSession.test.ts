@@ -94,6 +94,8 @@ import {
   MESSAGE_LIMITE_KRAKEN,
   pasBougiesMs,
 } from "./ChartInstance";
+import { REFCLOSE_LIMIT } from "./auxProvider";
+import { PLAFOND_BOUGIES_GRAPHE } from "../data/profondeurHistorique";
 
 const JOUR_MS = 86_400_000;
 const HEURE_MS = 3_600_000;
@@ -193,7 +195,7 @@ describe("doitEtendreHistorique — ajout à chaud (sessions)", () => {
   });
 });
 
-describe("amorce longue (AXIS : 1 500 bougies déclarées par la définition)", () => {
+describe("amorce longue (AXIS : 1 500 bougies, AXIS S/R : 3 000, déclarées par la définition)", () => {
   const H4 = 4 * HEURE_MS;
   // Backfill de 500 bougies 4h : la première ouvre 499 × 4 h avant la dernière.
   const premier = DERNIER - 499 * H4;
@@ -216,11 +218,27 @@ describe("amorce longue (AXIS : 1 500 bougies déclarées par la définition)", 
     expect(limitePageAmorce(1200, 1500, 500)).toBe(300);
   });
 
+  it("AXIS S/R déclare 3 000 bougies : l'amorce la plus longue l'emporte, la référence et le tampon la couvrent", () => {
+    expect(getIndicator("stratAxisSr")?.amorceBougies).toBe(3000);
+    expect(amorceMinimale(["stratAxisSr"])).toBe(3000);
+    expect(amorceMinimale(["stratAxis", "stratAxisSr", "rsi"])).toBe(3000);
+    expect(amorceMinimale(["stratAxis"])).toBe(1500);
+    expect(limitePageAmorce(500, 3000, 500)).toBe(500);
+    expect(limitePageAmorce(2800, 3000, 500)).toBe(200);
+    expect(REFCLOSE_LIMIT).toBeGreaterThanOrEqual(3000); // la référence couvre l'amorce la plus longue
+    expect(PLAFOND_BOUGIES_GRAPHE).toBeGreaterThanOrEqual(3000); // data/profondeurHistorique.ts : 20 000
+  });
+
   it("doitEtendreHistorique : AXIS sur 500 bougies → vrai ; sur 1 500 → faux ; sans AXIS → faux", () => {
     expect(doitEtendreHistorique(["stratAxis"], premier, DERNIER, 500)).toBe(true);
     expect(doitEtendreHistorique(["stratAxis"], premier, DERNIER, 1499)).toBe(true);
     expect(doitEtendreHistorique(["stratAxis"], DERNIER - 1499 * H4, DERNIER, 1500)).toBe(false);
     expect(doitEtendreHistorique(["rsi"], premier, DERNIER, 500)).toBe(false);
+  });
+
+  it("doitEtendreHistorique : AXIS S/R sur 1 500 bougies → vrai ; sur 3 000 → faux", () => {
+    expect(doitEtendreHistorique(["stratAxisSr"], DERNIER - 1499 * H4, DERNIER, 1500)).toBe(true);
+    expect(doitEtendreHistorique(["stratAxisSr"], DERNIER - 2999 * H4, DERNIER, 3000)).toBe(false);
   });
 
   it("l'extension compte en BOUGIES : 500 → 1 500 en deux pages de 500, puis rien (idempotent)", async () => {
@@ -243,6 +261,53 @@ describe("amorce longue (AXIS : 1 500 bougies déclarées par la définition)", 
     expect(buffer).toHaveLength(1500);
     expect(await etendreSessionJusqua(params)).toBe(0);
     expect(limits).toHaveLength(2);
+  });
+
+  it("l'extension compte en BOUGIES : 500 → 3 000 en cinq pages de 500 (AXIS S/R)", async () => {
+    let buffer = Array.from({ length: 500 }, (_, i) => bougie(premier + i * H4));
+    const limits: number[] = [];
+    const params = {
+      bougiesMin: amorceMinimale(["stratAxisSr"]),
+      tfMs: H4,
+      limitePage: 500,
+      lirePremierTime: () => buffer[0]?.time,
+      lireNombre: () => buffer.length,
+      chargerPlusAncien: async (avant: number, limit: number) => {
+        limits.push(limit);
+        buffer = [...Array.from({ length: limit }, (_, i) => bougie(avant - (limit - i) * H4)), ...buffer];
+        return limit;
+      },
+    };
+    // Cinq pages tiennent sous le plafond de dix par extension (`MAX_PAGES_SESSION`) :
+    // un seul passage suffit, le second ne demande plus rien.
+    expect(await etendreSessionJusqua(params)).toBe(5);
+    expect(limits).toEqual([500, 500, 500, 500, 500]);
+    expect(buffer).toHaveLength(3000);
+    expect(await etendreSessionJusqua(params)).toBe(0);
+    expect(limits).toHaveLength(5);
+  });
+
+  it("l'extension compte en BOUGIES : 500 → 3 000 en neuf pages de 300 (AXIS S/R), en un seul passage", async () => {
+    let buffer = Array.from({ length: 500 }, (_, i) => bougie(premier + i * H4));
+    const limits: number[] = [];
+    const params = {
+      bougiesMin: amorceMinimale(["stratAxisSr"]),
+      tfMs: H4,
+      limitePage: 300,
+      lirePremierTime: () => buffer[0]?.time,
+      lireNombre: () => buffer.length,
+      chargerPlusAncien: async (avant: number, limit: number) => {
+        limits.push(limit);
+        buffer = [...Array.from({ length: limit }, (_, i) => bougie(avant - (limit - i) * H4)), ...buffer];
+        return limit;
+      },
+    };
+    // Neuf pages, sous le plafond par extension (`MAX_PAGES_SESSION`) : aucune n'attend un second passage.
+    expect(await etendreSessionJusqua(params)).toBe(9);
+    expect(limits).toEqual([300, 300, 300, 300, 300, 300, 300, 300, 100]);
+    expect(buffer).toHaveLength(3000);
+    expect(await etendreSessionJusqua(params)).toBe(0);
+    expect(limits).toHaveLength(9);
   });
 
   it("session ET amorce : chaque page demande le plus grand des deux manques", async () => {

@@ -136,7 +136,9 @@ export function dessinerAnnotationsPane(
     if (l.cible !== cible) continue;
     if (l.idx < fenetre.de || l.idx >= fenetre.a) continue;
     if (l.ancrageX === "droite") {
-      aDroite.push({ label: l, y: axes.convertirY(l.valeur) });
+      // Une position non finie fausserait le tri et l'écart des suivantes : l'étiquette est écartée.
+      const y = axes.convertirY(l.valeur);
+      if (Number.isFinite(y)) aDroite.push({ label: l, y });
       continue;
     }
     const x = axes.convertirX(l.idx);

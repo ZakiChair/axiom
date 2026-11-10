@@ -138,12 +138,13 @@ export function ensureAnnotationOverlayRegistered(): void {
         return [{ type: "polygon", attrs: { coordinates: pts }, styles }];
       }
       if (ext.droite === true) {
-        // Ancré à droite : 8 px après la bougie comme annotationsPane.ts, `dessous` ignoré.
+        // Ancré à droite : texte à 8 px après la bougie comme annotationsPane.ts, `dessous` ignoré.
+        // `paddingLeft: 0` : le style texte par défaut des overlays (`paddingLeft: 4`) le décalerait à x + 12.
         return [
           {
             type: "text",
             attrs: { x: c0.x + 8, y: c0.y, text: ext.texte, align: "left", baseline: "middle" },
-            styles: { color: couleur, size: 10, backgroundColor: "transparent" },
+            styles: { color: couleur, size: 10, backgroundColor: "transparent", paddingLeft: 0 },
           },
         ];
       }

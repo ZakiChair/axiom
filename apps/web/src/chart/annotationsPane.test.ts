@@ -141,6 +141,16 @@ describe("dessinerAnnotationsPane", () => {
     expect(ctx.textBaseline).toBe("middle");
   });
 
+  it("étiquette ancrée à droite de valeur non finie : écartée, sans fausser le tri ni l'écart de 11 px des suivantes", () => {
+    const ctx = fauxCtx();
+    dessinerAnnotationsPane(ctx, { labels: [
+      { idx: 9, valeur: 52.5, texte: "R forte · 8", couleur: "--down", cible: "prix", ancrageX: "droite" },
+      { idx: 9, valeur: NaN, texte: "R forte · 3", couleur: "--down", cible: "prix", ancrageX: "droite" },
+      { idx: 9, valeur: 50, texte: "R forte · 12", couleur: "--down", cible: "prix", ancrageX: "droite" },
+    ] }, "prix", AXES, FENETRE);
+    expect(ctx.ops).toEqual(["fillText(R forte · 12,98,100)", "fillText(R forte · 8,98,111)"]);
+  });
+
   it("étiquette ancrée à droite : dessinée après les étiquettes centrées, `position` ignorée", () => {
     const ctx = fauxCtx();
     dessinerAnnotationsPane(ctx, { labels: [

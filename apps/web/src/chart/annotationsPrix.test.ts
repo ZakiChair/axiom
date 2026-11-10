@@ -140,7 +140,7 @@ describe("AnnotationsPrix", () => {
     ]);
   });
 
-  it("figure label ancré à droite : x + 8, aligné à gauche, centré sur la valeur, fond transparent", () => {
+  it("figure label ancré à droite : texte à x + 8 (sans le retrait de 4 px du style par défaut), aligné à gauche, centré sur la valeur, fond transparent", () => {
     const figures = capture.template?.createPointFigures?.({
       overlay: { extendData: { genre: "label", texte: "R forte · 12", couleur: "--down", dessous: false, droite: true } },
       coordinates: [{ x: 30, y: 100 }],
@@ -149,7 +149,9 @@ describe("AnnotationsPrix", () => {
     const [figure] = figures as OverlayFigure[];
     expect(figure?.type).toBe("text");
     expect(figure?.attrs).toEqual({ x: 38, y: 100, text: "R forte · 12", align: "left", baseline: "middle" });
-    expect(figure?.styles.backgroundColor).toBe("transparent");
+    // `paddingLeft: 0` : le style texte par défaut des overlays (`paddingLeft: 4`) décalerait le texte à x + 12.
+    // canvasTokens mocké sur son repli : la couleur résolue de --down est DOWN_REPLI.
+    expect(figure?.styles).toEqual({ color: "#ef4444", size: 10, backgroundColor: "transparent", paddingLeft: 0 });
   });
 
   it("appliquer : transmet `creux` du marqueur et l'ancrage à droite du label à l'overlay", () => {

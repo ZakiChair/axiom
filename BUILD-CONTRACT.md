@@ -2096,7 +2096,13 @@ la référence visuelle « vue C » approuvée par le propriétaire ; plan :
     médiane pointillée disparaît. `maxZonesSr` = 0 : aucune zone tracée, ni forte, ni faible, ni
     cassée ; les triangles creux et les sorties restent.
   - Infobulle d'une zone : « forte » ou « faible », rôle, bornes, niveau, écart au cours,
-    touches, rejets, inversion, puis « touches comptées sur N bougies ».
+    touches, rejets, inversion, puis « touches comptées sur N bougies ». Sa ligne n'est montrée
+    que si elle trouve place dans l'infobulle du graphe (3 lignes au plus) : après les marqueurs
+    à 3 bougies ou moins du réticule, les zones dont la bande couvre la bougie survolée, quelle
+    que soit la hauteur du réticule, les fortes puis les faibles, chaque groupe rangé par
+    proximité au cours de la dernière bougie décidée, même quand la bougie survolée est ancienne.
+    Sur le cas de référence, aux réglages par défaut, 6 des 12 zones actives tracées n'y
+    paraissent à aucune bougie, dont les 4 faibles.
 - **Signal précoce** (réglage nouveau `signauxPrecoces`, défaut vrai, libellé « Signaux précoces
   sur zone forte (non mesurés) »).
   - Réaction décidée à la clôture de la bougie i, avec les zones connues après i − 1. Sur un
@@ -2145,8 +2151,11 @@ la référence visuelle « vue C » approuvée par le propriétaire ; plan :
   - Un triangle creux peut tomber sur la bougie même qui désactive sa zone, une bougie après la
     fin de la bande : la décision lit l'état de la veille.
   - L'infobulle du graphe a 3 lignes au plus. Les triangles creux y passent avant les forts
-    mouvements : près d'un triangle creux, la ligne d'un fort mouvement peut n'apparaître qu'une
-    bougie plus loin.
+    mouvements et les retournements ↺ : près d'un triangle creux, la ligne d'un fort mouvement
+    peut n'apparaître qu'une bougie plus loin, celle d'un ↺ jusqu'à trois (cas de référence, case
+    « Détecter les retournements » cochée). Les lignes de zone passent après tous les marqueurs
+    et s'évincent entre elles : une zone faible, ou une zone forte moins proche du cours que trois
+    autres, peut n'y paraître à aucune bougie (voir l'infobulle d'une zone, plus haut).
 - **« Non mesuré ».** Les signaux précoces n'ont passé aucun test. Une mesure rapide hors
   protocole, sur BTC seul (conception, §9), ne leur trouve aucun avantage ; aucun de ses chiffres
   ne paraît dans l'interface. Chaque triangle creux porte la mention ci-dessus, et le libellé du

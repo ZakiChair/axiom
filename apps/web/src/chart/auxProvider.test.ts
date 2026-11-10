@@ -854,10 +854,8 @@ describe("AuxProvider — séries strictes du lot C", () => {
     const r = { exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const,
       ids: ["refClose" as const, "refCloseStrict" as const], candleTimes: [H, 2 * H, 3 * H] };
     await new Promise<void>((resolve) => { let restants = 2; p.getAligned(r, () => { if (--restants === 0) resolve(); }); });
-    // Deux appels (pages de 1 000) pour couvrir l'amorce AXIS (1 500 bougies) : la seconde
-    // page repart de la plus ancienne reçue et est fusionnée sans doublon.
-    // Deux appels (Binance plafonne à 1 000 par page) pour couvrir l'amorce AXIS
-    // (1 500 bougies) : la seconde page repart de la plus ancienne reçue.
+    // Deux appels : la seconde page repart de la plus ancienne reçue (`endTime` = son
+    // open − 1) mais n'apporte aucune bougie nouvelle, ce qui arrête la pagination.
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(fetcher).toHaveBeenNthCalledWith(1, "ETHUSDT", "1h", { limit: 1000 });
     expect(fetcher).toHaveBeenNthCalledWith(2, "ETHUSDT", "1h", { limit: 1000, endTime: H - 1 });
@@ -866,7 +864,29 @@ describe("AuxProvider — séries strictes du lot C", () => {
     } });
   });
 
-  it("refClose : la source complète (≥ 1 500 bougies) couvre l'amorce en deux pages fusionnées", async () => {
+  it("refClose : la source complète couvre l'amorce d'AXIS S/R (3 000 bougies) en trois pages fusionnées", async () => {
+    const pageDepuis = (debut: number) => Array.from({ length: 1000 }, (_v, i) => ({
+      time: (debut + i) * H, open: 1, high: 1, low: 1, close: debut + i, volume: 1,
+    }));
+    // Repli `[]` : un appel de trop échoue sur le compte, jamais sur le vrai réseau.
+    const fetcher = vi.spyOn(binanceAdapter, "fetchKlines")
+      .mockResolvedValueOnce(pageDepuis(2000))
+      .mockResolvedValueOnce(pageDepuis(1000))
+      .mockResolvedValueOnce(pageDepuis(0))
+      .mockResolvedValue([]);
+    const p = new AuxProvider();
+    const r = { exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const,
+      ids: ["refClose" as const], candleTimes: [0, 1500 * H, 2999 * H] };
+    await new Promise<void>((resolve) => p.getAligned(r, resolve));
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher).toHaveBeenNthCalledWith(1, "ETHUSDT", "1h", { limit: 1000 });
+    expect(fetcher).toHaveBeenNthCalledWith(2, "ETHUSDT", "1h", { limit: 1000, endTime: 2000 * H - 1 });
+    expect(fetcher).toHaveBeenNthCalledWith(3, "ETHUSDT", "1h", { limit: 1000, endTime: 1000 * H - 1 });
+    // 3 000 points fusionnés : la plus ancienne (0), le milieu (1 500) et la plus récente (2 999).
+    expect(p.getAligned(r, () => {})).toEqual({ status: "ready", aux: { refClose: [0, 1500, 2999] } });
+  });
+
+  it("refClose : une source courte rend tout ce qu'elle a, la pagination s'arrête sur une page vide", async () => {
     const page1 = Array.from({ length: 1000 }, (_v, i) => ({
       time: 501 * H + i * H, open: 100, high: 100, low: 100, close: 100 + i, volume: 1,
     }));
@@ -875,13 +895,16 @@ describe("AuxProvider — séries strictes du lot C", () => {
     }));
     const fetcher = vi.spyOn(binanceAdapter, "fetchKlines")
       .mockResolvedValueOnce(page1)
-      .mockResolvedValueOnce(page2);
+      .mockResolvedValueOnce(page2)
+      .mockResolvedValue([]);
     const p = new AuxProvider();
     const r = { exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const,
       ids: ["refClose" as const], candleTimes: [0, 500 * H, 1000 * H, 1500 * H] };
     await new Promise<void>((resolve) => p.getAligned(r, resolve));
-    expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(fetcher).toHaveBeenNthCalledWith(2, "ETHUSDT", "1h", { limit: 500, endTime: 501 * H - 1 });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher).toHaveBeenNthCalledWith(1, "ETHUSDT", "1h", { limit: 1000 });
+    expect(fetcher).toHaveBeenNthCalledWith(2, "ETHUSDT", "1h", { limit: 1000, endTime: 501 * H - 1 });
+    expect(fetcher).toHaveBeenNthCalledWith(3, "ETHUSDT", "1h", { limit: 1000, endTime: -1 });
     // 1 501 points fusionnés, triés, sans doublon : LOCF exact (à 1000·H : page 1, indice 499).
     expect(p.getAligned(r, () => {})).toEqual({ status: "ready", aux: { refClose: [50, 550, 100 + 499, 100 + 999] } });
   });

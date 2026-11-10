@@ -142,15 +142,17 @@ const ERROR_TTL_MS = 30_000;
 /** Profondeur d'historique demandée aux fournisseurs (90 jours). */
 const LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000;
 /**
- * Profondeur d'un fetch `refClose` (patron cbprem/derivatives, DEUX appels). Un niveau :
- * `binanceAdapter.fetchKlines` sans borne temporelle rend les `limit` bougies les plus
- * RÉCENTES (atteint `now` sans pagination) ; la seconde page repart de la plus ancienne
- * (`endTime` = son open − 1 ms) et est fusionnée sans doublon. 1 500 couvre l'amorce
- * d'AXIS (`amorceBougies` = 1500 : garde-fou de régime v5) ; au-delà (scroll historique)
- * les bougies plus anciennes restent `undefined` (LOCF sans antériorité) — dégradation
- * gracieuse cohérente avec la clé sans composante de plage.
+ * Profondeur d'un fetch `refClose`, en bougies. Un niveau : `binanceAdapter.fetchKlines`
+ * sans borne temporelle rend les `limit` bougies les plus RÉCENTES (atteint `now` sans
+ * pagination) ; Binance plafonnant à 1 000 bougies par appel, chaque page suivante repart
+ * de la plus ancienne reçue (`endTime` = son open − 1 ms) et est fusionnée sans doublon.
+ * 3 000 couvre l'amorce la plus longue des définitions qui lisent la référence (AXIS S/R :
+ * `amorceBougies` = 3000 ; AXIS : 1 500) — sinon le garde-fou de régime ne s'appliquerait
+ * pas à la moitié ancienne de l'historique. Au-delà (scroll historique) les bougies plus
+ * anciennes restent `undefined` (LOCF sans antériorité) — dégradation gracieuse cohérente
+ * avec la clé sans composante de plage.
  */
-const REFCLOSE_LIMIT = 1500;
+export const REFCLOSE_LIMIT = 3000;
 /** Intervalle d'agrégation Coinalyze pour OI/funding (cf. COINALYZE_INTERVALS). */
 const COINALYZE_INTERVAL = "1hour";
 /** Durée du bucket `COINALYZE_INTERVAL`, en ms. */
@@ -477,20 +479,28 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe, e
       // autres séries de la requête.
       if (timeframeToFapiInterval(timeframe) === undefined) return [];
       try {
-        // Binance plafonne à 1 000 klines par appel : une seconde page part de la plus
-        // ancienne reçue pour couvrir l'amorce AXIS (1 500) en une seule entrée de cache.
-        const recentes = await binanceAdapter.fetchKlines(symbol, timeframe, { limit: Math.min(1000, REFCLOSE_LIMIT) });
-        let candles = recentes;
-        if (recentes.length < REFCLOSE_LIMIT && recentes.length > 0) {
-          const plusAncienne = recentes[0]!.time;
-          const anciennes = await binanceAdapter.fetchKlines(symbol, timeframe, {
-            limit: Math.min(1000, REFCLOSE_LIMIT - recentes.length),
-            endTime: plusAncienne - 1,
-          });
-          const vues = new Set(recentes.map((c) => c.time));
-          candles = [...anciennes.filter((c) => !vues.has(c.time)), ...recentes];
+        // Binance plafonne à 1 000 klines par appel : pages successives, la première sans
+        // borne, les suivantes depuis la plus ancienne reçue, jusqu'à REFCLOSE_LIMIT (amorce
+        // d'AXIS S/R) ou une page sans bougie nouvelle (source plus courte : tout ce qu'elle
+        // a), en une seule entrée de cache. Sur un doublon, la page la plus récente prime.
+        const closes = new Map<number, number>();
+        let plusAncienne = Infinity;
+        while (closes.size < REFCLOSE_LIMIT) {
+          const limit = Math.min(1000, REFCLOSE_LIMIT - closes.size);
+          const page = await binanceAdapter.fetchKlines(
+            symbol,
+            timeframe,
+            closes.size === 0 ? { limit } : { limit, endTime: plusAncienne - 1 },
+          );
+          const avant = closes.size;
+          for (const c of page) {
+            if (closes.has(c.time)) continue;
+            closes.set(c.time, c.close);
+            if (c.time < plusAncienne) plusAncienne = c.time;
+          }
+          if (closes.size === avant) break;
         }
-        return toPoints(candles.map((c) => ({ time: c.time, value: c.close })));
+        return toPoints([...closes].map(([time, value]) => ({ time, value })));
       } catch {
         return [];
       }

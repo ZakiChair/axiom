@@ -2213,7 +2213,10 @@ la référence visuelle « vue C » approuvée par le propriétaire ; plan :
     en 390 × 844), tests et documentation. Chaque remarque importante a été soumise à une
     vérification contradictoire (conception, reproduction, impact), puis corrigée dans une vague
     finale : infobulle des zones et des triangles creux, repli de `forceZoneForte`, ligne
-    « résistance » de la mesure rapide, documentation.
+    « résistance » de la mesure rapide, documentation. Une seule reste ouverte : au téléphone,
+    la première ligne de toute infobulle du graphe passe sous le bandeau du symbole (défaut
+    antérieur au chantier, voir les limites plus haut). Le propriétaire l'a laissée en limite
+    connue en décidant la fusion le 10 novembre 2026.
   - `pnpm check` vert après la vague finale : typage des 7 projets ; indicateurs 229 fichiers /
     1 078 tests, alertes 129, backtest 131, pacte 120, daemon 786, web 430 fichiers / 6 388
     tests.
@@ -2230,5 +2233,9 @@ la référence visuelle « vue C » approuvée par le propriétaire ; plan :
     - infobulle du graphe : rubans rangés par distance verticale au réticule
       (`apps/web/src/chart/indicators.tooltip.test.ts`) ; réserve en tête des 120 triangles
       creux.
-  - Reste avant la fusion : `pnpm check:e2e`, que ni la revue finale ni la vague finale n'ont
-    relancé.
+  - Vérification avant la fusion, sur `e7189e7` (10 novembre 2026) :
+    - `pnpm check` vert, avec les mêmes comptes ;
+    - `pnpm check:e2e` : 175 parcours sur 175 ;
+    - application réelle (BTCUSDT 4h) : réticule dans une bande, la première ligne de
+      l'infobulle décrit cette zone ; réticule sur un triangle creux, la ligne commence par la
+      mention « non mesuré », entière au bureau.

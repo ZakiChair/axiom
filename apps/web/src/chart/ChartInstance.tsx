@@ -184,10 +184,11 @@ const PROFONDEUR_SESSION: Record<string, number> = {
   pivotWoodie: 1,
 };
 /**
- * Plafond de pages d'une extension (2 jours en 1 min = 6 pages de 500 ; une amorce de
- * 1 500 bougies depuis un backfill de 500 = 2 pages).
+ * Plafond de pages d'une extension, borne défensive. Cas qui le dimensionnent : 2 jours en
+ * 1 min = 6 pages de 500 ; amorce de 1 500 bougies (AXIS) depuis un backfill de 500 =
+ * 2 pages ; amorce de 3 000 (AXIS S/R) = 5 pages de 500, 9 d'une source plafonnée à 300.
  */
-const MAX_PAGES_SESSION = 8;
+const MAX_PAGES_SESSION = 10;
 
 /**
  * Minuit UTC jusqu'auquel le backfill doit remonter pour que les définitions

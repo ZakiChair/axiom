@@ -254,6 +254,18 @@ les `maxZonesSr` (défaut 4) futures zones de support (`--up`) et de résistance
 BT « AXIS S/R confluence (4h) »), et propose un filtre d'entrée optionnel
 `margeResistanceAtr` (défaut 0 = sans) pour éviter les achats immédiatement
 sous une résistance active.
+**Zones par force et signal précoce (9 novembre 2026)** : AXIS S/R classe
+désormais ses zones par force (touches + rejets sur volume fort, forte dès 6
+par défaut) — toutes les zones fortes en bande pleine, étiquetées au bord
+droit (« S fort · 5 », « R forte · 12 »), les quatre zones faibles les plus
+proches en pointillé, les 12 zones fortes cassées les plus récentes estompées.
+Un triangle creux marque la bougie close qui entre dans une zone forte et
+clôture au-delà, sans attendre le signal confirmé : signal précoce
+**non mesuré**, lecture indicative, jamais une promesse (sorties
+`reactionSupport` et `reactionResistance` pour une alerte de seuil). Comme une
+zone compte ses touches depuis la première bougie chargée, le graphe remonte à
+**3 000 bougies** quand AXIS S/R est actif (AXIS seul reste à 1 500), et la
+série de référence du garde-fou de régime couvre la même profondeur.
 [Méthode, réglages, limites et backtests](docs/axis-2026-10-07.md).
 
 ### Historique des décisions et nouveaux indicateurs

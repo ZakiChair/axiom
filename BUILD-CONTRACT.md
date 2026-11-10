@@ -2051,3 +2051,129 @@ revue priment dans cet ordre : §6, §5, puis les §0 à §4.
   - Instabilité préexistante, hors lot : `quatre-lots-sauvegardes.e2e.ts:32` échoue parfois. La
     réouverture de NOTE par ⌘K, juste après « Fermer », n'aboutit pas. C'est reproduit à
     c2f757d.
+
+## AXIS S/R — zones classées par force et signal précoce (demande du 9 novembre 2026)
+
+Le propriétaire demande d'« améliorer les signaux d'AXIS », puis précise : « j'aimerais les voir
+apparaître suffisamment tôt, que je puisse voir quelle zone marque une forte résistance ou
+support ». Parmi les définitions, seule **AXIS S/R** (`stratAxisSr`) change : ses zones sont
+classées par force, et un triangle creux marque la bougie qui réagit sur une zone forte.
+**Aucun fournisseur, hôte, indicateur, fenêtre ni dépendance nouvelle ; `stratAxis.ts` (AXIS)
+n'est pas modifié.** Pour une même série, une même référence et les mêmes réglages, les séries
+existantes d'AXIS S/R (`etat`, `score`, `prixSignal`, `stop`, `support`, `resistance`), ses
+signaux confirmés et ses forts mouvements, marqueurs et étiquettes compris, sont inchangés au
+caractère près. Spec : `docs/superpowers/specs/2026-11-09-axis-sr-zones-fortes-design.md`, avec
+la référence visuelle « vue C » approuvée par le propriétaire ; plan :
+`docs/superpowers/plans/2026-11-09-axis-sr-zones-fortes.md`.
+
+- **Exceptions au contrat** (conception, §5).
+  - `@axiom/types` reçoit exactement deux champs optionnels : `creux?: boolean` sur
+    `MarqueurAnnotation` (triangle au trait, non rempli, plus petit) et
+    `ancrageX?: "centre" | "droite"` sur `LabelAnnotation` (texte à droite de sa bougie, centré
+    sur sa valeur). Absents, le rendu est celui d'avant. `chart/annotationsPane.ts` et
+    `chart/annotationsPrix.ts` les rendent ; aucun autre indicateur ne change d'aspect.
+  - Amorce de **3 000 bougies** pour `stratAxisSr` seul (`AMORCE_AXIS_SR`). `stratAxis` reste à
+    1 500 (`AMORCE_AXIS`), qui reste aussi le seuil de la mention « amorce courte » des signaux.
+  - `REFCLOSE_LIMIT` = 3 000 dans `chart/auxProvider.ts` (1 500 avant). La constante vaut pour
+    toute définition qui lit la référence, `refClose` ou `refCloseStrict` (même cache) : AXIS,
+    AXIS S/R et les sept indicateurs statistiques à référence reçoivent jusqu'à 3 000 bougies de
+    référence, par pages de 1 000, en quatre appels au plus.
+- **Zones classées par force.**
+  - Force : touches + rejets sur volume fort + 0,5 si la zone est inversée (formule inchangée).
+    Une zone est forte si sa force atteint `forceZoneForte` (réglage nouveau, défaut 6, de 2 à
+    50) ; tant qu'elle est active, sa force ne décroît pas.
+  - Toutes les zones fortes actives sont tracées : bande pleine d'autant plus opaque qu'elle est
+    forte (`min(0,34 ; 0,14 + 0,012 × min(16 ; force))`), bords en trait plein, étiquette
+    « S fort · n » ou « R forte · n » au bord droit (n = touches).
+  - Zones faibles : les `maxZonesSr` plus proches du cours (défaut 4, de 0 à 12, nouveau libellé
+    « Zones faibles tracées (0 = aucune zone) »), moitié supports, moitié résistances. Sans
+    remplissage, bords en pointillé, étiquette « faible ».
+  - Zones fortes cassées : les 12 zones désactivées les plus récentes qui étaient fortes à leur
+    dernière bougie active (clôture de `finIdx`, avant les fusions de la bougie qui les casse).
+    Bande estompée (opacité 0,09) arrêtée à cette bougie ; ni bord, ni étiquette, ni infobulle.
+  - Une bande part de la confirmation de sa zone et suit, bougie par bougie, les bornes connues à
+    la clôture. Vert (`--up`) pour un support, rouge (`--down`) pour une résistance ; la ligne
+    médiane pointillée disparaît. `maxZonesSr` = 0 : aucune zone tracée, ni forte, ni faible, ni
+    cassée ; les triangles creux et les sorties restent.
+  - Infobulle d'une zone : « forte » ou « faible », rôle, bornes, niveau, écart au cours,
+    touches, rejets, inversion, puis « touches comptées sur N bougies ».
+- **Signal précoce** (réglage nouveau `signauxPrecoces`, défaut vrai, libellé « Signaux précoces
+  sur zone forte (non mesurés) »).
+  - Réaction décidée à la clôture de la bougie i, avec les zones connues après i − 1. Sur un
+    support (niveau ≤ close[i − 1]) : low ≤ borne haute, close > borne haute, et close dans la
+    moitié haute de la bougie. Sur une résistance : le symétrique. Une zone ne réagit pas à moins
+    de 4 bougies de sa réaction précédente ; une bougie plate ne réagit jamais.
+  - Triangle creux, plus petit que le triangle plein : sous le plus bas pour un support (`--up`),
+    au-dessus du plus haut pour une résistance (`--down`). Au plus un par bougie et par sens,
+    aucun sur une bougie de signal confirmé, les 120 plus récents.
+  - Infobulle, réticule à 3 bougies ou moins : sens, bornes et décompte de la zone, ce que la
+    bougie a fait, puis la mention exacte :
+    « signal précoce non mesuré — lecture indicative, jamais une promesse ».
+    Aucun chiffre de performance dans l'interface.
+- **Sorties pour les alertes.** `reactionSupport` (« Réaction sur support fort ») et
+  `reactionResistance` (« Réaction sur résistance forte »), masquées : 1 sur une bougie close qui
+  réagit dans ce sens, 0 sinon, indéfinies sur la bougie en formation. Elles ne dépendent ni de
+  `signauxPrecoces` ni de `maxZonesSr`. Une alerte de seuil d'indicateur (`indicateur-seuil`)
+  existante les lit ; aucun type d'alerte nouveau. AXIS S/R passe de 21 à 23 réglages et de 6 à 8
+  sorties, dont 6 masquées. Ni preset BT ni opérande nouveau dans la fenêtre BT.
+- **Profondeur de 3 000 bougies** (décision du propriétaire, conception §3.6).
+  - Une zone compte ses touches depuis la première bougie chargée. AXIS S/R actif, le graphe
+    remonte de lui-même à 3 000 bougies : cinq pages de 500 après le chargement initial.
+  - `MAX_PAGES_SESSION`, plafond d'une extension, passe de 8 à 10 : une source plafonnée à 300
+    bougies par appel atteint 3 000 en 9 pages.
+  - `refClose` : si une page suivante échoue, les pages déjà reçues sont servies (série
+    partielle, bougies récentes) ; si la première échoue, série vide, comme avant. Jamais d'état
+    d'erreur.
+  - Source plus courte : tout ce qu'elle a.
+- **Effet sur les signaux confirmés.** La référence couvre désormais 3 000 bougies. Sur les
+  bougies plus anciennes que les 1 500 dernières, les signaux d'AXIS et d'AXIS S/R passent donc
+  sous le garde-fou de régime quand l'historique chargé est assez long (AXIS S/R affiché, ou
+  défilement arrière). Avant, ils y restaient ceux de la v2, faute de référence. C'est
+  l'intention de la conception (§3.6).
+- **Limites connues.**
+  - Zones et triangles creux dépendent de la première bougie chargée : charger plus d'historique
+    les redessine. Ce n'est pas un repaint : rien de ce qui est décidé à une bougie ne lit une
+    bougie plus récente.
+  - Alertes, mécanisme existant pris tel quel :
+    - évaluées aux réglages par défaut (`forceZoneForte` = 6), même si l'instance du graphe en a
+      d'autres ;
+    - seulement l'application ouverte sur le symbole et l'unité de l'alerte, sur le tampon du
+      graphe, qui n'a 3 000 bougies que si AXIS S/R y est affiché ;
+    - le daemon n'évalue que les alertes en 1 min ou héritées, sur 1 500 bougies ;
+    - le formulaire liste les sorties par leur clé ; la notification garde sa formule générique
+      (« stratAxisSr(reactionSupport) >= 1 »).
+  - Un triangle creux peut tomber sur la bougie même qui désactive sa zone, une bougie après la
+    fin de la bande : la décision lit l'état de la veille.
+  - L'infobulle du graphe a 3 lignes au plus. Les triangles creux y passent avant les forts
+    mouvements : près d'un triangle creux, la ligne d'un fort mouvement peut n'apparaître qu'une
+    bougie plus loin.
+- **« Non mesuré ».** Les signaux précoces n'ont passé aucun test. Une mesure rapide hors
+  protocole, sur BTC seul (conception, §9), ne leur trouve aucun avantage ; aucun de ses chiffres
+  ne paraît dans l'interface. Chaque triangle creux porte la mention ci-dessus, et le libellé du
+  réglage dit « non mesurés ».
+- **Budget.**
+  - Chargement initial : **1 193 254 / 356 315** à `169cd36`, dans `pnpm check` (Node 26.7.0,
+    zlib 1.2.12).
+  - Soit +4 961 / +1 782 depuis le départ de la branche, mesuré le 9 novembre
+    (1 188 293 / 354 533). Marge gzip 3 685, au-dessus des 3 000 exigés.
+  - Calcul complet d'AXIS S/R à 3 000 bougies, médiane de 30 calculs : ≈ 2 ms sous Bun et
+    ≈ 2,9 ms sous V8, sous le plafond de 10 ms. La conception relevait 2,9 ms sous Bun avant le
+    chantier.
+- **Revue et tests.**
+  - Revue indépendante de chaque lot : conformité, plus des angles contradictoires (rendu,
+    équivalence au moteur relancé, non-régression, tracé, identité des signaux, pagination). Les
+    corrections arbitrées ont été regroupées en un lot 4b, revu à son tour.
+  - `pnpm check` vert à `169cd36` : typage des 7 projets ; indicateurs 229 fichiers / 1 078
+    tests, alertes 129, backtest 131, pacte 120, daemon 786, web 430 fichiers / 6 382 tests.
+  - Tests ajoutés :
+    - le moteur en une passe égale une référence lente qui relance le moteur à chaque bougie ;
+    - cas de référence BTCUSDT 4h de 3 000 bougies, versé au dépôt
+      (`packages/indicators/src/strategy/fixtures/btcusdt-4h-3000.json`) : 8 zones fortes
+      actives, 122 réactions (62 sur support, 60 sur résistance), 120 triangles creux ;
+    - causalité par préfixes et futur altéré ; série sans volume, bougies plates, historique de
+      0, 1 ou 8 bougies, prix × 1e-9 ;
+    - une alerte de seuil tire exactement aux 31 réactions depuis l'index 2 700
+      (`packages/alerts/src/engine.axisSr.test.ts`) ;
+    - extension de 500 à 3 000 bougies, pagination de `refClose`.
+  - À compléter au lot 6 : `pnpm check:e2e`, captures du graphe réel (bureau et téléphone),
+    revue finale du diff complet.

@@ -2,10 +2,12 @@
  * @axiom/indicators — strategy/stratAxisSr.test.ts
  *
  * Tests dédiés à `stratAxisSr` (« AXIS S/R ») : variante d'AXIS dotée de la
- * détection causale et de la projection des futures zones de support et de
- * résistance (`zonesSrAxis`), des sorties masquées `support` et `resistance`,
- * et du filtre d'entrée `margeResistanceAtr`, tandis que `stratAxis` (« AXIS »)
- * demeure strictement inchangée (sans zones S/R).
+ * détection causale des zones de support et de résistance (`zonesSrAxis`), de
+ * leur tracé par force, des sorties masquées `support`, `resistance`,
+ * `reactionSupport` et `reactionResistance`, et du filtre d'entrée
+ * `margeResistanceAtr`, tandis que `stratAxis` (« AXIS ») demeure strictement
+ * inchangée (sans zones S/R). Le tracé sur le cas de référence BTCUSDT 4h est
+ * vérifié dans `stratAxisSr.trace.test.ts`.
  */
 import { describe, expect, it } from "vitest";
 import type { Candle } from "@axiom/types";
@@ -17,6 +19,8 @@ import { etatsStrategie, specStrategie } from "../utils-fabrique-strategie";
 import fixtureRaw from "../golden/fixture-ohlcv.json";
 import { AMORCE_AXIS, ATR_STOP_PERIODE, REGIME_TESTE, fluxAxis, stratAxis } from "./stratAxis";
 import {
+  AMORCE_AXIS_SR,
+  FORCE_ZONE_FORTE_DEFAUT,
   MAX_POOL_ZONES_AXIS,
   MAX_ZONES_SR_DEFAUT,
   PIVOT_SR_DEFAUT,
@@ -33,18 +37,20 @@ const EMA50 = { emaTendance: 50 };
 function resume(candlesEntree: Candle[], params: Record<string, number | boolean> = {}): string {
   const res = computeIndicator(stratAxisSr, candlesEntree, params);
   return (res.annotations?.marqueurs ?? [])
-    .filter((m) => m.couleur !== "--accent")
+    .filter((m) => m.couleur !== "--accent" && m.creux !== true)
     .map((m) => `${m.idx}${m.forme === "triangleHaut" ? "▲" : "▼"}`)
     .join(" ");
 }
 
 describe("stratAxisSr — contrat et séparation d'avec stratAxis", () => {
-  it("enregistrée sous stratAxisSr (« AXIS S/R »), 21 inputs, 6 sorties dont 4 masquées, tandis que stratAxis reste à 17 inputs et 4 sorties", () => {
+  it("enregistrée sous stratAxisSr (« AXIS S/R »), 23 inputs, 8 sorties dont 6 masquées, amorce de 3 000 bougies, tandis que stratAxis reste à 17 inputs, 4 sorties et 1 500 bougies", () => {
     expect(getIndicator("stratAxisSr")).toBe(stratAxisSr);
     expect(stratAxisSr.name).toBe("AXIS S/R");
     expect(stratAxisSr.category).toBe("strategy");
     expect(stratAxisSr.pane).toBe("overlay");
-    expect(stratAxisSr.amorceBougies).toBe(AMORCE_AXIS);
+    expect(AMORCE_AXIS_SR).toBe(3000);
+    expect(stratAxisSr.amorceBougies).toBe(AMORCE_AXIS_SR);
+    expect(stratAxis.amorceBougies).toBe(AMORCE_AXIS);
     expect(stratAxisSr.auxFacultatives).toEqual(["oi", "refClose"]);
     expect(stratAxisSr.minTimeframe).toBeUndefined();
     expect(TIMEFRAME_REQUIS.stratAxisSr).toBeUndefined();
@@ -54,12 +60,14 @@ describe("stratAxisSr — contrat et séparation d'avec stratAxis", () => {
     // stratAxis reste la version sans S/R (17 inputs, 4 sorties).
     expect(stratAxis.inputs).toHaveLength(17);
     expect(stratAxis.outputs).toHaveLength(4);
-    expect(stratAxisSr.inputs).toHaveLength(21);
-    expect(stratAxisSr.inputs.slice(-4)).toEqual([
+    expect(stratAxisSr.inputs).toHaveLength(23);
+    expect(stratAxisSr.inputs.slice(-6)).toEqual([
       { key: "pivotSr", name: "Pivots S/R (bougies gauche/droite)", type: "number", default: PIVOT_SR_DEFAUT, min: 2, max: 50 },
       { key: "zoneSrAtr", name: "Largeur de zone S/R (× ATR 14)", type: "number", default: ZONE_SR_ATR_DEFAUT, min: 0.1, max: 5 },
-      { key: "maxZonesSr", name: "Zones S/R futures tracées (0 = sans)", type: "number", default: MAX_ZONES_SR_DEFAUT, min: 0, max: 12 },
+      { key: "maxZonesSr", name: "Zones faibles tracées (0 = aucune zone)", type: "number", default: MAX_ZONES_SR_DEFAUT, min: 0, max: 12 },
       { key: "margeResistanceAtr", name: "Marge sous résistance à l'entrée (× ATR 14, 0 = sans)", type: "number", default: 0, min: 0, max: 10 },
+      { key: "forceZoneForte", name: "Force d'une zone forte (touches + rejets sur volume fort)", type: "number", default: FORCE_ZONE_FORTE_DEFAUT, min: 2, max: 50 },
+      { key: "signauxPrecoces", name: "Signaux précoces sur zone forte (non mesurés)", type: "boolean", default: true },
     ]);
     expect(stratAxisSr.outputs).toEqual([
       { key: "prixSignal", name: "Prix d'achat", style: "line" },
@@ -68,6 +76,8 @@ describe("stratAxisSr — contrat et séparation d'avec stratAxis", () => {
       { key: "score", name: "Score (−6 à +6)", style: "line", masquee: true },
       { key: "support", name: "Support actif proche", style: "line", masquee: true },
       { key: "resistance", name: "Résistance active proche", style: "line", masquee: true },
+      { key: "reactionSupport", name: "Réaction sur support fort", style: "line", masquee: true },
+      { key: "reactionResistance", name: "Réaction sur résistance forte", style: "line", masquee: true },
     ]);
     expect(PIVOT_SR_DEFAUT).toBe(5);
     expect(ZONE_SR_ATR_DEFAUT).toBe(0.5);
@@ -75,19 +85,19 @@ describe("stratAxisSr — contrat et séparation d'avec stratAxis", () => {
     expect(MAX_POOL_ZONES_AXIS).toBe(24);
   });
 
-  it("aux défauts (margeResistanceAtr 0), stratAxisSr produit exactement les mêmes signaux, labels et séries du cœur que stratAxis, les zones S/R en plus", () => {
+  it("aux défauts (margeResistanceAtr 0, sans signaux précoces), stratAxisSr produit exactement les mêmes signaux, labels et séries du cœur que stratAxis, les zones S/R en plus", () => {
     const sansSr = computeIndicator(stratAxis, candles, EMA50);
-    const avecSr = computeIndicator(stratAxisSr, candles, EMA50);
+    const avecSr = computeIndicator(stratAxisSr, candles, { ...EMA50, signauxPrecoces: false });
     expect(avecSr.series.prixSignal).toEqual(sansSr.series.prixSignal);
     expect(avecSr.series.stop).toEqual(sansSr.series.stop);
     expect(avecSr.series.etat).toEqual(sansSr.series.etat);
     expect(avecSr.series.score).toEqual(sansSr.series.score);
     expect(avecSr.annotations?.marqueurs).toEqual(sansSr.annotations?.marqueurs);
-    expect(avecSr.annotations?.labels).toEqual(sansSr.annotations?.labels);
+    expect(avecSr.annotations?.labels?.filter((l) => l.ancrageX !== "droite")).toEqual(sansSr.annotations?.labels);
     expect(sansSr.annotations?.rubans).toBeUndefined();
     expect(sansSr.annotations?.segments).toBeUndefined();
     expect(avecSr.annotations?.rubans).toHaveLength(MAX_ZONES_SR_DEFAUT);
-    expect(avecSr.annotations?.segments).toHaveLength(MAX_ZONES_SR_DEFAUT);
+    expect(avecSr.annotations?.segments?.length).toBeGreaterThanOrEqual(2 * MAX_ZONES_SR_DEFAUT);
   });
 });
 
@@ -126,7 +136,7 @@ describe("zonesSrAxis et filtre margeResistanceAtr", () => {
     expect(z20.support[20]).toBeCloseTo(110.1, 4);
   });
 
-  it("fixture dorée : support ≤ close < resistance partout où définis, projetés en rubans et segments jusqu'au bord droit", () => {
+  it("fixture dorée : support ≤ close < resistance partout où définis ; quatre zones faibles tracées jusqu'au bord droit, sans remplissage, bords en pointillé", () => {
     const res = computeIndicator(stratAxisSr, candles, EMA50);
     const sup = res.series.support ?? [];
     const resist = res.series.resistance ?? [];
@@ -141,27 +151,31 @@ describe("zonesSrAxis et filtre margeResistanceAtr", () => {
     expect(sup[candles.length - 1]).toBe(sup[candles.length - 2]);
     expect(resist[candles.length - 1]).toBe(resist[candles.length - 2]);
 
+    // Aucune zone forte au seuil 6 sur ces 300 bougies : quatre zones faibles, d'alpha 0.
     const rubans = res.annotations?.rubans ?? [];
     const segments = res.annotations?.segments ?? [];
     expect(rubans).toHaveLength(MAX_ZONES_SR_DEFAUT);
-    expect(segments).toHaveLength(MAX_ZONES_SR_DEFAUT);
     expect(rubans.filter((r) => r.couleur === "--up")).toHaveLength(2);
     expect(rubans.filter((r) => r.couleur === "--down")).toHaveLength(2);
-    for (let k = 0; k < rubans.length; k++) {
-      const r = rubans[k]!;
-      const s = segments[k]!;
+    for (const r of rubans) {
+      expect(r.alpha).toBe(0);
       expect(r.deIdx + r.hauts.length - 1).toBe(candles.length - 1);
-      expect(s.deIdx).toBe(r.deIdx);
-      expect(s.aIdx).toBe(candles.length - 1);
+      expect(r.bas).toHaveLength(r.hauts.length);
+      expect(r.info).toMatch(/^AXIS zone faible de (support|résistance) \[/);
+      expect(r.info?.endsWith(" — touches comptées sur 300 bougies")).toBe(true);
+    }
+    expect(segments.length).toBeGreaterThanOrEqual(2 * MAX_ZONES_SR_DEFAUT);
+    for (const s of segments) {
       expect(s.trait).toBe("pointille");
       expect(s.cible).toBe("prix");
-      expect(r.info).toMatch(/^AXIS zone de (support|résistance) future \[/);
+      expect(s.info).toBeUndefined();
+      expect(s.aValeur).toBe(s.deValeur);
+      expect(s.aIdx).toBeGreaterThanOrEqual(s.deIdx);
     }
     const sansTrace = computeIndicator(stratAxisSr, candles, { ...EMA50, maxZonesSr: 0 });
     expect(sansTrace.annotations?.rubans).toBeUndefined();
     expect(sansTrace.annotations?.segments).toBeUndefined();
-    expect(sansTrace.series.support).toEqual(sup);
-    expect(sansTrace.series.resistance).toEqual(resist);
+    expect(sansTrace.series).toEqual(res.series);
   });
 
   it("margeResistanceAtr : 0 = équivalence exacte ; > 0 retarde les achats sous résistance proche et nomme la marge en ATR", () => {
@@ -184,19 +198,21 @@ describe("zonesSrAxis et filtre margeResistanceAtr", () => {
     expect(etatsStrategie("stratAxisSr", candles, { ...EMA50, margeResistanceAtr: 0.5 })).toEqual(r05.series.etat);
   });
 
-  it("causalité stricte : un préfixe ou un futur altéré ne change jamais support, resistance ni etat", () => {
-    const params = { ...EMA50, margeResistanceAtr: 0.5 };
+  it("causalité stricte : un préfixe ou un futur altéré ne change jamais support, resistance, etat ni les réactions sur zone forte", () => {
+    // Seuil de force abaissé à 2 : au seuil 6, ces 300 bougies ne portent aucune réaction.
+    const params = { ...EMA50, margeResistanceAtr: 0.5, forceZoneForte: 2 };
+    const controlees = ["support", "resistance", "etat", "reactionSupport", "reactionResistance"] as const;
     const complet = computeIndicator(stratAxisSr, candles, params);
+    expect(complet.series.reactionSupport?.some((v) => v === 1)).toBe(true);
+    expect(complet.series.reactionResistance?.some((v) => v === 1)).toBe(true);
     for (const k of [60, 108, 139, 240, 280]) {
       const prefixe = computeIndicator(stratAxisSr, candles.slice(0, k + 1), params);
-      expect(prefixe.series.support?.slice(0, k), `support préfixe ${k}`).toEqual(complet.series.support?.slice(0, k));
-      expect(prefixe.series.resistance?.slice(0, k), `resistance préfixe ${k}`).toEqual(complet.series.resistance?.slice(0, k));
-      expect(prefixe.series.etat?.slice(0, k), `etat préfixe ${k}`).toEqual(complet.series.etat?.slice(0, k));
       const alterees = candles.map((c, i) => (i <= k ? c : { ...c, high: 1e12 + i, low: 1, close: 1e12 - i, volume: 1e12 }));
       const futur = computeIndicator(stratAxisSr, alterees, params);
-      expect(futur.series.support?.slice(0, k + 1), `support futur ${k}`).toEqual(complet.series.support?.slice(0, k + 1));
-      expect(futur.series.resistance?.slice(0, k + 1), `resistance futur ${k}`).toEqual(complet.series.resistance?.slice(0, k + 1));
-      expect(futur.series.etat?.slice(0, k + 1), `etat futur ${k}`).toEqual(complet.series.etat?.slice(0, k + 1));
+      for (const cle of controlees) {
+        expect(prefixe.series[cle]?.slice(0, k), `${cle} préfixe ${k}`).toEqual(complet.series[cle]?.slice(0, k));
+        expect(futur.series[cle]?.slice(0, k + 1), `${cle} futur ${k}`).toEqual(complet.series[cle]?.slice(0, k + 1));
+      }
     }
   });
 });

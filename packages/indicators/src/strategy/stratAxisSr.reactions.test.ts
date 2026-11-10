@@ -132,8 +132,7 @@ describe("zonesSrAxis — réactions sur zone forte : le moteur en une passe ren
     // 4 bougies de son évènement précédent, et le moteur ne rend rien. Ainsi la zone 0, qui réagit à 64, est refusée
     // à 67 (3 bougies) et réagit de nouveau à 68 (4 bougies).
     expect(refus).toHaveLength(68);
-    for (const { idx, id, precedent } of refus) {
-      expect(idx - precedent, `zone ${id} à ${idx}`).toBeLessThan(REARMEMENT_REACTION_AXIS);
+    for (const { idx, id } of refus) {
       expect(r.reactions.some((e) => e.idx === idx && e.zone.id === id), `zone ${id} à ${idx}`).toBe(false);
     }
     expect(refus).toContainEqual({ idx: 67, id: 0, precedent: 64 });

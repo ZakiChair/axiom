@@ -38,8 +38,10 @@ const TEXTE_ZONE_SUPPORT =
   "AXIS zone forte de support [75626.55 – 76601.83] (niveau 76114.19, -1.89 % du cours) — 5 touches, 2 rejets sur volume fort — touches comptées sur 3000 bougies";
 const TEXTE_ZONE_RESISTANCE =
   "AXIS zone forte de résistance [85314.76 – 86430.38] (niveau 85872.57, +10.69 % du cours) — 12 touches, 7 rejets sur volume fort, polarité inversée — touches comptées sur 3000 bougies";
+/** Réserve des signaux précoces, en tête du texte : l'infobulle coupe la ligne au bord du graphe, jamais son début. */
+const TETE_PRECOCE = "AXIS S/R signal précoce non mesuré — lecture indicative, jamais une promesse — ";
 const TEXTE_REACTION_2733 =
-  "AXIS S/R réaction sur support fort [75592.65 – 76529.83] — 4 touches, 2 rejets sur volume fort ; la bougie est entrée dans la zone et a clôturé au-dessus ; signal précoce non mesuré — lecture indicative, jamais une promesse";
+  "AXIS S/R signal précoce non mesuré — lecture indicative, jamais une promesse — réaction sur support fort [75592.65 – 76529.83] — 4 touches, 2 rejets sur volume fort ; la bougie est entrée dans la zone et a clôturé au-dessus";
 
 describe("stratAxisSr — sorties reactionSupport et reactionResistance (BTCUSDT 4h, 3 000 bougies closes)", () => {
   it("1 sur chaque bougie de réaction, 0 ailleurs : 62 sur support, 60 sur résistance, renseignées aussi sur une bougie de signal confirmé (2 850)", () => {
@@ -169,6 +171,7 @@ describe("stratAxisSr — triangles creux des réactions sur zone forte", () => 
     expect(triangles[0]!.idx).toBe(262);
     expect(triangles.at(-1)!.idx).toBe(2988);
     expect(new Set(triangles.map((m) => `${m.idx}${m.forme}`)).size).toBe(triangles.length);
+    expect(triangles.filter((m) => m.info?.startsWith(TETE_PRECOCE) !== true)).toEqual([]);
 
     const signaux = signauxConfirmes(defaut);
     const idxSignaux = new Set(signaux.map((m) => m.idx));
@@ -188,7 +191,7 @@ describe("stratAxisSr — triangles creux des réactions sur zone forte", () => 
     const t2761 = triangles.find((m) => m.idx === 2761);
     expect(t2761).toMatchObject({ valeur: btc[2761]!.high, forme: "triangleBas", couleur: "--down", creux: true });
     expect(t2761?.info).toMatch(
-      /^AXIS S\/R réaction sur résistance forte \[\d+\.\d{2} – \d+\.\d{2}\] — 9 touches, 6 rejets sur volume fort, polarité inversée ; la bougie est entrée dans la zone et a clôturé au-dessous ; signal précoce non mesuré — lecture indicative, jamais une promesse$/
+      /^AXIS S\/R signal précoce non mesuré — lecture indicative, jamais une promesse — réaction sur résistance forte \[\d+\.\d{2} – \d+\.\d{2}\] — 9 touches, 6 rejets sur volume fort, polarité inversée ; la bougie est entrée dans la zone et a clôturé au-dessous$/
     );
 
     const rang = (m: MarqueurAnnotation): number => marqueurs.indexOf(m);
@@ -208,8 +211,9 @@ describe("stratAxisSr — triangles creux des réactions sur zone forte", () => 
     // Seuil 3, bougie 2 570 : deux résistances fortes, de force 4,5 et 3 ; la plus forte est la plus loin du close.
     expect(forces(5, 0.5, 3, 2570)).toEqual(["-1:4.5", "-1:3"]);
     expect(infos(calculer(btc, { forceZoneForte: 3 }), 2570)).toEqual([
-      "AXIS S/R réaction sur résistance forte [78290.18 – 79077.88] — 4 touches, 0 rejet sur volume fort, polarité inversée ; " +
-        "la bougie est entrée dans la zone et a clôturé au-dessous ; signal précoce non mesuré — lecture indicative, jamais une promesse",
+      TETE_PRECOCE +
+        "réaction sur résistance forte [78290.18 – 79077.88] — 4 touches, 0 rejet sur volume fort, polarité inversée ; " +
+        "la bougie est entrée dans la zone et a clôturé au-dessous",
     ]);
 
     // Pivots 3, zones de ± 0,3 × ATR, seuil 3 : à 2 570 et à 2 811, deux résistances de même force ; la plus proche
@@ -279,15 +283,16 @@ describe("stratAxisSr — entrées limites du tracé", () => {
     expect(res.annotations?.rubans?.[0]?.info).toContain("[0.00007563 – 0.00007660]");
   });
 
-  it("forceZoneForte non fini (NaN, ±Infinity, texte non numérique) reçu sans résolution des réglages : repli sur 6, même résultat", () => {
-    // `computeIndicator` remplace déjà un réglage non fini par son défaut (`resolveParams`) ; ici `calc` est appelée
-    // directement, comme par un appelant qui ne résout pas les réglages.
+  it("forceZoneForte qui n'est pas un nombre fini (NaN, ±Infinity, texte, chaîne vide ou d'espaces, booléen) reçu sans résolution des réglages : repli sur 6, même résultat", () => {
+    // `computeIndicator` remplace déjà un réglage qui n'est pas un nombre fini par son défaut (`resolveParams`) ; ici
+    // `calc` est appelée directement, comme par un appelant qui ne résout pas les réglages. `Number("")`, `Number(" ")`
+    // et `Number(false)` valent 0, `Number(true)` 1 : sans repli, toutes les zones seraient fortes.
     const ctx = { ...buildCalcContext(btc), aux: auxBtc, timeframe: "4h" as const };
-    const avec = (forceZoneForte: number | string): IndicatorResult =>
+    const avec = (forceZoneForte: number | string | boolean): IndicatorResult =>
       stratAxisSr.calc(btc, { ...resolveParams(stratAxisSr, {}), forceZoneForte }, ctx);
     const seuil6 = avec(6);
     expect(seuil6).toEqual(defaut);
-    for (const v of [NaN, Infinity, -Infinity, "abc"]) expect(avec(v), String(v)).toEqual(seuil6);
+    for (const v of [NaN, Infinity, -Infinity, "abc", "", " ", true, false]) expect(avec(v), JSON.stringify(v)).toEqual(seuil6);
   });
 
   it("historique vide ou très court (0, 1, 8 bougies) : aucune exception, séries de la bonne longueur, ni zone ni triangle creux", () => {

@@ -553,7 +553,8 @@ const texteZone = (z: ZoneSrAxis, forte: boolean, prixRef: number, bougies: numb
 /**
  * Triangles creux des réactions sur zone forte (conception §4.5, §4.7) : un par bougie et par sens,
  * citant la zone la plus forte, puis la plus proche du close ; aucun sur une bougie de signal
- * confirmé ; les `MAX_SIGNAUX_AXIS` plus récents. PURE.
+ * confirmé ; les `MAX_SIGNAUX_AXIS` plus récents. La réserve ouvre le texte : l'infobulle du graphe
+ * coupe une ligne trop longue au bord du pane (au téléphone vers le 55e caractère), jamais son début. PURE.
  */
 function trianglesCreuxAxis(candles: Candle[], reactions: ReactionZoneSrAxis[], signaux: Set<number>): MarqueurAnnotation[] {
   const parBougie = new Map<string, ReactionZoneSrAxis>();
@@ -580,9 +581,9 @@ function trianglesCreuxAxis(candles: Candle[], reactions: ReactionZoneSrAxis[], 
       couleur: surSupport ? "--up" : "--down",
       cible: "prix",
       info:
-        `AXIS S/R réaction sur ${surSupport ? "support fort" : "résistance forte"} [${prix(zone.bas)} – ${prix(zone.haut)}] — ` +
-        `${decompteZone(zone)} ; la bougie est entrée dans la zone et a clôturé ${surSupport ? "au-dessus" : "au-dessous"} ; ` +
-        RESERVE_PRECOCE,
+        `AXIS S/R ${RESERVE_PRECOCE} — réaction sur ${surSupport ? "support fort" : "résistance forte"} ` +
+        `[${prix(zone.bas)} – ${prix(zone.haut)}] — ${decompteZone(zone)} ; ` +
+        `la bougie est entrée dans la zone et a clôturé ${surSupport ? "au-dessus" : "au-dessous"}`,
       creux: true,
     });
   }
@@ -644,10 +645,11 @@ function coeurAxisSr(
   const seuilOi = Number(params.seuilOi ?? 2);
   const flux = fluxAxis(candles, ctx.aux?.oi, Number(params.rvolPeriode ?? 20), Number(params.oiBougies ?? 6));
   const atr = rma(trueRange(candles), ATR_STOP_PERIODE);
-  // Seuil lu par le moteur et par le tracé : un réglage non fini (NaN, ±Infinity, texte non numérique) se replie sur
-  // le défaut ; sinon toutes les zones réagiraient et aucune ne serait tracée en forte.
-  const forceLue = Number(params.forceZoneForte ?? FORCE_ZONE_FORTE_DEFAUT);
-  const forceZoneForte = Number.isFinite(forceLue) ? forceLue : FORCE_ZONE_FORTE_DEFAUT;
+  // Seuil lu par le moteur et par le tracé : seul un nombre fini est gardé, comme dans `resolveParams` ; tout autre
+  // réglage (NaN, ±Infinity, texte, booléen) se replie sur le défaut. `Number("")`, `Number(" ")` et `Number(false)`
+  // valent 0, `Number(true)` 1 : convertis, ils rendraient toutes les zones fortes.
+  const forceLue = params.forceZoneForte;
+  const forceZoneForte = typeof forceLue === "number" && Number.isFinite(forceLue) ? forceLue : FORCE_ZONE_FORTE_DEFAUT;
   const sr = zonesSrAxis(
     candles,
     flux,

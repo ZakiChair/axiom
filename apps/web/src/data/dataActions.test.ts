@@ -37,7 +37,7 @@ describe("capacités des sources DATA", () => {
   it("dit le remède quand le runtime des alertes n'est pas démarré : recharger, aucune action dans DATA", () => {
     const capacites = actionsSourceData(SOURCE_SANTE_ALERTES);
     expect(capacites.actions).toEqual([]);
-    expect(capacites.motif).toBe("Aucune alerte n'est évaluée dans ce navigateur. Rechargez l'application.");
+    expect(capacites.motif).toBe("Aucune alerte n'est évaluée dans ce navigateur. Si l'état dure, rechargez l'application.");
   });
 
   it("propose les réglages seulement pour des clés configurables", () => {

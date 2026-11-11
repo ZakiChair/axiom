@@ -133,11 +133,18 @@ describe("chargerTresoreriesBtc : un appel, cache 6 h, coalescence, repli périm
     vi.resetModules();
     vi.stubGlobal("localStorage", stockage());
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
 
   it("appelle l'endpoint public sans clé, écrit le cache, puis le relit sans second appel", async () => {
     const fetcher = vi.fn<typeof fetch>(async () => reponse(200));
     vi.stubGlobal("fetch", fetcher);
+    // Horloge figée : l'écriture du cache et le résultat du premier appel lisent chacun `Date.now()`.
+    // Sans cela, un changement de milliseconde entre les deux faisait échouer l'égalité des `ts`
+    // (échec intermittent, relevé à l'intégration du 11 novembre 2026).
+    vi.spyOn(Date, "now").mockReturnValue(1_794_392_503_435);
     const { chargerTresoreriesBtc } = await import("./tresoreriesBtc");
     const r = await chargerTresoreriesBtc();
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -149,6 +156,7 @@ describe("chargerTresoreriesBtc : un appel, cache 6 h, coalescence, repli périm
     const encore = await chargerTresoreriesBtc();
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(encore).toMatchObject({ perime: false, ts: r!.ts });
+    expect(r!.ts).toBe(1_794_392_503_435);
   });
 
   it("ajoute la clé Demo personnelle quand elle existe ; accès « cle »", async () => {

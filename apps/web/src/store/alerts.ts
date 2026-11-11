@@ -109,8 +109,9 @@ interface Persiste {
 
 /** Garde de forme d'une def persistée (patron `estTradeValide` d'expy.ts) : champs
  * requis + types. Un item corrompu est ÉCARTÉ à l'hydratation — sans cette garde,
- * `demarrerAlertes` (App.tsx, useEffect sans try/catch) lit `d.actif && d.condition.type`
- * → TypeError → ErrorBoundary racine à CHAQUE boot tant que la clé n'est pas purgée. */
+ * `demarrerAlertes` (démarré par alerts/demarrageDiffere) lit `d.actif && d.condition.type`
+ * → TypeError → alertes inactives (« démarrage échoué ») à CHAQUE boot tant que la clé n'est
+ * pas purgée. */
 function estAlertDefValide(v: unknown): v is AlertDef {
   if (typeof v !== "object" || v === null) return false;
   const d = v as Record<string, unknown>;

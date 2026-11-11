@@ -7,8 +7,9 @@ import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
  *  - double montage React StrictMode du serveur de développement : un seul runtime démarré ;
  *  - module introuvable : avis visible, terminal en place, nouvelle tentative au retour de
  *    l'onglet jamais muette (un seul avis à la fois), et « Recharger » rétablit les alertes ;
- *  - le toast expiré, l'état reste affiché : ligne « alertes » en erreur dans Santé sources
- *    (absente en nominal) et section Alertes indisponible ;
+ *  - le toast expiré, l'état reste affiché : « inactives » à la place du compteur du bandeau
+ *    (écran principal), ligne « alertes » en erreur dans Santé sources (absente en nominal) et
+ *    section Alertes indisponible ;
  *  - mise en page bureau : seule la section Alertes tombe (son chunk dépend du runtime).
  *
  * La pastille « Santé » du bandeau n'est pas vérifiée ici : le réseau bouchonné (503) met
@@ -116,6 +117,10 @@ test("module introuvable : le toast expiré, l'état « alertes inactives » res
   await expect(avis.first()).toBeVisible();
   // Toast actionnable : 6 s. Ensuite, plus aucun avis, mais la panne ne redevient pas muette.
   await expect(avis).toHaveCount(0, { timeout: 10_000 });
+  // Écran principal, tiroir fermé : le bandeau écrit « inactives » à la place du compteur.
+  const bandeau = page.getByRole("status", { name: "Session : P&L jour, alertes, santé" });
+  await expect(bandeau.getByText("inactives", { exact: true })).toBeVisible();
+  await expect(bandeau.getByTitle(AVIS)).toBeVisible();
 
   const panneaux = await ouvrirSanteSources(page);
   const ligne = panneaux.getByRole("button", { name: /^alertes/ });

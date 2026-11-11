@@ -19,8 +19,9 @@ export interface GestionnaireFluxCapitaux {
 }
 
 /**
- * Le runtime d'alertes est présent dès le démarrage, mais la collecte lente ne doit
- * charger ses transports qu'au premier panneau ou à la première alerte active.
+ * Le runtime d'alertes est chargé dès le démarrage (import() hors du chargement initial,
+ * alerts/demarrageDiffere), mais la collecte lente ne doit charger ses transports qu'au
+ * premier panneau ou à la première alerte active.
  */
 async function chargerFluxCapitauxParDefaut(signal?: AbortSignal): Promise<VueFluxCapitaux> {
   const { chargerFluxCapitaux } = await import("../data/onchain/fluxCapitaux");

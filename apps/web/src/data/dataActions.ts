@@ -80,6 +80,8 @@ const SOURCES: Record<string, CapaciteConnue> = {
   cboe: { page: "cboe", vue: { id: "options", nom: "OMON" }, motif: "Les données options et leurs contrôles sont disponibles dans OMON." },
   news: { vue: { id: "news", nom: "NEWS" }, motif: "Les flux et leur suivi sont disponibles dans NEWS." },
   axiomd: { motif: "La connexion dépend du daemon local axiomd. Aucune commande de démarrage n'est exposée ici." },
+  // Runtime des alertes non démarré (alerts/demarrageDiffere) : le seul remède fiable est le rechargement.
+  alertes: { motif: "Aucune alerte n'est évaluée dans ce navigateur. Rechargez l'application." },
 };
 
 /** PURE. Les canaux WS connus partagent seulement la documentation de leur exchange. */

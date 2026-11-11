@@ -2621,8 +2621,9 @@ la référence visuelle « vue C » approuvée par le propriétaire ; plan :
     bandeau du bureau ; défaut antérieur, hors des fichiers de ce chantier) : la ligne d'un
     triangle creux, le plus souvent la première, n'y est alors pas lisible. (Limite LEVÉE au
     téléphone le 11 novembre 2026 : l'infobulle y commence sous le bas réel de l'en-tête. La
-    coupure vers le 55e caractère reste, et le bureau garde ses 36 px. Voir « AXIS — lisible,
-    honnête et annonciateur ».)
+    coupure reste, et « vers le 55e caractère » ne vaut qu'à 390 px en thème par défaut (moins
+    sur un écran plus étroit ou en chasse fixe : mesures de la section suivante) ; le bureau
+    garde ses 36 px. Voir « AXIS — lisible, honnête et annonciateur ».)
 - **« Non mesuré ».** Les signaux précoces n'ont été soumis à aucun test sur données jamais vues.
   Une mesure rapide hors protocole, sur BTC seul et sans valeur probante (conception, §9), ne
   leur trouve aucun avantage ; aucun de ses chiffres ne paraît dans l'interface. Chaque triangle
@@ -2738,7 +2739,9 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
     cours », `DELAI_CHARGEMENT_LENT_MS`) : sur un réseau dégradé, le bandeau comptait sinon des
     alertes que rien n'évaluait encore. Un chargement ordinaire ne s'affiche pas. Elle alimente la pastille « Santé », la section Santé sources et la fenêtre
     DATA (libellé « Alertes (ce navigateur) », motif « Aucune alerte n'est évaluée dans ce
-    navigateur. Rechargez l'application. »). Le bandeau de session écrit « ALERTES inactives » à
+    navigateur. Si l'état dure, rechargez l'application. » ; « Si l'état dure » depuis la revue de
+    la pull request n° 11 : pendant un chargement qui traîne, recharger relancerait les requêtes
+    en cours). Le bandeau de session écrit « ALERTES inactives » à
     la place du compteur (correction d'intégration : il affichait encore « ALERTES 1 »).
   - La section Alertes a sa propre `ErrorBoundary` : son chunk dépend de celui du runtime ; s'il
     manque, elle affiche « Alertes indisponible » et « Recharger l'application », le reste du
@@ -2806,10 +2809,11 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
     bougie). À la dernière bougie décidée, à plat, hors bougie d'une sortie par stop : tout est
     réuni pour acheter SAUF la clôture au-dessus de l'EMA de tendance. Rendu : un segment
     pointillé gris de 6 bougies au niveau de cette EMA, terminé sur la dernière bougie, et
-    l'étiquette « pré-signal » au bord droit. Infobulle : « AXIS pré-signal > X, non mesuré —
+    l'étiquette « pré-signal » au bord droit. Infobulle : « AXIS pré-signal non mesuré > X —
     si clôture au-dessus et si le score et les filtres tiennent : achat » (« … si le score
-    tient » quand aucun filtre n'est lu). Le niveau et « non mesuré » tiennent dans les
-    40 premiers caractères, « achat » vient en dernier (revue globale, voir « Revue et tests »).
+    tient » quand aucun filtre n'est lu). « non mesuré » finit au 26e caractère, le niveau entre
+    le 35e et le 40e (six à onze caractères), « achat » vient en dernier (revues du 11 novembre,
+    voir « Revue et tests »).
     L'EMA étant récursive, la bougie suivante clôture au-dessus de son EMA si et seulement si
     elle clôture au-dessus de X : le cas est exact, à l'arrondi d'affichage de X près (deux
     décimales à partir de 100, cinq chiffres significatifs entre 1 et 100, quatre en dessous :
@@ -2833,9 +2837,15 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
     Bloomberg (chasse fixe) ; thèmes cute et aurora non mesurés. À 390 px en thème par défaut,
     tête d'une zone, statut d'un signal et « non mesuré » d'un triangle creux ou d'un ↺
     tiennent ; ailleurs leur fin est coupée (à 45 caractères, « AXIS résistance forte ·
-    4 touches · bord à +1 » pour +13.4 %, et « … test 4h ≈ EMA » pour le statut). Seuls le
-    niveau du pré-signal et son « non mesuré » se lisent partout. Le détail qui suit n'est
-    lisible qu'au bureau.
+    4 touches · bord à +1 » pour +13.4 %, et « … test 4h ≈ EMA » pour le statut). En chasse
+    fixe, mesuré par la revue de la pull request n° 11 : 34 caractères à 320 px, 40 à 360 px,
+    42 à 375 px (45 à 390 px, 51 à 430 px) ; la ligne du pré-signal, riche en chiffres, n'en
+    montre que 40 à 41 à 320 px en thème par défaut. Le « non mesuré » du pré-signal (26e
+    caractère) se lit dans toutes ces configurations. D'après ces mesures, son niveau (fini
+    entre le 35e et le 40e caractère) est rogné à 320 px en chasse fixe (« > 94023 » pour
+    94023.57) et tient ailleurs, sans marge pour un niveau de onze caractères à 320 px en thème
+    par défaut et à 360 px en chasse fixe. Le texte final n'a pas été remesuré sur le graphe.
+    Le détail qui suit n'est lisible qu'au bureau.
   - L'infobulle est dessinée sur le graphe, sans fond. Ses trois rangées recouvrent ce qui se
     trouve dans les 50 px sous l'en-tête : repère du plus haut, bord ou bande d'une zone,
     étiquette de zone ou de signal. Sur les captures d'intégration au téléphone, le repère du
@@ -2907,8 +2917,8 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
   - Tête d'un signal confirmé sans le mot « réussi ».
   - Choix d'intégration : « ↺ » sur chaque marqueur de retournement ; « inactives » à la place
     du compteur du bandeau.
-  - Choix pris après la revue globale : texte du pré-signal ouvert par son niveau et « non
-    mesuré », sans « S/R » ; « inactives » aussi après dix secondes de chargement.
+  - Choix pris après la revue globale : texte du pré-signal ouvert par « non mesuré » puis son
+    niveau, sans « S/R » ; « inactives » aussi après dix secondes de chargement.
   - Relevé par la revue, laissé tel quel : le signe « ≈ » de « test 4h ≈ EMA 200 seule ».
     Honnête, mais « ≤ », de même longueur, collerait mieux à « pas mieux que » (en PnL net
     total, AXIS fait 28 à 43 % de moins que l'EMA 200 seule sur 3 actifs sur 4, avec une
@@ -2969,8 +2979,10 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
       écart au bord, âges et secondes lignes justes sur 18 494 textes ; statut court jamais
       plus favorable que la fin d'infobulle. Deux mineurs sur la ligne du pré-signal.
     - Alertes différées : ni alerte perdue, ni alerte doublée, ni erreur affichée pendant un
-      chargement ordinaire ; garde-fou `MODULES_DIFFERES` vérifié par injection. Un mineur
-      (chargement qui traîne) et un test intermittent expliqué.
+      chargement ordinaire ; garde-fou `MODULES_DIFFERES` vérifié par injection. Verdict
+      « corrections », avec deux majeurs confirmés par leur contradicteur, dont aucun n'est un
+      défaut du chargeur — le test intermittent (fragilité du test, antérieure au chantier) et
+      la CI rouge (panne du runner) — et un mineur (chargement qui traîne).
     - Téléphone, parcours, documentation : géométrie de l'infobulle et ligne réservée conformes
       (seul AXIS S/R est touché) ; chiffres du contrat concordants. Un majeur (niveau du
       pré-signal illisible hors de 390 px en thème par défaut) et deux mineurs de documentation.
@@ -2980,11 +2992,18 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
       à 360 px), et sa partie lisible était « achat si > X », sans la clôture ni les conditions.
       Nouveau texte ci-dessus (lot I). Niveau à cinq chiffres significatifs entre 1 et 100
       (« 2.25 » pour un seuil de 2,2534 avant). Tests épinglés modifiés à dessein, un test sur
-      des prix du centime au million.
-    - Alertes : ligne santé après dix secondes de chargement (quatre tests, qui échouent quand
-      on retire la minuterie ou l'un de ses désarmements).
+      des niveaux de six à onze caractères. Une première réécriture plaçait le niveau avant
+      « non mesuré » : la revue de la pull request n° 11 a mesuré la mention coupée à 320 px en
+      chasse fixe (« … > 94023.57, non me »), là où l'ancien texte la gardait ; « non mesuré »
+      est repassé en tête.
+    - Alertes : ligne santé après dix secondes de chargement (quatre tests ; par mutation, ils
+      échouent sans la minuterie, sans son désarmement au succès ou sans celui de l'arrêt ; le
+      désarmement à l'échec est tenu par un test antérieur du même fichier). Vérifié par la
+      revue sur le vrai navigateur, module retardé de 14 s : « ALERTES 1 » jusqu'à 9,5 s,
+      « inactives » à 11,5 s sans toast, retour au compteur à l'arrivée du module.
     - Test intermittent, antérieur au chantier : `alerts/runtime.test.ts` échouait parfois sur
-      une machine chargée (18 appels `fetch` au lieu de 1, lignes 778 et 829). Le mock de
+      une machine chargée (18 appels `fetch` au lieu de 1, lignes 778 et 829 avant le
+      correctif, 783 et 834 après). Le mock de
       `data/onchain/fluxCapitaux` était contourné (Vitest sert le vrai module aux `import()`
       concurrents tant que la fabrique asynchrone du mock n'est pas résolue) et la vraie
       collecte, 17 requêtes, tombait dans un test qui compte les fetch. Le module est chargé
@@ -3000,6 +3019,12 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
     leur premier passage est un constat neuf. Premier point à surveiller, relevé à la lecture :
     `mobile-axis-sr.e2e.ts:138` (aucun pane sous le réticule au repos ; WebKit n'écarte les
     évènements souris de compatibilité que 500 ms après un toucher sur le graphe).
+  - **Pull request n° 11** (corrections ci-dessus). Revue par un agent indépendant : code des
+    corrections des alertes et du test sans constat (onze mutants tués, six scénarios de plus,
+    vrai navigateur) ; un majeur sur l'ordre du texte du pré-signal et des mineurs de
+    documentation, corrigés dans la même pull request. À sa rédaction, sa CI tombe sur la même
+    panne du runner (typage, tests et build verts, parcours e2e sautés) ; elle n'est fusionnée
+    qu'une fois ses parcours e2e passés en CI, sauf demande contraire du propriétaire.
 - **Reporté.**
   - Mention « réglages hors test » quand les réglages du cœur ou de la couche flux s'écartent
     de ceux des campagnes.

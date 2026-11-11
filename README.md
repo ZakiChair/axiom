@@ -283,7 +283,7 @@ résistance forte les plus proches. Les retournements ↺ sont gris, marqués
 EQS). AXIS S/R trace un **pré-signal**, non mesuré lui aussi, quand il ne
 manque à l'achat que la clôture au-dessus de l'EMA de tendance : un court
 pointillé gris à ce niveau, que l'infobulle donne en tête de ligne (« AXIS
-pré-signal > 64024.02, non mesuré — … »). Aucun signal confirmé, aucune série
+pré-signal non mesuré > 64024.02 — … »). Aucun signal confirmé, aucune série
 ne change.
 Le module qui évalue les alertes est désormais chargé juste après le premier
 affichage ; s'il manque, ou si son chargement dépasse dix secondes, le bandeau

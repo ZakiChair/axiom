@@ -941,9 +941,11 @@ export const stratAxisSr: IndicatorDef = {
         trait: "pointille",
         couleur,
         cible: "prix",
-        // Au téléphone la ligne est coupée vers le 55e caractère : « non mesuré », « si clôture » et le niveau
-        // doivent y tenir, pour que la partie lisible reste une condition et non « achat si > X ».
-        info: `AXIS S/R pré-signal non mesuré — si clôture > ${prixSeuil(niveau)} et si le score ${filtres ? "et les filtres tiennent" : "tient"} : achat`,
+        // Au téléphone la ligne est coupée sans points de suspension : vers le 55e caractère à 390 px, le 45e en
+        // thème à chasse fixe, le 42e à 320 px (mesures de la revue globale du 11 novembre 2026). Le niveau et
+        // « non mesuré » tiennent donc dans les 40 premiers ; « achat » vient en dernier, après ses conditions,
+        // pour que la partie lisible ne soit jamais « achat si > X ».
+        info: `AXIS pré-signal > ${prixSeuil(niveau)}, non mesuré — si clôture au-dessus et si le score ${filtres ? "et les filtres tiennent" : "tient"} : achat`,
       });
       labels.push({ idx: n - 1, valeur: niveau, texte: "pré-signal", couleur, cible: "prix", ancrageX: "droite" });
     }

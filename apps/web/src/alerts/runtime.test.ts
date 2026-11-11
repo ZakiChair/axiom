@@ -72,6 +72,10 @@ import { alertsStore } from "../store/alerts";
 import { marketStore } from "../store/market";
 import { orderflowStore } from "../store/orderflow";
 import { presetAlertsStore, type AlertePreset } from "../store/presetAlerts";
+// Le runtime charge ces deux modules par import() au premier scan d'une alerte de preset.
+// Chargés ici une fois : sous horloge simulée, un premier chargement resterait en suspens.
+import "../data/screenerRun";
+import "../data/screener";
 import { fluxCapitauxStore } from "../store/fluxCapitaux";
 import { remplacerLectures } from "../store/analyseMultidomaine";
 import type { LectureAnalyse } from "../data/analyseMultidomaine";
@@ -898,9 +902,11 @@ describe("alertes de preset : pas de garde de visibilité, état de scan observa
     executerScreenerMock.mockImplementationOnce(() => ancien).mockImplementationOnce(() => nouveau);
     presetAlertsStore.setState({ alertes: [{ ...ALERTE, expireTs: now + 1_000 }] });
     stop = demarrerAlertes();
+    await vi.advanceTimersByTimeAsync(0); // import() du pipeline, puis premier scan
     expect(executerScreenerMock).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(presetAlertsStore.getState().prolonger("p1", now + 2 * 3_600_000)).toBe("ok");
+    await vi.advanceTimersByTimeAsync(0);
     expect(executerScreenerMock).toHaveBeenCalledTimes(2);
     rejeterAncien(new Error("ancien réseau"));
     await Promise.resolve();

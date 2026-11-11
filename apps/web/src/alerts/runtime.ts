@@ -66,8 +66,6 @@ import type { WatchlistSource } from "../store/watchlist";
 import { daemonSupporte, detectDaemon, urlDaemon } from "../data/daemon";
 import { coinalyzeProvider, filtrerFrontieres8h } from "../data/coinalyze";
 import { histFunding } from "../data/referentiels";
-import { executerScreener } from "../data/screenerRun";
-import { notesNonMesures, notesReferenceNonEvaluee, SCREENER_POSITION_CAP } from "../data/screener";
 import { extUrl } from "../data/extapi";
 import { AGE_MAX_FLUX_MS } from "../data/onchain/fluxCapitaux.contract";
 import { fluxCapitauxStore, garderFluxCapitauxPourAlertes } from "../store/fluxCapitaux";
@@ -123,6 +121,20 @@ const FUNDING_Z_WINDOW = 30;
 const PRESET_COOLDOWN_MS = 6 * 3_600_000;
 /** Cap indicateurs réduit pour un scan d'alerte (échantillon plus léger que le run UI). */
 const PRESET_CAP_INDICATEURS = 30;
+
+/**
+ * Pipeline du screener, chargé UNE fois au premier scan d'une alerte de preset : ≈ 16 Ko
+ * hors du chargement initial (garde-fou : chargementInitial.test.ts). Promesse partagée par
+ * les scans simultanés ; un échec de chargement (réseau) se retente au scan suivant.
+ */
+let pipelineScreener: Promise<[typeof import("../data/screenerRun"), typeof import("../data/screener")]> | null = null;
+function chargerPipelineScreener(): NonNullable<typeof pipelineScreener> {
+  pipelineScreener ??= Promise.all([import("../data/screenerRun"), import("../data/screener")]).catch((e: unknown) => {
+    pipelineScreener = null;
+    throw e;
+  });
+  return pipelineScreener;
+}
 
 /** Alertes déjà signalées pour un paramètre « unité » (un avertissement par alerte). */
 const unitesSignalees = new Set<string>();
@@ -681,6 +693,9 @@ function creerRuntime(): Unsubscribe {
     };
     ticksEnCours.set(id, generation);
     try {
+      // Un échec de chargement du pipeline est publié comme un échec de scan.
+      const [{ executerScreener }, { notesNonMesures, notesReferenceNonEvaluee, SCREENER_POSITION_CAP }] =
+        await chargerPipelineScreener();
       const res = await executerScreener(alerte.baseConditions, alerte.indicatorConditions, alerte.tf, {
         capIndicateurs: PRESET_CAP_INDICATEURS,
         capPosition: SCREENER_POSITION_CAP,

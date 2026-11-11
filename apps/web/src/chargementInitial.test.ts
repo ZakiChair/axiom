@@ -28,6 +28,8 @@ const MODULES_DIFFERES: Record<string, string> = {
   "data/backtestFunding": "funding réel du backtest — import() au lancement d'un run",
   "data/brief": "overnight de la watchlist — import() depuis rafraichirRegime (commit 7784984)",
   "store/signaux": "store des signaux — import() par la commande SIG (commands/windowPanels), chargé avec ScreenerWindow",
+  "data/screenerRun": "pipeline d'un run du screener — import() par le premier scan d'une alerte de preset (alerts/runtime) et avec store/screener",
+  "data/screener": "filtres, presets et constantes du screener — chargés avec data/screenerRun, les fenêtres EQS / SQZ / SIG et le worker",
   "store/screener": "store du screener — chargé à la demande (fenêtres EQS, SQZ, BRIEF ; store SIG) ; EQS bascule par commands/windowPanels",
   "store/macroRatesView": "vue macro — import() par la commande MACRO (commands/registry), chargée avec MacroRatesWindow",
   "data/macro/catalogueMacro": "catalogue macro — chart/macro importe fred et stablecoins sans passer par le baril data/macro",

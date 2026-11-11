@@ -232,14 +232,20 @@ describe("stratAxisSr — tracé du pré-signal (préfixe clos jusqu'à 2 288, d
     // À partir de 100, deux décimales suffisent (écart d'arrondi de 0,005 % au plus).
     expect(info(1e-2)).toBe(`${tete}640.24${suite}`);
     expect(info(10)).toBe(`${tete}640240.16${suite}`);
-    // Niveaux de onze caractères, les plus longs hors notation exponentielle au-dessus d'un millionième.
+    // Niveaux de onze caractères : les plus longs entre un millionième et cent millions.
     expect(info(1e-10)).toBe(`${tete}0.000006402${suite}`);
     expect(info(1000)).toBe(`${tete}64024015.56${suite}`);
-    // À toute échelle, « non mesuré » finit au 26e caractère et le niveau au 40e au plus. La ligne visible la
-    // plus courte mesurée (34 caractères, 320 px en chasse fixe) garde donc toujours « non mesuré ».
+    // À toute échelle, « non mesuré » finit au 26e caractère : la ligne visible la plus courte mesurée
+    // (34 caractères, 320 px en chasse fixe) le garde donc toujours. Sous cent millions, le niveau finit au
+    // 40e caractère au plus.
     for (const facteur of [1e-10, 1e-9, 1e-4, 1e-3, 1e-2, 1, 10, 1000]) {
       expect(info(facteur).slice(0, 26), String(facteur)).toBe("AXIS pré-signal non mesuré");
       expect(info(facteur).indexOf(" — si clôture"), String(facteur)).toBeLessThanOrEqual(40);
     }
+    // Au-delà (paires en devises faibles), le niveau prend douze caractères ou plus et dépasse le 40e ;
+    // la mention, elle, ne bouge pas.
+    expect(info(1e4)).toBe(`${tete}640240155.58${suite}`);
+    expect(info(1e4).indexOf(" — si clôture")).toBe(41);
+    expect(info(1e4).slice(0, 26)).toBe("AXIS pré-signal non mesuré");
   });
 });

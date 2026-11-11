@@ -2811,9 +2811,10 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
     pointillé gris de 6 bougies au niveau de cette EMA, terminé sur la dernière bougie, et
     l'étiquette « pré-signal » au bord droit. Infobulle : « AXIS pré-signal non mesuré > X —
     si clôture au-dessus et si le score et les filtres tiennent : achat » (« … si le score
-    tient » quand aucun filtre n'est lu). « non mesuré » finit au 26e caractère, le niveau entre
-    le 35e et le 40e (six à onze caractères), « achat » vient en dernier (revues du 11 novembre,
-    voir « Revue et tests »).
+    tient » quand aucun filtre n'est lu). « non mesuré » finit au 26e caractère à toute échelle
+    de prix ; le niveau finit au 40e au plus pour un prix inférieur à cent millions (onze
+    caractères au plus ; douze ou treize au-delà) ; « achat » vient en dernier (revues du
+    11 novembre, voir « Revue et tests »).
     L'EMA étant récursive, la bougie suivante clôture au-dessus de son EMA si et seulement si
     elle clôture au-dessus de X : le cas est exact, à l'arrondi d'affichage de X près (deux
     décimales à partir de 100, cinq chiffres significatifs entre 1 et 100, quatre en dessous :
@@ -2841,11 +2842,17 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
     fixe, mesuré par la revue de la pull request n° 11 : 34 caractères à 320 px, 40 à 360 px,
     42 à 375 px (45 à 390 px, 51 à 430 px) ; la ligne du pré-signal, riche en chiffres, n'en
     montre que 40 à 41 à 320 px en thème par défaut. Le « non mesuré » du pré-signal (26e
-    caractère) se lit dans toutes ces configurations. D'après ces mesures, son niveau (fini
-    entre le 35e et le 40e caractère) est rogné à 320 px en chasse fixe (« > 94023 » pour
-    94023.57) et tient ailleurs, sans marge pour un niveau de onze caractères à 320 px en thème
-    par défaut et à 360 px en chasse fixe. Le texte final n'a pas été remesuré sur le graphe.
-    Le détail qui suit n'est lisible qu'au bureau.
+    caractère) se lit dans toutes ces configurations. Texte final remesuré sur le vrai graphe
+    par la contre-revue de la pull request n° 11, dans douze configurations : la mention s'y
+    lit partout. Son niveau est rogné à 320 px en chasse fixe, et c'est alors la partie
+    entière qui est coupée dès 100 000 : « > 94023 » pour 94023.57, mais « > 11302 » pour
+    113028.30, dix fois trop petit (11 des 63 bougies en pré-signal du cas de référence ont un
+    tel niveau de neuf caractères) ; sous un centième, on lit « > 0.000 ». Ailleurs il est
+    entier jusqu'à onze caractères, sans marge à 320 px en thème par défaut et à 360 px en
+    chasse fixe (40 caractères visibles) ; un niveau de douze caractères (prix d'au moins cent
+    millions) y est rogné. À 390 px en thème par défaut, cette ligne montre 54 caractères.
+    Piste relevée, non retenue : sans « AXIS » en tête, un niveau de dix caractères tiendrait
+    dans 34. Le détail qui suit n'est lisible qu'au bureau.
   - L'infobulle est dessinée sur le graphe, sans fond. Ses trois rangées recouvrent ce qui se
     trouve dans les 50 px sous l'en-tête : repère du plus haut, bord ou bande d'une zone,
     étiquette de zone ou de signal. Sur les captures d'intégration au téléphone, le repère du
@@ -3019,10 +3026,15 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
     leur premier passage est un constat neuf. Premier point à surveiller, relevé à la lecture :
     `mobile-axis-sr.e2e.ts:138` (aucun pane sous le réticule au repos ; WebKit n'écarte les
     évènements souris de compatibilité que 500 ms après un toucher sur le graphe).
-  - **Pull request n° 11** (corrections ci-dessus). Revue par un agent indépendant : code des
-    corrections des alertes et du test sans constat (onze mutants tués, six scénarios de plus,
-    vrai navigateur) ; un majeur sur l'ordre du texte du pré-signal et des mineurs de
-    documentation, corrigés dans la même pull request. À sa rédaction, sa CI tombe sur la même
+  - **Pull request n° 11** (corrections ci-dessus). Revue par un agent indépendant, verdict
+    « corrections » : code des corrections des alertes et du test sans constat (onze mutants
+    tués, six scénarios de plus, vrai navigateur) ; deux majeurs — l'ordre du texte du
+    pré-signal, et la CI rouge, condition de fusion et non défaut du diff — et trois mineurs :
+    niveaux de onze caractères, phrases de documentation périmées ou imprécises, conseil
+    « Rechargez » de la fenêtre DATA pendant un chargement en cours. Tous corrigés dans la même
+    pull request, sauf la CI. Contre-revue des corrections : majeur du texte levé, mesure à
+    l'appui ; trois mineurs de documentation (borne du niveau, exemple du niveau rogné, ce
+    résumé), corrigés. À sa rédaction, sa CI tombe sur la même
     panne du runner (typage, tests et build verts, parcours e2e sautés) ; elle n'est fusionnée
     qu'une fois ses parcours e2e passés en CI, sauf demande contraire du propriétaire.
 - **Reporté.**

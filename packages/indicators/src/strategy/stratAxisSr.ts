@@ -944,7 +944,8 @@ export const stratAxisSr: IndicatorDef = {
         // Au téléphone la ligne est coupée sans points de suspension : vers le 55e caractère à 390 px en thème
         // par défaut, le 45e en chasse fixe, le 40e à 320 px, le 34e à 320 px en chasse fixe (mesures des revues
         // du 11 novembre 2026). « non mesuré » vient donc en premier (il finit au 26e caractère, lisible dans
-        // tous ces cas), puis le niveau (fini entre le 35e et le 40e : rogné sur les écrans les plus étroits).
+        // tous ces cas), puis le niveau (fini au 40e au plus pour un prix inférieur à cent millions : rogné sur
+        // les écrans les plus étroits, où c'est la partie entière d'un prix d'au moins 100 000 qui est coupée).
         // « achat » vient en dernier, après ses conditions : la partie lisible n'est jamais « achat si > X ».
         info: `AXIS pré-signal non mesuré > ${prixSeuil(niveau)} — si clôture au-dessus et si le score ${filtres ? "et les filtres tiennent" : "tient"} : achat`,
       });

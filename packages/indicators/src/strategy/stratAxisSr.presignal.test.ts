@@ -144,7 +144,7 @@ describe("stratAxisSr — tracé du pré-signal (préfixe clos jusqu'à 2 288, d
     trait: "pointille",
     couleur: "--text-dim",
     cible: "prix",
-    info: `AXIS S/R · pré-signal non mesuré — achat à la clôture si > ${niveau.toFixed(2)} et si le score et les filtres tiennent`,
+    info: `AXIS S/R · pré-signal non mesuré — achat si > ${niveau.toFixed(2)} à la clôture et si le score et les filtres tiennent`,
   };
   const ETIQUETTE = { idx: 2288, valeur: niveau, texte: "pré-signal", couleur: "--text-dim", cible: "prix", ancrageX: "droite" };
 
@@ -154,10 +154,12 @@ describe("stratAxisSr — tracé du pré-signal (préfixe clos jusqu'à 2 288, d
     expect(aDroite(res).at(-1)).toEqual(ETIQUETTE);
     expect(aDroite(res).filter((l) => l.texte === "pré-signal")).toHaveLength(1);
     expect(ETIQUETTE.texte.length).toBeLessThanOrEqual(12);
-    // Au téléphone, la ligne est coupée vers le 55e caractère : la mention « non mesuré » y tient.
+    // Au téléphone, la ligne est coupée vers le 55e caractère : la mention « non mesuré » ET le niveau y
+    // tiennent (intégration du 11 novembre 2026 : avec « à la clôture » avant lui, le niveau était coupé).
     expect(SEGMENT.info.slice(0, 55)).toContain("pré-signal non mesuré");
+    expect(SEGMENT.info.slice(0, 55)).toBe("AXIS S/R · pré-signal non mesuré — achat si > 64024.02 ");
     expect(niveau).toBeCloseTo(64024.02, 2);
-    expect(SEGMENT.info).toBe("AXIS S/R · pré-signal non mesuré — achat à la clôture si > 64024.02 et si le score et les filtres tiennent");
+    expect(SEGMENT.info).toBe("AXIS S/R · pré-signal non mesuré — achat si > 64024.02 à la clôture et si le score et les filtres tiennent");
     // Le close de 2 288 est sous le niveau : c'est la seule condition qui manque.
     expect(closes[2288]!).toBeLessThan(niveau);
   });
@@ -206,9 +208,9 @@ describe("stratAxisSr — tracé du pré-signal (préfixe clos jusqu'à 2 288, d
 
   it("sans filtre actif (régime 0), le texte ne nomme que le score ; prix × 1e-9 : niveau lisible", () => {
     const sansRegime = informes(calculer(clos, { regimeBtc: 0 }));
-    expect(sansRegime).toEqual([{ ...SEGMENT, info: `AXIS S/R · pré-signal non mesuré — achat à la clôture si > ${niveau.toFixed(2)} et si le score tient` }]);
+    expect(sansRegime).toEqual([{ ...SEGMENT, info: `AXIS S/R · pré-signal non mesuré — achat si > ${niveau.toFixed(2)} à la clôture et si le score tient` }]);
     const minuscules = clos.map((c) => ({ ...c, open: c.open * 1e-9, high: c.high * 1e-9, low: c.low * 1e-9, close: c.close * 1e-9 }));
     const info = informes(calculer(minuscules))[0]?.info ?? "";
-    expect(info).toBe("AXIS S/R · pré-signal non mesuré — achat à la clôture si > 0.00006402 et si le score et les filtres tiennent");
+    expect(info).toBe("AXIS S/R · pré-signal non mesuré — achat si > 0.00006402 à la clôture et si le score et les filtres tiennent");
   });
 });

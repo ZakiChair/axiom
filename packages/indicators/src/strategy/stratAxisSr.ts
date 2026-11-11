@@ -936,7 +936,8 @@ export const stratAxisSr: IndicatorDef = {
         trait: "pointille",
         couleur,
         cible: "prix",
-        info: `AXIS S/R · pré-signal non mesuré — achat à la clôture si > ${prix(niveau)} et si le score ${filtres ? "et les filtres tiennent" : "tient"}`,
+        // Le niveau avant « à la clôture » : au téléphone la ligne est coupée vers le 55e caractère, il doit y tenir.
+        info: `AXIS S/R · pré-signal non mesuré — achat si > ${prix(niveau)} à la clôture et si le score ${filtres ? "et les filtres tiennent" : "tient"}`,
       });
       labels.push({ idx: n - 1, valeur: niveau, texte: "pré-signal", couleur, cible: "prix", ancrageX: "droite" });
     }

@@ -272,12 +272,48 @@ describe("marquerScan — état de scan de SESSION (jamais persisté)", () => {
   it("l'état de scan ne survit PAS à un rechargement (retiré de la persistance)", () => {
     presetAlertsStore.getState().ajouter(builder("Momentum"));
     const id = presetAlertsStore.getState().alertes[0]?.id ?? "";
-    presetAlertsStore.getState().marquerScan(id, 1_000, "réseau HS");
+    presetAlertsStore.getState().marquerScan(id, 1_000, "réseau HS", "2 symboles non mesurés");
     // Une mutation persistée (bascule) réécrit la clé : les champs de session en sont exclus.
     presetAlertsStore.getState().basculer(id);
 
     const relu = lirePresetAlerts();
     expect(relu[0]?.dernierScanTs).toBeUndefined();
     expect(relu[0]?.derniereErreur).toBeUndefined();
+    expect(relu[0]?.avertissement).toBeUndefined();
+  });
+
+  it("publie la couverture incomplète d'un scan réussi et l'efface au scan suivant", () => {
+    presetAlertsStore.getState().ajouter(builder("Momentum"));
+    const id = presetAlertsStore.getState().alertes[0]?.id ?? "";
+    presetAlertsStore.getState().marquerScan(id, 1_000, undefined, "2 symboles non mesurés");
+    expect(presetAlertsStore.getState().alertes[0]?.avertissement).toBe("2 symboles non mesurés");
+    presetAlertsStore.getState().marquerScan(id, 2_000);
+    expect(presetAlertsStore.getState().alertes[0]?.avertissement).toBeUndefined();
+  });
+});
+
+describe("référence de force relative figée", () => {
+  beforeEach(() => {
+    installMockLocalStorage();
+    presetAlertsStore.setState({ alertes: [] });
+  });
+
+  afterEach(() => {
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
+  it("garde la référence de la création, persistée et relue", () => {
+    expect(presetAlertsStore.getState().ajouter({ ...builder("RS"), refSymbol: "ETHUSDT" })).toBe("ok");
+    expect(presetAlertsStore.getState().alertes[0]?.refSymbol).toBe("ETHUSDT");
+    expect(lirePresetAlerts()[0]?.refSymbol).toBe("ETHUSDT");
+  });
+
+  it("une alerte antérieure sans référence reste valide ; une référence non textuelle est écartée", () => {
+    presetAlertsStore.getState().ajouter(builder("Ancienne"));
+    const [ancienne] = lirePresetAlerts();
+    expect(ancienne).toBeDefined();
+    expect(ancienne).not.toHaveProperty("refSymbol");
+    localStorage.setItem("axiom:presetAlerts:v1", JSON.stringify([ancienne, { ...ancienne, id: "corrompue", refSymbol: 42 }]));
+    expect(lirePresetAlerts().map((a) => a.id)).toEqual([ancienne!.id]);
   });
 });

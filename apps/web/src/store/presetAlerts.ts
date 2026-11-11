@@ -41,6 +41,12 @@ export interface AlertePreset {
   /** Snapshot des conditions indicateurs à la création. */
   indicatorConditions: IndicatorCondition[];
   /**
+   * Référence de force relative figée à la création (absente sur les alertes créées avant
+   * le 7 novembre 2026 : référence du graphe au moment du scan). Changer la référence du
+   * graphe ensuite ne change pas le sens d'une alerte « RS Mansfield > 0 ».
+   */
+  refSymbol?: string;
+  /**
    * Période de scan (minutes). Dérivée à la création : 15 si AUCUN filtre indicateur
    * (scan léger : ticker + filtres de base), 60 sinon (étage indicateurs = worker + klines).
    */
@@ -60,6 +66,11 @@ export interface AlertePreset {
    * SESSION (cf. `dernierScanTs`) — rend visibles les échecs autrefois avalés.
    */
   derniereErreur?: string;
+  /**
+   * Couverture incomplète du dernier scan réussi (symboles non mesurés, écartés sans
+   * évaluation), effacée au scan suivant. Champ de SESSION, jamais persisté.
+   */
+  avertissement?: string;
 }
 
 /**
@@ -73,6 +84,8 @@ export interface DepuisBuilderAlerte {
   tf: Timeframe;
   baseConditions: BaseCondition[];
   indicatorConditions: IndicatorCondition[];
+  /** Référence de force relative du graphe à la création (figée dans l'alerte). */
+  refSymbol?: string;
   expireTs?: number;
 }
 
@@ -93,10 +106,10 @@ export interface PresetAlertsState {
   /** Prolonge explicitement ; le quota est contrôlé avant mutation. */
   prolonger: (id: string, expireTs: number) => "ok" | "limite" | "invalide";
   /**
-   * Publie l'issue d'un scan (champs de SESSION `dernierScanTs` / `derniereErreur`) :
-   * appelé par le runtime au succès comme à l'échec. NON persisté.
+   * Publie l'issue d'un scan (champs de SESSION `dernierScanTs` / `derniereErreur` /
+   * `avertissement`) : appelé par le runtime au succès comme à l'échec. NON persisté.
    */
-  marquerScan: (id: string, ts: number, erreur?: string) => void;
+  marquerScan: (id: string, ts: number, erreur?: string, avertissement?: string) => void;
 }
 
 /** Identifiant d'alerte (crypto.randomUUID si dispo, repli horodaté). */
@@ -118,6 +131,7 @@ function estAlertePresetValide(v: unknown): v is AlertePreset {
     typeof a.tf === "string" &&
     Array.isArray(a.baseConditions) &&
     Array.isArray(a.indicatorConditions) &&
+    (a.refSymbol === undefined || typeof a.refSymbol === "string") &&
     (a.periodeMin === 15 || a.periodeMin === 60) &&
     typeof a.actif === "boolean" &&
     echeanceAlerteValide(a as Pick<AlertePreset, "expireTs">) &&
@@ -145,11 +159,11 @@ export function lirePresetAlerts(): AlertePreset[] {
 }
 
 /** Écriture TOLÉRANTE (best-effort : quota / mode privé silencieux). Les champs de
- *  SESSION (`dernierScanTs`, `derniereErreur`) sont retirés : les relire au boot
+ *  SESSION (`dernierScanTs`, `derniereErreur`, `avertissement`) sont retirés : les relire au boot
  *  afficherait l'état d'une session précédente. */
 function ecrirePresetAlerts(alertes: AlertePreset[]): void {
   try {
-    const persistables = alertes.map(({ dernierScanTs, derniereErreur, ...reste }) => reste);
+    const persistables = alertes.map(({ dernierScanTs, derniereErreur, avertissement, ...reste }) => reste);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persistables));
   } catch {
     /* best-effort */
@@ -171,6 +185,7 @@ export const presetAlertsStore = createStore<PresetAlertsState>((set, get) => ({
       // Copies profondes : le snapshot ne doit pas partager de référence avec le builder.
       baseConditions: b.baseConditions.map((c) => ({ ...c })),
       indicatorConditions: b.indicatorConditions.map((c) => ({ ...c })),
+      ...(b.refSymbol !== undefined ? { refSymbol: b.refSymbol } : {}),
       periodeMin: b.indicatorConditions.length === 0 ? 15 : 60,
       actif: true,
       ...(b.expireTs !== undefined ? { expireTs: b.expireTs } : {}),
@@ -215,11 +230,11 @@ export const presetAlertsStore = createStore<PresetAlertsState>((set, get) => ({
     return "ok";
   },
 
-  marquerScan: (id, ts, erreur) => {
+  marquerScan: (id, ts, erreur, avertissement) => {
     // Pas d'écriture localStorage : l'état de scan est volontairement éphémère.
     set({
       alertes: get().alertes.map((a) =>
-        a.id === id ? { ...a, dernierScanTs: ts, derniereErreur: erreur } : a,
+        a.id === id ? { ...a, dernierScanTs: ts, derniereErreur: erreur, avertissement } : a,
       ),
     });
   },

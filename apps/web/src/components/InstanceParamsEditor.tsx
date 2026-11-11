@@ -1,6 +1,7 @@
 /** Éditeur de paramètres partagé sans charger le catalogue des indicateurs. */
 import type { IndicatorDef, IndicatorInput } from "@axiom/types";
 import type { ActiveIndicator } from "../store/indicators";
+import { SelecteurUnite } from "../chart/SelecteurUnite";
 import { Input, Select } from "./ui";
 
 export function InstanceParamsEditor({
@@ -82,6 +83,7 @@ export function InstanceParamsEditor({
           {renderControl(input)}
         </label>
       ))}
+      <SelecteurUnite def={def} params={instance.params} onChange={onChange} />
       {(def.id === "stratAxis" || def.id === "stratAxisSr") && (
         <div className="mt-1 flex flex-col gap-1.5 border-t border-neutral-800/80 pt-1.5">
           <label className="flex items-center justify-between gap-2 text-xs text-accent">

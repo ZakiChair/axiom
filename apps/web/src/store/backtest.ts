@@ -46,6 +46,7 @@ import { windowManagerStore, mirrorOpenState } from "./windowManager";
 import { copierConfigRun, signatureRun, type ConfigRun, type ModeFundingBacktest } from "./backtestSignature";
 import { backtestHistoryStore } from "./backtestHistory";
 import { VERSION_MOTEUR_BT } from "../data/backtestArchive";
+import { motifUniteHorsGraphe, uniteImbriquee } from "../chart/uniteParam";
 
 export { BACKTEST_TIMEFRAMES, SEUIL_PROFONDEUR_BT };
 
@@ -811,7 +812,13 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
     terminateWorker();
     const runId = ++currentRunId;
     const config = copierConfigRun(configCourante(get()));
-    const incompatibilite = raisonTimeframeBacktest([...config.reglesEntree, ...config.reglesSortie], config.tf);
+    const regles = [...config.reglesEntree, ...config.reglesSortie];
+    // Paramètre « unité » (SUG-1, phase 1 : graphe seul) : un preset importé qui le porte
+    // calculerait sur l'intervalle du run en l'ignorant. Refus motivé plutôt qu'un faux run.
+    const unite = uniteImbriquee(regles);
+    const incompatibilite = unite !== null
+      ? motifUniteHorsGraphe(unite, "backtest")
+      : raisonTimeframeBacktest(regles, config.tf);
     if (incompatibilite) {
       set({ phase: "error", error: incompatibilite, resultat: null, note: null });
       return;

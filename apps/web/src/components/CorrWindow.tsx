@@ -16,7 +16,11 @@
  *    fenêtre glissante = les rendements communs de la fenêtre sélectionnée (le
  *    dernier point coïncide avec la valeur de la cellule) ;
  *  - bascule Pearson / Spearman, fenêtre 7/30/90/180 j, bouton « recalculer » (re-fetch
- *    forcé), indication de fraîcheur, chips d'erreur par symbole en échec de chargement.
+ *    forcé), indication de fraîcheur, chips d'erreur par symbole en échec de chargement ;
+ *  - (2026-11-07) onglets « Rotation » (nuage RS-Ratio / RS-Momentum contre BTC, approximation
+ *    ouverte, corr/CorrRotation.tsx) et « Régime » (dispersion, corrélations, absorption,
+ *    corr/CorrRegime.tsx) sur l'univers de base crypto FIGÉ à sa composition — univers
+ *    Top 50 ajouté pour cette coupe transversale.
  *
  * Données : klines 1d des adaptateurs existants (aucune source nouvelle), en CACHE session
  * (réouvrir ≠ refetch ; changer méthode/fenêtre/tri/onglet ne refetch pas ; changer
@@ -33,14 +37,15 @@ import type { Commande } from "../commands/registry";
 import { watchlistStore } from "../store/watchlist";
 import { corrUiStore } from "../store/corrUi";
 import { mcapStore } from "../store/mcap";
-import { QUOTE_ASSETS } from "../data/symbol";
 import { fetchMarketOverview, type CoinTile } from "../data/marketOverview";
 import { fetchPairs } from "../data/pairs";
+import { resolveTickerSource } from "../data/ticker";
 import {
   alignerSeries,
   calculerMatrice,
   chargerSeries,
   correlationGlissante,
+  courtSymbole,
   exclureJourCourant,
   FENETRES_CORR,
   filtrerPairesExtremes,
@@ -64,6 +69,10 @@ import { formatDec } from "../lib/format";
 import { lireTokenCanvas, POLICE_CANVAS, POLICE_CANVAS_MONO } from "../lib/canvasTokens";
 import { Badge, BadgeFiabilite, Bouton, BoutonBascule, BoutonRafraichir, Chargement, Chip, EnTeteFenetre, ErreurBloc, Fraicheur, Input, NoteSource, Onglets, Segmente, SegmenteCompact, Vide } from "./ui";
 import { TableTriable, trierLignes, type ColonneTable, type TriTable } from "./TableTriable";
+import { CorrRotation } from "./corr/CorrRotation";
+import { CorrRegime } from "./corr/CorrRegime";
+import type { UniversTransversal } from "./corr/communCorr";
+import { classerUniversTransversal, FENETRE_Z_ROTATION, PAS_MOMENTUM_ROTATION } from "../data/rotationRelative";
 
 /**
  * Commandes exposées à la palette (l'intégrateur les enregistre via `enregistrerCommandes`).
@@ -128,15 +137,6 @@ function couleurCellule(
   return t >= 0 ? melanger(neutre, up, t) : melanger(neutre, down, -t);
 }
 
-/** Base d'un symbole (retire la cotation) pour l'étiquette compacte de la matrice. */
-function courtSymbole(s: string): string {
-  if (s.includes("/")) return s; // forex EUR/USD conservé
-  for (const q of QUOTE_ASSETS) {
-    if (s.endsWith(q) && s.length > q.length) return s.slice(0, -q.length);
-  }
-  return s;
-}
-
 // ─────────────────────────── Géométrie de la matrice ───────────────────────────
 
 const GUTTER_L = 54; // marge gauche pour les étiquettes de lignes
@@ -152,10 +152,17 @@ function tailleCellule(n: number): number {
 
 // ─────────────────────────── Onglet « Paires » (déclaratif) ───────────────────────────
 
-/** Onglets de la fenêtre (matrice canvas / liste des paires). */
+/**
+ * Onglets de la fenêtre : matrice canvas, liste des paires, puis (2026-11-07) les deux vues
+ * de coupe transversale contre BTC — Rotation (nuage RS-Ratio/RS-Momentum) et Régime
+ * (dispersion, corrélations, absorption) — sur l'univers de base FIGÉ (sans les références
+ * tradfi ni les ajouts ponctuels, qui restent des croisements de la matrice).
+ */
 const ONGLETS_CORR: readonly { id: OngletCorr; label: string }[] = [
   { id: "matrice", label: "Matrice" },
   { id: "paires", label: "Paires" },
+  { id: "rotation", label: "Rotation" },
+  { id: "regime", label: "Régime" },
 ];
 
 /** Colonnes de la table des paires (module : aucune dépendance à l'état du composant). */
@@ -233,6 +240,8 @@ export function CorrWindow() {
   const univers = useStore(corrUiStore, (s) => s.univers);
   const tri = useStore(corrUiStore, (s) => s.tri);
   const onglet = useStore(corrUiStore, (s) => s.onglet);
+  /** Onglets « matrice » (matrice canvas ou table des paires) vs coupe transversale. */
+  const vueMatrice = onglet === "matrice" || onglet === "paires";
 
   const [saisie, setSaisie] = useState("");
   const [nonce, setNonce] = useState(0); // bump = recalcul forcé (re-fetch)
@@ -325,6 +334,36 @@ export function CorrWindow() {
     if (pairesBinance === undefined) return CATALOGUE_PAIRES_EN_COURS;
     return topPairesUnivers(catalogue, topN, pairesBinance);
   }, [topN, watchSymbols, catalogue, pairesBinance]);
+
+  // Univers de coupe transversale (onglets Rotation et Régime) : base crypto de l'univers,
+  // FIGÉE à sa composition. Un top N n'est recomposé qu'au changement d'univers ou sur
+  // « Recalculer » (un rafraîchissement du catalogue CoinGecko ne le réécrit pas en cours de
+  // session) ; la watchlist suit les ajouts/retraits de l'utilisateur. Classement pur
+  // (classerUniversTransversal) : hors crypto (Twelve Data, synthétiques), paires non cotées
+  // en dollar (ETHBTC, xxxEUR) et doublons d'actif écartés et affichés ; base BTC (BTCUSD,
+  // BTC-PERP…) comptée comme la référence, jamais comme un alt.
+  const [universFige, setUniversFige] = useState<(UniversTransversal & { cle: string; signature: string }) | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    if (topN !== null && pairesBinance === undefined) return; // catalogue Binance en cours
+    const sources = watchlistStore.getState().sources;
+    const classe = classerUniversTransversal(basePaires, (s) => resolveTickerSource(s, sources[s]));
+    const signature = JSON.stringify([classe.alts, classe.references, classe.horsCrypto, classe.exclus]);
+    const cle = `${univers}|${nonce}`;
+    setUniversFige((prec) => {
+      if (topN !== null && classe.alts.length + classe.references.length === 0) return prec !== null && prec.cle === cle ? prec : null; // catalogue CoinGecko en cours
+      if (prec !== null && prec.cle === cle && (topN !== null || prec.signature === signature)) return prec;
+      return {
+        cle,
+        signature,
+        id: univers,
+        ...classe,
+        libelle: topN === null ? "Watchlist" : `Top ${topN} cap. CoinGecko (paires Binance USDT)`,
+        estTop: topN !== null,
+        composeA: Date.now(),
+      };
+    });
+  }, [open, univers, nonce, basePaires, topN, pairesBinance]);
 
   // Symboles = univers + références tradfi actives + ajouts ponctuels, normalisés et
   // dédoublonnés (les références forment un bloc contigu dans la matrice). STABILISÉS
@@ -643,7 +682,13 @@ export function CorrWindow() {
       <EnTeteFenetre
         mnemo="CORR"
         titre="Corrélations"
-        sousTitre={`Log-rendements journaliers · ${methode === "pearson" ? "Pearson" : "Spearman"} · ${fenetreJours} j`}
+        sousTitre={
+          onglet === "rotation"
+            ? `Rotation contre BTC · z-scores ${Math.round(FENETRE_Z_ROTATION / 7)} sem. · momentum ${PAS_MOMENTUM_ROTATION} j · descriptif`
+            : onglet === "regime"
+              ? "Régime transversal · dispersion 7 j · corrélations 30/60 j · descriptif"
+              : `Log-rendements journaliers · ${methode === "pearson" ? "Pearson" : "Spearman"} · ${fenetreJours} j`
+        }
         actions={
           <>
             <Fraicheur loading={loading} majTs={majTs} />
@@ -652,7 +697,8 @@ export function CorrWindow() {
         }
       />
 
-      {/* Onglets Matrice / Paires (persistés — deux VUES de la même matrice calculée). */}
+      {/* Onglets Matrice / Paires (deux VUES de la même matrice calculée) et Rotation /
+          Régime (coupe transversale contre BTC) — onglet persisté. */}
       <Onglets
         options={ONGLETS_CORR.map((o) => ({ id: o.id, label: o.label }))}
         actif={onglet}
@@ -660,7 +706,9 @@ export function CorrWindow() {
       />
 
       <div className="px-4 py-3">
-        {/* Contrôles : méthode, fenêtre (réglages persistés — store corrUi). */}
+        {/* Contrôles : méthode, fenêtre (réglages persistés — store corrUi). Propres à la
+            matrice : masqués sur Rotation et Régime, qui ont leurs fenêtres figées. */}
+        {vueMatrice && (
         <div className="mb-3 flex items-center gap-2">
           <Segmente
             options={[
@@ -676,8 +724,9 @@ export function CorrWindow() {
             onChange={(f) => corrUiStore.getState().setFenetre(f)}
           />
         </div>
+        )}
 
-        {/* Univers de la matrice (watchlist / top N CoinGecko) et tri d'affichage. */}
+        {/* Univers (watchlist / top N CoinGecko, commun aux quatre onglets) et tri d'affichage. */}
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <SegmenteCompact
             ariaLabel="Univers de la matrice"
@@ -685,6 +734,7 @@ export function CorrWindow() {
             actif={univers}
             onChange={(u) => corrUiStore.getState().setUnivers(u)}
           />
+          {vueMatrice && (
           <SegmenteCompact
             ariaLabel="Tri de la matrice"
             options={TRIS_CORR.map((t) => ({
@@ -697,8 +747,11 @@ export function CorrWindow() {
             actif={tri}
             onChange={(t) => corrUiStore.getState().setTri(t)}
           />
+          )}
         </div>
 
+        {vueMatrice && (
+        <>
         {/* Références tradfi préréglées : toggles individuels, les actives rejoignent
             l'univers de la matrice (routage curé → twelvedata, 1 crédit par recalcul). */}
         <div className="mb-3 flex flex-wrap items-center gap-1.5" role="group" aria-label="Références tradfi">
@@ -745,8 +798,10 @@ export function CorrWindow() {
             ))}
           </div>
         )}
+        </>
+        )}
 
-        {/* Matrice, table des paires ou message d'état. */}
+        {/* Matrice, table des paires, rotation, régime ou message d'état. */}
         {topN !== null && (catalogue.length === 0 || pairesBinance === undefined) ? (
           catalogueErreur ? (
             <ErreurBloc>
@@ -755,6 +810,14 @@ export function CorrWindow() {
             </ErreurBloc>
           ) : (
             <Chargement libelle="Catalogues (CoinGecko · paires Binance)…" />
+          )
+        ) : onglet === "rotation" || onglet === "regime" ? (
+          universFige === null ? (
+            <Chargement libelle="Composition de l'univers…" />
+          ) : onglet === "rotation" ? (
+            <CorrRotation univers={universFige} nonce={nonce} />
+          ) : (
+            <CorrRegime univers={universFige} nonce={nonce} />
           )
         ) : symbols.length < 2 ? (
           <Vide>Au moins deux symboles sont nécessaires. Ajoutez-en à la watchlist ou via le champ ci-dessus.</Vide>
@@ -842,6 +905,7 @@ export function CorrWindow() {
           </section>
         )}
 
+        {vueMatrice && (
         <div className="mt-3">
           <NoteSource>
             Corrélations sur log-rendements journaliers, alignés sur les jours calendaires UTC communs
@@ -850,6 +914,7 @@ export function CorrWindow() {
             Klines réutilisées des sources existantes, en cache de session.
           </NoteSource>
         </div>
+        )}
       </div>
     </>
   );

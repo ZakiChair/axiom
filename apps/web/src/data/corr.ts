@@ -18,6 +18,7 @@ import type { Candle } from "@axiom/types";
 import { getAdapter } from "./adapters";
 import { toBinanceUsdtPair } from "./marketOverview";
 import { resolveTickerSource } from "./ticker";
+import { QUOTE_ASSETS } from "./symbol";
 import { watchlistStore } from "../store/watchlist";
 
 /** Une clôture journalière horodatée (ms epoch de l'ouverture de bougie). */
@@ -32,8 +33,15 @@ export type MethodeCorr = "pearson" | "spearman";
 /** Nombre de millisecondes dans une journée (bucket calendaire UTC). */
 const JOUR_MS = 86_400_000;
 
-/** Jours d'historique quotidien récupérés (couvre 180 j de fenêtre + week-ends écartés). */
-export const MAX_JOURS = 260;
+/**
+ * Jours d'historique quotidien récupérés. 260 couvraient la fenêtre matrice de 180 j ;
+ * porté à 400 le 2026-11-07 pour l'onglet Rotation (z-scores sur 52 semaines + pas de
+ * momentum + traîne : 385 observations communes au minimum, cf. rotationRelative.ts) et
+ * l'onglet Régime (fenêtres de 60 j situées dans environ un an d'historique). Une seule
+ * requête par symbole (Binance plafonne à 1000 bougies ; Coinbase à 350 : ses symboles
+ * restent « historique insuffisant » en Rotation).
+ */
+export const MAX_JOURS = 400;
 
 /**
  * Fenêtres de calcul proposées à l'UI (en jours calendaires). À 7 j sur un croisement
@@ -69,7 +77,7 @@ export const REFERENCES_CORR: readonly ReferenceCorr[] = [
 // ─────────────────────────── Univers, tri, onglet (pur) ───────────────────────────
 
 /** Univers de la matrice : watchlist active, ou top N par capitalisation CoinGecko. */
-export type UniversCorr = "watchlist" | "top10" | "top20" | "top30";
+export type UniversCorr = "watchlist" | "top10" | "top20" | "top30" | "top50";
 
 /** Options d'univers proposées à l'UI (`topN: null` = watchlist, ordre actuel). */
 export const UNIVERS_CORR: readonly { id: UniversCorr; label: string; topN: number | null }[] = [
@@ -77,6 +85,9 @@ export const UNIVERS_CORR: readonly { id: UniversCorr; label: string; topN: numb
   { id: "top10", label: "Top 10", topN: 10 },
   { id: "top20", label: "Top 20", topN: 20 },
   { id: "top30", label: "Top 30", topN: 30 },
+  // Top 50 (2026-11-07) : univers de coupe transversale des onglets Rotation et Régime
+  // (composé au chargement, figé jusqu'à « Recalculer »). Disponible aussi pour la matrice.
+  { id: "top50", label: "Top 50", topN: 50 },
 ];
 
 /** Ordre d'affichage de la matrice (vue PURE — jamais de refetch ni de recalcul). */
@@ -89,8 +100,15 @@ export const TRIS_CORR: readonly { id: TriCorr; label: string }[] = [
   { id: "similarite", label: "Similarité" },
 ];
 
-/** Onglet actif de la fenêtre CORR. */
-export type OngletCorr = "matrice" | "paires";
+/**
+ * Onglet actif de la fenêtre CORR. « rotation » (force relative contre BTC) et « regime »
+ * (régime transversal) ajoutés le 2026-11-07 : deux VUES de coupe transversale qui
+ * partagent l'univers et le cache de séries de la matrice.
+ */
+export type OngletCorr = "matrice" | "paires" | "rotation" | "regime";
+
+/** Identifiants d'onglet acceptés à l'hydratation (catalogue fermé). */
+export const ONGLETS_CORR_IDS: readonly OngletCorr[] = ["matrice", "paires", "rotation", "regime"];
 
 /**
  * Stablecoins EXCLUS de l'univers top-N (tickers CoinGecko en MAJUSCULES) : corréler
@@ -189,11 +207,30 @@ export function topPairesUnivers(
   return paires;
 }
 
+// ─────────────────────────── Libellé court (pur) ───────────────────────────
+
+/**
+ * Base d'un symbole (retire la cotation) pour les étiquettes compactes (matrice, nuage de
+ * rotation, tables). Le forex « EUR/USD » est conservé tel quel. Fonction PURE.
+ */
+export function courtSymbole(s: string): string {
+  if (s.includes("/")) return s; // forex EUR/USD conservé
+  for (const q of QUOTE_ASSETS) {
+    if (s.endsWith(q) && s.length > q.length) return s.slice(0, -q.length);
+  }
+  return s;
+}
+
 // ─────────────────────────── Alignement (pur) ───────────────────────────
 
 /** Numéro de jour calendaire UTC d'un horodatage ms (bucket d'alignement). */
-function bucketJour(ms: number): number {
+export function bucketJour(ms: number): number {
   return Math.floor(ms / JOUR_MS);
+}
+
+/** Horodatage ms (00:00 UTC) d'un numéro de jour calendaire. Fonction PURE. */
+export function debutJour(jour: number): number {
+  return jour * JOUR_MS;
 }
 
 /**
@@ -203,6 +240,19 @@ function bucketJour(ms: number): number {
  * vecteurs de MÊME longueur (clôtures des jours communs). Fonction PURE.
  */
 export function alignerSeries(a: SerieCloture[], b: SerieCloture[]): { a: number[]; b: number[] } {
+  const { a: ax, b: bx } = alignerSeriesJours(a, b);
+  return { a: ax, b: bx };
+}
+
+/**
+ * Comme `alignerSeries`, mais renvoie AUSSI les jours communs (numéros de jour UTC, cf.
+ * `bucketJour`) : la rotation date sa traîne et le graphe du ratio X÷BTC. Mêmes règles.
+ * Fonction PURE.
+ */
+export function alignerSeriesJours(
+  a: SerieCloture[],
+  b: SerieCloture[],
+): { jours: number[]; a: number[]; b: number[] } {
   const mapA = new Map<number, number>();
   for (const p of a) {
     if (Number.isFinite(p.time) && Number.isFinite(p.close)) mapA.set(bucketJour(p.time), p.close);
@@ -212,16 +262,18 @@ export function alignerSeries(a: SerieCloture[], b: SerieCloture[]): { a: number
     if (Number.isFinite(p.time) && Number.isFinite(p.close)) mapB.set(bucketJour(p.time), p.close);
   }
   const joursCommuns = [...mapA.keys()].filter((j) => mapB.has(j)).sort((x, y) => x - y);
+  const jours: number[] = [];
   const ax: number[] = [];
   const bx: number[] = [];
   for (const j of joursCommuns) {
     const va = mapA.get(j);
     const vb = mapB.get(j);
     if (va === undefined || vb === undefined) continue;
+    jours.push(j);
     ax.push(va);
     bx.push(vb);
   }
-  return { a: ax, b: bx };
+  return { jours, a: ax, b: bx };
 }
 
 /**
@@ -597,7 +649,7 @@ export interface ReglagesCorr {
   univers: UniversCorr;
   /** Tri d'affichage de la matrice (vue pure sur la matrice calculée). */
   tri: TriCorr;
-  /** Onglet actif (matrice ou liste des paires). */
+  /** Onglet actif (matrice, liste des paires, rotation contre BTC ou régime transversal). */
   onglet: OngletCorr;
 }
 
@@ -649,14 +701,17 @@ export function hydraterReglagesCorr(raw: unknown): ReglagesCorr {
     : defauts.univers;
   const tri: TriCorr = TRIS_CORR.some((t) => t.id === o.tri) ? (o.tri as TriCorr) : defauts.tri;
   const onglet: OngletCorr =
-    o.onglet === "matrice" || o.onglet === "paires" ? o.onglet : defauts.onglet;
+    ONGLETS_CORR_IDS.includes(o.onglet as OngletCorr) ? (o.onglet as OngletCorr) : defauts.onglet;
   return { methode, fenetreJours, extras, referencesActives, univers, tri, onglet };
 }
 
 // ─────────────── Chargement des klines (impur, cache SESSION) ───────────────
 
-/** Cache SESSION des séries journalières par symbole (évite tout refetch à la réouverture). */
-const cacheSeries = new Map<string, SerieCloture[]>();
+/**
+ * Cache SESSION des séries journalières par symbole (évite tout refetch à la réouverture),
+ * CLÔTURES SEULES, daté du jour UTC de chargement (invalide au jour suivant).
+ */
+const cacheSeries = new Map<string, { serie: SerieCloture[]; jourCharge: number }>();
 
 /**
  * Charge (ou ressert du cache session) la série journalière d'un symbole via l'adaptateur
@@ -683,16 +738,43 @@ export function estEchecRecent(echecs: ReadonlyMap<string, number>, symbol: stri
 
 export async function chargerSerie(symbol: string): Promise<SerieCloture[]> {
   const cached = cacheSeries.get(symbol);
-  if (cached !== undefined) return cached;
+  // Entrée valable le JOUR UTC de son chargement seulement : passé minuit, une nouvelle
+  // clôture existe et la série en cache s'arrête la veille (2026-11-07).
+  if (cached !== undefined && cached.jourCharge === bucketJour(Date.now())) return cached.serie;
   if (estEchecRecent(echecsRecents, symbol, Date.now())) return [];
+  // Requête déjà EN VOL pour ce symbole (matrice et onglet Rotation/Régime qui chargent
+  // le même univers au même moment, ou section BRIEF) : on la partage au lieu d'émettre
+  // un doublon — le cache n'est posé qu'à la résolution.
+  const enVol = chargementsEnVol.get(symbol);
+  if (enVol !== undefined) return enVol;
+  const promesse = chargerSerieReseau(symbol).finally(() => {
+    if (chargementsEnVol.get(symbol) === promesse) chargementsEnVol.delete(symbol);
+  });
+  chargementsEnVol.set(symbol, promesse);
+  return promesse;
+}
+
+/** Requêtes klines en cours par symbole (dédoublonnage, cf. `chargerSerie`). */
+const chargementsEnVol = new Map<string, Promise<SerieCloture[]>>();
+
+/** Chargement réseau effectif d'une série (sans consultation du cache). */
+async function chargerSerieReseau(symbol: string): Promise<SerieCloture[]> {
   try {
     const source = resolveTickerSource(symbol, watchlistStore.getState().sources[symbol]);
     const candles: Candle[] = await getAdapter(source).fetchKlines(symbol, "1d", { limit: MAX_JOURS });
-    const serie = candles
-      .filter((c) => Number.isFinite(c.time) && Number.isFinite(c.close) && c.close > 0)
-      .map((c) => ({ time: c.time, close: c.close }))
-      .sort((x, y) => x.time - y.time);
-    cacheSeries.set(symbol, serie);
+    const recuA = Date.now();
+    // La bougie du jour UTC de la RÉCEPTION est partielle : écartée AVANT la mise en cache.
+    // Sinon, une session qui franchit minuit la lirait comme une clôture (son close est
+    // celui de l'heure du chargement) — les appelants l'écartent aussi, mais avec LEUR
+    // horloge, qui peut déjà être au lendemain.
+    const serie = exclureJourCourant(
+      candles
+        .filter((c) => Number.isFinite(c.time) && Number.isFinite(c.close) && c.close > 0)
+        .map((c) => ({ time: c.time, close: c.close }))
+        .sort((x, y) => x.time - y.time),
+      recuA,
+    );
+    cacheSeries.set(symbol, { serie, jourCharge: bucketJour(recuA) });
     echecsRecents.delete(symbol);
     return serie;
   } catch {
@@ -717,4 +799,5 @@ export async function chargerSeries(symbols: string[]): Promise<Map<string, Seri
 export function viderCacheSeries(): void {
   cacheSeries.clear();
   echecsRecents.clear(); // « Recalculer » ré-arme aussi les symboles récemment en échec
+  chargementsEnVol.clear(); // « Recalculer » ne réutilise pas une requête partie avant
 }

@@ -22,6 +22,7 @@
 import { createStore } from "zustand/vanilla";
 import type { Timeframe } from "@axiom/types";
 import { navigateTo } from "../lib/navigation";
+import { ajouterPreset } from "../lib/indicatorPresets";
 import { watchlistStore } from "./watchlist";
 import {
   BUILTIN_PRESETS,
@@ -33,11 +34,17 @@ import {
   type ScreenerRow,
 } from "../data/screener";
 import { executerScreener } from "../data/screenerRun";
+import {
+  champParId,
+  instancesPourGraphe,
+  PRESETS_DESCRIPTIFS,
+  uniteCondition,
+} from "../data/screenerRegles";
 import { windowManagerStore, mirrorOpenState } from "./windowManager";
 
 // Utilitaires du pipeline déplacés vers data/screenerRun.ts ; ré-exportés ici pour
-// les consommateurs existants (store/signaux.ts, store/squeeze.ts) — aucun cycle
-// (screenerRun n'importe rien du store).
+// les consommateurs existants (store/signaux.ts, store/squeeze.ts) — aucun cycle :
+// screenerRun ne lit que store/refSymbol, qui n'importe rien du screener.
 export { mapPool, TICKER_24H_URL, OI_HIST_LIMIT } from "../data/screenerRun";
 
 /** Clé localStorage des presets UTILISATEUR (les livrés sont constants, non persistés). */
@@ -61,8 +68,12 @@ export interface ScreenerState {
   addBaseCondition: () => void;
   updateBaseCondition: (index: number, patch: Partial<BaseCondition>) => void;
   removeBaseCondition: (index: number) => void;
+  /** Ajoute une condition sur un champ du catalogue (RSI < 30 par défaut). */
   addIndicatorCondition: () => void;
-  updateIndicatorCondition: (index: number, patch: Partial<IndicatorCondition>) => void;
+  /** Ajoute une règle au modèle du backtest (close > EMA 200 par défaut). */
+  addRegleCondition: () => void;
+  /** Remplace la condition `index` (champ ↔ règle compris). */
+  replaceIndicatorCondition: (index: number, cond: IndicatorCondition) => void;
   removeIndicatorCondition: (index: number) => void;
 
   // — Presets (livrés + utilisateur) —
@@ -83,6 +94,17 @@ export interface ScreenerState {
   rows: ScreenerRow[];
   error: string | null;
   note: string | null;
+  /**
+   * TF et conditions figés au lancement du run affiché : un clic sur un résultat ouvre le
+   * graphe à CETTE unité avec CES instances, même si le builder a changé depuis.
+   */
+  runTf: Timeframe | null;
+  runConditions: IndicatorCondition[];
+  /**
+   * Avis de la dernière ouverture d'un résultat au graphe : ce qui n'a PAS été posé
+   * (panneaux pleins, conditions d'une autre unité). null = rien à signaler.
+   */
+  avisGraphe: string | null;
   run: () => void;
   cancel: () => void;
 }
@@ -95,6 +117,24 @@ function defaultBaseCondition(): BaseCondition {
 /** Condition indicateur par défaut (RSI < 30). */
 function defaultIndicatorCondition(): IndicatorCondition {
   return { kind: "indicator", fieldId: "rsi", param: 14, op: "<", value: 30 };
+}
+
+/** Règle par défaut : close au-dessus de l'EMA 200 (le worker charge l'amorce). */
+function defaultRegleCondition(): IndicatorCondition {
+  return {
+    kind: "regle",
+    condition: {
+      type: "comparaison",
+      gauche: { type: "prix", champ: "close" },
+      comparateur: ">",
+      droite: { type: "indicateur", indicateurId: "ema", params: { length: 200 }, output: "ema" },
+    },
+  };
+}
+
+/** Copie profonde : éditer le builder ne doit jamais muter un preset source. */
+function copierConditions<T>(conds: readonly T[]): T[] {
+  return conds.map((c) => structuredClone(c));
 }
 
 /** Identifiant de preset utilisateur (crypto.randomUUID si dispo, repli horodaté). */
@@ -163,9 +203,14 @@ export const screenerStore = createStore<ScreenerState>((set, get) => ({
       indicatorConditions: [...s.indicatorConditions, defaultIndicatorCondition()],
       dernierPresetCharge: null,
     })),
-  updateIndicatorCondition: (index, patch) =>
+  addRegleCondition: () =>
     set((s) => ({
-      indicatorConditions: s.indicatorConditions.map((c, i) => (i === index ? { ...c, ...patch } : c)),
+      indicatorConditions: [...s.indicatorConditions, defaultRegleCondition()],
+      dernierPresetCharge: null,
+    })),
+  replaceIndicatorCondition: (index, cond) =>
+    set((s) => ({
+      indicatorConditions: s.indicatorConditions.map((c, i) => (i === index ? cond : c)),
       dernierPresetCharge: null,
     })),
   removeIndicatorCondition: (index) =>
@@ -178,13 +223,14 @@ export const screenerStore = createStore<ScreenerState>((set, get) => ({
   dernierPresetCharge: null,
 
   loadPreset: (id) => {
-    const preset = [...BUILTIN_PRESETS, ...get().userPresets].find((p) => p.id === id);
+    const preset = [...BUILTIN_PRESETS, ...PRESETS_DESCRIPTIFS, ...get().userPresets].find((p) => p.id === id);
     if (preset === undefined) return;
-    // Copies profondes : éditer le builder ne doit pas muter le preset source.
+    // Copies profondes : éditer le builder ne doit pas muter le preset source (une règle
+    // porte des opérandes imbriqués).
     set({
       tf: preset.tf,
-      baseConditions: preset.baseConditions.map((c) => ({ ...c })),
-      indicatorConditions: preset.indicatorConditions.map((c) => ({ ...c })),
+      baseConditions: copierConditions(preset.baseConditions),
+      indicatorConditions: copierConditions(preset.indicatorConditions),
       dernierPresetCharge: preset.id,
     });
   },
@@ -196,8 +242,8 @@ export const screenerStore = createStore<ScreenerState>((set, get) => ({
       id: genPresetId(),
       name: nom,
       tf,
-      baseConditions: baseConditions.map((c) => ({ ...c })),
-      indicatorConditions: indicatorConditions.map((c) => ({ ...c })),
+      baseConditions: copierConditions(baseConditions),
+      indicatorConditions: copierConditions(indicatorConditions),
     };
     const userPresets = [...get().userPresets, preset];
     writeUserPresets(userPresets);
@@ -214,12 +260,24 @@ export const screenerStore = createStore<ScreenerState>((set, get) => ({
   rows: [],
   error: null,
   note: null,
+  runTf: null,
+  runConditions: [],
+  avisGraphe: null,
 
   run: () => {
     // Un seul run à la fois : on invalide le précédent (ses callbacks seront ignorés).
     const runId = ++currentRunId;
     const { tf, baseConditions, indicatorConditions } = get();
-    set({ runState: "loading", progress: { done: 0, total: 0 }, rows: [], error: null, note: null });
+    set({
+      runState: "loading",
+      progress: { done: 0, total: 0 },
+      rows: [],
+      error: null,
+      note: null,
+      runTf: tf,
+      runConditions: copierConditions(indicatorConditions),
+      avisGraphe: null,
+    });
 
     // Pipeline extrait (aucune écriture de store) : la progression du worker fait passer
     // l'état en « running » (le premier appel avec total figé, comme avant), le résultat
@@ -258,17 +316,33 @@ mirrorOpenState("screener", screenerStore);
 // ─────────────────────────── Actions dérivées (chart / watchlist) ───────────────────────────
 
 /**
- * Ouvre un résultat dans le graphe via le bus panneau→chart (Lot C2) :
- * source Binance + symbole + TF du run.
+ * Ouvre un résultat dans le graphe via le bus panneau→chart (Lot C2) : source Binance +
+ * symbole + TF du run, puis pose les instances des conditions de cette unité (préréglage
+ * d'indicateurs : sans doublon, refusé si les panneaux du graphe sont pleins). Ce qui n'a
+ * pas été posé est dit dans `avisGraphe` : l'utilisateur ne doit pas croire voir les
+ * indicateurs de ses conditions quand ils manquent.
  */
 export function ouvrirDansChart(symbol: string): void {
+  const s = screenerStore.getState();
+  const tf = s.runTf ?? s.tf;
+  const conds = s.runTf === null ? s.indicatorConditions : s.runConditions;
   windowManagerStore.getState().propagerSymboleAuGroupe("screener", symbol);
-  navigateTo({
-    symbol,
-    exchange: "binance",
-    timeframe: screenerStore.getState().tf,
-    source: "eqs",
-  });
+  navigateTo({ symbol, exchange: "binance", timeframe: tf, source: "eqs" });
+  const avis: string[] = [];
+  const instances = instancesPourGraphe(conds, tf);
+  if (instances.length > 0) {
+    const { raison } = ajouterPreset({ id: "eqs", nom: "EQS", resume: "", explication: "", instances });
+    if (raison !== null) avis.push(`indicateurs des conditions non posés : ${raison}`);
+  }
+  const autres = [...new Set(conds.map((c) => uniteCondition(c, tf)).filter((u) => u !== tf))];
+  if (autres.length > 0) {
+    avis.push(`conditions ${autres.join(", ")} non posées (graphe ouvert en ${tf})`);
+  }
+  const mansfield = conds.some(
+    (c) => c.kind === "indicator" && uniteCondition(c, tf) === tf && champParId(c.fieldId)?.derive === "rsMansfield",
+  );
+  if (mansfield) avis.push("RS Mansfield non posé (ratio sans instance sur le graphe)");
+  screenerStore.setState({ avisGraphe: avis.length > 0 ? `${symbol} : ${avis.join(" ; ")}` : null });
 }
 
 /** Ajoute un résultat à la watchlist (groupe actif), sans source : classé comme tout favori. */

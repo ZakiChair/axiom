@@ -49,6 +49,19 @@ describe("préréglages d’analyse", () => {
     expect(ajouterPreset(swing).instances).toHaveLength(1);
   });
 
+  it("distingue l’unité de calcul : une EMA [1d] ne masque pas l’EMA native, ni l’inverse", () => {
+    const ema200 = { id: "t", nom: "t", resume: "", explication: "", instances: [{ defId: "ema", params: { length: 200 } }] };
+    indicatorsStore.getState().setAll([{ defId: "ema", params: { length: 200, unite: "1d" } }]);
+    expect(planifierPreset(ema200, indicatorsStore.getState().indicators, 5).ajouts).toEqual([{ defId: "ema", params: { length: 200 } }]);
+
+    const ema200Jour = { ...ema200, instances: [{ defId: "ema", params: { length: 200, unite: "1d" } }] };
+    indicatorsStore.getState().setAll([{ defId: "ema", params: { length: 200 } }]);
+    expect(planifierPreset(ema200Jour, indicatorsStore.getState().indicators, 5).ajouts).toHaveLength(1);
+
+    indicatorsStore.getState().setAll([{ defId: "ema", params: { length: 200, unite: "1d" } }]);
+    expect(planifierPreset(ema200Jour, indicatorsStore.getState().indicators, 5).ajouts).toEqual([]);
+  });
+
   it("refuse tout le groupe si sa pane dépasse la capacité, sans ajouter même l’EMA", () => {
     indicatorsStore.getState().add("rsi");
     chartCapaciteStore.setState({ paneMax: 1 });

@@ -442,6 +442,8 @@ interface PersistedSession {
   niveauxOptions: boolean;
   /** Bascule des bandes implicites DVOL sur le chart maître (chart/niveauxOverlays). */
   bandesImplicites: boolean;
+  /** Bascule des bandes RV (HAR-RV, tout actif) sur le chart maître (chart/niveauxOverlays). */
+  bandesRv: boolean;
   /** Bascule de la ligne « Coût Strategy » sur le chart maître (chart/niveauxOverlays). */
   prixRevientTresoreries: boolean;
   macroOverlays: MacroOverlayId[];
@@ -472,6 +474,7 @@ function currentSession(): PersistedSession {
     niveauxClesFamilles: niveauxOverlaysStore.getState().familles,
     niveauxOptions: niveauxOverlaysStore.getState().niveauxOptions,
     bandesImplicites: niveauxOverlaysStore.getState().bandesImplicites,
+    bandesRv: niveauxOverlaysStore.getState().bandesRv,
     prixRevientTresoreries: niveauxOverlaysStore.getState().prixRevient,
     macroOverlays: macroOverlayStore.getState().enabled,
     denominateur: denominateurStore.getState().denominateur,
@@ -534,6 +537,7 @@ function hydrateSession(): void {
   if (Array.isArray(p.niveauxClesFamilles)) niveauxOverlaysStore.getState().setFamilles(p.niveauxClesFamilles);
   if (typeof p.niveauxOptions === "boolean") niveauxOverlaysStore.getState().setActif("niveauxOptions", p.niveauxOptions);
   if (typeof p.bandesImplicites === "boolean") niveauxOverlaysStore.getState().setActif("bandesImplicites", p.bandesImplicites);
+  if (typeof p.bandesRv === "boolean") niveauxOverlaysStore.getState().setActif("bandesRv", p.bandesRv);
   if (typeof p.prixRevientTresoreries === "boolean") niveauxOverlaysStore.getState().setActif("prixRevient", p.prixRevientTresoreries);
 
   if (Array.isArray(p.macroOverlays)) {
@@ -834,12 +838,23 @@ const ETATS_LOCAUX_NON_EXPORTES: ReadonlySet<string> = new Set([
  */
 const PREFIXE_ARCHIVE_CRYPTOQUANT = "axiom:onchain:cq:";
 
+/**
+ * Instantanés quotidiens d'options d'OMON (chantier du 7 novembre 2026) : archive de la surface à
+ * maturité constante (`axiom:surfaceOptions:<devise>:v1`) et OI par strike J-0…J-7
+ * (`axiom:oiStrikes:<devise>:<jour>`). Données Deribit dérivées (usage personnel), doublées dans
+ * le KV du daemon (namespaces `surface-options` et `oi-strikes`) : jamais exportées, ni remplacées
+ * ni purgées par un import (une sauvegarde ancienne raccourcirait l'historique). Littéraux
+ * volontaires : data/surfaceConstante et data/deltaOiStrikes restent dans le chunk d'OMON.
+ */
+const PREFIXES_INSTANTANES_OPTIONS = ["axiom:surfaceOptions:", "axiom:oiStrikes:"] as const;
+
 /** Clé jamais exportée ni importée, et préservée localement lors d'un import. */
 function resteSurLePoste(cle: string): boolean {
   return (
     estCredentialLocal(cle) ||
     ETATS_LOCAUX_NON_EXPORTES.has(cle) ||
-    cle.startsWith(PREFIXE_ARCHIVE_CRYPTOQUANT)
+    cle.startsWith(PREFIXE_ARCHIVE_CRYPTOQUANT) ||
+    PREFIXES_INSTANTANES_OPTIONS.some((prefixe) => cle.startsWith(prefixe))
   );
 }
 

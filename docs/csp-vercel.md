@@ -57,3 +57,24 @@ la même origine — réécritures de `vercel.json` vers `api/proxy.ts` — et r
 `'self'` : elles n'entrent pas dans `connect-src`. La route `/cqapi` (CryptoQuant BASIC,
 2026-09-16) n'a demandé aucun ajout à la politique ni à `shared/extapi-hosts.ts` ; seul un
 appel direct du navigateur vers un nouvel hôte exige une entrée ici.
+
+## Appels directs sans proxy
+
+Une source publique sans clé dont l'API répond avec des en-têtes CORS ouverts peut être
+appelée directement par le navigateur, sans passer par `/extapi` (précédent : OCDE, Eurostat,
+ONS, cf. `BUILD-CONTRACT.md`). Elle n'entre alors **que** dans `connect-src`, jamais dans
+`shared/extapi-hosts.ts`, et toujours par son hôte exact, sans joker.
+Constat du 2026-11-07 : les hôtes OCDE, Eurostat et ONS, appelés en direct depuis le
+2026-09-06, ne figurent pas encore dans `connect-src` (écart antérieur, hors du lot SUG-39).
+
+- `https://wikimedia.org` (ajouté le 2026-11-07, SUG-39) : pages vues quotidiennes
+  Wikipédia de la section « Attention grand public » de CYCLE
+  (`apps/web/src/data/attentionWiki.ts`). Seul le chemin
+  `/api/rest_v1/metrics/pageviews/per-article/<édition>.wikipedia/all-access/user/<article>/daily/…`
+  est construit, à partir d'une base fixe et d'un titre de la table curée (titre encodé : il
+  ne peut pas sortir de son segment). Le navigateur ne pouvant pas poser `User-Agent`,
+  l'en-tête `Api-User-Agent` porte l'identifiant générique demandé par la politique de
+  Wikimedia (sans e-mail personnel) ; si son pré-vol CORS est refusé, un seul nouvel essai
+  part en requête simple. Le CORS de l'API (`Access-Control-Allow-Origin: *`) n'a pas pu être
+  revérifié depuis le conteneur de développement, sans réseau : à contrôler sur le
+  déploiement (absence de ligne `[Report Only]` et réponse 200 à l'ouverture de CYCLE).

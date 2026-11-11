@@ -170,6 +170,35 @@ export function buildFootprintBarApprochee(
   return buildFootprintBar(time, cells, bucketSize);
 }
 
+/**
+ * FootprintBar INTRABAR d'une bougie jamais vue en live, reconstruit depuis ses
+ * sous-bougies (data/intrabar.ts) : chaque sous-bougie est répartie sur SON [bas, haut]
+ * avec SON split acheteur/vendeur taker (rowsApprochees), puis les niveaux s'additionnent.
+ * Plus fin que `buildFootprintBarApprochee` (une seule répartition sur la bougie entière),
+ * mais toujours approché par niveau : l'appelant l'étiquette par la résolution
+ * (« réparti à la minute (1m) »), jamais comme un footprint tick. null si aucun volume.
+ */
+export function buildFootprintBarIntrabar(
+  time: number,
+  sousBougies: readonly Pick<Candle, "low" | "high" | "volume" | "buyVolume" | "sellVolume">[],
+  bucketSize: number
+): FootprintBar | null {
+  const cells = new Map<number, FpCell>();
+  for (const s of sousBougies) {
+    for (const r of rowsApprochees(s, bucketSize)) {
+      const idx = Math.round(r.price / bucketSize);
+      const cell = cells.get(idx);
+      if (cell === undefined) cells.set(idx, { buy: r.buyVol, sell: r.sellVol });
+      else {
+        cell.buy += r.buyVol;
+        cell.sell += r.sellVol;
+      }
+    }
+  }
+  if (cells.size === 0) return null;
+  return buildFootprintBar(time, cells, bucketSize);
+}
+
 /** Repli tickSize selon la magnitude du prix (si /exchangeInfo échoue). */
 export function fallbackTick(price: number): number {
   if (price >= 1000) return 0.1;

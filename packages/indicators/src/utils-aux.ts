@@ -56,3 +56,33 @@ export function alignAux(
   }
   return out;
 }
+
+/**
+ * Projette sur les bougies d'un graphe une série calculée sur une unité SUPÉRIEURE
+ * (EMA 1d ou RSI 4h sur un graphe 1h). Chaque valeur supérieure est datée à la CLÔTURE
+ * de sa bougie (ouverture + `dureeSup`), instant où elle est connue (famille 1 de la
+ * convention ci-dessus) ; chaque bougie du graphe lit la dernière bougie supérieure
+ * close au plus tard à SA clôture (ouverture + `dureeGraphe`). Sur un graphe 1h, l'EMA
+ * 4h de 00:00-04:00 apparaît donc sur la bougie 03:00, close à 04:00 : la courbe monte
+ * en escalier, en retard d'au plus une période supérieure, et ne repeint jamais.
+ *
+ * Réutilise `alignAux` : les points portent l'INDICE de la bougie supérieure, remplacé
+ * ensuite par sa valeur. Une valeur supérieure absente (amorce, trou du calcul) reste
+ * absente sur le graphe, jamais remplacée par la précédente. La borne de lecture vient
+ * de la durée connue du graphe, pas de la bougie suivante : un trou du graphe n'élargit
+ * aucune borne (contrairement au mode `surCloture`).
+ *
+ * L'appelant ne fournit que des bougies supérieures CLOSES (la bougie en cours
+ * repeindrait), triées par ouverture croissante. PURE.
+ */
+export function projeterSurUnite(
+  tempsGraphe: number[],
+  dureeGraphe: number,
+  ouverturesSup: number[],
+  dureeSup: number,
+  serieSup: Array<number | undefined>
+): Array<number | undefined> {
+  const points = ouverturesSup.map((t, k) => ({ time: t + dureeSup, value: k }));
+  const indices = alignAux(tempsGraphe.map((t) => t + dureeGraphe), points);
+  return indices.map((k) => (k === undefined ? undefined : serieSup[k]));
+}

@@ -38,6 +38,7 @@ import {
 } from "./ui";
 import { TableTriable, type ColonneTable } from "./TableTriable";
 import { VueModelesPrix } from "./cycle/ModelesPrix";
+import { SectionAttentionWiki } from "./cycle/AttentionWiki";
 
 /** Un jour en millisecondes (dates de halving et de sommet reconstruites depuis le jour post-halving). */
 const JOUR_MS = 86_400_000;
@@ -584,6 +585,12 @@ export function CycleWindow() {
             </div>
           </>
         )}
+
+        {/* Attention grand public (Wikipédia) : source indépendante de Coin Metrics, affichée même en
+            cas d'échec du prix. Montée DANS ce bloc défilant, après le contenu Coin Metrics : en
+            frère `shrink-0`, elle écrasait ce bloc `flex-1 min-h-0` et le graphe, la table des
+            cycles et les modèles de prix débordaient par-dessus (revue G-attention-wiki, tour 1). */}
+        <SectionAttentionWiki />
       </div>
     </>
   );

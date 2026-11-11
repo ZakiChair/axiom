@@ -22,6 +22,7 @@ import { useStore } from "zustand";
 import { marketStore } from "../store/market";
 import { distOverlayStore } from "../chart/distLignes";
 import { NOTE_BANDES_IMPLICITES, niveauxOverlaysStore } from "../chart/niveauxOverlays";
+import { detailBandesRv, infoBandesRvStore, resumeBandesRv } from "../chart/niveaux/bandesRv";
 import { distVar, HORIZONS, type NiveauxVar } from "../data/distVar";
 import { formatPrice, formatPct } from "../lib/format";
 import { Badge, BoutonBascule, BoutonRafraichir, EnTeteFenetre, Chargement, ErreurBloc, Fraicheur, NoteSource, Vide } from "./ui";
@@ -87,6 +88,10 @@ export function DistWindow() {
   // Overlay des bandes VaR sur le chart maître (toggle persisté, défaut OFF).
   const overlayActif = useStore(distOverlayStore, (s) => s.actif);
   const bandesImplicitesActives = useStore(niveauxOverlaysStore, (s) => s.bandesImplicites);
+  const bandesRvActives = useStore(niveauxOverlaysStore, (s) => s.bandesRv);
+  // Publié par la source active (σ, couverture hors échantillon, amplitude consommée).
+  const infoBandesRv = useStore(infoBandesRvStore, (s) => s.info);
+  const detailRv = bandesRvActives ? detailBandesRv(infoBandesRv) : null;
 
   // Compteur de rafraîchissement : sa hausse force la re-lecture du snapshot de bougies
   // (capte la dernière bougie mise à jour en direct, hors abonnement haute fréquence).
@@ -182,6 +187,14 @@ export function DistWindow() {
             >
               Bandes implicites
             </BoutonBascule>
+            {/* Bandes ±1σ/±2σ prévues par HAR-RV pour tout actif (réalisé conditionnel, calibré). */}
+            <BoutonBascule
+              actif={bandesRvActives}
+              onClick={() => niveauxOverlaysStore.getState().basculer("bandesRv")}
+              title={resumeBandesRv(bandesRvActives ? infoBandesRv : null)}
+            >
+              Bandes RV
+            </BoutonBascule>
             <BoutonRafraichir onClick={rafraichir} />
           </span>
         }
@@ -208,6 +221,9 @@ export function DistWindow() {
           </div>
         )}
 
+        {detailRv !== null && (
+          <NoteSource>Bandes RV (HAR, amplitude statistique, pas une borne) — {detailRv}</NoteSource>
+        )}
         <div className="mt-3 flex items-center justify-between">
           <NoteSource>
             Distribution empirique des {calcul.nCloses} dernières bougies {timeframe} du chart

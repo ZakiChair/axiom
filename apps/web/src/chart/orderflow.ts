@@ -48,11 +48,14 @@ import { detectCvdDivergences, type CvdDivergence } from "./cvdSpotPerp";
 import { precisionCvd } from "./cvdPrecision";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 import { createRafThrottle, type RafThrottle } from "./rafThrottle";
+// Sous-bougies Binance chargées à la demande (chunk différé partagé avec le VPVR/VPFR).
+import { creerClientIntrabar, LIBELLE_REPLI, type ClientIntrabar } from "../data/intrabar";
 // Calcul pur (CVD, footprint, formatteurs) — cf. ./orderflow.calc.
 import {
   buildCvdSpotPerpBuckets,
   buildFootprintBar,
   buildFootprintBarApprochee,
+  buildFootprintBarIntrabar,
   computeCvd,
   fallbackTick,
   fmtDelta,
@@ -99,6 +102,12 @@ interface PixelXY {
 
 /** Type d'échelle de l'axe prix (miroir de YAxisType klinecharts, câblé par Chart.tsx). */
 type PriceAxisType = "normal" | "log" | "percentage";
+
+/**
+ * Origine d'une colonne : ticks live (exacte), sous-bougies Binance (répartie par
+ * sous-bougie, data/intrabar.ts) ou OHLCV de la bougie réparti uniformément (« ≈ »).
+ */
+type ModeColonne = "tick" | "intrabar" | "uniforme";
 
 /** Palette du footprint lue depuis les tokens de thème (le canvas n'évalue pas var()). */
 interface FootprintPalette {
@@ -278,6 +287,8 @@ export class OrderflowController {
 
   /** Buffer borné : open time de bougie -> niveaux de prix (footprint). */
   private readonly footprints = new Map<number, Map<number, FpCell>>();
+  /** Colonnes historiques reconstruites depuis les sous-bougies Binance (null hors activité). */
+  private intrabar: ClientIntrabar | null = null;
 
   // --- CVD spot vs perp (Task 17) : sous-feature auto-gérée du contrôleur ---
   /** Id du sous-pane CVD S/P (null tant qu'inactif). */
@@ -331,6 +342,7 @@ export class OrderflowController {
   private start(): void {
     this.running = true;
     this.dirty = true;
+    this.intrabar = creerClientIntrabar(this.markDirty);
     this.tradeRepaint = createRafThrottle(this.markDirty, { minIntervalMs: TICK_MIN_INTERVAL_MS });
     this.canvas.style.display = "block";
     ensureCvdRegistered();
@@ -370,6 +382,8 @@ export class OrderflowController {
     this.raf = 0;
     this.tradeRepaint?.dispose();
     this.tradeRepaint = null;
+    this.intrabar?.dispose();
+    this.intrabar = null;
     this.unsubscribeActions();
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
@@ -840,6 +854,14 @@ export class OrderflowController {
     const visibleBars: FootprintBar[] = [];
     const barPositions: { xc: number; colW: number }[] = [];
     const approxFlags: boolean[] = [];
+    const modes: ModeColonne[] = [];
+    // Colonnes sans ticks : sous-bougies Binance si disponibles (bougies clôturées
+    // seulement), sinon répartition uniforme « ≈ ». Lecture synchrone du cache, le
+    // chargement (anti-rebondi) rappelle markDirty à l'arrivée.
+    const { exchange, timeframe } = this.store.getState();
+    const intra = this.intrabar?.vue({ exchange, symbol: this.symbol, timeframe }, candles, start, end) ?? null;
+    let nIntrabar = 0;
+    let nUniforme = 0;
 
     for (let i = start; i < end; i++) {
       const kd: KLineData | undefined = dataList[i];
@@ -849,20 +871,28 @@ export class OrderflowController {
       const candle = candles[i];
       if (candle === undefined) continue;
       const cells = this.footprints.get(kd.timestamp);
+      const sous = intra?.parBougie.get(candle.time);
       let bar: FootprintBar | null;
-      let approx = false;
+      let mode: ModeColonne = "tick";
       if (cells !== undefined && cells.size > 0) {
         bar = buildFootprintBar(kd.timestamp, cells, this.bucketSize);
+      } else if (sous !== undefined) {
+        // Bougie jamais vue en live, sous-bougies disponibles : répartie par sous-bougie.
+        bar = buildFootprintBarIntrabar(kd.timestamp, sous, this.bucketSize);
+        mode = "intrabar";
       } else {
         // Bougie jamais vue en live : colonne APPROCHÉE depuis l'OHLCV, étiquetée « ≈ ».
         bar = buildFootprintBarApprochee(kd.timestamp, candle, this.bucketSize);
-        approx = true;
+        mode = "uniforme";
       }
       if (bar === null) continue;
+      if (mode === "intrabar") nIntrabar++;
+      else if (mode === "uniforme") nUniforme++;
       visibleCandles.push(candle);
       visibleBars.push(bar);
       barPositions.push({ xc, colW });
-      approxFlags.push(approx);
+      approxFlags.push(mode !== "tick");
+      modes.push(mode);
     }
 
     // Divergences delta : calculées sur le SEUL sous-ensemble à ticks réels. Le
@@ -903,10 +933,10 @@ export class OrderflowController {
       const pos = barPositions[i];
       if (bar === undefined || pos === undefined) continue;
 
-      const approx = approxFlags[i] === true;
+      const mode = modes[i] ?? "uniforme";
       // Imbalances : uniquement sur les colonnes à ticks réels.
       const imbFlags =
-        !approx && settings.showImbalances
+        mode === "tick" && settings.showImbalances
           ? detectImbalances(bar.rows, settings.imbalanceRatioPct, settings.imbalanceMinVol)
           : null;
 
@@ -921,16 +951,33 @@ export class OrderflowController {
         palette,
         imbPalette,
         imbFlags,
-        settings.showBarPoc && !approx, // POC/VA d'une répartition uniforme = arbitraire
-        settings.showBarVa && !approx,
+        // POC/VA d'une répartition uniforme = arbitraires ; ceux d'une colonne intrabar
+        // suivent la répartition par sous-bougie (approchés, étiquetés par la légende).
+        settings.showBarPoc && mode !== "uniforme",
+        settings.showBarVa && mode !== "uniforme",
         divergences[i] ?? null,
-        approx
+        mode
       );
     }
 
     // Overlay OCN (Open/Close Net) — par-dessus le footprint, dans le même clip.
-    if (this.ocnRunning && settings.showOpenCloseNet) {
+    const ocnVisible = this.ocnRunning && settings.showOpenCloseNet;
+    if (ocnVisible) {
       this.renderOcn(left, top, width, height, yOf, rowH, settings.ocnLookback);
+    }
+
+    // Légende des colonnes sans ticks (bas-gauche du pane prix, au-dessus de celle de
+    // l'OCN) : résolution réellement utilisée et couverture, ou motif du repli « ≈ ».
+    if (nIntrabar + nUniforme > 0) {
+      const texte =
+        nIntrabar > 0 && intra?.libelleResolution
+          ? `Colonnes historiques : ${intra.libelleResolution} · ${nIntrabar}/${nIntrabar + nUniforme}`
+          : `Colonnes historiques : ${intra?.libelle ?? LIBELLE_REPLI}`;
+      ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
+      ctx.fillStyle = palette.textDim;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "bottom";
+      ctx.fillText(texte, left + 8, top + height - (ocnVisible ? 22 : 6));
     }
 
     ctx.restore();
@@ -1002,7 +1049,7 @@ export class OrderflowController {
     showBarPoc: boolean,
     showBarVa: boolean,
     divergence: DivergenceFlag,
-    approx: boolean
+    mode: ModeColonne
   ): void {
     const ctx = this.ctx;
     const cellW = Math.min(colW * 0.92, 180);
@@ -1016,9 +1063,9 @@ export class OrderflowController {
     }
     if (maxTot <= 0) return;
 
-    // Répartition uniforme : mêmes buy/sell affichés sur chaque ligne → aucun signal
-    // de niveau, comme le POC/VA/imbalances déjà masqués pour ces colonnes.
-    const showText = colW >= 44 && rowH >= 9 && !approx;
+    // Sans ticks, les chiffres par niveau sont reconstruits (uniformes ou par sous-bougie) :
+    // pas de texte, qui suggérerait une précision tick absente.
+    const showText = colW >= 44 && rowH >= 9 && mode === "tick";
     ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
 
     for (const r of bar.rows) {
@@ -1029,7 +1076,8 @@ export class OrderflowController {
       const h = Math.max(1, yBot - yTop);
       const net = r.buyVol - r.sellVol;
       const intensity = Math.min(1, (r.buyVol + r.sellVol) / maxTot);
-      const alpha = (0.12 + 0.5 * intensity) * (approx ? 0.55 : 1); // colonnes ≈ atténuées
+      // Colonnes sans ticks atténuées (≈ davantage que l'intrabar).
+      const alpha = (0.12 + 0.5 * intensity) * (mode === "tick" ? 1 : mode === "intrabar" ? 0.8 : 0.55);
 
       // Teinte up/down du thème + intensité via globalAlpha (le canvas n'évalue pas var()).
       ctx.globalAlpha = alpha;
@@ -1080,7 +1128,7 @@ export class OrderflowController {
       ctx.fillStyle = palette.textDim;
       ctx.fillRect(xLeft, Math.min(yVAH, yVAL), cellW, Math.abs(yVAL - yVAH));
       ctx.globalAlpha = 1;
-    } else if (!approx && Number.isFinite(yVAH) && Number.isFinite(yVAL)) {
+    } else if (mode !== "uniforme" && Number.isFinite(yVAH) && Number.isFinite(yVAL)) {
       // Trait atténué à gauche de la colonne (comportement par défaut). Jamais sur
       // une colonne ≈ : sur une répartition uniforme, pocIdx épingle le niveau le
       // plus bas (premier de la Map) et l'expansion VA n'a de place que vers le
@@ -1100,10 +1148,15 @@ export class OrderflowController {
     if (colW >= 22) {
       ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
       ctx.textAlign = "center";
-      if (approx) {
+      if (mode === "uniforme") {
         // Approximation : delta en teinte neutre, préfixé ≈ (jamais présenté comme réel).
         ctx.fillStyle = palette.textDim;
         ctx.fillText(`≈${fmtDelta(bar.delta)}`, xc, paneTop + 8);
+      } else if (mode === "intrabar") {
+        // Delta de la bougie = Σ taker des sous-bougies (k[9]) ; teinte neutre : la colonne
+        // n'est pas un footprint tick (résolution dans la légende).
+        ctx.fillStyle = palette.textDim;
+        ctx.fillText(fmtDelta(bar.delta), xc, paneTop + 8);
       } else {
         ctx.fillStyle = bar.delta >= 0 ? palette.up : palette.down;
         ctx.fillText(fmtDelta(bar.delta), xc, paneTop + 8);

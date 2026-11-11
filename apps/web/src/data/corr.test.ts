@@ -2,10 +2,26 @@
  * Tests de la logique PURE de corrélation (data/corr.ts). Chaque valeur attendue est
  * calculée À LA MAIN et justifiée en commentaire (pas d'oracle « circulaire »).
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { Candle } from "@axiom/types";
+
+// Adaptateurs bouchonnés : seul le test de dédoublonnage de `chargerSerie` les sollicite
+// (jamais de réseau en test). Les autres tests sont purs.
+const { fetchKlines } = vi.hoisted(() => ({ fetchKlines: vi.fn() }));
+vi.mock("./adapters", () => ({ getAdapter: () => ({ fetchKlines }) }));
+
 import {
   alignerSeries,
+  alignerSeriesJours,
+  bucketJour,
   calculerMatrice,
+  chargerSerie,
+  courtSymbole,
+  debutJour,
+  MAX_JOURS,
+  ONGLETS_CORR_IDS,
+  UNIVERS_CORR,
+  viderCacheSeries,
   correlation,
   correlationGlissante,
   exclureJourCourant,
@@ -302,10 +318,19 @@ describe("hydraterReglagesCorr", () => {
     expect(valides.univers).toBe("top20");
     expect(valides.tri).toBe("similarite");
     expect(valides.onglet).toBe("paires");
-    const invalides = hydraterReglagesCorr({ univers: "top50", tri: "corr", onglet: "liste" });
+    const invalides = hydraterReglagesCorr({ univers: "top100", tri: "corr", onglet: "liste" });
     expect(invalides.univers).toBe("watchlist");
     expect(invalides.tri).toBe("watchlist");
     expect(invalides.onglet).toBe("matrice");
+  });
+
+  it("accepte l'univers Top 50 et les onglets Rotation et Régime (2026-11-07)", () => {
+    expect(hydraterReglagesCorr({ univers: "top50" }).univers).toBe("top50");
+    for (const onglet of ONGLETS_CORR_IDS) {
+      expect(hydraterReglagesCorr({ onglet }).onglet).toBe(onglet);
+    }
+    expect(ONGLETS_CORR_IDS).toEqual(["matrice", "paires", "rotation", "regime"]);
+    expect(UNIVERS_CORR.find((u) => u.id === "top50")?.topN).toBe(50);
   });
 
   it("accepte un état valide champ par champ (extras normalisés trim+MAJUSCULES)", () => {
@@ -351,8 +376,109 @@ describe("hydraterReglagesCorr", () => {
 });
 
 describe("FENETRES_CORR", () => {
-  it("propose 7, 30, 90 et 180 jours (7 j ajouté par CORR v2, MAX_JOURS inchangé)", () => {
+  it("propose 7, 30, 90 et 180 jours (7 j ajouté par CORR v2)", () => {
     expect(FENETRES_CORR).toEqual([7, 30, 90, 180]);
+  });
+
+  it("MAX_JOURS = 400 : couvre la plus longue fenêtre matrice et les 385 observations de la rotation", () => {
+    expect(MAX_JOURS).toBe(400);
+    expect(MAX_JOURS).toBeGreaterThan(Math.max(...FENETRES_CORR));
+  });
+});
+
+describe("courtSymbole", () => {
+  it("retire la cotation, garde le forex et un symbole sans cotation connue", () => {
+    expect(courtSymbole("SOLUSDT")).toBe("SOL");
+    expect(courtSymbole("EUR/USD")).toBe("EUR/USD");
+    expect(courtSymbole("SPY")).toBe("SPY");
+  });
+});
+
+describe("alignerSeriesJours", () => {
+  it("renvoie les jours communs (numéros UTC) avec les mêmes clôtures que alignerSeries", () => {
+    const a: SerieCloture[] = [
+      { time: j(1), close: 10 },
+      { time: j(2), close: 11 },
+      { time: j(4) + 3_600_000, close: 13 }, // 01:00 UTC le jour 4
+    ];
+    const b: SerieCloture[] = [
+      { time: j(2), close: 20 },
+      { time: j(3), close: 21 },
+      { time: j(4), close: 22 },
+    ];
+    const r = alignerSeriesJours(a, b);
+    expect(r).toEqual({ jours: [2, 4], a: [11, 13], b: [20, 22] });
+    expect(alignerSeries(a, b)).toEqual({ a: r.a, b: r.b });
+    expect(bucketJour(j(4) + 3_600_000)).toBe(4);
+    expect(debutJour(4)).toBe(j(4));
+  });
+});
+
+describe("chargerSerie (dédoublonnage des requêtes en vol)", () => {
+  /** Bougie 1d minimale (seuls time et close comptent). */
+  const bougie = (time: number, close: number): Candle => ({ time, open: close, high: close, low: close, close, volume: 0 });
+
+  it("deux appels simultanés n'émettent qu'une requête ; le cache sert ensuite sans réseau", async () => {
+    viderCacheSeries();
+    fetchKlines.mockReset();
+    let resoudre: (c: Candle[]) => void = () => {};
+    fetchKlines.mockImplementation(
+      () =>
+        new Promise<Candle[]>((r) => {
+          resoudre = r;
+        }),
+    );
+    const p1 = chargerSerie("SOLUSDT");
+    const p2 = chargerSerie("SOLUSDT");
+    expect(fetchKlines).toHaveBeenCalledTimes(1);
+    expect(fetchKlines).toHaveBeenCalledWith("SOLUSDT", "1d", { limit: MAX_JOURS });
+    resoudre([bougie(j(2), 2), bougie(j(1), 1)]); // désordonnées : la série est triée
+    const [s1, s2] = await Promise.all([p1, p2]);
+    expect(s1).toEqual([
+      { time: j(1), close: 1 },
+      { time: j(2), close: 2 },
+    ]);
+    expect(s2).toBe(s1);
+    await chargerSerie("SOLUSDT");
+    expect(fetchKlines).toHaveBeenCalledTimes(1);
+    viderCacheSeries();
+  });
+
+  it("écarte la bougie du jour de réception (partielle) et recharge au jour UTC suivant", async () => {
+    viderCacheSeries();
+    fetchKlines.mockReset();
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(j(100) + 23 * 3_600_000); // 23 h UTC, jour 100
+      fetchKlines.mockResolvedValueOnce([bougie(j(99), 1), bougie(j(100), 9)]);
+      expect(await chargerSerie("DOTUSDT")).toEqual([{ time: j(99), close: 1 }]);
+      vi.setSystemTime(j(100) + 23.5 * 3_600_000); // même jour : cache
+      expect(await chargerSerie("DOTUSDT")).toEqual([{ time: j(99), close: 1 }]);
+      expect(fetchKlines).toHaveBeenCalledTimes(1);
+      vi.setSystemTime(j(101) + 60_000); // passé minuit : la clôture du jour 100 existe
+      fetchKlines.mockResolvedValueOnce([bougie(j(99), 1), bougie(j(100), 2), bougie(j(101), 3)]);
+      expect(await chargerSerie("DOTUSDT")).toEqual([
+        { time: j(99), close: 1 },
+        { time: j(100), close: 2 },
+      ]);
+      expect(fetchKlines).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      viderCacheSeries();
+    }
+  });
+
+  it("un échec renvoie une série vide sans la cacher (réessai après « Recalculer »)", async () => {
+    viderCacheSeries();
+    fetchKlines.mockReset();
+    fetchKlines.mockRejectedValueOnce(new Error("réseau"));
+    expect(await chargerSerie("ADAUSDT")).toEqual([]);
+    fetchKlines.mockResolvedValueOnce([bougie(j(1), 5)]);
+    expect(await chargerSerie("ADAUSDT")).toEqual([]); // échec récent : silence TTL, pas de requête
+    expect(fetchKlines).toHaveBeenCalledTimes(1);
+    viderCacheSeries();
+    expect(await chargerSerie("ADAUSDT")).toEqual([{ time: j(1), close: 5 }]);
+    viderCacheSeries();
   });
 });
 

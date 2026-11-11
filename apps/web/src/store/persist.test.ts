@@ -55,6 +55,8 @@ import {
   decisionsReconcile,
 } from "./persist";
 import type { SnapshotKv } from "../data/daemon";
+import { cleLocaleSurface } from "../data/surfaceConstante";
+import { cleLocaleOi } from "../data/deltaOiStrikes";
 
 const CHART_KEY = "axiom:chartState:v1";
 const WATCH_KEY = "axiom:watchlist:v1";
@@ -108,6 +110,7 @@ beforeEach(() => {
   niveauxOverlaysStore.getState().setActif("niveauxCles", false);
   niveauxOverlaysStore.getState().setActif("niveauxOptions", false);
   niveauxOverlaysStore.getState().setActif("bandesImplicites", false);
+  niveauxOverlaysStore.getState().setActif("bandesRv", false);
   niveauxOverlaysStore.getState().setActif("prixRevient", false);
   niveauxOverlaysStore.getState().setFamilles(["J", "S"]);
   macroOverlayStore.getState().setEnabled([]);
@@ -444,6 +447,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
         niveauxClesFamilles: ["T", "J", "M"],
         niveauxOptions: true,
         bandesImplicites: true,
+        bandesRv: true,
         prixRevientTresoreries: true,
         macroOverlays: ["m2", "stablecoins"],
         denominateur: "SOL",
@@ -467,6 +471,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(niveauxOverlaysStore.getState().familles).toEqual(["J", "M", "T"]);
     expect(niveauxOverlaysStore.getState().niveauxOptions).toBe(true);
     expect(niveauxOverlaysStore.getState().bandesImplicites).toBe(true);
+    expect(niveauxOverlaysStore.getState().bandesRv).toBe(true);
     expect(niveauxOverlaysStore.getState().prixRevient).toBe(true);
     expect(compareStore.getState().symbols.map((c) => c.symbol)).toEqual(["ETHUSDT", "SOLUSDT"]);
     // setEnabled réordonne selon MACRO_OVERLAYS = ["crypto-total","stablecoins","m2"].
@@ -498,6 +503,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
         niveauxClesFamilles: ["X", 3], // aucune famille connue -> ignoré (reste J + S)
         niveauxOptions: 1, // pas un booléen -> ignoré (reste OFF)
         bandesImplicites: "true", // pas un booléen -> ignoré (reste OFF)
+        bandesRv: 1, // pas un booléen -> ignoré (reste OFF)
         prixRevientTresoreries: 1, // pas un booléen -> ignoré (reste OFF)
       })
     );
@@ -516,6 +522,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(niveauxOverlaysStore.getState().familles).toEqual(["J", "S"]);
     expect(niveauxOverlaysStore.getState().niveauxOptions).toBe(false);
     expect(niveauxOverlaysStore.getState().bandesImplicites).toBe(false);
+    expect(niveauxOverlaysStore.getState().bandesRv).toBe(false);
     expect(niveauxOverlaysStore.getState().prixRevient).toBe(false);
   });
 
@@ -532,6 +539,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     niveauxOverlaysStore.getState().basculerFamille("T");
     niveauxOverlaysStore.getState().basculer("niveauxOptions");
     niveauxOverlaysStore.getState().basculer("bandesImplicites");
+    niveauxOverlaysStore.getState().basculer("bandesRv");
     niveauxOverlaysStore.getState().basculer("prixRevient");
 
     saveSessionUi();
@@ -551,6 +559,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(raw.niveauxClesFamilles).toEqual(["J", "S", "T"]);
     expect(raw.niveauxOptions).toBe(true);
     expect(raw.bandesImplicites).toBe(true);
+    expect(raw.bandesRv).toBe(true);
     expect(raw.prixRevientTresoreries).toBe(true);
   });
 
@@ -706,6 +715,19 @@ describe("importerSauvegarde — remplacement des clés axiom:*", () => {
     expect(localStorage.getItem("axiom:notes:v1")).toBe("autres notes");
   });
 
+  it("ne supprime ni ne remplace les instantanés d'options d'OMON (surface, OI par strike)", () => {
+    // Clés produites par les modules eux-mêmes : le littéral de persist.ts ne peut pas dériver.
+    const surface = cleLocaleSurface("BTC");
+    const oi = cleLocaleOi("ETH", "2026-11-06");
+    localStorage.setItem(surface, '{"v":1,"points":[]}');
+    localStorage.setItem(oi, "instantane-local");
+
+    expect(importerSauvegarde(JSON.stringify({ "axiom:notes:v1": "notes importées", [oi]: "instantane-etranger" }))).toBe(true);
+    expect(localStorage.getItem(surface)).toBe('{"v":1,"points":[]}');
+    expect(localStorage.getItem(oi)).toBe("instantane-local");
+    expect(localStorage.getItem("axiom:notes:v1")).toBe("notes importées");
+  });
+
   it("refuse un JSON invalide, un tableau ou un objet sans clé axiom: (aucun changement)", () => {
     localStorage.setItem("axiom:garde:v1", "intact");
 
@@ -780,6 +802,15 @@ describe("exporterSauvegarde — périmètre réel du fichier téléchargé", ()
     const dump = await capturerExport();
     expect(dump["axiom:onchain:bg:abonnement-refuse"]).toBeUndefined();
     expect(dump["axiom:onchain:bg:abonnement-generation"]).toBeUndefined();
+    expect(dump[CHART_KEY]).toBe("{}");
+  });
+  it("n'embarque pas les instantanés d'options d'OMON (données Deribit dérivées, KV daemon)", async () => {
+    localStorage.setItem(cleLocaleSurface("BTC"), '{"v":1,"points":[]}');
+    localStorage.setItem(cleLocaleOi("BTC", "2026-11-06"), "{}");
+    localStorage.setItem(CHART_KEY, "{}");
+    const dump = await capturerExport();
+    expect(dump[cleLocaleSurface("BTC")]).toBeUndefined();
+    expect(dump[cleLocaleOi("BTC", "2026-11-06")]).toBeUndefined();
     expect(dump[CHART_KEY]).toBe("{}");
   });
   it("n'embarque jamais la clé CryptoQuant personnelle", async () => {

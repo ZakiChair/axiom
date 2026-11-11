@@ -6,6 +6,9 @@
  * en USD par le taux USDT/USD Kraken — peg neutralisé, doc 02 § B7) ou « Brute » (USD vs
  * USDT, inclut l'écart de peg). Si l'ajustement est indisponible, le segmenté est neutralisé
  * sur Brute et une note discrète le dit ; la `NoteSource` dit la vérité selon le mode.
+ * Bandes ±2σ et z GLISSANTS 7 j, causaux : chaque point est jugé avec les 168 h qui le
+ * précèdent (lui inclus), jamais avec la suite de la série ; les bandes sont tracées point
+ * par point et s'interrompent là où elles sont indisponibles (moins de 30 points, σ nul).
  *
  * Présentation PURE (patron SqueezeWindow) : l'état de données vit dans `cbpremStore`
  * (vanilla) ; seul le survol est local à React. Le tracé suit le patron canvas des
@@ -19,7 +22,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { cbpremStore } from "../store/cbprem";
-import { bandesPremium, zPoint, type PointPremium } from "../data/cbprem";
+import { bandesGlissantes, zPoint, type BandeGlissante, type PointPremium } from "../data/cbprem";
 import { lireTokenCanvas, rgbaTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import { formatDateCourte, formatDateHeure, formatDec, formatPct } from "../lib/format";
 import {
@@ -46,8 +49,23 @@ const PAD_B = 20;
 /** Nombre cible d'étiquettes X (sous-échantillonnage temporel). */
 const CIBLE_LABELS_X = 6;
 
-/** Bandes statistiques (moyenne / σ population) — cf. data/cbprem.ts. */
-type Bandes = { moyenne: number; sigma: number };
+/** Bandes glissantes point par point (null = indisponible à ce point) — cf. data/cbprem.ts. */
+type Bandes = readonly (BandeGlissante | null)[];
+
+/** Plages [début, fin] d'indices consécutifs où la bande glissante est disponible. */
+function plagesDisponibles(bandes: Bandes): [number, number][] {
+  const plages: [number, number][] = [];
+  let debut = -1;
+  bandes.forEach((b, i) => {
+    if (b !== null && debut < 0) debut = i;
+    if (b === null && debut >= 0) {
+      plages.push([debut, i - 1]);
+      debut = -1;
+    }
+  });
+  if (debut >= 0) plages.push([debut, bandes.length - 1]);
+  return plages;
+}
 
 /** Pas « ronds » autorisés en % pour la grille Y, du plus FIN au plus GROSSIER. */
 const PAS_PCT = [0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 5] as const;
@@ -119,11 +137,11 @@ interface DomaineY {
 /**
  * Domaine vertical : bornes des premiums ÉLARGIES pour toujours contenir 0 (sinon la
  * ligne de zéro et les remplissages up/dessus / down/dessous seraient incohérents quand
- * toute la série partage un signe) PUIS, si des bandes sont fournies, pour contenir
- * moyenne ± 2σ (sinon les bandes sortiraient du cadre et seraient invisibles), enfin
- * une marge de respiration.
+ * toute la série partage un signe) PUIS pour contenir moyenne ± 2σ de chaque bande
+ * glissante disponible (sinon les bandes sortiraient du cadre et seraient invisibles),
+ * enfin une marge de respiration.
  */
-function domaineY(serie: readonly PointPremium[], bandes: Bandes | null): DomaineY {
+function domaineY(serie: readonly PointPremium[], bandes: Bandes): DomaineY {
   let vMin = Infinity;
   let vMax = -Infinity;
   for (const p of serie) {
@@ -132,9 +150,10 @@ function domaineY(serie: readonly PointPremium[], bandes: Bandes | null): Domain
   }
   vMin = Math.min(vMin, 0);
   vMax = Math.max(vMax, 0);
-  if (bandes !== null) {
-    vMin = Math.min(vMin, bandes.moyenne - 2 * bandes.sigma);
-    vMax = Math.max(vMax, bandes.moyenne + 2 * bandes.sigma);
+  for (const b of bandes) {
+    if (b === null) continue;
+    vMin = Math.min(vMin, b.moyenne - 2 * b.sigma);
+    vMax = Math.max(vMax, b.moyenne + 2 * b.sigma);
   }
   const marge = (vMax - vMin) * 0.08 || 1;
   return { vMin: vMin - marge, vMax: vMax + marge };
@@ -150,7 +169,7 @@ function yAt(g: Geometrie, v: number, dom: DomaineY): number {
 function dessiner(
   canvas: HTMLCanvasElement,
   serie: readonly PointPremium[],
-  bandes: Bandes | null,
+  bandes: Bandes,
   moyenne7j: number | null,
 ): void {
   const ctx = canvas.getContext("2d");
@@ -206,12 +225,21 @@ function dessiner(
   ctx.fill();
   ctx.restore();
 
-  // Bandes ±2σ : remplissage très faible entre elles (repère de dispersion en fond).
-  if (bandes !== null) {
-    const yHaut = yAt(g, bandes.moyenne + 2 * bandes.sigma, dom);
-    const yBas = yAt(g, bandes.moyenne - 2 * bandes.sigma, dom);
-    ctx.fillStyle = rgbaTokenCanvas("--text-dim", 0.04, "#94a3b8");
-    ctx.fillRect(g.left, yHaut, g.plotW, yBas - yHaut);
+  // Bornes glissantes moyenne ± 2σ, point par point, sur chaque plage disponible.
+  const plages = plagesDisponibles(bandes);
+  const borne = (i: number, k: 2 | -2): number => {
+    const b = bandes[i] as BandeGlissante; // indice pris dans une plage disponible
+    return yAt(g, b.moyenne + k * b.sigma, dom);
+  };
+
+  // Bandes ±2σ : remplissage très faible entre les deux bornes (repère de dispersion en fond).
+  ctx.fillStyle = rgbaTokenCanvas("--text-dim", 0.04, "#94a3b8");
+  for (const [debut, fin] of plages) {
+    ctx.beginPath();
+    for (let i = debut; i <= fin; i++) ctx.lineTo(xAt(g, i, n), borne(i, 2));
+    for (let i = fin; i >= debut; i--) ctx.lineTo(xAt(g, i, n), borne(i, -2));
+    ctx.closePath();
+    ctx.fill();
   }
 
   // Grille horizontale : 3-4 lignes aux ticks ronds % + étiquettes Y à gauche.
@@ -231,21 +259,19 @@ function dessiner(
     ctx.fillText(Math.abs(t) < 1e-9 ? "0.00%" : formatPct(t, 2), g.left - 4, y);
   }
 
-  // Lignes ±2σ : pointillé discret token dim (bornes de la bande de dispersion).
-  if (bandes !== null) {
-    ctx.save();
-    ctx.strokeStyle = dim;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([3, 3]);
-    for (const v of [bandes.moyenne + 2 * bandes.sigma, bandes.moyenne - 2 * bandes.sigma]) {
-      const y = yAt(g, v, dom);
+  // Lignes ±2σ glissantes : pointillé discret token dim, interrompu hors des plages disponibles.
+  ctx.save();
+  ctx.strokeStyle = dim;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  for (const [debut, fin] of plages) {
+    for (const k of [2, -2] as const) {
       ctx.beginPath();
-      ctx.moveTo(g.left, y);
-      ctx.lineTo(g.right, y);
+      for (let i = debut; i <= fin; i++) ctx.lineTo(xAt(g, i, n), borne(i, k));
       ctx.stroke();
     }
-    ctx.restore();
   }
+  ctx.restore();
 
   // Ligne « moyenne 7 j » : pointillé token accent (tendance courte).
   if (moyenne7j !== null && Number.isFinite(moyenne7j)) {
@@ -308,8 +334,22 @@ interface Survol {
   xPix: number;
   largeur: number;
   point: PointPremium;
-  /** z-score du point survolé vs les bandes (null si moins de 30 pts ou σ nul). */
-  z: number | null;
+  /** Bande glissante du point survolé (null = indisponible : moins de 30 pts sur 168 h ou σ nul). */
+  bande: BandeGlissante | null;
+}
+
+/** Ligne d'infobulle du z glissant : valeur et nombre de points de la fenêtre, ou « indisponible ». */
+function ligneZ(point: PointPremium, bande: BandeGlissante | null): { label: string; valeur: string; couleur: string } {
+  const label = "z glissant 7j";
+  if (bande === null) return { label, valeur: "indisponible", couleur: lireTokenCanvas("--text-dim", "#94a3b8") };
+  const z = zPoint(point.premiumPct, bande);
+  // Teinté down si extrême (|z| ≥ 2), sinon discret.
+  const extreme = Math.abs(z) >= 2;
+  return {
+    label,
+    valeur: `${formatDec(z, 2)} · ${bande.n} pts`,
+    couleur: lireTokenCanvas(extreme ? "--down" : "--text-dim", extreme ? "#f92855" : "#94a3b8"),
+  };
 }
 
 export function CbpremWindow() {
@@ -328,9 +368,11 @@ export function CbpremWindow() {
   const [survol, setSurvol] = useState<Survol | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Bandes moyenne/σ (population, toute la série) : partagées entre le tracé des
-  // bandes ±2σ et le z-score du survol. Mémoïsées sur la série (même source que z30j).
-  const bandes = useMemo(() => bandesPremium(serie), [serie]);
+  // Bandes glissantes causales (168 h, point par point) : partagées entre le tracé ±2σ et le
+  // z du survol. Mémoïsées sur la série ; la dernière est celle du z courant (statsPremium).
+  const bandes = useMemo(() => bandesGlissantes(serie), [serie]);
+  // Points de la fenêtre du dernier z (168 en 1h quand elle est pleine).
+  const couvertureZ = bandes.at(-1)?.n ?? null;
   const moyenne7j = stats?.moyenne7j ?? null;
 
   // Run auto au PREMIER open (FloatingWindow ne monte l'enfant que si ouvert). La garde
@@ -370,8 +412,7 @@ export function CbpremWindow() {
       setSurvol(null);
       return;
     }
-    const z = bandes === null ? null : zPoint(point.premiumPct, bandes);
-    setSurvol({ xPix: xAt(g, idx, serie.length), largeur: rect.width, point, z });
+    setSurvol({ xPix: xAt(g, idx, serie.length), largeur: rect.width, point, bande: bandes[idx] ?? null });
   };
 
   const onLeave = (): void => setSurvol(null);
@@ -429,7 +470,7 @@ export function CbpremWindow() {
         }
       />
 
-      {/* Bandeau de synthèse : premium courant teinté, moyenne 7 j, z-score 30 j, écart de peg. */}
+      {/* Bandeau de synthèse : premium courant teinté, moyenne 7 j, z glissant 7 j, écart de peg. */}
       <div className="flex shrink-0 flex-wrap items-center gap-4 border-b border-border px-4 py-2 text-[11px]">
         <span className="flex items-center gap-1.5">
           <span className="text-text-dim">Premium</span>
@@ -438,8 +479,19 @@ export function CbpremWindow() {
         <span className="text-text-dim">
           Moy 7j <span className="tabular-nums text-text">{formatPct(stats?.moyenne7j ?? null, 3)}</span>
         </span>
-        <span className="text-text-dim">
-          Z 30j <span className="tabular-nums text-text">{formatDec(stats?.z30j ?? null, 2)}</span>
+        <span
+          className="text-text-dim"
+          title="z descriptif du dernier premium contre les 168 h qui le précèdent, lui inclus (σ population). Indisponible sous 30 points dans la fenêtre ou si σ est nul."
+        >
+          Z glissant 7j{" "}
+          <span className="tabular-nums text-text">
+            {/* Pas encore de run : tiret ; run fait mais z non calculable : état explicite. */}
+            {stats === null || stats.zGlissant7j !== null ? formatDec(stats?.zGlissant7j ?? null, 2) : "indisponible"}
+          </span>
+          {/* Couverture : fenêtre partielle (début de série, trous) dite dans le bandeau, pas seulement au survol. */}
+          {stats?.zGlissant7j != null && couvertureZ !== null && couvertureZ < 168 && (
+            <span className="tabular-nums"> sur {couvertureZ} pts</span>
+          )}
         </span>
         <span className="text-text-dim" title="(USDT/USD − 1) × 100 au dernier point aligné, source Kraken">
           Écart USDT/USD <span className="tabular-nums text-text">{formatPct(ecartPegPct, 3)}</span>
@@ -485,19 +537,7 @@ export function CbpremWindow() {
                       survol.point.premiumPct >= 0 ? "#2dc08e" : "#f92855",
                     ),
                   },
-                  // z du point : teinté down si extrême (|z| ≥ 2), sinon discret.
-                  ...(survol.z !== null
-                    ? [
-                        {
-                          label: "z",
-                          valeur: formatDec(survol.z, 2),
-                          couleur: lireTokenCanvas(
-                            Math.abs(survol.z) >= 2 ? "--down" : "--text-dim",
-                            Math.abs(survol.z) >= 2 ? "#f92855" : "#94a3b8",
-                          ),
-                        },
-                      ]
-                    : []),
+                  ligneZ(survol.point, survol.bande),
                 ]}
               />
             )}
@@ -510,6 +550,7 @@ export function CbpremWindow() {
             {mode === "ajuste"
               ? "Coinbase vs Binance × USDT/USD Kraken · klines 1h · 30 j — peg neutralisé"
               : "Coinbase vs Binance · klines 1h · 30 j · USD vs USDT — inclut l'écart de peg"}
+            {" · bandes ±2σ et z glissants 7 j (passé et point courant, sans données futures), descriptifs"}
           </NoteSource>
           <Fraicheur loading={enCours} majTs={majTs} />
         </div>

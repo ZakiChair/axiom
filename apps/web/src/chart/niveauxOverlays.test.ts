@@ -20,6 +20,7 @@ beforeEach(() => {
   niveauxOverlaysStore.getState().setActif("niveauxCles", false);
   niveauxOverlaysStore.getState().setActif("niveauxOptions", false);
   niveauxOverlaysStore.getState().setActif("bandesImplicites", false);
+  niveauxOverlaysStore.getState().setActif("bandesRv", false);
   niveauxOverlaysStore.getState().setActif("prixRevient", false);
   niveauxOverlaysStore.getState().setFamilles(["J", "S"]);
 });
@@ -30,6 +31,7 @@ describe("niveauxOverlaysStore — bascules et familles", () => {
     expect(s.niveauxCles).toBe(false);
     expect(s.niveauxOptions).toBe(false);
     expect(s.bandesImplicites).toBe(false);
+    expect(s.bandesRv).toBe(false);
     expect(s.prixRevient).toBe(false);
     expect(s.familles).toEqual(["J", "S"]);
     expect(overlaysNiveauxActifs(s)).toBe(false);
@@ -56,6 +58,14 @@ describe("niveauxOverlaysStore — bascules et familles", () => {
     const s = niveauxOverlaysStore.getState();
     expect(s.bandesImplicites).toBe(true);
     expect(s.niveauxCles || s.niveauxOptions).toBe(false);
+    expect(overlaysNiveauxActifs(s)).toBe(true);
+  });
+
+  it("les bandes RV suffisent à activer l'overlay", () => {
+    niveauxOverlaysStore.getState().basculer("bandesRv");
+    const s = niveauxOverlaysStore.getState();
+    expect(s.bandesRv).toBe(true);
+    expect(s.niveauxCles || s.niveauxOptions || s.bandesImplicites || s.prixRevient).toBe(false);
     expect(overlaysNiveauxActifs(s)).toBe(true);
   });
 

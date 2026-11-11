@@ -44,6 +44,7 @@ import {
   indicatorsStore,
   type ActiveIndicator,
 } from "../store/indicators";
+import { uniteDemandee } from "./uniteParam";
 
 /** Point d'indicateur côté KLineChart : clé d'output -> valeur finie. */
 type AxiomPoint = Record<string, number>;
@@ -69,11 +70,14 @@ function seriesVides(def: IndicatorDef, n: number): IndicatorResult {
  * Statut d'affichage d'une instance quand RIEN n'est tracé (jamais de pane muet,
  * BUILD-CONTRACT) : « unusable » = contexte incompatible ou source en échec ;
  * « vide » = calcul légitime mais aucune valeur sur ce buffer ; « chargement » = données
- * auxiliaires attendues. `null` = valeurs tracées, ou rien à signaler (buffer en cours de
- * chargement, stratégie overlay restée à plat).
+ * auxiliaires attendues. Seule exception, « partiel » : des valeurs sont tracées, mais une
+ * partie du graphe reste sans valeur (instance calculée sur une unité supérieure : début
+ * non couvert par l'historique ou l'amorce, rechargement en échec ; cf. bougiesUnite.ts).
+ * `null` = valeurs tracées, ou rien à signaler (buffer en cours de chargement, stratégie
+ * overlay restée à plat).
  */
 export interface StatutIndicateur {
-  etat: "unusable" | "vide" | "chargement";
+  etat: "unusable" | "vide" | "chargement" | "partiel";
   raison: string;
 }
 
@@ -96,6 +100,39 @@ function raisonSansValeur(def: IndicatorDef, params: ActiveIndicator["params"], 
   }
   if (horizon !== null && horizon > nbBougies) return `Historique insuffisant : ${nbBougies} bougies, horizon ${horizon}`;
   return "Aucune valeur calculable sur cet historique";
+}
+
+/**
+ * Libellé d'une instance sur le graphe (légendes, `shortName`) : « EMA (50) », suffixé
+ * « [1d] » quand l'instance est calculée sur une unité supérieure (`params.unite`).
+ */
+export function libelleInstance(def: IndicatorDef, params: ActiveIndicator["params"]): string {
+  return formatInstanceLabel(def, params); // suffixe d'unité compris
+}
+
+type ModuleUnite = typeof import("./bougiesUnite");
+/** Module de l'unité supérieure, chargé à la première instance qui le demande (budget d'entrée). */
+let moduleUnite: ModuleUnite | null = null;
+let chargementUnite: Promise<ModuleUnite> | null = null;
+/** Instant du dernier échec de chargement du module (nouvel essai après 30 s). */
+let echecModuleUnite = 0;
+
+/** Module chargé, `null` pendant le chargement (puis `relancer`), ou "echec" récent. */
+function obtenirModuleUnite(relancer: () => void): ModuleUnite | null | "echec" {
+  if (moduleUnite !== null) return moduleUnite;
+  if (chargementUnite === null) {
+    if (Date.now() - echecModuleUnite < 30_000) return "echec";
+    chargementUnite = import("./bougiesUnite").then(
+      (m) => (moduleUnite = m),
+      (err: unknown) => {
+        echecModuleUnite = Date.now();
+        chargementUnite = null;
+        throw err;
+      },
+    );
+  }
+  chargementUnite.then(relancer, relancer);
+  return null;
 }
 
 /** Canal des statuts d'UN graphe : écrit par son `ChartIndicators`, lu par ses légendes DOM. */
@@ -506,6 +543,8 @@ export class ChartIndicators {
     candles: Candle[],
     exchange: ExchangeId
   ): { result: IndicatorResult; suffix: string; statut: StatutIndicateur | null } {
+    const unite = uniteDemandee(inst.params);
+    if (unite !== null) return this.calculerSurUnite(def, inst, unite, candles, exchange);
     const raison = this.timeframe === null
       ? null
       : raisonUnusableIndicateur(def, { exchange, symbol: this.symbol, timeframe: this.timeframe });
@@ -575,6 +614,44 @@ export class ChartIndicators {
   }
 
   /**
+   * Instance calculée sur une UNITÉ SUPÉRIEURE (`params.unite`, SUG-1) : le module paresseux
+   * `bougiesUnite.ts` vérifie l'éligibilité, charge les bougies supérieures closes, calcule
+   * et projette à la clôture. Ses arrivées passent par `onAuxReady` (recalcul de CETTE
+   * instance seulement), comme les séries auxiliaires. Le contexte du graphe ne décide pas
+   * ici : c'est celui de l'unité supérieure qui compte (contrôlé par le module).
+   */
+  private calculerSurUnite(
+    def: IndicatorDef,
+    inst: ActiveIndicator,
+    unite: string,
+    candles: Candle[],
+    exchange: ExchangeId
+  ): { result: IndicatorResult; suffix: string; statut: StatutIndicateur | null } {
+    const vide = seriesVides(def, candles.length);
+    const timeframe = this.timeframe;
+    if (timeframe === null) return { result: vide, suffix: "", statut: null };
+    const symbol = this.symbol;
+    // Réponse d'un ancien symbole jetée, comme pour les séries auxiliaires.
+    const relancer = () => {
+      if (this.symbol === symbol) this.onAuxReady(inst.instanceId);
+    };
+    const chargement = { result: vide, suffix: " …", statut: { etat: "chargement" as const, raison: `Chargement des bougies ${unite}…` } };
+    const module = obtenirModuleUnite(relancer);
+    if (module === null) return chargement;
+    const etat = module === "echec"
+      ? { status: "error" as const, raison: "Module de l'unité supérieure introuvable (réseau ?)" }
+      : module.calculerSurUnite({ def, params: inst.params, unite, exchange, symbol, timeframe, candles }, relancer);
+    if (etat.status === "pending") return chargement;
+    // Refus (éligibilité, alignement) ou échec du chargement : raison rédigée par le module.
+    if (etat.status !== "ready") return { result: vide, suffix: " (UNUSABLE)", statut: { etat: "unusable", raison: etat.raison } };
+    if (!sortieFinie(def, etat.result)) {
+      const raison = `${unite} : ${raisonSansValeur(def, inst.params, etat.nbBougies)}`;
+      return { result: etat.result, suffix: " (UNUSABLE)", statut: { etat: "vide", raison } };
+    }
+    return { result: etat.result, suffix: "", statut: etat.partiel === null ? null : { etat: "partiel", raison: etat.partiel } };
+  }
+
+  /**
    * Rappel de `auxProvider.getAligned` une fois le fetch aux résolu (ou en échec) :
    * recalcule et pousse UNIQUEMENT cette instance via `overrideIndicator` — jamais
    * `createIndicator`/`removeIndicator` (pas de re-création de pane). No-op si
@@ -592,7 +669,7 @@ export class ChartIndicators {
     if (!def) return;
     const { result, suffix, statut } = this.computeForInstance(def, inst, candles, exchange);
     this.chart.overrideIndicator(
-      { name: info.name, shortName: `${formatInstanceLabel(def, inst.params)}${suffix}`, extendData: result },
+      { name: info.name, shortName: `${libelleInstance(def, inst.params)}${suffix}`, extendData: result },
       info.paneId
     );
     this.annotationsPrix.appliquer(inst.instanceId, def, result.annotations, candles);
@@ -682,7 +759,7 @@ export class ChartIndicators {
         // stable) : recalcul + override + libellé.
         const { result, suffix, statut } = this.computeForInstance(def, inst, candles, exchange);
         this.chart.overrideIndicator(
-          { name, shortName: `${formatInstanceLabel(def, inst.params)}${suffix}`, extendData: result },
+          { name, shortName: `${libelleInstance(def, inst.params)}${suffix}`, extendData: result },
           existing.paneId
         );
         existing.key = key;
@@ -696,7 +773,7 @@ export class ChartIndicators {
       const { result, suffix, statut } = this.computeForInstance(def, inst, candles, exchange);
       const paneId = def.pane === "overlay" ? CANDLE_PANE_ID : axiomPaneId(inst.instanceId);
       const created = this.chart.createIndicator(
-        { name, shortName: `${formatInstanceLabel(def, inst.params)}${suffix}`, extendData: result },
+        { name, shortName: `${libelleInstance(def, inst.params)}${suffix}`, extendData: result },
         true, // isStack : coexistence des overlays sur le pane prix.
         { id: paneId, dragEnabled: true, minHeight: 60 }
       );
@@ -789,11 +866,11 @@ export class ChartIndicators {
       const def = getIndicator(inst.defId);
       if (!def) continue;
       const { result, suffix, statut } = this.computeForInstance(def, inst, candles, exchange);
-      // Le libellé (shortName) est renvoyé pour les defs aux-aware, dont le suffixe
-      // peut changer sans édition de params, ainsi que pour tout def contextuellement
-      // UNUSABLE ; les autres gardent leur libellé déjà posé par `sync`.
-      const override = (def.aux && def.aux.length > 0) || suffix !== ""
-        ? { name: info.name, shortName: `${formatInstanceLabel(def, inst.params)}${suffix}`, extendData: result }
+      // Le libellé (shortName) est renvoyé pour les defs aux-aware et les instances sur
+      // unité supérieure, dont le suffixe peut changer sans édition de params, ainsi que
+      // pour tout def contextuellement UNUSABLE ; les autres gardent celui posé par `sync`.
+      const override = (def.aux && def.aux.length > 0) || suffix !== "" || uniteDemandee(inst.params) !== null
+        ? { name: info.name, shortName: `${libelleInstance(def, inst.params)}${suffix}`, extendData: result }
         : { name: info.name, extendData: result };
       this.chart.overrideIndicator(override, info.paneId);
       this.annotationsPrix.appliquer(inst.instanceId, def, result.annotations, candles);

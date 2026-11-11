@@ -17,6 +17,7 @@
 import { createStore } from "zustand/vanilla";
 import type { IndicatorDef, IndicatorInstance } from "@axiom/types";
 import { getIndicator, resolveParams } from "@axiom/indicators";
+import { suffixeUnite } from "../chart/uniteParam";
 
 /** Jeu de paramètres d'un indicateur (miroir du type des `params` d'IndicatorInstance). */
 type IndicatorParams = Record<string, number | boolean | string>;
@@ -144,7 +145,9 @@ export function formatInstanceLabel(def: IndicatorDef, params: IndicatorParams):
     if (typeof v === "number") parts.push(String(v));
     else if (typeof v === "string") parts.push(v);
   }
-  return parts.length > 0 ? `${def.name} (${parts.join(", ")})` : def.name;
+  // Suffixe « [4h] » d'une instance calculée sur une unité supérieure (SUG-1) : la liste
+  // « Actifs » des menus et les légendes du graphe la distinguent ainsi de l'instance native.
+  return `${parts.length > 0 ? `${def.name} (${parts.join(", ")})` : def.name}${suffixeUnite(params)}`;
 }
 
 /** Rend `base` unique vis-à-vis de `used` en suffixant « -2 », « -3 »… si besoin. */

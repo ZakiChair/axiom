@@ -146,7 +146,7 @@ describe("stratAxisSr — tracé du pré-signal (préfixe clos jusqu'à 2 288, d
     trait: "pointille",
     couleur: "--text-dim",
     cible: "prix",
-    info: `AXIS pré-signal > ${niveau.toFixed(2)}, non mesuré — si clôture au-dessus et si le score et les filtres tiennent : achat`,
+    info: `AXIS pré-signal non mesuré > ${niveau.toFixed(2)} — si clôture au-dessus et si le score et les filtres tiennent : achat`,
   };
   const ETIQUETTE = { idx: 2288, valeur: niveau, texte: "pré-signal", couleur: "--text-dim", cible: "prix", ancrageX: "droite" };
 
@@ -156,14 +156,16 @@ describe("stratAxisSr — tracé du pré-signal (préfixe clos jusqu'à 2 288, d
     expect(aDroite(res).at(-1)).toEqual(ETIQUETTE);
     expect(aDroite(res).filter((l) => l.texte === "pré-signal")).toHaveLength(1);
     expect(ETIQUETTE.texte.length).toBeLessThanOrEqual(12);
-    // Revue globale du 11 novembre 2026, mesures sur le vrai graphe : la ligne est coupée vers le 55e caractère
-    // à 390 px, le 45e en thème à chasse fixe, le 42e à 320 px. Avec le niveau aux caractères 47 à 54, on lisait
-    // « achat si > » sans niveau, ou un niveau coupé (« > 940 »). Le niveau et « non mesuré » tiennent maintenant
-    // dans les 40 premiers caractères, et « achat » vient en dernier, après ses conditions.
-    expect(SEGMENT.info.slice(0, 40)).toBe("AXIS pré-signal > 64024.02, non mesuré —");
+    // Revues du 11 novembre 2026, mesures sur le vrai graphe : la ligne est coupée vers le 55e caractère à
+    // 390 px, le 45e en thème à chasse fixe, le 40e à 320 px, le 34e à 320 px en chasse fixe. Avec le niveau aux
+    // caractères 47 à 54, on lisait « achat si > » sans niveau, ou un niveau coupé (« > 940 »). « non mesuré »
+    // ouvre maintenant la ligne (26 caractères : lisible dans tous ces cas), le niveau suit (37e caractère ici),
+    // et « achat » vient en dernier, après ses conditions.
+    expect(SEGMENT.info.slice(0, 26)).toBe("AXIS pré-signal non mesuré");
+    expect(SEGMENT.info.slice(0, 37)).toBe("AXIS pré-signal non mesuré > 64024.02");
     expect(SEGMENT.info.slice(0, 57)).not.toContain("achat");
     expect(niveau).toBeCloseTo(64024.02, 2);
-    expect(SEGMENT.info).toBe("AXIS pré-signal > 64024.02, non mesuré — si clôture au-dessus et si le score et les filtres tiennent : achat");
+    expect(SEGMENT.info).toBe("AXIS pré-signal non mesuré > 64024.02 — si clôture au-dessus et si le score et les filtres tiennent : achat");
     // Le close de 2 288 est sous le niveau : c'est la seule condition qui manque.
     expect(closes[2288]!).toBeLessThan(niveau);
   });
@@ -212,27 +214,32 @@ describe("stratAxisSr — tracé du pré-signal (préfixe clos jusqu'à 2 288, d
 
   it("sans filtre actif (régime 0), le texte ne nomme que le score ; prix × 1e-9 : niveau lisible", () => {
     const sansRegime = informes(calculer(clos, { regimeBtc: 0 }));
-    expect(sansRegime).toEqual([{ ...SEGMENT, info: `AXIS pré-signal > ${niveau.toFixed(2)}, non mesuré — si clôture au-dessus et si le score tient : achat` }]);
+    expect(sansRegime).toEqual([{ ...SEGMENT, info: `AXIS pré-signal non mesuré > ${niveau.toFixed(2)} — si clôture au-dessus et si le score tient : achat` }]);
     expect((sansRegime[0]?.info ?? "").slice(0, 57)).not.toContain("achat");
     expect(sansRegime[0]?.info).toContain(" : achat");
     const info = informes(calculer(aLEchelle(1e-9)))[0]?.info ?? "";
-    expect(info).toBe("AXIS pré-signal > 0.00006402, non mesuré — si clôture au-dessus et si le score et les filtres tiennent : achat");
+    expect(info).toBe("AXIS pré-signal non mesuré > 0.00006402 — si clôture au-dessus et si le score et les filtres tiennent : achat");
   });
 
   it("entre 1 et 100, le niveau garde cinq chiffres significatifs : deux décimales l'écarteraient du seuil réel", () => {
     // Revue globale du 11 novembre 2026 : « 6.40 » pour un seuil de 6,4024 ; une clôture à 6,401 passait
     // pour un franchissement. L'écart d'arrondi tombe de 0,5 % au plus à 0,005 %.
     const info = (facteur: number): string => informes(calculer(aLEchelle(facteur)))[0]?.info ?? "";
-    const suite = ", non mesuré — si clôture au-dessus et si le score et les filtres tiennent : achat";
-    expect(info(1e-4)).toBe(`AXIS pré-signal > 6.4024${suite}`);
-    expect(info(1e-3)).toBe(`AXIS pré-signal > 64.024${suite}`);
+    const tete = "AXIS pré-signal non mesuré > ";
+    const suite = " — si clôture au-dessus et si le score et les filtres tiennent : achat";
+    expect(info(1e-4)).toBe(`${tete}6.4024${suite}`);
+    expect(info(1e-3)).toBe(`${tete}64.024${suite}`);
     // À partir de 100, deux décimales suffisent (écart d'arrondi de 0,005 % au plus).
-    expect(info(1e-2)).toBe(`AXIS pré-signal > 640.24${suite}`);
-    expect(info(10)).toBe(`AXIS pré-signal > 640240.16${suite}`);
-    // Du centime au million, le niveau ET « non mesuré » tiennent dans les 40 premiers caractères : lisibles à
-    // 320 px (42 caractères mesurés) comme en thème à chasse fixe (45).
-    for (const facteur of [1e-9, 1e-4, 1e-3, 1e-2, 1, 10]) {
-      expect(info(facteur).indexOf(", non mesuré") + ", non mesuré".length, String(facteur)).toBeLessThanOrEqual(40);
+    expect(info(1e-2)).toBe(`${tete}640.24${suite}`);
+    expect(info(10)).toBe(`${tete}640240.16${suite}`);
+    // Niveaux de onze caractères, les plus longs hors notation exponentielle au-dessus d'un millionième.
+    expect(info(1e-10)).toBe(`${tete}0.000006402${suite}`);
+    expect(info(1000)).toBe(`${tete}64024015.56${suite}`);
+    // À toute échelle, « non mesuré » finit au 26e caractère et le niveau au 40e au plus. La ligne visible la
+    // plus courte mesurée (34 caractères, 320 px en chasse fixe) garde donc toujours « non mesuré ».
+    for (const facteur of [1e-10, 1e-9, 1e-4, 1e-3, 1e-2, 1, 10, 1000]) {
+      expect(info(facteur).slice(0, 26), String(facteur)).toBe("AXIS pré-signal non mesuré");
+      expect(info(facteur).indexOf(" — si clôture"), String(facteur)).toBeLessThanOrEqual(40);
     }
   });
 });

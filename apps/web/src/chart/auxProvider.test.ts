@@ -859,10 +859,8 @@ describe("AuxProvider — séries strictes du lot C", () => {
     const r = { exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const,
       ids: ["refClose" as const, "refCloseStrict" as const], candleTimes: [H, 2 * H, 3 * H] };
     await new Promise<void>((resolve) => { let restants = 2; p.getAligned(r, () => { if (--restants === 0) resolve(); }); });
-    // Deux appels (pages de 1 000) pour couvrir l'amorce AXIS (1 500 bougies) : la seconde
-    // page repart de la plus ancienne reçue et est fusionnée sans doublon.
-    // Deux appels (Binance plafonne à 1 000 par page) pour couvrir l'amorce AXIS
-    // (1 500 bougies) : la seconde page repart de la plus ancienne reçue.
+    // Deux appels : la seconde page repart de la plus ancienne reçue (`endTime` = son
+    // open − 1) mais n'apporte aucune bougie nouvelle, ce qui arrête la pagination.
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(fetcher).toHaveBeenNthCalledWith(1, "ETHUSDT", "1h", { limit: 1000 });
     expect(fetcher).toHaveBeenNthCalledWith(2, "ETHUSDT", "1h", { limit: 1000, endTime: H - 1 });
@@ -871,7 +869,29 @@ describe("AuxProvider — séries strictes du lot C", () => {
     } });
   });
 
-  it("refClose : la source complète (≥ 1 500 bougies) couvre l'amorce en deux pages fusionnées", async () => {
+  it("refClose : la source complète couvre l'amorce d'AXIS S/R (3 000 bougies) en trois pages fusionnées", async () => {
+    const pageDepuis = (debut: number) => Array.from({ length: 1000 }, (_v, i) => ({
+      time: (debut + i) * H, open: 1, high: 1, low: 1, close: debut + i, volume: 1,
+    }));
+    // Repli `[]` : un appel de trop échoue sur le compte, jamais sur le vrai réseau.
+    const fetcher = vi.spyOn(binanceAdapter, "fetchKlines")
+      .mockResolvedValueOnce(pageDepuis(2000))
+      .mockResolvedValueOnce(pageDepuis(1000))
+      .mockResolvedValueOnce(pageDepuis(0))
+      .mockResolvedValue([]);
+    const p = new AuxProvider();
+    const r = { exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const,
+      ids: ["refClose" as const], candleTimes: [0, 1500 * H, 2999 * H] };
+    await new Promise<void>((resolve) => p.getAligned(r, resolve));
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher).toHaveBeenNthCalledWith(1, "ETHUSDT", "1h", { limit: 1000 });
+    expect(fetcher).toHaveBeenNthCalledWith(2, "ETHUSDT", "1h", { limit: 1000, endTime: 2000 * H - 1 });
+    expect(fetcher).toHaveBeenNthCalledWith(3, "ETHUSDT", "1h", { limit: 1000, endTime: 1000 * H - 1 });
+    // 3 000 points fusionnés : la plus ancienne (0), le milieu (1 500) et la plus récente (2 999).
+    expect(p.getAligned(r, () => {})).toEqual({ status: "ready", aux: { refClose: [0, 1500, 2999] } });
+  });
+
+  it("refClose : une source courte rend tout ce qu'elle a, la pagination s'arrête sur une page vide", async () => {
     const page1 = Array.from({ length: 1000 }, (_v, i) => ({
       time: 501 * H + i * H, open: 100, high: 100, low: 100, close: 100 + i, volume: 1,
     }));
@@ -880,15 +900,66 @@ describe("AuxProvider — séries strictes du lot C", () => {
     }));
     const fetcher = vi.spyOn(binanceAdapter, "fetchKlines")
       .mockResolvedValueOnce(page1)
-      .mockResolvedValueOnce(page2);
+      .mockResolvedValueOnce(page2)
+      .mockResolvedValue([]);
     const p = new AuxProvider();
     const r = { exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const,
       ids: ["refClose" as const], candleTimes: [0, 500 * H, 1000 * H, 1500 * H] };
     await new Promise<void>((resolve) => p.getAligned(r, resolve));
-    expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(fetcher).toHaveBeenNthCalledWith(2, "ETHUSDT", "1h", { limit: 500, endTime: 501 * H - 1 });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher).toHaveBeenNthCalledWith(1, "ETHUSDT", "1h", { limit: 1000 });
+    expect(fetcher).toHaveBeenNthCalledWith(2, "ETHUSDT", "1h", { limit: 1000, endTime: 501 * H - 1 });
+    expect(fetcher).toHaveBeenNthCalledWith(3, "ETHUSDT", "1h", { limit: 1000, endTime: -1 });
     // 1 501 points fusionnés, triés, sans doublon : LOCF exact (à 1000·H : page 1, indice 499).
     expect(p.getAligned(r, () => {})).toEqual({ status: "ready", aux: { refClose: [50, 550, 100 + 499, 100 + 999] } });
+  });
+
+  it("refClose : l'échec d'une page suivante rend les pages déjà reçues, sans état d'erreur (2 000 bougies d'une source de 10 000)", async () => {
+    // Chaque page rend les `limit` bougies les plus récentes avant `endTime`, comme Binance ; le 3e appel échoue.
+    const source = Array.from({ length: 10_000 }, (_v, i) => ({ time: i * H, open: 1, high: 1, low: 1, close: i, volume: 1 }));
+    let appels = 0;
+    const fetcher = vi.spyOn(binanceAdapter, "fetchKlines").mockImplementation(async (_symbole, _tf, opts) => {
+      appels += 1;
+      if (appels === 3) throw new Error("réseau coupé");
+      const fin = opts?.endTime === undefined ? source.length : Math.floor(opts.endTime / H) + 1;
+      return source.slice(Math.max(0, fin - (opts?.limit ?? 1000)), fin);
+    });
+    const p = new AuxProvider();
+    const r = { exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const,
+      ids: ["refClose" as const], candleTimes: Array.from({ length: 3000 }, (_v, i) => (7000 + i) * H) };
+    await new Promise<void>((resolve) => p.getAligned(r, resolve));
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    const etat = p.getAligned(r, () => {});
+    expect(etat.status).toBe("ready");
+    const serie = etat.status === "ready" ? (etat.aux.refClose ?? []) : [];
+    // Les 1 000 bougies les plus anciennes restent sans référence ; les 2 000 récentes ont la leur.
+    expect(serie.filter((v) => v !== undefined)).toHaveLength(2000);
+    expect([serie[999], serie[1000], serie[2999]]).toEqual([undefined, 8000, 9999]);
+  });
+
+  it("refClose : l'échec de la première page rend une série vide, sans état d'erreur ni autre appel", async () => {
+    const fetcher = vi.spyOn(binanceAdapter, "fetchKlines")
+      .mockRejectedValueOnce(new Error("réseau coupé"))
+      .mockResolvedValue([]);
+    const p = new AuxProvider();
+    const r = { exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const,
+      ids: ["refClose" as const], candleTimes: [0, H, 2 * H] };
+    await new Promise<void>((resolve) => p.getAligned(r, resolve));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(p.getAligned(r, () => {})).toEqual({ status: "ready", aux: { refClose: [undefined, undefined, undefined] } });
+  });
+
+  it("refClose : au plus 4 appels par chargement, même pour une source qui ne rend qu'une bougie nouvelle par appel", async () => {
+    const fetcher = vi.spyOn(binanceAdapter, "fetchKlines").mockImplementation(async (_symbole, _tf, opts) => {
+      const t = opts?.endTime === undefined ? 100 * H : opts.endTime + 1 - H;
+      return [{ time: t, open: 1, high: 1, low: 1, close: t / H, volume: 1 }];
+    });
+    const p = new AuxProvider();
+    const r = { exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const,
+      ids: ["refClose" as const], candleTimes: [96 * H, 97 * H, 98 * H, 99 * H, 100 * H] };
+    await new Promise<void>((resolve) => p.getAligned(r, resolve));
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(p.getAligned(r, () => {})).toEqual({ status: "ready", aux: { refClose: [undefined, 97, 98, 99, 100] } });
   });
 
   it("funding strict : expire à la borne exclusive et une venue en échec n'efface pas les autres", async () => {

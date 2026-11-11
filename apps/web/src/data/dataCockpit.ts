@@ -54,7 +54,7 @@ const LIBELLES_SOURCE: Record<string, string> = {
   "coingecko:market": "CoinGecko · marché",
   wikimedia: "Wikimedia · pages vues",
   axiomd: "Daemon Axiom",
-  // Ligne posée par alerts/demarrageDiffere tant que le runtime des alertes n'est pas démarré.
+  // Ligne posée par alerts/demarrageDiffere après un échec, ou quand le chargement du runtime dépasse dix secondes.
   alertes: "Alertes (ce navigateur)",
 };
 

@@ -76,7 +76,7 @@ test("démarrage nominal : un seul runtime malgré le double montage, sans avis"
   expect(sondes).toHaveLength(1);
   expect(echecs).toEqual([]);
   await expect(page.getByText(AVIS)).toHaveCount(0);
-  // Aucune ligne « alertes » au registre santé : elle n'existe que pendant une panne.
+  // Aucune ligne « alertes » au registre santé : elle n'existe qu'après un échec ou dix secondes de chargement.
   const panneaux = await ouvrirSanteSources(page);
   await expect(panneaux.getByRole("button", { name: /^alertes/ })).toHaveCount(0);
 });

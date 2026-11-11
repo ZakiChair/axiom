@@ -76,6 +76,11 @@ import { presetAlertsStore, type AlertePreset } from "../store/presetAlerts";
 // Chargés ici une fois : sous horloge simulée, un premier chargement resterait en suspens.
 import "../data/screenerRun";
 import "../data/screener";
+// Même raison pour la collecte des flux de capitaux, que `store/fluxCapitaux` charge par import() à
+// chaque démarrage du runtime : tant que la fabrique asynchrone de son mock n'est pas résolue, Vitest
+// sert le VRAI module aux import() suivants. Sa collecte réelle (17 requêtes) tombait alors, machine
+// chargée, dans un test qui compte les fetch. Chargé ici une fois, le mock est servi à tous les tests.
+import "../data/onchain/fluxCapitaux";
 import { fluxCapitauxStore } from "../store/fluxCapitaux";
 import { remplacerLectures } from "../store/analyseMultidomaine";
 import type { LectureAnalyse } from "../data/analyseMultidomaine";

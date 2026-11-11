@@ -272,7 +272,9 @@ zone compte ses touches depuis la première bougie chargée, le graphe remonte �
 sur 3 000 bougies, pour AXIS comme pour AXIS S/R.
 **Lisible, honnête et annonciateur (11 novembre 2026)** : au téléphone,
 l'infobulle du graphe commence sous le bandeau du symbole, et l'essentiel de
-chaque ligne tient dans les 55 caractères qu'il affiche — une zone s'ouvre par
+chaque ligne tient dans les 55 caractères qu'affiche un écran de 390 px en
+thème par défaut (moins sur un écran plus étroit ou en thème Matrix ou
+Bloomberg) — une zone s'ouvre par
 « AXIS support fort · 5 touches · bord à -1.3 % », un signal confirmé par son
 statut de mesure (« test 4h ≈ EMA 200 seule », « 1h : test échoué »). Au bord
 droit, une seconde ligne donne l'écart du cours au support fort et à la
@@ -280,10 +282,12 @@ résistance forte les plus proches. Les retournements ↺ sont gris, marqués
 « ↺ », notés sur 100 et dits **non mesurés** (« heuristique » de poids 1 dans
 EQS). AXIS S/R trace un **pré-signal**, non mesuré lui aussi, quand il ne
 manque à l'achat que la clôture au-dessus de l'EMA de tendance : un court
-pointillé gris à ce niveau. Aucun signal confirmé, aucune série ne change.
+pointillé gris à ce niveau, que l'infobulle donne en tête de ligne (« AXIS
+pré-signal non mesuré > 64024.02 — … »). Aucun signal confirmé, aucune série
+ne change.
 Le module qui évalue les alertes est désormais chargé juste après le premier
-affichage ; s'il manque, le bandeau écrit « ALERTES inactives » et un avis
-propose de recharger.
+affichage ; s'il manque, ou si son chargement dépasse dix secondes, le bandeau
+écrit « ALERTES inactives » ; en cas d'échec, un avis propose de recharger.
 [Méthode, réglages, limites et backtests](docs/axis-2026-10-07.md).
 
 ### COT — exposition des catégories de traders

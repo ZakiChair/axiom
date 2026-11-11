@@ -2,8 +2,8 @@
  * Démarrage différé du runtime des alertes : succès, échec signalé (avis, « Recharger » en
  * ligne) puis nouvelle tentative (`online`, retour de l'onglet), une tentative à la fois,
  * annulation pendant le chargement, jamais deux runtimes. L'état « alertes inactives » dure
- * plus que son toast : ligne « alertes » du registre santé, posée à l'échec, retirée au
- * démarrage, absente en nominal. Le chargeur est injecté (promesses
+ * plus que son toast : ligne « alertes » du registre santé, posée à l'échec ou après dix
+ * secondes de chargement, retirée au démarrage, absente en nominal. Le chargeur est injecté (promesses
  * pilotées par le test) ; le dernier bloc passe par le vrai `import("./runtime")`, mêmes
  * doublures que runtime.heartbeat-transition.test.ts. Aucun réseau. Le câblage d'App et le
  * comportement réel du navigateur sont tenus par e2e/mobile-alertes-differees.e2e.ts.
@@ -27,7 +27,13 @@ vi.mock("../chart/liquidationMarkers", () => ({
   liqEventsStore: { getState: () => ({ events: [] }), subscribe: () => () => {} },
 }));
 
-import { AVIS_ALERTES_INACTIVES, SOURCE_SANTE_ALERTES, demarrerAlertesDifferees } from "./demarrageDiffere";
+import {
+  AVIS_ALERTES_CHARGEMENT,
+  AVIS_ALERTES_INACTIVES,
+  DELAI_CHARGEMENT_LENT_MS,
+  SOURCE_SANTE_ALERTES,
+  demarrerAlertesDifferees,
+} from "./demarrageDiffere";
 import { degradedLevel } from "../components/HealthPanel";
 import { healthStore, type SanteSource } from "../store/health";
 import { toastsStore } from "../store/toasts";
@@ -402,6 +408,73 @@ describe("démarrage différé — échec de chargement", () => {
     expect(ecouteursActifs).toEqual([]);
     arret();
     arret = undefined;
+    expect(healthStore.getState().sources).toEqual({});
+  });
+});
+
+describe("démarrage différé — chargement qui traîne", () => {
+  it("après dix secondes sans module, l'état est dit au registre santé, sans toast ni erreur ; le démarrage le lève sans annoncer de rétablissement", async () => {
+    const chargement = differe();
+    const demarrerAlertes = vi.fn(() => () => {});
+    arret = demarrerAlertesDifferees(() => chargement.promesse);
+    await vi.advanceTimersByTimeAsync(DELAI_CHARGEMENT_LENT_MS - 1);
+    expect(santeAlertes()).toBeUndefined(); // un chargement ordinaire ne s'affiche pas
+    await vi.advanceTimersByTimeAsync(1);
+    expect(santeAlertes()).toEqual(ligneErreur(AVIS_ALERTES_CHARGEMENT));
+    expect(textesToasts()).toEqual([]); // rien n'a échoué : pas d'avis
+    expect(erreurConsole).not.toHaveBeenCalled();
+    expect(ecouteursActifs).toEqual([]); // la tentative est toujours en cours : rien à relancer
+
+    chargement.resoudre({ demarrerAlertes });
+    await vider();
+    expect(demarrerAlertes).toHaveBeenCalledTimes(1);
+    expect(healthStore.getState().sources).toEqual({});
+    expect(textesToasts()).toEqual([]); // aucun avis n'avait été affiché : pas de « Alertes actives »
+  });
+
+  it("un chargement terminé avant dix secondes ne pose jamais la ligne, même longtemps après", async () => {
+    const chargement = differe();
+    arret = demarrerAlertesDifferees(() => chargement.promesse);
+    await vi.advanceTimersByTimeAsync(DELAI_CHARGEMENT_LENT_MS - 1);
+    chargement.resoudre({ demarrerAlertes: () => () => {} });
+    await vi.advanceTimersByTimeAsync(DELAI_CHARGEMENT_LENT_MS * 3);
+    expect(healthStore.getState().sources).toEqual({});
+  });
+
+  it("l'échec qui suit un chargement lent remplace l'état par l'avis d'échec, et la tentative suivante redevient lente à son tour", async () => {
+    const premier = differe();
+    const second = differe();
+    const charger = vi.fn<() => Promise<ModuleRuntime>>().mockReturnValueOnce(premier.promesse).mockReturnValueOnce(second.promesse);
+    arret = demarrerAlertesDifferees(charger);
+    await vi.advanceTimersByTimeAsync(DELAI_CHARGEMENT_LENT_MS);
+    premier.rejeter(new Error("chunk introuvable"));
+    await vider();
+    expect(santeAlertes()).toEqual(ligneErreur(AVIS_ALERTES_INACTIVES));
+    expect(textesToasts()).toEqual([AVIS_ALERTES_INACTIVES]);
+
+    // Nouvelle tentative qui traîne à son tour : l'état dit qu'un chargement est en cours.
+    fenetre.dispatchEvent(new Event("online"));
+    await vi.advanceTimersByTimeAsync(DELAI_CHARGEMENT_LENT_MS);
+    expect(santeAlertes()).toEqual(ligneErreur(AVIS_ALERTES_CHARGEMENT));
+    second.resoudre({ demarrerAlertes: () => () => {} });
+    await vider();
+    expect(healthStore.getState().sources).toEqual({});
+  });
+
+  it("un arrêt pendant un chargement lent retire la ligne ; un arrêt plus tôt désarme la minuterie", async () => {
+    const lent = differe();
+    arret = demarrerAlertesDifferees(() => lent.promesse);
+    await vi.advanceTimersByTimeAsync(DELAI_CHARGEMENT_LENT_MS);
+    expect(santeAlertes()).toEqual(ligneErreur(AVIS_ALERTES_CHARGEMENT));
+    arret();
+    arret = undefined;
+    expect(healthStore.getState().sources).toEqual({});
+
+    const interrompu = differe();
+    const arreterTot = demarrerAlertesDifferees(() => interrompu.promesse);
+    await vi.advanceTimersByTimeAsync(DELAI_CHARGEMENT_LENT_MS - 1);
+    arreterTot();
+    await vi.advanceTimersByTimeAsync(DELAI_CHARGEMENT_LENT_MS);
     expect(healthStore.getState().sources).toEqual({});
   });
 });

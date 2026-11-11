@@ -1,7 +1,8 @@
 /**
  * SessionStrip — bandeau dense (11px) sous la Toolbar : P&L jour, alertes actives,
  * pastille santé globale. Acceptation G8 (chrome session visible sans ouvrir de fenêtre).
- * Runtime des alertes non démarré (alerts/demarrageDiffere) : « inactives » remplace le compteur.
+ * Runtime des alertes non démarré, après un échec ou un chargement de plus de dix secondes
+ * (alerts/demarrageDiffere) : « inactives » remplace le compteur.
  *
  * Contrat de perf (PortfolioWindow / BUILD-CONTRACT) :
  *  - AUCUN re-render React sur tick de prix : le P&L est recalculé à chaque ticker et

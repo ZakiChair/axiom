@@ -56,7 +56,7 @@ import {
 } from "./commands/windowPanels";
 import { enregistrerCommandes, paletteStore, type Commande } from "./commands/registry";
 import { useRaccourcisGlobaux, fullscreenStore } from "./commands/hotkeys";
-import { demarrerAlertes } from "./alerts/runtime";
+import { demarrerAlertesDifferees } from "./alerts/demarrageDiffere";
 import { demarrerMoteurPaper } from "./store/paper";
 import { FloatingWindow } from "./components/FloatingWindow";
 import { Taskbar } from "./components/Taskbar";
@@ -223,8 +223,8 @@ function FenetreFallback() {
 
 const SettingsPanel = lazy(() => import("./components/SettingsPanel").then(m => ({ default: m.SettingsPanel })));
 // Panneau Alertes de la sidebar : lazy comme les fenêtres (chunk hors budget initial).
-// Le runtime d'alertes (`demarrerAlertes`) reste statique — le module n'a aucun effet
-// de bord nécessaire au boot.
+// Le runtime d'alertes est différé lui aussi (`alerts/demarrageDiffere`) : aucun import
+// statique de `alerts/runtime` ici (garde-fou : chargementInitial.test.ts).
 const AlertsPanel = lazy(() => import("./components/AlertsPanel").then(m => ({ default: m.AlertsPanel })));
 const OnboardingOverlay = lazy(() => import("./components/OnboardingOverlay").then(m => ({ default: m.OnboardingOverlay })));
 const CommandPalette = lazy(() => import("./components/CommandPalette").then(m => ({ default: m.CommandPalette })));
@@ -312,14 +312,12 @@ export function App() {
   // Écouteur clavier global unique (TF, toggles, plein écran, palette…).
   useRaccourcisGlobaux();
 
-  // Runtime des alertes : démarré une fois pour toute la session (idempotent,
-  // compatible double montage React StrictMode). Arrêté au démontage.
-  useEffect(() => {
-    const stop = demarrerAlertes();
-    return () => stop();
-  }, []);
+  // Runtime des alertes : chargé par import() hors du chargement initial, puis démarré une
+  // fois pour toute la session (double montage React StrictMode : le montage annulé ne
+  // démarre rien). Échec de chargement signalé et retenté ; arrêté au démontage.
+  useEffect(() => demarrerAlertesDifferees(), []);
 
-  // Moteur paper trading : idem alertes (idempotent, StrictMode-safe). Ne souscrit aux tickers
+  // Moteur paper trading : démarrage idempotent (StrictMode-safe). Ne souscrit aux tickers
   // que s'il y a des ordres/positions actifs ; dort sinon (aucun coût réseau).
   useEffect(() => {
     const stop = demarrerMoteurPaper();
@@ -408,9 +406,13 @@ export function App() {
                 className="rounded px-3 text-text-dim">✕</button>}
             </div>
             <Watchlist />
-            <Suspense fallback={<AlertsPanelFallback />}>
-              <AlertsPanel />
-            </Suspense>
+            {/* Le chunk du panneau dépend de celui du runtime des alertes : s'il manque, seule
+                cette section propose de recharger, le reste du terminal reste en place. */}
+            <ErrorBoundary scope="Alertes" compact recovery="reload">
+              <Suspense fallback={<AlertsPanelFallback />}>
+                <AlertsPanel />
+              </Suspense>
+            </ErrorBoundary>
             <CompareControl />
             <HealthPanel />
           </aside>

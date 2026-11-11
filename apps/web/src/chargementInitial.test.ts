@@ -58,6 +58,11 @@ const MODULES_DIFFERES: Record<string, string> = {
   "chart/bougiesUnite": "indicateurs sur unité supérieure (chargement, calcul, projection) — import() par chart/indicators à la première instance qui porte `params.unite`",
   "chart/uniteSuperieure": "éligibilité de l'unité supérieure — chargée avec chart/bougiesUnite et l'éditeur de paramètres (menu Indicateurs)",
   "data/dominanceStablecoins": "dominance des stablecoins STABLE.D (requêtes CMC, cache, calcul, repoll) — import() mémorisé par data/mcapCandles à l'ouverture de la série",
+  // Constat WEB-3 de la revue du 6 novembre 2026 : runtime des alertes et ce qu'il entraînait (≈ 7,8 Ko gzip de moins au chargement initial).
+  "alerts/runtime": "runtime des alertes — import() par alerts/demarrageDiffere au montage d'App (échec signalé et retenté), aussi chargé avec AlertsPanel (React.lazy)",
+  "store/presetAlerts": "alertes de preset d'EQS — chargées avec alerts/runtime, AlertsPanel et ScreenerWindow (React.lazy)",
+  "store/fluxCapitaux": "store des flux de capitaux — chargé avec alerts/runtime et les sections CHAIN / STBL / BRIEF (React.lazy)",
+  "components/liquidationsWindow.util": "calculs de la fenêtre LIQ (minute glissante de liq-cascade) — chargés avec alerts/runtime et LiquidationsWindow (React.lazy)",
 };
 
 /** `import type { A } from "x"`, `import type * as M from "x"`, `export type { A } from "x"`, multi-lignes compris. */

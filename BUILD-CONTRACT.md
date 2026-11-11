@@ -2731,9 +2731,12 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
     tentative au prochain `online` et au retour de l'onglet. Module chargé mais démarrage en
     exception : « Alertes inactives : démarrage échoué », sans nouvelle tentative. Au
     rétablissement : toast « Alertes actives ».
-  - L'état dure plus longtemps que le toast : tant que le runtime n'est pas démarré, le registre
-    santé porte une ligne `alertes` en erreur (seconde ligne qui n'est pas une source de marché,
-    après `axiomd`). Elle alimente la pastille « Santé », la section Santé sources et la fenêtre
+  - L'état dure plus longtemps que le toast : après un échec, et tant que le runtime n'est pas
+    démarré, le registre santé porte une ligne `alertes` en erreur (seconde ligne qui n'est pas
+    une source de marché, après `axiomd`). Depuis la revue globale, la même ligne est posée, sans
+    toast, quand le chargement dure plus de dix secondes (« Alertes inactives : chargement en
+    cours », `DELAI_CHARGEMENT_LENT_MS`) : sur un réseau dégradé, le bandeau comptait sinon des
+    alertes que rien n'évaluait encore. Un chargement ordinaire ne s'affiche pas. Elle alimente la pastille « Santé », la section Santé sources et la fenêtre
     DATA (libellé « Alertes (ce navigateur) », motif « Aucune alerte n'est évaluée dans ce
     navigateur. Rechargez l'application. »). Le bandeau de session écrit « ALERTES inactives » à
     la place du compteur (correction d'intégration : il affichait encore « ALERTES 1 »).
@@ -2803,11 +2806,14 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
     bougie). À la dernière bougie décidée, à plat, hors bougie d'une sortie par stop : tout est
     réuni pour acheter SAUF la clôture au-dessus de l'EMA de tendance. Rendu : un segment
     pointillé gris de 6 bougies au niveau de cette EMA, terminé sur la dernière bougie, et
-    l'étiquette « pré-signal » au bord droit. Infobulle : « AXIS S/R · pré-signal non mesuré —
-    achat si > X à la clôture et si le score et les filtres tiennent » (« … si le score tient »
-    quand aucun filtre n'est lu). L'EMA étant récursive, la bougie suivante clôture au-dessus de
-    son EMA si et seulement si elle clôture au-dessus de X : le cas est exact, mais conditionnel
-    et **non mesuré**. Sur le cas de référence (données déjà vues, sans valeur probante) :
+    l'étiquette « pré-signal » au bord droit. Infobulle : « AXIS pré-signal > X, non mesuré —
+    si clôture au-dessus et si le score et les filtres tiennent : achat » (« … si le score
+    tient » quand aucun filtre n'est lu). Le niveau et « non mesuré » tiennent dans les
+    40 premiers caractères, « achat » vient en dernier (revue globale, voir « Revue et tests »).
+    L'EMA étant récursive, la bougie suivante clôture au-dessus de son EMA si et seulement si
+    elle clôture au-dessus de X : le cas est exact, à l'arrondi d'affichage de X près (deux
+    décimales à partir de 100, cinq chiffres significatifs entre 1 et 100, quatre en dessous :
+    0,005 % au plus à partir de 1, 0,05 % en dessous), mais conditionnel et **non mesuré**. Sur le cas de référence (données déjà vues, sans valeur probante) :
     63 bougies en pré-signal sur 3 000, en 18 épisodes ; niveau franchi 5 fois à la bougie
     suivante ; 4 achats, soit 4 des 17 achats du cas annoncés d'une bougie. Aucune série, aucune
     alerte, aucun marqueur n'en dépend.
@@ -2819,10 +2825,17 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
   - Le libellé d'une zone ne commence plus par ce qui se lit déjà sur le graphe : ses
     55 premiers caractères disent le rôle, la force, les touches et l'écart.
 - **Limites qui restent.**
-  - L'infobulle ne revient pas à la ligne. Au téléphone (390 px), une ligne est coupée vers le
-    55e caractère (57 à 59 mesurés sur les captures d'intégration) : tête d'une zone, statut
-    d'un signal, « non mesuré » d'un triangle creux ou d'un ↺, niveau du pré-signal y tiennent ;
-    le détail qui suit n'est lisible qu'au bureau.
+  - L'infobulle ne revient pas à la ligne : au téléphone, une ligne est coupée net, sans points
+    de suspension, et un nombre peut l'être en son milieu. Caractères visibles, mesurés par la
+    revue globale sur le vrai graphe (Chromium, police du conteneur ; un vrai téléphone peut
+    différer d'un ou deux caractères) : 55 à 57 à 390 px en thème par défaut ; 52 à 54 à
+    375 px ; 49 à 51 à 360 px ; 42 à 44 à 320 px ; 45 à 390 px dans les thèmes Matrix et
+    Bloomberg (chasse fixe) ; thèmes cute et aurora non mesurés. À 390 px en thème par défaut,
+    tête d'une zone, statut d'un signal et « non mesuré » d'un triangle creux ou d'un ↺
+    tiennent ; ailleurs leur fin est coupée (à 45 caractères, « AXIS résistance forte ·
+    4 touches · bord à +1 » pour +13.4 %, et « … test 4h ≈ EMA » pour le statut). Seuls le
+    niveau du pré-signal et son « non mesuré » se lisent partout. Le détail qui suit n'est
+    lisible qu'au bureau.
   - L'infobulle est dessinée sur le graphe, sans fond. Ses trois rangées recouvrent ce qui se
     trouve dans les 50 px sous l'en-tête : repère du plus haut, bord ou bande d'une zone,
     étiquette de zone ou de signal. Sur les captures d'intégration au téléphone, le repère du
@@ -2838,7 +2851,9 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
     panneau de 53 à 111 px), les trois lignes passent derrière le panneau ; le refermer suffit.
     « Détails » ouvert, l'ordonnée n'est relue qu'au redimensionnement du conteneur ou de
     l'en-tête, pas à l'ajout d'un pane (mesuré à la revue : 73 px gardés là où la formule donne
-    55, les deux derrière le panneau).
+    55, les deux derrière le panneau). Même effet, relevé par la revue globale, en paysage sans
+    pane d'indicateur (844 × 390) et en 320 × 568 : « Détails » ouvert, les deux premières
+    rangées passent derrière le panneau, la troisième seule reste visible.
   - Ligne réservée : réticule dans une bande et trois marqueurs proches, le troisième dans
     l'ordre du tableau (signaux confirmés, triangles creux, forts mouvements, ↺) perd sa ligne à
     cette bougie. Exemple : bougie 2 988 du cas de référence, où la ligne « AXIS forte vente —
@@ -2875,7 +2890,12 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
     page téléphone, où la première passe redimensionne les axes, à chaque essai quand les
     réponses sont immédiates (six sur six, dont trois sur `111df0d`) et jamais avec 150 ms de
     latence par réponse ; au bureau, une fois, sur quatre essais d'une série tronquée avec
-    cette latence. Non corrigé dans ce chantier.
+    cette latence. Précisé par la revue globale : ces essais portaient AXIS S/R (persisté ou
+    ajouté), donc la remontée aux 3 000 bougies dans cet instant ; sans indicateur, trois
+    essais sans gel. Le canvas de superposition, qui porte le réticule et l'infobulle, se fige
+    aussi, parfois seul : l'infobulle ne suit alors plus le doigt. Le lot T ne l'aggrave pas
+    (aucune de ses passes ne change la taille d'un canvas). Non corrigé dans ce chantier ;
+    correctif reporté (voir « Reporté »).
 - **Choix de l'orchestrateur, à confirmer par le propriétaire.**
   - Écart aux zones en % du cours plutôt qu'en ATR.
   - Retournements ↺ classés « heuristique » de poids 1 dans EQS : l'ordre de la boîte de signaux
@@ -2886,7 +2906,13 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
     voir le budget.
   - Tête d'un signal confirmé sans le mot « réussi ».
   - Choix d'intégration : « ↺ » sur chaque marqueur de retournement ; « inactives » à la place
-    du compteur du bandeau ; niveau du pré-signal placé avant « à la clôture ».
+    du compteur du bandeau.
+  - Choix pris après la revue globale : texte du pré-signal ouvert par son niveau et « non
+    mesuré », sans « S/R » ; « inactives » aussi après dix secondes de chargement.
+  - Relevé par la revue, laissé tel quel : le signe « ≈ » de « test 4h ≈ EMA 200 seule ».
+    Honnête, mais « ≤ », de même longueur, collerait mieux à « pas mieux que » (en PnL net
+    total, AXIS fait 28 à 43 % de moins que l'EMA 200 seule sur 3 actifs sur 4, avec une
+    meilleure expectancy par trade partout).
 - **Budget.** Chargement initial, octets bruts / gzip, par `scripts/verifier-budget-build.mjs`
   (Node 22.23.4, zlib 1.3.1), plafonds 1 220 000 / 360 000 inchangés.
   - Avant, sur `111df0d` : **1 192 298 / 358 337**, marge gzip 1 663.
@@ -2907,7 +2933,7 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
     1 440 × 900, réseau bouchonné, cas de référence BTCUSDT 4h) : la tête d'une zone, le statut
     d'un signal et la réserve d'un ↺ tiennent dans la partie visible d'une ligne au téléphone ;
     le niveau du pré-signal n'y tenait pas (« … achat à la clôture si > 9 »), le texte a été
-    réordonné ; les étiquettes du bord droit, seconde ligne et « pré-signal » compris, tiennent
+    réordonné une première fois (puis réécrit après la revue globale, ci-dessous) ; les étiquettes du bord droit, seconde ligne et « pré-signal » compris, tiennent
     dans la marge droite et s'écartent de 11 px (largeur mesurée : 50 px au plus pour 76 px).
   - Tests ajoutés : chargeur des alertes (18 tests : double montage, échec, nouvelle tentative,
     ligne santé, arrêt) ; ordonnée de l'infobulle (11) ; ligne réservée et cas de référence
@@ -2934,10 +2960,56 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
   - Hors chantier, corrigé au passage : le test « appelle l'endpoint public sans clé… » de
     `data/onchain/tresoreriesBtc.test.ts` échouait par intermittence (deux lectures de
     l'horloge à 1 ms d'écart) ; son horloge est figée, le code n'est pas modifié.
+  - **Revue globale de la branche intégrée** (11 novembre 2026), par trois réviseurs
+    indépendants en lecture seule, chaque constat majeur soumis à un contradicteur. Aucun
+    constat bloquant.
+    - Calculs, causalité, honnêteté des textes : séries, signaux confirmés, marqueurs et
+      détection des retournements identiques à `111df0d` sur 31 152 comparaisons ; pré-signal
+      conforme à sa définition sur 7 208 bougies et 14 720 bougies suivantes synthétiques ;
+      écart au bord, âges et secondes lignes justes sur 18 494 textes ; statut court jamais
+      plus favorable que la fin d'infobulle. Deux mineurs sur la ligne du pré-signal.
+    - Alertes différées : ni alerte perdue, ni alerte doublée, ni erreur affichée pendant un
+      chargement ordinaire ; garde-fou `MODULES_DIFFERES` vérifié par injection. Un mineur
+      (chargement qui traîne) et un test intermittent expliqué.
+    - Téléphone, parcours, documentation : géométrie de l'infobulle et ligne réservée conformes
+      (seul AXIS S/R est touché) ; chiffres du contrat concordants. Un majeur (niveau du
+      pré-signal illisible hors de 390 px en thème par défaut) et deux mineurs de documentation.
+  - **Corrections de la revue globale** (pull request de suite, n° 11).
+    - Texte du pré-signal : il plaçait son niveau aux caractères 47 à 54, lisible seulement à
+      390 px en thème par défaut (« achat si > » sans niveau en Matrix et Bloomberg, « > 940 »
+      à 360 px), et sa partie lisible était « achat si > X », sans la clôture ni les conditions.
+      Nouveau texte ci-dessus (lot I). Niveau à cinq chiffres significatifs entre 1 et 100
+      (« 2.25 » pour un seuil de 2,2534 avant). Tests épinglés modifiés à dessein, un test sur
+      des prix du centime au million.
+    - Alertes : ligne santé après dix secondes de chargement (quatre tests, qui échouent quand
+      on retire la minuterie ou l'un de ses désarmements).
+    - Test intermittent, antérieur au chantier : `alerts/runtime.test.ts` échouait parfois sur
+      une machine chargée (18 appels `fetch` au lieu de 1, lignes 778 et 829). Le mock de
+      `data/onchain/fluxCapitaux` était contourné (Vitest sert le vrai module aux `import()`
+      concurrents tant que la fabrique asynchrone du mock n'est pas résolue) et la vraie
+      collecte, 17 requêtes, tombait dans un test qui compte les fetch. Le module est chargé
+      une fois en tête du fichier. Le produit n'est pas en cause.
+    - Limites réécrites : caractères visibles par largeur et par thème, « Détails » ouvert,
+      canvas figé.
+  - **CI à la fusion de la pull request n° 10.** Typage, tests du daemon, des paquets, du web
+    et du PACTE, build et budget : verts sur GitHub. Les parcours e2e (bureau, téléphone
+    Chromium et WebKit) n'y ont pas tourné : l'installation des navigateurs expirait sur une
+    panne du miroir `apt` du runner, quatre fois de suite, sur la branche puis sur `main`.
+    Fusion faite sur demande explicite du propriétaire (« déploie sur Vercel et Merge sur
+    main »). **WebKit n'a exécuté aucun des 7 nouveaux parcours téléphone** ; tout échec à
+    leur premier passage est un constat neuf. Premier point à surveiller, relevé à la lecture :
+    `mobile-axis-sr.e2e.ts:138` (aucun pane sous le réticule au repos ; WebKit n'écarte les
+    évènements souris de compatibilité que 500 ms après un toucher sur le graphe).
 - **Reporté.**
   - Mention « réglages hors test » quand les réglages du cœur ou de la couche flux s'écartent
     de ceux des campagnes.
   - Retour à la ligne de l'infobulle (ou fond sous ses rangées), et son ordonnée au bureau.
+    Tant que la ligne est coupée net : têtes de zone et statuts plus courts que 45 caractères,
+    ou écart placé avant les touches, pour les thèmes à chasse fixe et les écrans étroits.
+  - Correctif du canvas figé (remise à l'échelle forcée après le premier chargement des bougies).
+  - `chargerFluxCapitauxParDefaut` (`store/fluxCapitaux.ts`) lance la collecte même si le
+    dernier consommateur est parti pendant l'`import()` : la requête Coin Metrics part quand
+    même (relevé par la revue, antérieur au chantier).
   - Lot alertes : alerte sur le pré-signal ou sur l'approche d'une zone forte, réglages de
     l'instance lus par les alertes, libellés des sorties dans le formulaire.
   - Amorce du backtest (BT-1).

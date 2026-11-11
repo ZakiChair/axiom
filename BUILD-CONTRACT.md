@@ -2681,19 +2681,21 @@ la référence visuelle « vue C » approuvée par le propriétaire ; plan :
 
 ## AXIS — lisible, honnête et annonciateur (demande du 11 novembre 2026)
 
-Demande du propriétaire, transmise par l'orchestrateur du chantier : « poursuis l'amélioration
-d'AXIS ». Elle prolonge celle du 9 novembre (zones classées par force et signal précoce, section
-précédente). Le brief d'intégration rapporte aussi « merge directement les PR et déploie » :
-fusion et déploiement relèvent de l'orchestrateur ; l'intégration décrite ici n'a rien poussé. Une
-cartographie et une critique adverse ont précédé le chantier ; le lot retenu rend AXIS lisible au
-téléphone, où le propriétaire l'utilise souvent, dit ce qui n'est pas mesuré, et annonce l'achat
-quand une seule condition manque. **Aucun fournisseur, hôte, indicateur, fenêtre, dépendance ni
+Demande du propriétaire, le 11 novembre 2026 : « Top, merge dans main et poursuit l'amélioration
+d'axis ». Elle prolonge celle du 9 novembre (zones classées par force et signal précoce, section
+précédente). Le propriétaire a ajouté le même jour : « Top après ça merge directement les pr et
+déploie ». Chaque pull request du chantier AXIS est donc fusionnée dans `main` par l'orchestrateur
+sans nouvelle demande, une fois sa CI verte et sa revue indépendante sans constat bloquant ; Vercel
+déploie `main`. Une cartographie et une critique adverse ont précédé le chantier ; le lot retenu
+rend AXIS lisible au téléphone, où le propriétaire l'utilise souvent, dit ce qui n'est pas mesuré,
+et annonce l'achat quand une seule condition manque. **Aucun fournisseur, hôte, indicateur, fenêtre, dépendance ni
 champ de `@axiom/types` nouveau ; aucune série, aucun signal confirmé, aucune sortie d'alerte ne
 change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde 23 réglages et
 8 sorties, AXIS ses 17 réglages. Trois lots, intégrés dans l'ordre 0, T, I sur la branche
 `feat/axis-lisible` (base `111df0d`), puis des corrections d'intégration.
 
-- **Exceptions au contrat** (actées par la demande, selon le brief de l'orchestrateur).
+- **Exceptions au contrat** (arbitrées par l'orchestrateur pour servir la demande, à confirmer par
+  le propriétaire).
   - Affichages ajoutés dans des surfaces existantes, sous le gel G100 : seconde ligne au bord
     droit du graphe et pré-signal (AXIS S/R) ; « inactives » au bandeau de session, ligne
     « alertes » du registre santé et section Alertes en erreur (démarrage des alertes) ; attribut

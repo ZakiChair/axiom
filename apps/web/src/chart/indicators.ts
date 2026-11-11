@@ -213,6 +213,18 @@ export function axiomPaneId(instanceId: string): string {
 const registered = new Set<string>();
 
 /**
+ * Distance verticale (px) entre l'ordonnée finie `y` du crosshair et une bande dont les bords sont
+ * aux ordonnées `yA` et `yB` (dans n'importe quel ordre) : 0 dans la bande. Mesurée en pixels, elle
+ * suit l'écran quelle que soit l'échelle de l'axe (linéaire, log, %). Bord non fini → +∞ : en dernier.
+ */
+function distanceVerticale(y: number, yA: number, yB: number): number {
+  const dessus = Math.min(yA, yB);
+  const dessous = Math.max(yA, yB);
+  if (!Number.isFinite(dessus) || !Number.isFinite(dessous)) return Infinity;
+  return y < dessus ? dessus - y : y > dessous ? y - dessous : 0;
+}
+
+/**
  * Index de couleur COURANT d'une instance, lu dans le store au moment du dessin.
  * Repli 0 si l'instance a disparu entre deux frames (le template survit brièvement
  * à son instance) — jamais d'exception dans un callback de rendu.
@@ -237,6 +249,10 @@ function seriesFor(def: IndicatorDef): IndicatorSeries {
  */
 function ensureRegistered(def: IndicatorDef, name: string, instanceId: string): void {
   if (registered.has(name)) return;
+
+  // Pane hôte de l'instance (même règle que `sync`) : le crosshair n'y a d'ordonnée utile
+  // que s'il le survole (tri des rubans de `createTooltipDataSource`).
+  const paneHote = def.pane === "overlay" ? CANDLE_PANE_ID : axiomPaneId(instanceId);
 
   // Sorties masquées (masquee === true, ex. etat/score d'AXIS) : présentes dans
   // extendData pour les alertes et le BT, mais ni figures ni points tracés —
@@ -318,11 +334,12 @@ function ensureRegistered(def: IndicatorDef, name: string, instanceId: string): 
       );
       return false;
     },
-    // Tooltip de pane : l'info de la divergence/du ruban le plus proche du
-    // crosshair (≤ 3 barres du pivot d'arrivée), 3 lignes max. Objet vide sinon.
+    // Tooltip de pane, 3 lignes max : d'abord les segments et marqueurs dont l'arrivée est à
+    // ≤ 3 barres du crosshair, dans l'ordre de leur tableau ; puis les rubans qui couvrent la
+    // bougie, la bande sous le crosshair en tête (cf. `distanceVerticale`). Objet vide sinon.
     // `crosshair.dataIndex` est renseigné en même temps que `kLineData` (bundle
     // 9.8.12) : absent = crosshair hors données, donc rien à afficher.
-    createTooltipDataSource: ({ indicator, crosshair }) => {
+    createTooltipDataSource: ({ indicator, crosshair, yAxis }) => {
       const vide = {} as IndicatorTooltipData;
       const annotations = (indicator.extendData as IndicatorResult | undefined)?.annotations;
       if (annotations === undefined) return vide;
@@ -344,9 +361,26 @@ function ensureRegistered(def: IndicatorDef, name: string, instanceId: string): 
       };
       for (const s of annotations.segments ?? []) pousser(s.aIdx, s.info);
       for (const m of annotations.marqueurs ?? []) pousser(m.idx, m.info);
+      // Rubans couvrant la bougie (zones d'AXIS S/R, prime spot/perp), rangés par distance verticale
+      // de leur bande, à CETTE bougie, au crosshair : la bande survolée d'abord. Le `y` du crosshair
+      // est relatif au pane survolé (bundle 9.8.12, `_makeWidgetEvent`) : sur un autre pane, ou
+      // sans `y`, toutes les distances valent 0 et l'ordre du tableau reste (tri stable).
+      const yCrosshair =
+        crosshair.paneId === paneHote && typeof crosshair.y === "number" && Number.isFinite(crosshair.y)
+          ? crosshair.y
+          : undefined;
+      const couvrants: Array<{ info: string; distance: number }> = [];
       for (const r of annotations.rubans ?? []) {
-        if (r.info !== undefined && idx >= r.deIdx && idx < r.deIdx + r.hauts.length) ajouter(r.info);
+        const haut = r.hauts[idx - r.deIdx];
+        if (r.info === undefined || idx < r.deIdx || haut === undefined) continue;
+        const distance =
+          yCrosshair === undefined
+            ? 0
+            : distanceVerticale(yCrosshair, yAxis.convertToPixel(haut), yAxis.convertToPixel(r.bas[idx - r.deIdx] ?? haut));
+        couvrants.push({ info: r.info, distance });
       }
+      couvrants.sort((a, b) => a.distance - b.distance);
+      for (const { info } of couvrants) ajouter(info);
       return values.length > 0 ? ({ values } as IndicatorTooltipData) : vide;
     },
   });

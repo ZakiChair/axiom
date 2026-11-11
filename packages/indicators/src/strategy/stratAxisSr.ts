@@ -140,7 +140,10 @@ export interface ZoneSrAxis {
   deIdx: number;
   /** Indice de la bougie où la zone a été confirmée causalement (deIdx + pivotSr). */
   confirmationIdx: number;
-  /** Indice de la dernière bougie ayant touché, renforcé ou inversé la zone. */
+  /**
+   * Indice de la bougie de confirmation du dernier pivot fusionné dans la zone, ou de son inversion si elle est
+   * plus récente. Une réaction ou une simple mèche dans la bande ne le met pas à jour.
+   */
   dernierIdx: number;
   /** Nombre de pivots confirmés fusionnés dans cette zone (≥ 1). */
   touches: number;
@@ -482,6 +485,8 @@ function plusProchesParRole<T>(elements: T[], zoneDe: (e: T) => ZoneSrAxis, prix
 }
 
 const pct = (v: number, decimales: number): string => `${v > 0 ? "+" : ""}${v.toFixed(decimales)} %`;
+/** Écart du cours au bord d'une zone : une décimale, deux sous 0,1 %, pour ne pas écrire « +0.0 % » hors de la zone. */
+const pctBord = (e: number): string => pct(e, Math.abs(e) < 0.1 ? 2 : 1);
 const prix = (v: number): string => (v >= 1 ? v.toFixed(2) : v.toPrecision(4));
 
 const NON_MESURE = "couche flux non mesurée";
@@ -593,7 +598,7 @@ const texteZone = (z: ZoneSrAxis, forte: boolean, prixRef: number, bougies: numb
   const ecart = ecartBordZone(z, prixRef);
   return (
     `AXIS ${support ? "support" : "résistance"} ${forte ? (support ? "fort" : "forte") : "faible"} · ${compte(z.touches, "touche")} · ` +
-    `${ecart === undefined ? "dans la zone" : `bord à ${pct(ecart, 1)}`} — ` +
+    `${ecart === undefined ? "dans la zone" : `bord à ${pctBord(ecart)}`} — ` +
     `[${prix(z.bas)} – ${prix(z.haut)}] (niveau ${prix(z.niveau)}, ${pct((z.niveau / prixRef - 1) * 100, 2)} du cours) — ` +
     `${rejetsZone(z)} — touches comptées sur ${bougies} bougies — ` +
     `dernier pivot confirmé${z.inversions > 0 ? " ou inversion" : ""} il y a ${compte(fin - z.dernierIdx, "bougie")}` +
@@ -901,7 +906,7 @@ export const stratAxisSr: IndicatorDef = {
           // au plus, la marge droite du graphe fait 80 px.
           if (proches.includes(piste)) {
             const ecart = ecartBordZone(z, prixRef);
-            labels.push(etiquette(ecart === undefined ? "dans la zone" : pct(ecart, 1)));
+            labels.push(etiquette(ecart === undefined ? "dans la zone" : pctBord(ecart)));
           }
         }
       }

@@ -372,6 +372,17 @@ describe("signalRetournementAxis — conversion en signal EQS", () => {
     expect(s?.detail.endsWith(" · entrée 0.00001234 · invalidation 0.00001185 · cibles 1R 0.00001283 / 2R 0.00001333")).toBe(true);
   });
 
+  it("prix entre 1 et 100 : quatre chiffres significatifs, le risque de l'entrée à l'invalidation reste lisible", () => {
+    // Deux décimales écriraient « entrée 1.05 · invalidation 1.04 » : un risque de 0,0092 lu comme 0,01.
+    const s = signalRetournementAxis({ ...entree("achat", 80), prixEntree: 1.0523, stopInvalidation: 1.0431, cible1R: 1.0617, cible2R: 1.0709 });
+    expect(s?.detail.endsWith(" · entrée 1.052 · invalidation 1.043 · cibles 1R 1.062 / 2R 1.071")).toBe(true);
+    const t = signalRetournementAxis({ ...entree("vente", 80), prixEntree: 23.4567, stopInvalidation: 24.1234, cible1R: 22.79, cible2R: 99.996 });
+    expect(t?.detail.endsWith(" · entrée 23.46 · invalidation 24.12 · cibles 1R 22.79 / 2R 100.0")).toBe(true);
+    // Dès 100 : deux décimales, comme sur le graphe.
+    const u = signalRetournementAxis(entree("achat", 80, 61234.567));
+    expect(u?.detail).toContain(" · entrée 61234.57 · ");
+  });
+
   it("mêmes prix, au caractère près, que l'infobulle du retournement sur le graphe (fixture dorée, prix × 2^-24 et × 1)", () => {
     const fixture = JSON.parse(
       readFileSync(new URL("../../../../packages/indicators/src/golden/fixture-ohlcv.json", import.meta.url), "utf8"),

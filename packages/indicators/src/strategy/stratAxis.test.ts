@@ -1718,13 +1718,18 @@ describe("retournements ↺ — non mesurés, distincts des signaux confirmés (
     });
   });
 
-  it("l'étiquette donne le score sur 100, sans « % », sur les dix marqueurs les plus récents", () => {
+  it("chaque marqueur porte « ↺ » ; les dix plus récents y ajoutent le sens et le score sur 100, sans « % »", () => {
+    // Le gris ne sépare pas un ↺ d'un signal confirmé dans tous les thèmes (Matrix : --text-dim ≈ --down ;
+    // Bloomberg : ≈ --up assombri) : le signe « ↺ » est donc écrit à chaque marqueur, pas aux seuls récents.
     const etiquettes = (avec.annotations?.labels ?? []).filter((l) => l.texte.startsWith("↺"));
-    expect(etiquettes).toHaveLength(MAX_LABELS_SORTIE);
-    for (const l of etiquettes) {
-      expect(l.texte).toMatch(/^↺ (Achat|Vente) \d+\/100$/);
-      expect(l.couleur).toBe("--text-dim");
-    }
+    expect(etiquettes).toHaveLength(retournements.length);
+    expect(etiquettes.map((l) => l.idx)).toEqual(retournements.map((m) => m.idx));
+    etiquettes.forEach((l, k) => {
+      const m = retournements[k]!;
+      expect(l).toMatchObject({ couleur: "--text-dim", cible: "prix", valeur: m.valeur, position: m.forme === "triangleHaut" ? "dessous" : "dessus" });
+      if (k < etiquettes.length - MAX_LABELS_SORTIE) expect(l.texte, String(l.idx)).toBe("↺");
+      else expect(l.texte).toMatch(m.forme === "triangleHaut" ? /^↺ Achat \d+\/100$/ : /^↺ Vente \d+\/100$/);
+    });
     expect(etiquettes.slice(-3)).toEqual([
       { idx: 282, valeur: 54614.96, texte: "↺ Vente 100/100", couleur: "--text-dim", cible: "prix", position: "dessus" },
       { idx: 287, valeur: 55679.05, texte: "↺ Vente 70/100", couleur: "--text-dim", cible: "prix", position: "dessus" },

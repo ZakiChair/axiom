@@ -410,11 +410,13 @@ export interface EntreeRetournementAxis {
 }
 
 /**
- * Niveau de prix lisible sous un centime : deux décimales dès 1, quatre chiffres significatifs en dessous.
- * Même règle que les infobulles d'AXIS sur le graphe (`prix` de strategy/stratAxis.ts) ; signaux.test.ts
- * compare les deux.
+ * Niveau de prix d'un retournement : deux décimales dès 100, quatre chiffres significatifs en dessous
+ * (lisible sous un centime, et l'écart de l'entrée à l'invalidation ne se perd pas pour un actif coté
+ * entre 1 et 100 : « 1.052 », pas « 1.05 »). Même écriture que les infobulles d'AXIS sur le graphe
+ * (`prix` de strategy/stratAxis.ts) dès 100 et sous 1 — signaux.test.ts compare les deux ; entre 1 et
+ * 100, le graphe garde ses deux décimales.
  */
-const prixAxis = (v: number): string => (v >= 1 ? v.toFixed(2) : v.toPrecision(4));
+const prixAxis = (v: number): string => (v >= 100 ? v.toFixed(2) : v.toPrecision(4));
 
 /**
  * Transforme un retournement potentiel détecté par le moteur multi-piliers AXIS

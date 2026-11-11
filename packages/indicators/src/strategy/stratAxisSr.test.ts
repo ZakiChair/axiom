@@ -113,9 +113,13 @@ describe("stratAxisSr — contrat et séparation d'avec stratAxis", () => {
       expect(m.info?.startsWith("AXIS ↺ signal précoce non mesuré — lecture indicative, jamais une promesse — Retournement "), m.info).toBe(true);
       expect(m.info).not.toContain("%");
     }
+    // « ↺ » à chaque marqueur gris (les thèmes Matrix et Bloomberg ne les séparent pas par la couleur) ; sens et
+    // score sur les dix plus récents.
     const etiquettes = (avecSr.annotations?.labels ?? []).filter((l) => l.texte.startsWith("↺"));
-    expect(etiquettes).toHaveLength(10);
-    for (const l of etiquettes) expect(l).toMatchObject({ couleur: "--text-dim", texte: expect.stringMatching(/^↺ (Achat|Vente) \d+\/100$/) });
+    expect(etiquettes).toHaveLength(40);
+    expect(etiquettes.map((l) => l.idx)).toEqual(gris.map((m) => m.idx));
+    for (const l of etiquettes.slice(0, 30)) expect(l).toMatchObject({ couleur: "--text-dim", texte: "↺" });
+    for (const l of etiquettes.slice(-10)) expect(l).toMatchObject({ couleur: "--text-dim", texte: expect.stringMatching(/^↺ (Achat|Vente) \d+\/100$/) });
     // L'aide `resume` ne compte que les signaux confirmés, la case cochée ou non.
     expect(resume(candles, params)).toBe(resume(candles, EMA50));
     expect(resume(candles, params)).toBe("60▲ 88▼ 107▲ 139▼ 280▲");
@@ -184,7 +188,7 @@ describe("zonesSrAxis et filtre margeResistanceAtr", () => {
       expect(r.bas).toHaveLength(r.hauts.length);
       // Infobulle d'une zone depuis le 11 novembre 2026 : l'essentiel en tête (55 caractères au plus), puis le
       // détail d'avant, puis l'âge du dernier pivot confirmé ; une zone faible n'a pas de réaction.
-      expect(r.info).toMatch(/^AXIS (support|résistance) faible · \d+ touches? · (bord à [+-]\d+\.\d %|dans la zone) — \[/);
+      expect(r.info).toMatch(/^AXIS (support|résistance) faible · \d+ touches? · (bord à [+-]\d+\.\d{1,2} %|dans la zone) — \[/);
       expect((r.info ?? "").indexOf(" — [")).toBeLessThanOrEqual(55);
       expect(r.info).toMatch(/ — touches comptées sur 300 bougies — dernier pivot confirmé( ou inversion)? il y a \d+ bougies?$/);
     }

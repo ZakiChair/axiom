@@ -51,7 +51,8 @@ const TEXTE_ZONE_RESISTANCE =
   "AXIS résistance forte · 12 touches · bord à +10.0 % — [85314.76 – 86430.38] (niveau 85872.57, +10.69 % du cours) — 7 rejets sur volume fort, polarité inversée — touches comptées sur 3000 bougies — dernier pivot confirmé ou inversion il y a 183 bougies ; dernière réaction il y a 149 bougies";
 /** Tête d'une infobulle de zone : ce qui précède les bornes. Au téléphone, la ligne est coupée vers le 55e caractère. */
 const teteZone = (info: string | undefined): string => (info ?? "").split(" — [")[0] ?? "";
-const TETE_ZONE = /^AXIS (support (fort|faible)|résistance (forte|faible)) · \d+ touches? · (bord à [+-]\d+\.\d %|dans la zone)$/;
+// Écart : une décimale, deux sous 0,1 % (jamais « +0.0 % » hors de la zone).
+const TETE_ZONE = /^AXIS (support (fort|faible)|résistance (forte|faible)) · \d+ touches? · (bord à [+-]\d+\.\d{1,2} %|dans la zone)$/;
 /** Réserve des signaux précoces, en tête du texte : l'infobulle coupe la ligne au bord du graphe, jamais son début. */
 const TETE_PRECOCE = "AXIS S/R signal précoce non mesuré — lecture indicative, jamais une promesse — ";
 const TEXTE_REACTION_2733 =
@@ -312,6 +313,45 @@ describe("stratAxisSr — zones tracées par force (BTCUSDT 4h, réglages par d�
     const droite = (calculer([...btc, enFormation]).annotations?.labels ?? []).filter((l) => l.ancrageX === "droite");
     expect(droite.every((l) => l.idx === 3000)).toBe(true);
     expect(droite.slice(0, 4).map((l) => l.texte)).toEqual(["S fort · 5", "-1.3 %", "R forte · 12", "+10.0 %"]);
+  });
+
+  it("bougie en formation loin au-dessus (90 000) : tête, écart, âges des 12 infobulles et paire de zones à seconde ligne restent ceux du cas clos", () => {
+    // À 90 000, au-dessus de deux résistances fortes, une lecture de la bougie en formation recalculerait chaque
+    // écart en tête, et des âges comptés depuis la dernière bougie (au lieu de la dernière décidée) gagneraient
+    // une bougie : ce test échoue dans les deux cas (contre-épreuves faites). La PAIRE de zones à seconde ligne,
+    // elle, ne dépend pas du prix lu tant que les zones fortes ne se chevauchent pas (le support fort le plus haut
+    // et la résistance forte la plus basse gagnent à tout prix) : sur ce cas, aucun préfixe ni aucun prix ne la
+    // fait changer. Elle est vérifiée ici, mais lire le prix en formation dans son choix ne se verrait pas.
+    const derniere = btc[2999]!;
+    const enFormation: Candle = { ...derniere, time: derniere.time + 14_400_000, open: derniere.close, high: 90000, low: derniere.close, close: 90000, closed: false };
+    const res = calculer([...btc, enFormation]);
+    const infos = (r: IndicatorResult): string[] => (r.annotations?.rubans ?? []).flatMap((x) => (x.info === undefined ? [] : [x.info]));
+    expect(infos(res)).toHaveLength(12);
+    // Seule la profondeur change : la série compte une bougie de plus.
+    expect(infos(res)).toEqual(infos(defaut).map((t) => t.replace("sur 3000 bougies", "sur 3001 bougies")));
+    expect(infos(res)[0]).toBe(TEXTE_ZONE_SUPPORT.replace("sur 3000 bougies", "sur 3001 bougies"));
+    const textes = (r: IndicatorResult): string[] => (r.annotations?.labels ?? []).filter((l) => l.ancrageX === "droite").map((l) => l.texte);
+    expect(textes(res)).toEqual(textes(defaut));
+    expect(textes(res).slice(0, 4)).toEqual(["S fort · 5", "-1.3 %", "R forte · 12", "+10.0 %"]);
+  });
+
+  it("cours à moins de 0,1 % du bord sans être dans la zone : l'écart s'écrit avec deux décimales, jamais « +0.0 % »", () => {
+    // Préfixe clos 403 : close 111 511,55, borne basse de la résistance forte à 111 558,70, soit +0,04 %.
+    const res = calculer(btc.slice(0, 404));
+    const droite = (res.annotations?.labels ?? []).filter((l) => l.ancrageX === "droite");
+    expect(droite.slice(0, 2).map((l) => l.texte)).toEqual(["R forte · 5", "+0.04 %"]);
+    expect(((111558.7 / btc[403]!.close - 1) * 100).toFixed(2)).toBe("0.04");
+    const tete = teteZone(res.annotations?.rubans?.[0]?.info);
+    expect(tete).toBe("AXIS résistance forte · 5 touches · bord à +0.04 %");
+    expect(tete.length).toBeLessThanOrEqual(55);
+    // Aucun écart nul hors de la zone, ni au bord droit ni en tête d'infobulle, sur les trois préfixes relevés.
+    for (const k of [403, 499, 618]) {
+      const r = calculer(btc.slice(0, k + 1));
+      const lus = [...(r.annotations?.labels ?? []).map((l) => l.texte), ...(r.annotations?.rubans ?? []).map((x) => teteZone(x.info))];
+      expect(lus.filter((t) => /[+-]0\.0 %/.test(t)), String(k)).toEqual([]);
+    }
+    // À partir de 0,1 %, une décimale, comme avant.
+    expect(droite.every((l) => l.texte.length <= 12)).toBe(true);
   });
 });
 

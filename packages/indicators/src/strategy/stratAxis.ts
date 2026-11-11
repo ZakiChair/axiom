@@ -887,7 +887,8 @@ export function signauxAxis(
  * AXIS et à AXIS S/R, hors bougies de signal. Heuristique jamais mesurée (revue du 6 novembre 2026, constat
  * IND-1) : gris (--text-dim), pour ne ressembler ni à un signal confirmé (--up, --down) ni à un fort mouvement
  * (--accent) ; la réserve des signaux précoces ouvre l'infobulle ; le score se lit sur 100, jamais en « % »
- * (ce n'est pas une probabilité).
+ * (ce n'est pas une probabilité). Chaque marqueur porte au moins « ↺ » : le gris ne suffit pas dans les thèmes
+ * Matrix et Bloomberg, où --text-dim est proche de --down ou de --up. Les plus récents ajoutent sens et score.
  */
 export function retournementsAxis(
   candles: Candle[],
@@ -918,16 +919,14 @@ export function retournementsAxis(
           `AXIS ↺ ${RESERVE_PRECOCE} — ${r.resume} · entrée ${prix(r.prixEntree)} · invalidation ${prix(r.stopInvalidation)} · ` +
           `cible 1R ${prix(r.cible1R)} / 2R ${prix(r.cible2R)}`,
       });
-      if (k >= recents.length - MAX_LABELS_SORTIE) {
-        labels.push({
-          idx: r.idx,
-          valeur,
-          texte: `${achat ? "↺ Achat" : "↺ Vente"} ${r.scoreConfiance}/100`,
-          couleur,
-          cible: "prix",
-          position: achat ? "dessous" : "dessus",
-        });
-      }
+      labels.push({
+        idx: r.idx,
+        valeur,
+        texte: k >= recents.length - MAX_LABELS_SORTIE ? `${achat ? "↺ Achat" : "↺ Vente"} ${r.scoreConfiance}/100` : "↺",
+        couleur,
+        cible: "prix",
+        position: achat ? "dessous" : "dessus",
+      });
     });
 }
 

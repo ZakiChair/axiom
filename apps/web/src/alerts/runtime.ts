@@ -123,8 +123,8 @@ const PRESET_COOLDOWN_MS = 6 * 3_600_000;
 const PRESET_CAP_INDICATEURS = 30;
 
 /**
- * Pipeline du screener, chargé UNE fois au premier scan d'une alerte de preset : ≈ 16 Ko
- * hors du chargement initial (garde-fou : chargementInitial.test.ts). Promesse partagée par
+ * Pipeline du screener, chargé UNE fois au premier scan d'une alerte de preset : ≈ 11,8 Ko
+ * minifiés (2 630 o gzip) hors du chargement initial (garde-fou : chargementInitial.test.ts). Promesse partagée par
  * les scans simultanés ; un échec de chargement (réseau) se retente au scan suivant.
  */
 let pipelineScreener: Promise<[typeof import("../data/screenerRun"), typeof import("../data/screener")]> | null = null;
@@ -696,6 +696,8 @@ function creerRuntime(): Unsubscribe {
       // Un échec de chargement du pipeline est publié comme un échec de scan.
       const [{ executerScreener }, { notesNonMesures, notesReferenceNonEvaluee, SCREENER_POSITION_CAP }] =
         await chargerPipelineScreener();
+      // Alerte retirée, désactivée ou prolongée pendant le chargement : aucun scan inutile.
+      if (!encoreValide()) return;
       const res = await executerScreener(alerte.baseConditions, alerte.indicatorConditions, alerte.tf, {
         capIndicateurs: PRESET_CAP_INDICATEURS,
         capPosition: SCREENER_POSITION_CAP,

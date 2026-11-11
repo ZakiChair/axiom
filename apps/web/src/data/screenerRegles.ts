@@ -15,7 +15,7 @@
  * (« indisponible ») : jamais de 0 de remplacement.
  *
  * Module chargé À LA DEMANDE (worker, fenêtre et store du screener) : data/screener.ts,
- * sur le chemin de chargement initial, n'en connaît que les types.
+ * différé lui aussi, n'en connaît que les types.
  */
 import type { Candle, IndicatorInstance, IndicatorResult, Timeframe } from "@axiom/types";
 import {

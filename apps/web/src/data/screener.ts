@@ -21,8 +21,9 @@
  *
  * Ce module ne fait AUCUN fetch : il n'expose que des types, constantes et fonctions
  * pures (parsing, comparaison, sélection). Les effets réseau vivent dans store/worker.
- * Il est sur le chemin de chargement initial (alerts/runtime) : la logique des
- * conditions ouvertes vit dans screenerRegles.ts, chargé à la demande.
+ * Module différé (garde-fou : chargementInitial.test.ts) : chargé au premier scan d'une
+ * alerte de preset (alerts/runtime), avec les fenêtres EQS / SQZ / SIG et le worker. La
+ * logique des conditions ouvertes vit dans screenerRegles.ts, chargé à la demande lui aussi.
  */
 import type { Candle, Timeframe } from "@axiom/types";
 import type { Condition } from "@axiom/backtest";

@@ -2405,11 +2405,13 @@ préfixe testée là où elle s'applique, donnée absente = état explicite (« 
   - Après la revue globale (2608c00) : 1 196 555 / 358 985, marge gzip 1 015.
   - Fusion de `main` le 11 novembre (AXIS S/R du 9 novembre, +1 981 o gzip à lui seul sous
     zlib 1.3.1) : le cumul dépassait le plafond (**1 201 963 / 360 969**). Le pipeline du
-    screener (`data/screenerRun`, `data/screener`, ≈ 16 Ko de source) n'était sur le chemin
+    screener (`data/screenerRun`, `data/screener`, ≈ 11,8 Ko minifiés) n'était sur le chemin
     initial que par les alertes de scan : `alerts/runtime.ts` le charge désormais par
     `import()` mémorisé au premier scan (échec de chargement publié comme échec de scan,
-    retenté au suivant), et les deux modules entrent dans `MODULES_DIFFERES`. Résultat :
-    **1 192 277 / 358 339, marge gzip 1 661** (Node 22.23.4, zlib 1.3.1).
+    retenté au suivant ; alerte revalidée après le chargement, donc aucun scan pour une
+    alerte retirée entre-temps ; `alerts/runtime.pipelineScreener.test.ts`), et les deux
+    modules entrent dans `MODULES_DIFFERES`. Gain : −9 686 o bruts / −2 630 o gzip.
+    Résultat : **1 192 298 / 358 337, marge gzip 1 663** (Node 22.23.4, zlib 1.3.1).
 - **Revue et tests.**
   - Chaque lot a été revu par un agent indépendant (un ou deux tours). À l'intégration : le
     constat majeur restant (EQS confondait « non mesuré » et « faux ») et les mineurs

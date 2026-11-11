@@ -488,6 +488,11 @@ const pct = (v: number, decimales: number): string => `${v > 0 ? "+" : ""}${v.to
 /** Écart du cours au bord d'une zone : une décimale, deux sous 0,1 %, pour ne pas écrire « +0.0 % » hors de la zone. */
 const pctBord = (e: number): string => pct(e, Math.abs(e) < 0.1 ? 2 : 1);
 const prix = (v: number): string => (v >= 1 ? v.toFixed(2) : v.toPrecision(4));
+/**
+ * Niveau du pré-signal : c'est un SEUIL, lu à la clôture suivante. Entre 1 et 100, deux décimales
+ * l'écarteraient du seuil réel jusqu'à 0,5 % (« 2.25 » pour 2,2534) : cinq chiffres significatifs.
+ */
+const prixSeuil = (v: number): string => (v >= 1 && v < 100 ? v.toPrecision(5) : prix(v));
 
 const NON_MESURE = "couche flux non mesurée";
 
@@ -936,8 +941,9 @@ export const stratAxisSr: IndicatorDef = {
         trait: "pointille",
         couleur,
         cible: "prix",
-        // Le niveau avant « à la clôture » : au téléphone la ligne est coupée vers le 55e caractère, il doit y tenir.
-        info: `AXIS S/R · pré-signal non mesuré — achat si > ${prix(niveau)} à la clôture et si le score ${filtres ? "et les filtres tiennent" : "tient"}`,
+        // Au téléphone la ligne est coupée vers le 55e caractère : « non mesuré », « si clôture » et le niveau
+        // doivent y tenir, pour que la partie lisible reste une condition et non « achat si > X ».
+        info: `AXIS S/R pré-signal non mesuré — si clôture > ${prixSeuil(niveau)} et si le score ${filtres ? "et les filtres tiennent" : "tient"} : achat`,
       });
       labels.push({ idx: n - 1, valeur: niveau, texte: "pré-signal", couleur, cible: "prix", ancrageX: "droite" });
     }

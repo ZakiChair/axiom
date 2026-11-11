@@ -87,7 +87,7 @@ export function InstanceParamsEditor({
       {(def.id === "stratAxis" || def.id === "stratAxisSr") && (
         <div className="mt-1 flex flex-col gap-1.5 border-t border-neutral-800/80 pt-1.5">
           <label className="flex items-center justify-between gap-2 text-xs text-accent">
-            <span className="truncate">Détecter les retournements (↺ Achat / Vente)</span>
+            <span className="truncate">Détecter les retournements ↺ (non mesurés)</span>
             <input
               type="checkbox"
               checked={Boolean(instance.params["detecterRetournements"] ?? false)}
@@ -97,7 +97,7 @@ export function InstanceParamsEditor({
           </label>
           {Boolean(instance.params["detecterRetournements"]) && (
             <label className="flex items-center justify-between gap-2 text-xs text-neutral-300">
-              <span className="truncate">Confiance min. retournement (40–100 %)</span>
+              <span className="truncate">Confiance min. retournement (40–100 /100)</span>
               <Input
                 type="number"
                 value={Number(instance.params["seuilConfianceRetournement"] ?? 60)}

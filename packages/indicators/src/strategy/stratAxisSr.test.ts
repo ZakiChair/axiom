@@ -37,7 +37,8 @@ const EMA50 = { emaTendance: 50 };
 function resume(candlesEntree: Candle[], params: Record<string, number | boolean> = {}): string {
   const res = computeIndicator(stratAxisSr, candlesEntree, params);
   return (res.annotations?.marqueurs ?? [])
-    .filter((m) => m.couleur !== "--accent" && m.creux !== true)
+    // Signaux confirmés seulement : ni forts mouvements (--accent), ni retournements ↺ (--text-dim), ni triangles creux.
+    .filter((m) => m.couleur !== "--accent" && m.couleur !== "--text-dim" && m.creux !== true)
     .map((m) => `${m.idx}${m.forme === "triangleHaut" ? "▲" : "▼"}`)
     .join(" ");
 }
@@ -98,6 +99,30 @@ describe("stratAxisSr — contrat et séparation d'avec stratAxis", () => {
     expect(sansSr.annotations?.segments).toBeUndefined();
     expect(avecSr.annotations?.rubans).toHaveLength(MAX_ZONES_SR_DEFAUT);
     expect(avecSr.annotations?.segments?.length).toBeGreaterThanOrEqual(2 * MAX_ZONES_SR_DEFAUT);
+  });
+
+  it("retournements ↺ (IND-1) : mêmes marqueurs et mêmes étiquettes que stratAxis, gris (--text-dim), réserve en tête, score sur 100 sans « % »", () => {
+    const params = { ...EMA50, detecterRetournements: true };
+    const sansSr = computeIndicator(stratAxis, candles, params);
+    const avecSr = computeIndicator(stratAxisSr, candles, { ...params, signauxPrecoces: false });
+    expect(avecSr.annotations?.marqueurs).toEqual(sansSr.annotations?.marqueurs);
+    expect(avecSr.annotations?.labels?.filter((l) => l.ancrageX !== "droite")).toEqual(sansSr.annotations?.labels);
+    const gris = (avecSr.annotations?.marqueurs ?? []).filter((m) => m.couleur === "--text-dim");
+    expect(gris).toHaveLength(40);
+    for (const m of gris) {
+      expect(m.info?.startsWith("AXIS ↺ signal précoce non mesuré — lecture indicative, jamais une promesse — Retournement "), m.info).toBe(true);
+      expect(m.info).not.toContain("%");
+    }
+    // « ↺ » à chaque marqueur gris (les thèmes Matrix et Bloomberg ne les séparent pas par la couleur) ; sens et
+    // score sur les dix plus récents.
+    const etiquettes = (avecSr.annotations?.labels ?? []).filter((l) => l.texte.startsWith("↺"));
+    expect(etiquettes).toHaveLength(40);
+    expect(etiquettes.map((l) => l.idx)).toEqual(gris.map((m) => m.idx));
+    for (const l of etiquettes.slice(0, 30)) expect(l).toMatchObject({ couleur: "--text-dim", texte: "↺" });
+    for (const l of etiquettes.slice(-10)) expect(l).toMatchObject({ couleur: "--text-dim", texte: expect.stringMatching(/^↺ (Achat|Vente) \d+\/100$/) });
+    // L'aide `resume` ne compte que les signaux confirmés, la case cochée ou non.
+    expect(resume(candles, params)).toBe(resume(candles, EMA50));
+    expect(resume(candles, params)).toBe("60▲ 88▼ 107▲ 139▼ 280▲");
   });
 });
 
@@ -161,8 +186,11 @@ describe("zonesSrAxis et filtre margeResistanceAtr", () => {
       expect(r.alpha).toBe(0);
       expect(r.deIdx + r.hauts.length - 1).toBe(candles.length - 1);
       expect(r.bas).toHaveLength(r.hauts.length);
-      expect(r.info).toMatch(/^AXIS zone faible de (support|résistance) \[/);
-      expect(r.info?.endsWith(" — touches comptées sur 300 bougies")).toBe(true);
+      // Infobulle d'une zone depuis le 11 novembre 2026 : l'essentiel en tête (55 caractères au plus), puis le
+      // détail d'avant, puis l'âge du dernier pivot confirmé ; une zone faible n'a pas de réaction.
+      expect(r.info).toMatch(/^AXIS (support|résistance) faible · \d+ touches? · (bord à [+-]\d+\.\d{1,2} %|dans la zone) — \[/);
+      expect((r.info ?? "").indexOf(" — [")).toBeLessThanOrEqual(55);
+      expect(r.info).toMatch(/ — touches comptées sur 300 bougies — dernier pivot confirmé( ou inversion)? il y a \d+ bougies?$/);
     }
     expect(segments.length).toBeGreaterThanOrEqual(2 * MAX_ZONES_SR_DEFAUT);
     for (const s of segments) {
@@ -193,6 +221,11 @@ describe("zonesSrAxis et filtre margeResistanceAtr", () => {
     const r05 = computeIndicator(stratAxisSr, candles, { ...EMA50, margeResistanceAtr: 0.5 });
     const achat60 = r05.annotations?.marqueurs?.find((m) => m.idx === 60);
     expect(achat60?.info).toContain(", résistance 61390.46 à 0.7 × ATR ≥ 0.5");
+    // Statut en tête (11 novembre 2026) : le filtre S/R est un réglage hors des tests, la tête ne dit plus « test 4h ».
+    const confirmes = (res: typeof r05) => (res.annotations?.marqueurs ?? []).filter((m) => m.couleur !== "--accent" && m.creux !== true);
+    expect(confirmes(r05).length).toBeGreaterThan(0);
+    for (const m of confirmes(r05)) expect(m.info?.slice(0, 55), m.info).toMatch(/^AXIS (achat|vente)( forte?)? — score [+-]\d\/6 · réglage non validé — /);
+    for (const m of confirmes(base)) expect(m.info?.slice(0, 55), m.info).toMatch(/^AXIS (achat|vente)( forte?)? — score [+-]\d\/6 · test 4h ≈ EMA 200 seule/);
     expect(achat60?.info).toContain(" ; filtre S/R (marge sous résistance ≥ 0.5 × ATR 14) : réglage hors des tests figés — non mesuré");
     expect(textesAxisSr("4h", 0, 0, REGIME_TESTE, 0.5).signaux.endsWith(" ; filtre S/R (marge sous résistance ≥ 0.5 × ATR 14) : réglage hors des tests figés — non mesuré")).toBe(true);
     expect(etatsStrategie("stratAxisSr", candles, { ...EMA50, margeResistanceAtr: 0.5 })).toEqual(r05.series.etat);

@@ -1,6 +1,7 @@
 /**
  * SessionStrip — bandeau dense (11px) sous la Toolbar : P&L jour, alertes actives,
  * pastille santé globale. Acceptation G8 (chrome session visible sans ouvrir de fenêtre).
+ * Runtime des alertes non démarré (alerts/demarrageDiffere) : « inactives » remplace le compteur.
  *
  * Contrat de perf (PortfolioWindow / BUILD-CONTRACT) :
  *  - AUCUN re-render React sur tick de prix : le P&L est recalculé à chaque ticker et
@@ -24,6 +25,7 @@ import { alertsStore } from "../store/alerts";
 import { alerteActiveAuTemps } from "@axiom/alerts";
 import { useExpirationClock } from "../alerts/useExpirationClock";
 import { healthStore, type SanteSource } from "../store/health";
+import { SOURCE_SANTE_ALERTES } from "../alerts/demarrageDiffere";
 import { degradedLevel } from "./HealthPanel";
 import { regimeStore } from "../store/regime";
 import { tonRegime } from "../data/regime";
@@ -57,11 +59,23 @@ export function compterAlertesActives(defs: readonly { actif: boolean; expireTs?
   return n;
 }
 
+/**
+ * Avis du runtime des alertes quand il n'est pas démarré (ligne « alertes » en erreur du registre
+ * santé, posée par alerts/demarrageDiffere) ; `undefined` en nominal. Aucune alerte n'est alors
+ * évaluée dans ce navigateur : le bandeau l'écrit à la place du compteur. PURE.
+ */
+export function avisAlertesInactives(sources: Record<string, SanteSource>): string | undefined {
+  const ligne = sources[SOURCE_SANTE_ALERTES];
+  return ligne?.etat === "error" ? (ligne.derniereErreur ?? "Alertes inactives") : undefined;
+}
+
 export function SessionStrip() {
   const positions = useStore(portfolioStore, (s) => s.positions);
   const defs = useStore(alertsStore, (s) => s.defs);
   const maintenant = useExpirationClock(defs);
   const nbAlertes = compterAlertesActives(defs, maintenant);
+  // Chaîne ou undefined : ne re-rend que si l'avis change (pas à chaque message d'une source).
+  const alertesInactives = useStore(healthStore, (s) => avisAlertesInactives(s.sources));
   // Abonnement bas-fréquence : ne change que si le niveau de dégradation bascule.
   const healthSig = useStore(healthStore, (s) => healthLevelSignature(s.sources));
   const healthLevel = healthSig === "ok" ? null : (healthSig as "error" | "warn");
@@ -154,9 +168,13 @@ export function SessionStrip() {
         |
       </span>
 
-      <div className="flex items-center gap-1 tabular-nums" title="Nombre d'alertes actives">
+      <div className="flex items-center gap-1 tabular-nums" title={alertesInactives ?? "Nombre d'alertes actives"}>
         <span className="uppercase tracking-[0.08em]">Alertes</span>
-        <span className="font-medium text-text">{nbAlertes}</span>
+        {alertesInactives === undefined ? (
+          <span className="font-medium text-text">{nbAlertes}</span>
+        ) : (
+          <span className="font-medium text-down">inactives</span>
+        )}
       </div>
 
       <span aria-hidden className="text-border">

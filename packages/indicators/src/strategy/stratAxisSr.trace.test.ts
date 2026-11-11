@@ -12,7 +12,16 @@ import type { Candle, IndicatorResult, MarqueurAnnotation } from "@axiom/types";
 import { buildCalcContext, computeIndicator, resolveParams } from "../engine";
 import { rma, trueRange } from "../utils";
 import { MAX_SIGNAUX_AXIS, fluxAxis } from "./stratAxis";
-import { ALPHA_ZONE_CASSEE, alphaZoneForte, stratAxisSr, zonesSrAxis, zonesTraceesAxis } from "./stratAxisSr";
+import {
+  ALPHA_ZONE_CASSEE,
+  alphaZoneForte,
+  ecartBordZone,
+  fortesProchesAxis,
+  stratAxisSr,
+  zonesSrAxis,
+  zonesTraceesAxis,
+  type PisteZoneSrAxis,
+} from "./stratAxisSr";
 import { bougiesBtcusdt4h } from "./fixtures/btcusdt4h";
 
 const btc = bougiesBtcusdt4h();
@@ -27,17 +36,23 @@ const zonesBtc = (pivotSr: number, zoneSrAtr: number, forceZoneForte: number) =>
 const calculer = (bougies: Candle[], params: Record<string, number | boolean | string> = {}): IndicatorResult =>
   computeIndicator(stratAxisSr, bougies, params, { refClose: bougies.map((c) => c.close) }, "4h");
 const creux = (res: IndicatorResult): MarqueurAnnotation[] => (res.annotations?.marqueurs ?? []).filter((m) => m.creux === true);
-/** Signaux confirmés (▲/▼ pleins) : ni creux, ni forts mouvements (`--accent`). */
+/** Signaux confirmés (▲/▼ pleins) : ni creux, ni forts mouvements (`--accent`), ni retournements ↺ (`--text-dim`). */
 const signauxConfirmes = (res: IndicatorResult): MarqueurAnnotation[] =>
-  (res.annotations?.marqueurs ?? []).filter((m) => m.creux !== true && m.couleur !== "--accent");
+  (res.annotations?.marqueurs ?? []).filter((m) => m.creux !== true && m.couleur !== "--accent" && m.couleur !== "--text-dim");
 const somme = (serie: Array<number | undefined> | undefined): number => (serie ?? []).reduce<number>((a, v) => a + (v ?? 0), 0);
 
 const defaut = calculer(btc);
 
+// Infobulle d'une zone (demande du 11 novembre 2026) : l'essentiel d'abord (rôle, forte ou faible, touches, écart du
+// cours au bord de la zone), puis le détail d'avant, puis l'âge du dernier pivot confirmé et de la dernière réaction.
 const TEXTE_ZONE_SUPPORT =
-  "AXIS zone forte de support [75626.55 – 76601.83] (niveau 76114.19, -1.89 % du cours) — 5 touches, 2 rejets sur volume fort — touches comptées sur 3000 bougies";
+  "AXIS support fort · 5 touches · bord à -1.3 % — [75626.55 – 76601.83] (niveau 76114.19, -1.89 % du cours) — 2 rejets sur volume fort — touches comptées sur 3000 bougies — dernier pivot confirmé il y a 2 bougies ; dernière réaction il y a 11 bougies";
 const TEXTE_ZONE_RESISTANCE =
-  "AXIS zone forte de résistance [85314.76 – 86430.38] (niveau 85872.57, +10.69 % du cours) — 12 touches, 7 rejets sur volume fort, polarité inversée — touches comptées sur 3000 bougies";
+  "AXIS résistance forte · 12 touches · bord à +10.0 % — [85314.76 – 86430.38] (niveau 85872.57, +10.69 % du cours) — 7 rejets sur volume fort, polarité inversée — touches comptées sur 3000 bougies — dernier pivot confirmé ou inversion il y a 183 bougies ; dernière réaction il y a 149 bougies";
+/** Tête d'une infobulle de zone : ce qui précède les bornes. Au téléphone, la ligne est coupée vers le 55e caractère. */
+const teteZone = (info: string | undefined): string => (info ?? "").split(" — [")[0] ?? "";
+// Écart : une décimale, deux sous 0,1 % (jamais « +0.0 % » hors de la zone).
+const TETE_ZONE = /^AXIS (support (fort|faible)|résistance (forte|faible)) · \d+ touches? · (bord à [+-]\d+\.\d{1,2} %|dans la zone)$/;
 /** Réserve des signaux précoces, en tête du texte : l'infobulle coupe la ligne au bord du graphe, jamais son début. */
 const TETE_PRECOCE = "AXIS S/R signal précoce non mesuré — lecture indicative, jamais une promesse — ";
 const TEXTE_REACTION_2733 =
@@ -103,8 +118,8 @@ describe("stratAxisSr — zones tracées par force (BTCUSDT 4h, réglages par d�
     expect(r1.info).toBe(TEXTE_ZONE_RESISTANCE);
 
     for (const r of rubans.slice(0, 12)) expect(r.deIdx + r.hauts.length - 1).toBe(2999);
-    expect(rubans[8]!.info?.startsWith("AXIS zone faible de résistance [78917.30 – 79672.11]")).toBe(true);
-    expect(rubans[9]!.info?.startsWith("AXIS zone faible de support [74552.38 – 75480.41]")).toBe(true);
+    expect(rubans[8]!.info?.startsWith("AXIS résistance faible · 2 touches · bord à +1.7 % — [78917.30 – 79672.11]")).toBe(true);
+    expect(rubans[9]!.info?.startsWith("AXIS support faible · 2 touches · bord à -2.7 % — [74552.38 – 75480.41]")).toBe(true);
     for (const r of rubans.slice(8, 12)) expect(r.alpha).toBe(0);
     for (const r of rubans.slice(12)) {
       expect(r.alpha).toBe(ALPHA_ZONE_CASSEE);
@@ -113,6 +128,75 @@ describe("stratAxisSr — zones tracées par force (BTCUSDT 4h, réglages par d�
     }
     expect(ALPHA_ZONE_CASSEE).toBe(0.09);
     expect(rubans[12]!.deIdx + rubans[12]!.hauts.length - 1).toBe(2986);
+  });
+
+  it("infobulle d'une zone : rôle, forte ou faible, touches et écart du cours au bord dans les 55 premiers caractères, pour les 12 zones actives", () => {
+    const sr = zonesBtc(5, 0.5, 6);
+    const close = btc[2999]!.close;
+    const { fortes, faibles } = zonesTraceesAxis(sr.pistes, close, 4, 6);
+    const zones = [...fortes, ...faibles].map((p) => p.zone);
+    const infos = (defaut.annotations?.rubans ?? []).slice(0, 12).map((r) => r.info);
+    expect(zones).toHaveLength(12);
+    zones.forEach((z, k) => {
+      const tete = teteZone(infos[k]);
+      const support = z.nature === "support";
+      expect(tete, tete).toMatch(TETE_ZONE);
+      expect(tete.length, tete).toBeLessThanOrEqual(55);
+      // Redérivé ici : le bord tourné vers le cours est la borne haute d'un support, la borne basse d'une résistance.
+      const bord = ((support ? z.haut : z.bas) / close - 1) * 100;
+      const accord = k < 8 ? (support ? "fort" : "forte") : "faible";
+      expect(tete).toBe(
+        `AXIS ${support ? "support" : "résistance"} ${accord} · ${z.touches} touches · bord à ${bord > 0 ? "+" : ""}${bord.toFixed(1)} %`
+      );
+      // Le détail d'avant suit la tête, sans répéter les touches.
+      expect(infos[k]).toContain(` — [${z.bas.toFixed(2)} – ${z.haut.toFixed(2)}] (niveau ${z.niveau.toFixed(2)}, `);
+      expect(infos[k]).toContain(" — touches comptées sur 3000 bougies — dernier pivot confirmé");
+    });
+    expect(teteZone(TEXTE_ZONE_SUPPORT)).toHaveLength(45);
+    expect(teteZone(TEXTE_ZONE_RESISTANCE)).toHaveLength(51);
+  });
+
+  it("infobulle d'une zone : âge du dernier pivot confirmé (ou de l'inversion) et de la dernière réaction, en bougies ; jamais « dernière touche », aucun pourcentage de réussite", () => {
+    const sr = zonesBtc(5, 0.5, 6);
+    const { fortes, faibles } = zonesTraceesAxis(sr.pistes, btc[2999]!.close, 4, 6);
+    const infos = (defaut.annotations?.rubans ?? []).slice(0, 12).map((r) => r.info ?? "");
+    // Dernière réaction de chaque zone, redérivée des réactions du moteur (par idx croissant).
+    const reaction = new Map<number, number>();
+    for (const r of sr.reactions) reaction.set(r.zone.id, r.idx);
+    fortes.forEach(({ zone: z }, k) => {
+      const pivot = `dernier pivot confirmé${z.inversions > 0 ? " ou inversion" : ""} il y a ${2999 - z.dernierIdx} bougies`;
+      const r = reaction.get(z.id);
+      const fin = r === undefined ? "aucune réaction" : `dernière réaction il y a ${2999 - r} bougies`;
+      expect(infos[k]!.endsWith(` — ${pivot} ; ${fin}`), infos[k]).toBe(true);
+    });
+    // Les deux résistances fortes « oubliées » du cas de référence : confirmées il y a 1 711 et 2 124 bougies, sans réaction.
+    expect(infos[6]!.endsWith(" — dernier pivot confirmé il y a 1711 bougies ; aucune réaction")).toBe(true);
+    expect(infos[7]!.endsWith(" — dernier pivot confirmé ou inversion il y a 2124 bougies ; aucune réaction")).toBe(true);
+    // « R forte · 12 » : le pivot date de 2 816, la réaction de 2 850 ; `dernierIdx` n'est pas une touche.
+    expect([fortes[1]!.zone.dernierIdx, reaction.get(fortes[1]!.zone.id)]).toEqual([2816, 2850]);
+    // Une zone faible n'a jamais été forte : le moteur ne lui connaît aucune réaction, l'infobulle n'en parle pas.
+    faibles.forEach(({ zone: z }, k) => {
+      expect(reaction.has(z.id)).toBe(false);
+      expect(infos[8 + k]!.endsWith(`dernier pivot confirmé${z.inversions > 0 ? " ou inversion" : ""} il y a ${2999 - z.dernierIdx} bougies`), infos[8 + k]).toBe(true);
+      expect(infos[8 + k]).not.toContain("réaction");
+    });
+    for (const info of infos) {
+      expect(info).not.toContain("dernière touche");
+      // Deux pourcentages seulement, deux écarts de prix : celui du bord et celui du niveau.
+      expect(info.match(/%/g)).toHaveLength(2);
+    }
+  });
+
+  it("infobulle d'une zone : le cours dans la bande d'une zone forte se lit « dans la zone », support (2 984) comme résistance (2 983)", () => {
+    // Préfixes clos du cas de référence : à 2 984, le close (80 170,02) est dans la bande [79 616,59 – 80 465,81]
+    // d'une zone forte, au-dessus de son niveau (support) ; à 2 983 (79 861,89), au-dessous (résistance).
+    for (const [k, role] of [[2984, "support fort"], [2983, "résistance forte"]] as const) {
+      const infos = (calculer(btc.slice(0, k + 1)).annotations?.rubans ?? []).map((r) => r.info ?? "");
+      const dedans = infos.filter((info) => teteZone(info).endsWith(" · dans la zone"));
+      expect(dedans, String(k)).toHaveLength(1);
+      expect(teteZone(dedans[0]), String(k)).toMatch(new RegExp(`^AXIS ${role} · \\d+ touches · dans la zone$`));
+      expect(dedans[0]).toContain(" — [79616.59 – 80465.81] (niveau 80041.20, ");
+    }
   });
 
   it("bords : horizontaux, sans info, en trait plein pour une forte et en pointillé pour une faible, chacun posé sur une borne de sa bande active", () => {
@@ -137,14 +221,18 @@ describe("stratAxisSr — zones tracées par force (BTCUSDT 4h, réglages par d�
     expect(segments.filter((s) => s.trait === "pointille").length).toBeGreaterThanOrEqual(8);
   });
 
-  it("étiquettes de zone : 12 au bord droit (dernière bougie), fortes puis faibles, après les étiquettes des signaux", () => {
+  // Repris le 11 novembre 2026 : 14 étiquettes au lieu de 12. Le support fort et la résistance forte les plus proches
+  // portent une seconde ligne, l'écart du cours à leur bord ; les 12 étiquettes d'avant gardent texte, ordre et valeur.
+  it("étiquettes de zone : 12 au bord droit (dernière bougie), fortes puis faibles, après les étiquettes des signaux ; une seconde ligne sous les deux zones fortes les plus proches", () => {
     const labels = defaut.annotations?.labels ?? [];
     const droite = labels.filter((l) => l.ancrageX === "droite");
-    expect(droite).toHaveLength(12);
+    expect(droite).toHaveLength(14);
     expect(droite.every((l) => l.idx === 2999 && l.cible === "prix")).toBe(true);
     expect(droite.map((l) => l.texte)).toEqual([
       "S fort · 5",
+      "-1.3 %",
       "R forte · 12",
+      "+10.0 %",
       "R forte · 8",
       "S fort · 8",
       "S fort · 7",
@@ -158,8 +246,112 @@ describe("stratAxisSr — zones tracées par force (BTCUSDT 4h, réglages par d�
     ]);
     expect(droite[0]).toMatchObject({ couleur: "--up", ancrageX: "droite" });
     expect(droite[0]!.valeur).toBeCloseTo(76114.19, 2);
-    expect(droite[1]).toMatchObject({ couleur: "--down" });
-    expect(labels.slice(-12)).toEqual(droite);
+    expect(droite[2]).toMatchObject({ couleur: "--down" });
+    expect(labels.slice(-14)).toEqual(droite);
+    // La seconde ligne suit son étiquette dans le tableau, à la même valeur et de la même couleur : le rendu, qui
+    // trie par ordonnée sans changer l'ordre des égaux, la pose 11 px dessous (annotationsPane.ts).
+    expect(droite[1]).toEqual({ ...droite[0], texte: "-1.3 %" });
+    expect(droite[3]).toEqual({ ...droite[2], texte: "+10.0 %" });
+    // Écart redérivé : du close de la dernière bougie décidée à la borne haute du support, basse de la résistance.
+    const close = btc[2999]!.close;
+    expect(((76601.83 / close - 1) * 100).toFixed(1)).toBe("-1.3");
+    expect(((85314.76 / close - 1) * 100).toFixed(1)).toBe("10.0");
+    // La marge droite du graphe fait 80 px : 12 caractères au plus par ligne.
+    for (const l of droite) expect(l.texte.length, l.texte).toBeLessThanOrEqual(12);
+  });
+
+  it("fortesProchesAxis : au plus un support fort et une résistance forte, les plus proches par le BORD ; à égalité, le premier reçu", () => {
+    const piste = (id: number, nature: "support" | "resistance", bas: number, haut: number): PisteZoneSrAxis => ({
+      zone: { id, nature, niveau: (bas + haut) / 2, bas, haut, demiLargeur: (haut - bas) / 2, deIdx: 0, confirmationIdx: 5, dernierIdx: 5, touches: 6, rejetsVolume: 0, inversions: 0, force: 6 },
+      active: true,
+      finIdx: 9,
+      evolution: [{ idx: 5, bas, haut }],
+    });
+    // Cours 100. Support large [80 – 98] : niveau 89, bord à −2 %. Support étroit [93 – 95] : niveau 94, plus proche
+    // par le niveau, mais bord à −5 %. C'est le large que le cours touchera d'abord.
+    const large = piste(0, "support", 80, 98);
+    const etroit = piste(1, "support", 93, 95);
+    const dessus = piste(2, "resistance", 110, 112);
+    const loin = piste(3, "resistance", 120, 121);
+    expect(ecartBordZone(large.zone, 100)).toBeCloseTo(-2, 9);
+    expect(ecartBordZone(etroit.zone, 100)).toBeCloseTo(-5, 9);
+    expect(ecartBordZone(dessus.zone, 100)).toBeCloseTo(10, 9);
+    // Rangées comme `zonesTraceesAxis` les rend, par proximité du niveau : l'étroit d'abord.
+    expect(fortesProchesAxis([etroit, large, dessus, loin], 100)).toEqual([large, dessus]);
+    // Cours dans la bande : écart indéfini, distance nulle, la zone est la plus proche de son rôle.
+    const autour = piste(4, "support", 97, 101);
+    expect(ecartBordZone(autour.zone, 100)).toBeUndefined();
+    expect(fortesProchesAxis([etroit, large, autour], 100)).toEqual([autour]);
+    // Égalité : deux supports dont la bande contient le cours ; le premier reçu est gardé.
+    const autour2 = piste(5, "support", 96, 100.5);
+    expect(fortesProchesAxis([autour2, autour], 100)).toEqual([autour2]);
+    expect(fortesProchesAxis([], 100)).toEqual([]);
+  });
+
+  it("seconde ligne : « dans la zone » quand le cours est dans la bande de la zone forte la plus proche ; aucune sans zone forte", () => {
+    // Préfixes clos 2 984 (support fort) et 2 983 (résistance forte) : le close est dans la bande [79 616,59 – 80 465,81].
+    for (const [k, etiquette] of [[2984, "S fort"], [2983, "R forte"]] as const) {
+      const droite = (calculer(btc.slice(0, k + 1)).annotations?.labels ?? []).filter((l) => l.ancrageX === "droite");
+      const rang = droite.findIndex((l) => l.texte === "dans la zone");
+      expect(rang, String(k)).toBeGreaterThan(0);
+      expect(droite[rang - 1]!.texte.startsWith(`${etiquette} · `), String(k)).toBe(true);
+      expect(droite[rang]).toEqual({ ...droite[rang - 1]!, texte: "dans la zone" });
+      expect(droite[rang]!.valeur).toBeCloseTo(80041.2, 2);
+      expect(droite.filter((l) => l.texte === "dans la zone")).toHaveLength(1);
+      expect(droite.filter((l) => /^(dans la zone|[+-]\d+\.\d %)$/.test(l.texte)), String(k)).toHaveLength(2);
+    }
+    // Seuil 50 : aucune zone forte, donc aucune seconde ligne ; quatre étiquettes « faible ».
+    const droite50 = (calculer(btc, { forceZoneForte: 50 }).annotations?.labels ?? []).filter((l) => l.ancrageX === "droite");
+    expect(droite50.map((l) => l.texte)).toEqual(["faible", "faible", "faible", "faible"]);
+  });
+
+  it("seconde ligne : la bougie en formation n'est pas lue, l'écart reste celui de la dernière clôture décidée", () => {
+    // Bougie en formation ajoutée, dont le prix s'effondre dans le support fort : l'étiquette est posée sur elle
+    // (bord droit), mais l'écart est toujours lu au close de 2 999, dernière bougie décidée.
+    const derniere = btc[2999]!;
+    const enFormation: Candle = { ...derniere, time: derniere.time + 14_400_000, open: derniere.close, high: derniere.close, low: 76000, close: 76100, closed: false };
+    const droite = (calculer([...btc, enFormation]).annotations?.labels ?? []).filter((l) => l.ancrageX === "droite");
+    expect(droite.every((l) => l.idx === 3000)).toBe(true);
+    expect(droite.slice(0, 4).map((l) => l.texte)).toEqual(["S fort · 5", "-1.3 %", "R forte · 12", "+10.0 %"]);
+  });
+
+  it("bougie en formation loin au-dessus (90 000) : tête, écart, âges des 12 infobulles et paire de zones à seconde ligne restent ceux du cas clos", () => {
+    // À 90 000, au-dessus de deux résistances fortes, une lecture de la bougie en formation recalculerait chaque
+    // écart en tête, et des âges comptés depuis la dernière bougie (au lieu de la dernière décidée) gagneraient
+    // une bougie : ce test échoue dans les deux cas (contre-épreuves faites). La PAIRE de zones à seconde ligne,
+    // elle, ne dépend pas du prix lu tant que les zones fortes ne se chevauchent pas (le support fort le plus haut
+    // et la résistance forte la plus basse gagnent à tout prix) : sur ce cas, aucun préfixe ni aucun prix ne la
+    // fait changer. Elle est vérifiée ici, mais lire le prix en formation dans son choix ne se verrait pas.
+    const derniere = btc[2999]!;
+    const enFormation: Candle = { ...derniere, time: derniere.time + 14_400_000, open: derniere.close, high: 90000, low: derniere.close, close: 90000, closed: false };
+    const res = calculer([...btc, enFormation]);
+    const infos = (r: IndicatorResult): string[] => (r.annotations?.rubans ?? []).flatMap((x) => (x.info === undefined ? [] : [x.info]));
+    expect(infos(res)).toHaveLength(12);
+    // Seule la profondeur change : la série compte une bougie de plus.
+    expect(infos(res)).toEqual(infos(defaut).map((t) => t.replace("sur 3000 bougies", "sur 3001 bougies")));
+    expect(infos(res)[0]).toBe(TEXTE_ZONE_SUPPORT.replace("sur 3000 bougies", "sur 3001 bougies"));
+    const textes = (r: IndicatorResult): string[] => (r.annotations?.labels ?? []).filter((l) => l.ancrageX === "droite").map((l) => l.texte);
+    expect(textes(res)).toEqual(textes(defaut));
+    expect(textes(res).slice(0, 4)).toEqual(["S fort · 5", "-1.3 %", "R forte · 12", "+10.0 %"]);
+  });
+
+  it("cours à moins de 0,1 % du bord sans être dans la zone : l'écart s'écrit avec deux décimales, jamais « +0.0 % »", () => {
+    // Préfixe clos 403 : close 111 511,55, borne basse de la résistance forte à 111 558,70, soit +0,04 %.
+    const res = calculer(btc.slice(0, 404));
+    const droite = (res.annotations?.labels ?? []).filter((l) => l.ancrageX === "droite");
+    expect(droite.slice(0, 2).map((l) => l.texte)).toEqual(["R forte · 5", "+0.04 %"]);
+    expect(((111558.7 / btc[403]!.close - 1) * 100).toFixed(2)).toBe("0.04");
+    const tete = teteZone(res.annotations?.rubans?.[0]?.info);
+    expect(tete).toBe("AXIS résistance forte · 5 touches · bord à +0.04 %");
+    expect(tete.length).toBeLessThanOrEqual(55);
+    // Aucun écart nul hors de la zone, ni au bord droit ni en tête d'infobulle, sur les trois préfixes relevés.
+    for (const k of [403, 499, 618]) {
+      const r = calculer(btc.slice(0, k + 1));
+      const lus = [...(r.annotations?.labels ?? []).map((l) => l.texte), ...(r.annotations?.rubans ?? []).map((x) => teteZone(x.info))];
+      expect(lus.filter((t) => /[+-]0\.0 %/.test(t)), String(k)).toEqual([]);
+    }
+    // À partir de 0,1 %, une décimale, comme avant.
+    expect(droite.every((l) => l.texte.length <= 12)).toBe(true);
   });
 });
 
@@ -237,6 +429,33 @@ describe("stratAxisSr — triangles creux des réactions sur zone forte", () => 
     expect(sans.annotations?.marqueurs).toEqual((defaut.annotations?.marqueurs ?? []).filter((m) => m.creux !== true));
   });
 
+  it("signaux confirmés : le statut de mesure tient dans les 55 premiers caractères (4h : réserve de l'EMA 200 ; 1h : test échoué), la réserve entière reste à la fin", () => {
+    const confirmes = signauxConfirmes(defaut);
+    expect(confirmes.length).toBeGreaterThan(10);
+    for (const m of confirmes) {
+      expect(m.info?.slice(0, 55), m.info).toMatch(/^AXIS (achat|vente)( forte?)? — score [+-]\d\/6 · test 4h ≈ EMA 200 seule/);
+      expect(m.info).toContain(" — test réussi sur données jamais vues (crypto 4h, 2017-2024), pas mieux qu'une EMA 200 seule sur 3/4 actifs — mesure passée, pas une promesse ; ");
+    }
+    const en1h = signauxConfirmes(computeIndicator(stratAxisSr, btc, {}, auxBtc, "1h"));
+    expect(en1h.map((m) => m.idx)).toEqual(confirmes.map((m) => m.idx));
+    for (const m of en1h) {
+      expect(m.info?.slice(0, 55), m.info).toMatch(/^AXIS (achat|vente)( forte?)? — score [+-]\d\/6 · 1h : test échoué — /);
+      expect(m.info).toContain(" — en 1h : test échoué sur données jamais vues (42 alts, oct. 2023-oct. 2026)");
+    }
+  });
+
+  it("retournements ↺ cochés (IND-1) : 40 marqueurs gris de plus, après tous les autres ; signaux confirmés, triangles creux, forts mouvements et séries inchangés", () => {
+    const avec = calculer(btc, { detecterRetournements: true });
+    const gris = (avec.annotations?.marqueurs ?? []).filter((m) => m.couleur === "--text-dim");
+    expect(gris).toHaveLength(40);
+    expect(gris.every((m) => m.creux === undefined && m.info?.startsWith("AXIS ↺ signal précoce non mesuré — lecture indicative, jamais une promesse — "))).toBe(true);
+    expect((avec.annotations?.marqueurs ?? []).filter((m) => m.couleur !== "--text-dim")).toEqual(defaut.annotations?.marqueurs);
+    expect((avec.annotations?.marqueurs ?? []).slice(-40)).toEqual(gris);
+    expect(signauxConfirmes(avec)).toEqual(signauxConfirmes(defaut));
+    expect(creux(avec)).toEqual(creux(defaut));
+    expect(avec.series).toEqual(defaut.series);
+  });
+
   it("signauxPrecoces : seul le booléen faux masque les triangles creux ; la chaîne « false », 0 ou une chaîne vide les gardent", () => {
     for (const v of ["false", 0, ""]) expect(creux(calculer(btc, { signauxPrecoces: v })), JSON.stringify(v)).toEqual(creux(defaut));
   });
@@ -281,6 +500,9 @@ describe("stratAxisSr — entrées limites du tracé", () => {
     expect(res.series.reactionSupport).toEqual(defaut.series.reactionSupport);
     expect(res.series.reactionResistance).toEqual(defaut.series.reactionResistance);
     expect(res.annotations?.rubans?.[0]?.info).toContain("[0.00007563 – 0.00007660]");
+    // Écarts et âges ne dépendent pas de l'échelle des prix : même tête, même fin.
+    expect(teteZone(res.annotations?.rubans?.[0]?.info)).toBe(teteZone(TEXTE_ZONE_SUPPORT));
+    expect(res.annotations?.rubans?.[0]?.info?.endsWith(" — dernier pivot confirmé il y a 2 bougies ; dernière réaction il y a 11 bougies")).toBe(true);
   });
 
   it("forceZoneForte qui n'est pas un nombre fini (NaN, ±Infinity, texte, chaîne vide ou d'espaces, booléen) reçu sans résolution des réglages : repli sur 6, même résultat", () => {

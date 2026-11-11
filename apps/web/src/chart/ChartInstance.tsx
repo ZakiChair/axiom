@@ -148,10 +148,30 @@ const Y_AXIS_TYPE: Record<PriceScaleType, YAxisType> = {
 const MOBILE_AXIS_BREAKPOINT_PX = 640;
 const MOBILE_X_AXIS_SIZE_PX = 28;
 const MOBILE_Y_AXIS_SIZE_PX = 80;
+/** Ordonnée de l'infobulle d'indicateur du pane des prix au bureau (px) : inchangée hors mise en page téléphone. */
+const HAUT_INFOBULLE_BUREAU_PX = 36;
 
-function applyResponsiveAxisStyles(chart: KLineChartInstance, viewportWidth: number): void {
+/**
+ * Ordonnée (px, dans le pane des prix) de la première rangée de l'infobulle d'indicateur en mise
+ * en page téléphone : 2 px sous le bas RÉEL de l'en-tête du slot, jamais au-dessus de la valeur
+ * du bureau. Ordonnées comptées depuis le haut du pane : `basEntete`, bas de l'en-tête ;
+ * `basReplie`, bas de sa part toujours affichée (le haut du panneau « Détails » quand il est
+ * ouvert, sinon `basEntete`). « Détails » fermé, le résultat ne lit donc pas la hauteur du pane.
+ * Ouvert, l'infobulle suit le panneau tant qu'il tient dans le tiers haut du pane (le compte à
+ * rebours de clôture y est : les deux se lisent ensemble) ; au-delà elle s'arrête à ce tiers
+ * plutôt que de descendre au milieu des bougies, sans jamais remonter sous la part repliée.
+ * Mesure non finie → valeur du bureau. PURE.
+ */
+export function hautInfobullePrix(basReplie: number, basEntete: number, hauteurPane: number): number {
+  if (!Number.isFinite(basReplie) || !Number.isFinite(basEntete) || !Number.isFinite(hauteurPane)) return HAUT_INFOBULLE_BUREAU_PX;
+  const sous = (bas: number): number => Math.ceil(bas) + 2;
+  return Math.max(HAUT_INFOBULLE_BUREAU_PX, sous(basReplie), Math.min(sous(basEntete), Math.floor(hauteurPane / 3)));
+}
+
+function applyResponsiveAxisStyles(chart: KLineChartInstance, viewportWidth: number, hautInfobulle: number): void {
   const mobile = viewportWidth < MOBILE_AXIS_BREAKPOINT_PX;
   chart.setStyles({
+    candle: { tooltip: { offsetTop: hautInfobulle } },
     xAxis: { size: mobile ? MOBILE_X_AXIS_SIZE_PX : "auto", tickText: { size: 12 } },
     yAxis: { size: mobile ? MOBILE_Y_AXIS_SIZE_PX : "auto", tickText: { size: 12 } },
   });
@@ -423,8 +443,11 @@ type SubscribeKlineAvecResync = (
   onResync?: (candles: Candle[]) => void,
 ) => Unsubscribe;
 
-/** Applique la palette du thème courant au graphe (bougies/grille/axes/crosshair + fond). */
-function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void {
+/**
+ * Applique la palette du thème courant au graphe (bougies/grille/axes/crosshair + fond).
+ * `hautInfobulle` : ordonnée courante de l'infobulle du pane des prix, reposée telle quelle.
+ */
+function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement, hautInfobulle: number): void {
   const bg = lireTokenCanvas("--bg", "");
   const surface = lireTokenCanvas("--surface", "");
   const border = lireTokenCanvas("--border", "");
@@ -465,14 +488,15 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void
       // elle poussait la légende des INDICATEURS sous ce bandeau, où elle était illisible
       // (seule sa queue dépassait, cf. revue du 2026-08-01 § 3.2).
       //
-      // `offsetTop: 36` place alors la légende d'indicateur juste SOUS le bandeau : vérifié
+      // `offsetTop` place alors la légende d'indicateur SOUS le bandeau (36 px au bureau, bas
+      // réel de l'en-tête au téléphone, cf. `hautInfobullePrix`) : vérifié
       // dans le bundle 9.8.12 — `_drawCandleStandardTooltip` (index.esm.js:9376) retourne
       // `coordinate.y + prevRowHeight`, soit `offsetTop` quand `isDrawTooltip` est faux, et
       // c'est CE retour qui sert d'ordonnée à `drawIndicatorTooltip` (:9356-9357). Poser
       // `showRule: "none"` SEUL ferait retomber l'ordonnée à 6, donc sous le bandeau :
       // les deux réglages vont ensemble. Les panes SÉPARÉS ne sont pas concernés — ils lisent
       // `indicator.tooltip.offsetTop` par un autre chemin (:8152).
-      tooltip: { showRule: TooltipShowRule.None, offsetTop: 36 },
+      tooltip: { showRule: TooltipShowRule.None, offsetTop: hautInfobulle },
       bar: {
         upColor: candleUp,
         downColor: candleDown,
@@ -696,9 +720,23 @@ export function ChartInstance({
     chargerViewportSync();
     const unsubscribeViewportOptions = chartLayoutStore.subscribe(chargerViewportSync);
 
+    // Infobulle du pane des prix : en mise en page téléphone, sous le bas RÉEL de l'en-tête du
+    // slot (bandeau du symbole ou en-tête d'une vue secondaire) ; ailleurs, la valeur du bureau.
+    // Relue à chaque redimensionnement du conteneur ou de l'en-tête, reposée à chaque thème.
+    const entete = container.querySelector("[data-chart-entete]");
+    let hautInfobulle = HAUT_INFOBULLE_BUREAU_PX;
+    const mesurerHautInfobulle = (): number => {
+      const pane = chart.getDom(CANDLE_PANE_ID, DomPosition.Main)?.getBoundingClientRect();
+      if (container.dataset.mobile !== "true" || !entete || !pane) return HAUT_INFOBULLE_BUREAU_PX;
+      const bas = entete.getBoundingClientRect().bottom;
+      // Panneau « Détails » du bandeau, quand il est affiché : la part repliée s'arrête à son haut.
+      const panneau = entete.querySelector("#chart-banner-details")?.getBoundingClientRect();
+      return hautInfobullePrix((panneau && panneau.height > 0 ? panneau.top : bas) - pane.top, bas - pane.top, pane.height);
+    };
+
     // Thème (bougies/grille/axes/crosshair + fond) — appliqué puis réabonné.
-    applyChartTheme(chart, chartDom);
-    const unsubscribeTheme = themeStore.subscribe(() => applyChartTheme(chart, chartDom));
+    applyChartTheme(chart, chartDom, hautInfobulle);
+    const unsubscribeTheme = themeStore.subscribe(() => applyChartTheme(chart, chartDom, hautInfobulle));
 
     // Contrôleur d'indicateurs @axiom (partagé : même sélection sur tous les slots ;
     // chaque slot calcule sur SON buffer). L'abonnement `indicatorsStore` qui CAPTURE
@@ -797,17 +835,27 @@ export function ChartInstance({
     const xhairThrottle = createRafThrottle(drawSyncedCrosshair, { minIntervalMs: 16 });
     const resizeThrottle = createRafThrottle(
       () => {
-        applyResponsiveAxisStyles(chart, window.innerWidth);
+        hautInfobulle = mesurerHautInfobulle();
+        applyResponsiveAxisStyles(chart, window.innerWidth, hautInfobulle);
         chart.resize();
         indicators.rafraichirHauteurs();
         paneHeaders.sync();
         overlayLegend.sync();
         xhairThrottle.trigger();
+        // « Détails » ouvert, le plafond de l'infobulle lit la hauteur du pane, que le moteur
+        // vient seulement de recalculer : une passe de plus si elle déplace l'ordonnée.
+        if (mesurerHautInfobulle() !== hautInfobulle) resizeThrottle.trigger();
       },
       { minIntervalMs: 50 },
     );
-    const resizeObserver = new ResizeObserver(resizeThrottle.trigger);
+    // L'en-tête change de hauteur sans que le conteneur bouge (« Détails », prix écrit par ref qui
+    // fait passer le bandeau sur deux rangées) : il est observé lui-même, et ne relance le
+    // redimensionnement que si l'ordonnée de l'infobulle en dépend.
+    const resizeObserver = new ResizeObserver((entrees) => {
+      if (entrees.some((e) => e.target === container) || mesurerHautInfobulle() !== hautInfobulle) resizeThrottle.trigger();
+    });
     resizeObserver.observe(container);
+    if (entete) resizeObserver.observe(entete);
     resizeThrottle.trigger();
     // Ce slot survolé publie le timestamp pointé ; les autres tracent la ligne.
     const onCrosshair = (data?: Crosshair): void => {
@@ -1743,7 +1791,7 @@ function SecondaryHeader({
 }) {
   const timeframes = supportedTimeframesFor(exchange, symbol);
   return (
-    <div className={`pointer-events-auto absolute left-1 top-1 z-20 flex max-w-[calc(100%-0.5rem)] items-center gap-1 rounded bg-surface/80 px-1 py-0.5 text-[10px] backdrop-blur ${mobile ? "right-1" : ""}`}>
+    <div data-chart-entete className={`pointer-events-auto absolute left-1 top-1 z-20 flex max-w-[calc(100%-0.5rem)] items-center gap-1 rounded bg-surface/80 px-1 py-0.5 text-[10px] backdrop-blur ${mobile ? "right-1" : ""}`}>
       <input
         aria-label="Symbole du slot"
         defaultValue={symbol}

@@ -410,28 +410,38 @@ export interface EntreeRetournementAxis {
 }
 
 /**
+ * Niveau de prix d'un retournement : deux décimales dès 100, quatre chiffres significatifs en dessous
+ * (lisible sous un centime, et l'écart de l'entrée à l'invalidation ne se perd pas pour un actif coté
+ * entre 1 et 100 : « 1.052 », pas « 1.05 »). Même écriture que les infobulles d'AXIS sur le graphe
+ * (`prix` de strategy/stratAxis.ts) dès 100 et sous 1 — signaux.test.ts compare les deux ; entre 1 et
+ * 100, le graphe garde ses deux décimales.
+ */
+const prixAxis = (v: number): string => (v >= 100 ? v.toFixed(2) : v.toPrecision(4));
+
+/**
  * Transforme un retournement potentiel détecté par le moteur multi-piliers AXIS
  * (épuisement RSI + divergence + inflexion MACD/score + mèche de rejet + absorption flux)
- * en signal actionnable pour l'inbox EQS. PURE.
+ * en signal de l'inbox EQS. PURE.
+ *
+ * Heuristique jamais mesurée (revue du 6 novembre 2026, constat IND-1 : aucune campagne, et le
+ * score sort aussi sur du bruit pur) : fiabilité « heuristique » et poids 1 quel que soit le score,
+ * qui s'écrit sur 100 et jamais en « % » — ce n'est pas une probabilité.
  */
 export function signalRetournementAxis(
   retournement: EntreeRetournementAxis | null | undefined,
 ): SignalDetecte | null {
   if (!retournement || retournement.scoreConfiance < 60) return null;
   const achat = retournement.sens === "achat";
-  const hautePrecision = retournement.scoreConfiance >= 75;
   return {
     id: "retournement-axis",
     direction: achat ? "haussier" : "baissier",
-    libelle: achat
-      ? `AXIS ↺ Achat (${retournement.scoreConfiance}%)`
-      : `AXIS ↺ Vente (${retournement.scoreConfiance}%)`,
+    libelle: `AXIS ↺ ${achat ? "Achat" : "Vente"} (${retournement.scoreConfiance}/100)`,
     detail:
-      `${retournement.resume} · entrée ${retournement.prixEntree.toFixed(4)} · ` +
-      `invalidation ${retournement.stopInvalidation.toFixed(4)} · ` +
-      `cibles 1R ${retournement.cible1R.toFixed(4)} / 2R ${retournement.cible2R.toFixed(4)}`,
-    fiabilite: hautePrecision ? "fiable" : "heuristique",
-    poids: hautePrecision ? 3 : 2,
+      `${retournement.resume} · entrée ${prixAxis(retournement.prixEntree)} · ` +
+      `invalidation ${prixAxis(retournement.stopInvalidation)} · ` +
+      `cibles 1R ${prixAxis(retournement.cible1R)} / 2R ${prixAxis(retournement.cible2R)}`,
+    fiabilite: "heuristique",
+    poids: 1,
   };
 }
 

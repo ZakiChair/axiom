@@ -54,6 +54,8 @@ const LIBELLES_SOURCE: Record<string, string> = {
   "coingecko:market": "CoinGecko · marché",
   wikimedia: "Wikimedia · pages vues",
   axiomd: "Daemon Axiom",
+  // Ligne posée par alerts/demarrageDiffere tant que le runtime des alertes n'est pas démarré.
+  alertes: "Alertes (ce navigateur)",
 };
 
 /** Libellé lisible d'une source : map complète d'abord, sinon `sourceLabel` générique. PURE. */

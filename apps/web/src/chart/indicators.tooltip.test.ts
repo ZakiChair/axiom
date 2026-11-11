@@ -16,11 +16,18 @@
  * sur le pane de l'indicateur (`crosshair.paneId`, `crosshair.y` relatif à ce pane),
  * les rubans qui couvrent la bougie sont rangés par distance verticale de leur bande au
  * réticule, en pixels via `yAxis.convertToPixel` : la bande survolée vient en tête.
+ *
+ * Ligne réservée (11 novembre 2026) : réticule DANS une bande, sa zone garde une des
+ * 3 lignes ; segments et marqueurs proches n'en prennent alors que deux. Avant, trois
+ * marqueurs à 3 bougies ou moins prenaient tout, même le doigt posé sur la bande. Hors
+ * de toute bande, sur un autre pane ou sans ordonnée, rien ne change.
  */
 import { describe, expect, it, vi } from "vitest";
 import type { Chart, IndicatorCreateTooltipDataSourceParams, IndicatorTemplate } from "klinecharts";
 import type { AnnotationsIndicateur, Candle, IndicatorResult } from "@axiom/types";
+import { computeIndicator, getIndicator } from "@axiom/indicators";
 import type { ActiveIndicator } from "../store/indicators";
+import fixtureBtc from "../../../../packages/indicators/src/strategy/fixtures/btcusdt-4h-3000.json";
 
 const capture = vi.hoisted(() => ({ template: null as IndicatorTemplate | null }));
 
@@ -185,5 +192,107 @@ describe("createTooltipDataSource — rubans rangés par distance verticale au r
     const reticule = { paneId: "candle_pane", y: yDe(107) };
     expect(lignes(tooltip(template, { rubans: [a, a2] }, 1, reticule))).toEqual(["forte A", "forte A2"]);
     expect(lignes(tooltip(template, { rubans: [a2, a] }, 1, reticule))).toEqual(["forte A2", "forte A"]);
+  });
+});
+
+describe("createTooltipDataSource — une ligne réservée à la bande sous le réticule", () => {
+  const lignes = (res: ReturnType<typeof tooltip>) => (res?.values ?? []).map((v) => v.value);
+  const marqueur = (idx: number, info: string) =>
+    ({ idx, valeur: 95, forme: "triangleHaut", couleur: "--up", cible: "prix", info }) as const;
+  /** Trois marqueurs à 3 bougies ou moins de la bougie 1 : de quoi prendre les trois lignes. */
+  const TROIS = [marqueur(0, "M1"), marqueur(1, "M2"), marqueur(2, "M3")];
+  const DANS_D = { paneId: "candle_pane", y: yDe(85) };
+
+  it("trois marqueurs proches, réticule dans une bande : deux marqueurs, puis la zone de cette bande", () => {
+    const template = templateCapture();
+    expect(lignes(tooltip(template, { marqueurs: TROIS, rubans: RUBANS }, 1, DANS_D))).toEqual(["M1", "M2", "faible D"]);
+  });
+
+  it("segments et marqueurs partagent les deux lignes restantes, dans l'ordre d'avant", () => {
+    const template = templateCapture();
+    const segments = ["S1", "S2"].map((info) => ({ ...SEGMENT_BASE, aIdx: 1, cible: "prix" as const, info }));
+    expect(lignes(tooltip(template, { segments, marqueurs: TROIS, rubans: RUBANS }, 1, DANS_D))).toEqual(["S1", "S2", "faible D"]);
+    expect(lignes(tooltip(template, { segments: segments.slice(0, 1), marqueurs: TROIS, rubans: RUBANS }, 1, DANS_D))).toEqual([
+      "S1",
+      "M1",
+      "faible D",
+    ]);
+  });
+
+  it("réticule hors de toute bande, sur un autre pane ou sans ordonnée : les trois marqueurs, comme avant", () => {
+    const template = templateCapture();
+    const annotations = { marqueurs: TROIS, rubans: RUBANS };
+    const attendu = ["M1", "M2", "M3"];
+    expect(lignes(tooltip(template, annotations, 1, { paneId: "candle_pane", y: yDe(136) }))).toEqual(attendu);
+    expect(lignes(tooltip(template, annotations, 1, { paneId: "axiom_volume", y: yDe(85) }))).toEqual(attendu);
+    expect(lignes(tooltip(template, annotations, 1))).toEqual(attendu);
+  });
+
+  it("une bande sans info (zone cassée) sous le réticule ne réserve rien", () => {
+    const template = templateCapture();
+    const cassee = { deIdx: 0, hauts: [90, 90, 90], bas: [80, 80, 80], couleur: "--up", alpha: 0.09 };
+    expect(lignes(tooltip(template, { marqueurs: TROIS, rubans: [bande(100, 110, "forte A"), cassee] }, 1, DANS_D))).toEqual([
+      "M1",
+      "M2",
+      "M3",
+    ]);
+  });
+
+  it("deux bandes sous le réticule : une seule ligne réservée, à la première dans l'ordre du tableau", () => {
+    const template = templateCapture();
+    const rubans = [bande(100, 110, "forte A"), bande(105, 115, "forte A2")];
+    const res = tooltip(template, { marqueurs: TROIS, rubans }, 1, { paneId: "candle_pane", y: yDe(107) });
+    expect(lignes(res)).toEqual(["M1", "M2", "forte A"]);
+  });
+
+  it("moins de trois marqueurs proches : rien ne change, les zones complètent", () => {
+    const template = templateCapture();
+    expect(lignes(tooltip(template, { marqueurs: TROIS.slice(0, 2), rubans: RUBANS }, 1, DANS_D))).toEqual(["M1", "M2", "faible D"]);
+    expect(lignes(tooltip(template, { marqueurs: TROIS.slice(0, 1), rubans: RUBANS }, 1, DANS_D))).toEqual(["M1", "faible D", "forte A"]);
+  });
+});
+
+describe("createTooltipDataSource — AXIS S/R sur le cas de référence BTCUSDT 4h (3 000 bougies closes)", () => {
+  /** Une ligne du JSON, colonnes `time`, `open`, `high`, `low`, `close`, `volume`, `buyVolume`. */
+  type LigneBougie = [time: number, open: number, high: number, low: number, close: number, volume: number, buyVolume: number];
+  const btc: Candle[] = (fixtureBtc.bougies as LigneBougie[]).map(([time, open, high, low, close, volume, buyVolume]) => ({
+    time,
+    open,
+    high,
+    low,
+    close,
+    volume,
+    buyVolume,
+    sellVolume: volume - buyVolume,
+    closed: true,
+  }));
+  /** Calcul complet tel que le graphe le fait : réglages par défaut, `refClose` = les closes, unité 4h. */
+  const annotations = computeIndicator(getIndicator("stratAxisSr")!, btc, {}, { refClose: btc.map((c) => c.close) }, "4h").annotations!;
+
+  it("réticule au milieu de la bande d'une zone tracée : sa ligne est rendue à chaque bougie couverte, même près de trois marqueurs", () => {
+    const template = templateCapture();
+    const zones = (annotations.rubans ?? []).filter((r) => r.info !== undefined);
+    expect(zones.length).toBeGreaterThan(0);
+    // Une ligne de zone se reconnaît à ce qu'un ruban la porte, jamais à son libellé.
+    const infosZones = new Set(zones.map((zone) => zone.info));
+    let couvertes = 0;
+    let presDeTroisMarqueurs = 0;
+    const sansLigne: string[] = [];
+    for (const zone of zones) {
+      for (let k = 0; k < zone.hauts.length; k++) {
+        const idx = zone.deIdx + k;
+        const milieu = (zone.hauts[k]! + zone.bas[k]!) / 2;
+        const rendues = (tooltip(template, annotations, idx, { paneId: "candle_pane", y: yDe(milieu) })?.values ?? []).map((v) => v.value);
+        couvertes++;
+        if (!rendues.includes(zone.info!)) sansLigne.push(`${idx} : ${zone.info}`);
+        // Sans ordonnée, rien n'est réservé : trois lignes sans zone = trois marqueurs proches.
+        const sansReticule = (tooltip(template, annotations, idx)?.values ?? []).map((v) => String(v.value));
+        if (sansReticule.length === 3 && sansReticule.every((ligne) => !infosZones.has(ligne))) presDeTroisMarqueurs++;
+      }
+    }
+    expect(sansLigne).toEqual([]);
+    // Le cas visé existe bien sur la série réelle, et les bandes couvrent l'essentiel des bougies.
+    expect(presDeTroisMarqueurs).toBeGreaterThan(0);
+    expect(couvertes).toBeGreaterThan(3000);
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { actionsSourceData, executerActionData, type DependancesActionsData } from "./dataActions";
+import { SOURCE_SANTE_ALERTES } from "../alerts/demarrageDiffere";
 
 function dependances(): DependancesActionsData {
   return {
@@ -31,6 +32,12 @@ describe("capacités des sources DATA", () => {
     expect(actionsSourceData("bgeometrics").actions).toContainEqual(expect.objectContaining({
       id: "vue", type: "fenetre", fenetre: "onchain",
     }));
+  });
+
+  it("dit le remède quand le runtime des alertes n'est pas démarré : recharger, aucune action dans DATA", () => {
+    const capacites = actionsSourceData(SOURCE_SANTE_ALERTES);
+    expect(capacites.actions).toEqual([]);
+    expect(capacites.motif).toBe("Aucune alerte n'est évaluée dans ce navigateur. Rechargez l'application.");
   });
 
   it("propose les réglages seulement pour des clés configurables", () => {

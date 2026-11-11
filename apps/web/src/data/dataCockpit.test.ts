@@ -4,6 +4,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { trierSources, formatFraicheur, libelleSource } from "./dataCockpit";
+import { SOURCE_SANTE_ALERTES } from "../alerts/demarrageDiffere";
 import type { SanteSource } from "../store/health";
 
 /** Fabrique une SanteSource minimale pour les tests de tri. */
@@ -114,5 +115,9 @@ describe("libelleSource", () => {
   it("retombe sur sourceLabel pour les exchanges WS connus", () => {
     expect(libelleSource("binance")).toBe("Binance");
     expect(libelleSource("binance:trades")).toBe("Binance · trades");
+  });
+
+  it("nomme la ligne du runtime des alertes, qui n'est pas une source de marché", () => {
+    expect(libelleSource(SOURCE_SANTE_ALERTES)).toBe("Alertes (ce navigateur)");
   });
 });

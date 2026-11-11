@@ -451,7 +451,7 @@ export function SymbolBanner() {
   }, [exchange, symbol, timeframe]);
 
   return (
-    <div data-chart-banner className={`pointer-events-none absolute top-2 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-border bg-surface/80 text-xs tabular-nums text-text-dim backdrop-blur-sm ${mobile ? "left-1 right-1 px-2" : "left-2 px-2.5 py-1"}`}>
+    <div data-chart-banner data-chart-entete className={`pointer-events-none absolute top-2 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-border bg-surface/80 text-xs tabular-nums text-text-dim backdrop-blur-sm ${mobile ? "left-1 right-1 px-2" : "left-2 px-2.5 py-1"}`}>
       <span title={enPourcentage ? COMPOSITION_DOMINANCE_STABLECOINS : bannerSymbol} className={`font-semibold text-text ${mobile ? "min-w-0 max-w-[28%] truncate" : ""}`}>{bannerSymbol}</span>
       <span className="text-text-dim">{timeframe}</span>
       <span ref={priceRef} className="min-w-0 font-semibold text-text">

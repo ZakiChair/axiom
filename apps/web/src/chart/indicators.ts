@@ -373,8 +373,9 @@ function ensureRegistered(def: IndicatorDef, name: string, instanceId: string): 
     },
     // Tooltip de pane, 3 lignes max : d'abord les segments et marqueurs dont l'arrivée est à
     // ≤ 3 barres du crosshair, dans l'ordre de leur tableau ; puis les rubans qui couvrent la
-    // bougie, la bande sous le crosshair en tête (cf. `distanceVerticale`). Objet vide sinon.
-    // `crosshair.dataIndex` est renseigné en même temps que `kLineData` (bundle
+    // bougie, la bande sous le crosshair en tête (cf. `distanceVerticale`). Crosshair DANS une
+    // bande : une ligne lui est réservée, segments et marqueurs n'en prennent que deux. Objet
+    // vide sinon. `crosshair.dataIndex` est renseigné en même temps que `kLineData` (bundle
     // 9.8.12) : absent = crosshair hors données, donc rien à afficher.
     createTooltipDataSource: ({ indicator, crosshair, yAxis }) => {
       const vide = {} as IndicatorTooltipData;
@@ -388,16 +389,11 @@ function ensureRegistered(def: IndicatorDef, name: string, instanceId: string): 
       // pivots d'arrivée sont distants de ≤ 3 barres). Sans ce filtre, la ligne
       // s'affiche deux fois et consomme 2 des 3 lignes du budget.
       const vus = new Set<string>();
-      const ajouter = (info: string) => {
-        if (vus.has(info) || values.length >= 3) return;
+      const ajouter = (info: string, max = 3) => {
+        if (vus.has(info) || values.length >= max) return;
         vus.add(info);
         values.push({ title: "", value: info });
       };
-      const pousser = (a: number, info: string | undefined) => {
-        if (info !== undefined && Math.abs(a - idx) <= 3) ajouter(info);
-      };
-      for (const s of annotations.segments ?? []) pousser(s.aIdx, s.info);
-      for (const m of annotations.marqueurs ?? []) pousser(m.idx, m.info);
       // Rubans couvrant la bougie (zones d'AXIS S/R, prime spot/perp), rangés par distance verticale
       // de leur bande, à CETTE bougie, au crosshair : la bande survolée d'abord. Le `y` du crosshair
       // est relatif au pane survolé (bundle 9.8.12, `_makeWidgetEvent`) : sur un autre pane, ou
@@ -417,6 +413,13 @@ function ensureRegistered(def: IndicatorDef, name: string, instanceId: string): 
         couvrants.push({ info: r.info, distance });
       }
       couvrants.sort((a, b) => a.distance - b.distance);
+      // Bande sous le crosshair (distance 0, ordonnée connue) : sa ligne est réservée.
+      const max = yCrosshair !== undefined && couvrants[0]?.distance === 0 ? 2 : 3;
+      const pousser = (a: number, info: string | undefined) => {
+        if (info !== undefined && Math.abs(a - idx) <= 3) ajouter(info, max);
+      };
+      for (const s of annotations.segments ?? []) pousser(s.aIdx, s.info);
+      for (const m of annotations.marqueurs ?? []) pousser(m.idx, m.info);
       for (const { info } of couvrants) ajouter(info);
       return values.length > 0 ? ({ values } as IndicatorTooltipData) : vide;
     },

@@ -69,7 +69,7 @@ d'historique (demande du 26 septembre 2026) »). Voir la
 - **Daemon** `axiomd` : proxy+cache SQLite, KV/snapshots, candles, alertes (macOS + Telegram), replay dumps Binance, couches GDELT/UCDP, LIQHL Hyperliquid paresseux, collecteur whales (blocs confirmés blockchain.info + Etherscan stables, table `whale_moves`, rétention 30 j). Bind `127.0.0.1:8787`, whitelist `/extapi`, garde Host/Origin/DNS-rebinding.
 - **Vercel** : front + proxy serverless sans secret partagé, whitelist/MIME/DNS durcis ; depuis le 2026-09-25, fonction `api/hlpool.ts` sans secret (pool réduit LIQHL, CDN 6 h). Les clés personnelles restent dans le navigateur. **Exception ACTÉE le 2026-09-14** (demande utilisateur, test communautaire) : une seule variable serveur, `BGEOMETRICS_API_KEY`, portée par `api/proxy.ts` vers bitcoin-data.com quand le client n'envoie aucune clé — clé gratuite et révocable, plafonds de l'offre gratuite (10 req/heure et 15 req/jour) partagés par les visiteurs, jamais exposée au navigateur ; toute autre clé reste personnelle (test structurel `apps/daemon/src/vercelProxy.test.ts`). Toute fonction strictement locale est marquée `UNUSABLE`, toute fenêtre partielle `PARTIAL` ; jamais de pane muet. La clé CryptoQuant (2026-09-16) relève de cette règle : personnelle, saisie dans les Réglages, repli `.env` pour le proxy Vite et le daemon `127.0.0.1` uniquement, JAMAIS de variable serveur sur Vercel (le test structurel continue d'exiger exactement une lecture d'environnement).
 - **Paper trading** (`PAPER`) : moteur de simulation locale présent, hors gate G100.
-- **Gate G100** : code-complete, e2e partiellement automatisés, **verdict manuel ouvert** (voir `docs/superpowers/plans/2026-07-22-gate-g100-qa.md` et plan d'action 2026-08-24). **Aucune nouvelle fenêtre ni fonctionnalité de surface avant le verdict** — des exceptions ACTÉES : le 2026-08-25 (fenêtre WHALES + alerte `whale-flux`, demande utilisateur explicite), le 2026-09-01 (fenêtre BPL + séries TOTAL/TOTAL2/TOTAL3 chartables, chantier CAP/BPL demandé par l'utilisateur) le 2026-09-02 (lot v2.7 « Décider » : alerte composite, backtest en R, coût d'exécution DOM — aucune fenêtre, aucun fournisseur, aucun indicateur, spec `docs/superpowers/specs/2026-09-02-lot-v27-decider-design.md`) et le 2026-09-04 (catalogue positionnement/orderflow et PLAY-POS, cf. Conventions), et le 2026-09-06 (onglet « Indicateurs » de la fenêtre RATE + trois fournisseurs statistiques publics sans clé — OCDE, Eurostat, ONS — au titre du remplacement des miroirs FRED internationaux démantelés ; spec `docs/superpowers/specs/2026-09-06-indicateurs-macro-mondiaux-design.md`), et le 2026-09-07 (fenêtre BPL : horizon de projection porté à +50 ans et navigation zoom/pan du graphe ; synchronisation des vues de la grille multi-chart — unités de temps, zoom/défilement, réticule — plan `docs/superpowers/plans/2026-09-07-synchronisation-multivue.md` ; demandes utilisateur explicites — aucune fenêtre, aucun fournisseur, aucun indicateur nouveau), et le 2026-09-14 (fenêtre BT : section « Tenue par moitié » — découpage walk-forward de lecture du run exécuté, `partagerResultatMoities` dans `@axiom/backtest`, frontière tracée sur l'équité ; excursions MAE/MFE par trade calculées par le moteur sur les barres détenues, colonnes de la table et moyennes de la grille ; demande utilisateur « nouvelle fonction pertinente » — aucune fenêtre, aucun fournisseur, aucun indicateur nouveau ; puis, le même jour, lot ON-CHAIN sur demande utilisateur « nouvelle fonction pertinente on-chain » + « Go » : sections « Mineurs » (Hash Ribbons SMA 30/60 j, hashprice) et « Activité DEX » (volume DEX 24 h, part du volume total) et tuile « Thermocap multiple » dans la fenêtre CHAIN, alerte globale `onchain-seuil` front-only sur six métriques quotidiennes — aucune fenêtre, aucun fournisseur (hôtes déjà autorisés : mempool.space, blockchain.info, Coin Metrics community, DefiLlama, CoinGecko), aucun indicateur graphique nouveau ; enfin, le même jour, chantier « indicateurs gratuits vérifiés » sur « Go pour tous les lots » du propriétaire après recherche sondée — cf. section « Chantier autorisé le 14 septembre 2026 » — aucune fenêtre, aucun fournisseur, aucun hôte, aucun indicateur graphique nouveau), et le 2026-09-16 (fournisseur CryptoQuant BASIC à clé personnelle sur décision du propriétaire : section repliable « Flux takers toutes places » dans DES et sous-section « Production des mineurs cotés » dans la section Mineurs de CHAIN — aucune fenêtre, aucun indicateur graphique, aucune dépendance, aucun hôte `/extapi` ; route dédiée `/cqapi` ; spec `docs/superpowers/specs/2026-09-16-cryptoquant-takers-mineurs-design.md`), et le 2026-09-26 (ratios ÷ marchés et devises, cf. section dédiée), et le 2026-11-07 (chantier « outils d'analyse et sources » sur « Go pour tes suggestions » du propriétaire : surfaces nouvelles dans des fenêtres existantes — graphe, EQS, DIST, BRIEF, CAP, CORR, OMON, CYCLE —, indicateur `primeVol`, identifiant aux `dvol`, fournisseur Wikimedia en appel direct ; aucune fenêtre nouvelle ; cf. section « Outils d'analyse et sources (autorisation du 7 novembre 2026) ») ; le gel reste la règle pour toute autre surface.
+- **Gate G100** : code-complete, e2e partiellement automatisés, **verdict manuel ouvert** (voir `docs/superpowers/plans/2026-07-22-gate-g100-qa.md` et plan d'action 2026-08-24). **Aucune nouvelle fenêtre ni fonctionnalité de surface avant le verdict** — des exceptions ACTÉES : le 2026-08-25 (fenêtre WHALES + alerte `whale-flux`, demande utilisateur explicite), le 2026-09-01 (fenêtre BPL + séries TOTAL/TOTAL2/TOTAL3 chartables, chantier CAP/BPL demandé par l'utilisateur) le 2026-09-02 (lot v2.7 « Décider » : alerte composite, backtest en R, coût d'exécution DOM — aucune fenêtre, aucun fournisseur, aucun indicateur, spec `docs/superpowers/specs/2026-09-02-lot-v27-decider-design.md`) et le 2026-09-04 (catalogue positionnement/orderflow et PLAY-POS, cf. Conventions), et le 2026-09-06 (onglet « Indicateurs » de la fenêtre RATE + trois fournisseurs statistiques publics sans clé — OCDE, Eurostat, ONS — au titre du remplacement des miroirs FRED internationaux démantelés ; spec `docs/superpowers/specs/2026-09-06-indicateurs-macro-mondiaux-design.md`), et le 2026-09-07 (fenêtre BPL : horizon de projection porté à +50 ans et navigation zoom/pan du graphe ; synchronisation des vues de la grille multi-chart — unités de temps, zoom/défilement, réticule — plan `docs/superpowers/plans/2026-09-07-synchronisation-multivue.md` ; demandes utilisateur explicites — aucune fenêtre, aucun fournisseur, aucun indicateur nouveau), et le 2026-09-14 (fenêtre BT : section « Tenue par moitié » — découpage walk-forward de lecture du run exécuté, `partagerResultatMoities` dans `@axiom/backtest`, frontière tracée sur l'équité ; excursions MAE/MFE par trade calculées par le moteur sur les barres détenues, colonnes de la table et moyennes de la grille ; demande utilisateur « nouvelle fonction pertinente » — aucune fenêtre, aucun fournisseur, aucun indicateur nouveau ; puis, le même jour, lot ON-CHAIN sur demande utilisateur « nouvelle fonction pertinente on-chain » + « Go » : sections « Mineurs » (Hash Ribbons SMA 30/60 j, hashprice) et « Activité DEX » (volume DEX 24 h, part du volume total) et tuile « Thermocap multiple » dans la fenêtre CHAIN, alerte globale `onchain-seuil` front-only sur six métriques quotidiennes — aucune fenêtre, aucun fournisseur (hôtes déjà autorisés : mempool.space, blockchain.info, Coin Metrics community, DefiLlama, CoinGecko), aucun indicateur graphique nouveau ; enfin, le même jour, chantier « indicateurs gratuits vérifiés » sur « Go pour tous les lots » du propriétaire après recherche sondée — cf. section « Chantier autorisé le 14 septembre 2026 » — aucune fenêtre, aucun fournisseur, aucun hôte, aucun indicateur graphique nouveau), et le 2026-09-16 (fournisseur CryptoQuant BASIC à clé personnelle sur décision du propriétaire : section repliable « Flux takers toutes places » dans DES et sous-section « Production des mineurs cotés » dans la section Mineurs de CHAIN — aucune fenêtre, aucun indicateur graphique, aucune dépendance, aucun hôte `/extapi` ; route dédiée `/cqapi` ; spec `docs/superpowers/specs/2026-09-16-cryptoquant-takers-mineurs-design.md`), et le 2026-09-26 (ratios ÷ marchés et devises, cf. section dédiée), et le 2026-11-07 (chantier « outils d'analyse et sources » sur « Go pour tes suggestions » du propriétaire : surfaces nouvelles dans des fenêtres existantes — graphe, EQS, DIST, BRIEF, CAP, CORR, OMON, CYCLE —, indicateur `primeVol`, identifiant aux `dvol`, fournisseur Wikimedia en appel direct ; aucune fenêtre nouvelle ; cf. section « Outils d'analyse et sources (autorisation du 7 novembre 2026) »), et le 2026-11-11 (chantier « AXIS lisible, honnête et annonciateur » sur « poursuis l'amélioration d'AXIS » : affichages ajoutés dans des surfaces existantes — seconde ligne au bord droit et pré-signal d'AXIS S/R, « inactives » au bandeau de session et ligne « alertes » du registre santé — ; aucune fenêtre, aucun fournisseur, aucun indicateur, aucune dépendance, aucun type nouveau ; cf. section « AXIS — lisible, honnête et annonciateur (demande du 11 novembre 2026) ») ; le gel reste la règle pour toute autre surface.
 
 ## Jalons historiques (atteints — ne pas rejouer, ne pas prendre comme périmètre actuel)
 - **M1 — Chart live** (`apps/web`) : Vite+React+TS+Tailwind ; client WS Binance + backfill REST ; rendu KLineChart live ; sélecteur symbole + timeframe ; crosshair. Store marché vanilla. **Atteint.**
@@ -2485,7 +2485,9 @@ apparaître suffisamment tôt, que je puisse voir quelle zone marque une forte r
 support ». Parmi les définitions, seule **AXIS S/R** (`stratAxisSr`) change : ses zones sont
 classées par force, et un triangle creux marque la bougie qui réagit sur une zone forte.
 **Aucun fournisseur, hôte, indicateur, fenêtre ni dépendance nouvelle ; `stratAxis.ts` (AXIS)
-n'est pas modifié.** Pour une même série, une même référence et les mêmes réglages, les séries
+n'est pas modifié.** (Vrai le 9 novembre. Depuis le 11 novembre 2026, `stratAxis.ts` porte le
+rendu partagé et le début de l'infobulle des signaux change : voir « AXIS — lisible, honnête et
+annonciateur ».) Pour une même série, une même référence et les mêmes réglages, les séries
 existantes d'AXIS S/R (`etat`, `score`, `prixSignal`, `stop`, `support`, `resistance`), ses
 signaux confirmés et ses forts mouvements, marqueurs et étiquettes compris, sont inchangés au
 caractère près. Spec : `docs/superpowers/specs/2026-11-09-axis-sr-zones-fortes-design.md`, avec
@@ -2527,7 +2529,10 @@ la référence visuelle « vue C » approuvée par le propriétaire ; plan :
     médiane pointillée disparaît. `maxZonesSr` = 0 : aucune zone tracée, ni forte, ni faible, ni
     cassée ; les triangles creux et les sorties restent.
   - Infobulle d'une zone : « forte » ou « faible », rôle, bornes, niveau, écart au cours,
-    touches, rejets, inversion, puis « touches comptées sur N bougies ». L'infobulle du graphe a
+    touches, rejets, inversion, puis « touches comptées sur N bougies ». (Réécrite le
+    11 novembre 2026 : rôle, force, touches et écart au bord en tête, puis l'âge du dernier
+    pivot et de la dernière réaction ; voir « AXIS — lisible, honnête et annonciateur ».)
+    L'infobulle du graphe a
     3 lignes au plus : après les marqueurs à 3 bougies ou moins du réticule viennent les zones
     dont la bande couvre la bougie survolée, rangées par distance verticale de leur bande au
     réticule (`chart/indicators.ts`, `createTooltipDataSource`) : la bande sous le réticule
@@ -2535,7 +2540,9 @@ la référence visuelle « vue C » approuvée par le propriétaire ; plan :
     fortes par proximité au cours de la dernière bougie décidée, puis les faibles. Sur le cas de
     référence, aux réglages par défaut, chacune des 12 zones actives tracées a sa ligne, en tête
     des lignes de zone, le réticule au milieu de sa bande, sauf quand trois marqueurs proches
-    prennent les trois lignes (281 des 11 473 bougies couvertes par les 12 bandes). Avant la
+    prennent les trois lignes (281 des 11 473 bougies couvertes par les 12 bandes). (Exception
+    LEVÉE le 11 novembre 2026 : réticule dans une bande, une ligne lui est réservée ; il ne
+    reste aucune de ces 281 bougies.) Avant la
     revue finale, les rubans suivaient l'ordre du tracé seul, et 6 de ces 12 zones, dont les
     4 faibles, n'avaient de ligne à aucune bougie. Ce tri vit dans le pont commun à tous les
     indicateurs, hors de la liste de fichiers du plan ; la seule autre définition à rubans
@@ -2602,7 +2609,9 @@ la référence visuelle « vue C » approuvée par le propriétaire ; plan :
     peut n'apparaître qu'une bougie plus loin, celle d'un ↺ jusqu'à trois (cas de référence, case
     « Détecter les retournements » cochée). Les lignes de zone passent après tous les marqueurs :
     quand trois marqueurs sont à 3 bougies ou moins du réticule, aucune zone n'y a de ligne, même
-    réticule sur sa bande (voir l'infobulle d'une zone, plus haut).
+    réticule sur sa bande (voir l'infobulle d'une zone, plus haut). (Limite LEVÉE le 11 novembre
+    2026 pour la bande sous le réticule, qui a sa ligne réservée ; son revers : le troisième
+    marqueur perd alors la sienne. Voir « AXIS — lisible, honnête et annonciateur ».)
   - L'infobulle ne revient pas à la ligne : une ligne plus large que le graphe est coupée à son
     bord. Au bureau, la mention d'un triangle creux, en tête, reste entière ; la fin de sa ligne
     (ce que la bougie a fait) peut manquer, par exemple en 1 440 px panneau de droite ouvert. Au
@@ -2610,7 +2619,10 @@ la référence visuelle « vue C » approuvée par le propriétaire ; plan :
     triangle creux, et la première ligne de toute infobulle d'indicateur passe sous le bandeau du
     symbole (`candle.tooltip.offsetTop` de 36 px dans `chart/ChartInstance.tsx`, calé sur le
     bandeau du bureau ; défaut antérieur, hors des fichiers de ce chantier) : la ligne d'un
-    triangle creux, le plus souvent la première, n'y est alors pas lisible.
+    triangle creux, le plus souvent la première, n'y est alors pas lisible. (Limite LEVÉE au
+    téléphone le 11 novembre 2026 : l'infobulle y commence sous le bas réel de l'en-tête. La
+    coupure vers le 55e caractère reste, et le bureau garde ses 36 px. Voir « AXIS — lisible,
+    honnête et annonciateur ».)
 - **« Non mesuré ».** Les signaux précoces n'ont été soumis à aucun test sur données jamais vues.
   Une mesure rapide hors protocole, sur BTC seul et sans valeur probante (conception, §9), ne
   leur trouve aucun avantage ; aucun de ses chiffres ne paraît dans l'interface. Chaque triangle
@@ -2642,7 +2654,8 @@ la référence visuelle « vue C » approuvée par le propriétaire ; plan :
     « résistance » de la mesure rapide, documentation. Une seule reste ouverte : au téléphone,
     la première ligne de toute infobulle du graphe passe sous le bandeau du symbole (défaut
     antérieur au chantier, voir les limites plus haut). Le propriétaire l'a laissée en limite
-    connue en décidant la fusion le 10 novembre 2026.
+    connue en décidant la fusion le 10 novembre 2026. (Remarque LEVÉE au téléphone le
+    11 novembre 2026, lot T de « AXIS — lisible, honnête et annonciateur ».)
   - `pnpm check` vert après la vague finale : typage des 7 projets ; indicateurs 229 fichiers /
     1 078 tests, alertes 129, backtest 131, pacte 120, daemon 786, web 430 fichiers / 6 388
     tests.
@@ -2665,3 +2678,266 @@ la référence visuelle « vue C » approuvée par le propriétaire ; plan :
     - application réelle (BTCUSDT 4h) : réticule dans une bande, la première ligne de
       l'infobulle décrit cette zone ; réticule sur un triangle creux, la ligne commence par la
       mention « non mesuré », entière au bureau.
+
+## AXIS — lisible, honnête et annonciateur (demande du 11 novembre 2026)
+
+Demande du propriétaire, transmise par l'orchestrateur du chantier : « poursuis l'amélioration
+d'AXIS ». Elle prolonge celle du 9 novembre (zones classées par force et signal précoce, section
+précédente). Le brief d'intégration rapporte aussi « merge directement les PR et déploie » :
+fusion et déploiement relèvent de l'orchestrateur ; l'intégration décrite ici n'a rien poussé. Une
+cartographie et une critique adverse ont précédé le chantier ; le lot retenu rend AXIS lisible au
+téléphone, où le propriétaire l'utilise souvent, dit ce qui n'est pas mesuré, et annonce l'achat
+quand une seule condition manque. **Aucun fournisseur, hôte, indicateur, fenêtre, dépendance ni
+champ de `@axiom/types` nouveau ; aucune série, aucun signal confirmé, aucune sortie d'alerte ne
+change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde 23 réglages et
+8 sorties, AXIS ses 17 réglages. Trois lots, intégrés dans l'ordre 0, T, I sur la branche
+`feat/axis-lisible` (base `111df0d`), puis des corrections d'intégration.
+
+- **Exceptions au contrat** (actées par la demande, selon le brief de l'orchestrateur).
+  - Affichages ajoutés dans des surfaces existantes, sous le gel G100 : seconde ligne au bord
+    droit du graphe et pré-signal (AXIS S/R) ; « inactives » au bandeau de session, ligne
+    « alertes » du registre santé et section Alertes en erreur (démarrage des alertes) ; attribut
+    `data-chart-entete` sur le bandeau du symbole et l'en-tête d'une vue secondaire.
+  - `stratAxis.ts` est modifié (textes, rendu partagé, exports), alors que la section du
+    9 novembre disait « `stratAxis.ts` n'est pas modifié » et « signaux confirmés … inchangés au
+    caractère près ». Depuis ce chantier, le DÉBUT de l'infobulle d'un signal confirmé d'AXIS et
+    d'AXIS S/R change (statut de mesure après le score) ; sa FIN, qui porte les formulations des
+    campagnes figées, reste au caractère près.
+  - Textes et libellés réécrits : infobulle d'une zone, retournements ↺ (infobulle, étiquette,
+    couleur, libellés de l'éditeur), classement des retournements dans EQS (voir le lot I).
+  - Tests « au caractère près » modifiés à dessein. Par le lot I : tête de l'infobulle des
+    signaux et des zones, infobulle, étiquette et couleur des ↺, libellé et poids EQS. À
+    l'intégration, expliqués dans le message de leur commit : « ↺ » sur chaque marqueur (40
+    étiquettes au lieu de 10), écart à deux décimales sous 0,1 %, texte du pré-signal réordonné.
+- **Lot 0 — alertes chargées après le premier rendu** (constat WEB-3 de la revue du 6 novembre).
+  Fichiers : `apps/web/src/alerts/demarrageDiffere.ts`, `App.tsx`, `chargementInitial.test.ts`,
+  `components/SessionStrip.tsx`, `data/dataCockpit.ts`, `data/dataActions.ts`,
+  `e2e/mobile-alertes-differees.e2e.ts`. `alerts/runtime.ts` n'est pas modifié.
+  - Le runtime des alertes part par `import()` juste après le premier rendu
+    (`demarrerAlertesDifferees`), hors du chargement initial. Il se calibre sur l'état courant à
+    son démarrage, comme avant : définitions et état armé persistés, dernière bougie close,
+    régime, CVD, flux de capitaux, on-chain, funding, cascades de liquidations, amorce des
+    alertes de preset, détection du daemon. Seul cas non rejoué, comme avant : les ticks de prix
+    antérieurs à l'abonnement ; un franchissement « les deux sens » commence donc à être observé
+    un chargement de chunk plus tard.
+  - Quatre entrées nouvelles de `MODULES_DIFFERES` : `alerts/runtime`, `store/presetAlerts`,
+    `store/fluxCapitaux`, `components/liquidationsWindow.util`. Trois modules plus petits sortent
+    aussi du chemin initial sans garde (`store/analyseMultidomaine`, `store/cvd-divergence`,
+    `data/onchain/fluxCapitaux.contract`).
+  - Un échec n'est jamais silencieux : `console.error`, un seul toast « Alertes inactives :
+    module non chargé » (bouton « Recharger » quand le navigateur est en ligne), nouvelle
+    tentative au prochain `online` et au retour de l'onglet. Module chargé mais démarrage en
+    exception : « Alertes inactives : démarrage échoué », sans nouvelle tentative. Au
+    rétablissement : toast « Alertes actives ».
+  - L'état dure plus longtemps que le toast : tant que le runtime n'est pas démarré, le registre
+    santé porte une ligne `alertes` en erreur (seconde ligne qui n'est pas une source de marché,
+    après `axiomd`). Elle alimente la pastille « Santé », la section Santé sources et la fenêtre
+    DATA (libellé « Alertes (ce navigateur) », motif « Aucune alerte n'est évaluée dans ce
+    navigateur. Rechargez l'application. »). Le bandeau de session écrit « ALERTES inactives » à
+    la place du compteur (correction d'intégration : il affichait encore « ALERTES 1 »).
+  - La section Alertes a sa propre `ErrorBoundary` : son chunk dépend de celui du runtime ; s'il
+    manque, elle affiche « Alertes indisponible » et « Recharger l'application », le reste du
+    terminal reste en place (avant : tout le terminal tombait sur « AXIOM indisponible »).
+  - Constat consigné : Chromium mémorise un `import()` échoué pour la vie du document. La
+    nouvelle tentative y échoue sans requête ; le rechargement est le seul remède fiable (même
+    règle que `ErrorBoundary` pour `React.lazy`). Firefox et WebKit non vérifiés.
+- **Lot T — infobulle lisible au téléphone.** Fichiers : `apps/web/src/chart/ChartInstance.tsx`,
+  `chart/indicators.ts`, `components/SymbolBanner.tsx`, `e2e/mobile-axis-sr.e2e.ts`,
+  `e2e/helpers/axis-sr-telephone.ts`.
+  - En mise en page téléphone (frontière de `useMobileLayout`, attribut `data-mobile`), la
+    première rangée de l'infobulle d'indicateur du pane des prix commence 2 px sous le bas RÉEL
+    de l'en-tête du slot (`data-chart-entete`), jamais au-dessus de 36 px : 52 px sous le bandeau
+    du symbole, 54 px sous l'en-tête d'une vue secondaire (Chromium, 390 × 844). Fonction pure
+    `hautInfobullePrix(basReplie, basEntete, hauteurPane)` =
+    max(36 ; bas replié + 2 ; min(bas + 2 ; tiers du pane)). « Détails » fermé, la hauteur du
+    pane ne compte pas. « Détails » ouvert, l'infobulle suit le panneau tant qu'il tient dans le
+    tiers haut du pane (portrait : 137 px pour un panneau à 135 px) et s'arrête à ce tiers
+    au-delà, sans remonter au-dessus de la part repliée du bandeau. Bureau : 36 px, inchangé.
+  - Couplage : `ChartInstance.tsx` lit `#chart-banner-details` de `SymbolBanner.tsx` ; renommer
+    l'identifiant casse le plafond, deux parcours le détectent.
+  - Ligne réservée (`createTooltipDataSource`, pont commun à tous les indicateurs) : réticule
+    DANS la bande d'une zone, une des trois lignes lui est réservée ; segments et marqueurs à
+    3 bougies ou moins n'en prennent alors que deux, ordre inchangé. Sur le cas de référence,
+    réticule au milieu de la bande : il ne reste aucune des 11 473 bougies couvertes sans ligne
+    de zone (281 avant). Rien de réservé hors bande, sur un autre pane, sans ordonnée, ou pour
+    une zone cassée ; une seule ligne si deux bandes se chevauchent. La prime spot/perp, seule
+    autre définition à rubans porteurs d'info, n'est pas changée.
+- **Lot I — AXIS S/R et AXIS : textes, retournements, pré-signal.** Fichiers :
+  `packages/indicators/src/strategy/stratAxis.ts`, `stratAxisSr.ts`,
+  `apps/web/src/data/signaux.ts`, `components/InstanceParamsEditor.tsx`.
+  - **Infobulle d'une zone.** L'essentiel tient en tête, 55 caractères au plus sur les 12 zones
+    du cas de référence : rôle, forte ou faible, touches, écart du cours au BORD de la zone
+    (« AXIS support fort · 5 touches · bord à -1.3 % », ou « dans la zone »). Suivent les bornes,
+    le niveau et son écart, les rejets, l'inversion, la profondeur, puis « dernier pivot confirmé
+    (ou inversion) il y a N bougies » et, pour une zone forte, « dernière réaction il y a
+    M bougies » ou « aucune réaction ». Des décomptes, aucun taux de réussite.
+  - **Seconde ligne au bord droit.** Sous l'étiquette du support fort et de la résistance forte
+    les plus proches par leur bord (`fortesProchesAxis`), l'écart en % de la dernière clôture
+    DÉCIDÉE à ce bord, ou « dans la zone » : cas de référence, « -1.3 % » et « +10.0 % »,
+    14 étiquettes au bord droit au lieu de 12, plus une « pré-signal » quand il est actif. Une
+    décimale ; deux sous 0,1 % (« +0.04 % »), pour ne pas écrire un écart nul hors de la zone
+    (correction d'intégration). La bougie en formation n'est pas lue.
+  - **Signaux confirmés** d'AXIS et d'AXIS S/R : un statut court suit le score (`statutAxis`) :
+    « test 4h ≈ EMA 200 seule » en 4h ou sans unité ; « 1h : test échoué », « 1w : non mesuré »
+    ailleurs ; « filtre flux, non mesuré » ; « réglage non validé » quand le stop, le filtre ADX,
+    un régime hors de 0 et de 100 ou la marge S/R sont actifs. Il abrège la réserve de fin
+    d'infobulle sans jamais dire mieux qu'elle. « réussi » n'y figure pas : avec « — score »,
+    que `indicators.axisStop.test.ts` épingle, la plus longue tête (« AXIS vente forte — score
+    -4/6 · test 4h ≈ EMA 200 seule ») fait déjà 55 caractères ; « test réussi » reste écrit en
+    entier à la fin.
+  - **Retournements ↺** (constat IND-1 de la revue du 6 novembre : jamais mesurés, seuils fixés
+    à la main, score qui n'est pas une probabilité). Marqueurs et étiquettes gris (`--text-dim`) ;
+    infobulle ouverte par la réserve des signaux précoces (« AXIS ↺ signal précoce non mesuré —
+    lecture indicative, jamais une promesse — … ») ; score écrit « 80/100 », jamais « 80 % » ;
+    chaque marqueur porte au moins « ↺ », les dix plus récents ajoutent sens et score
+    (correction d'intégration : le gris ne les sépare pas des signaux confirmés dans les thèmes
+    Matrix et Bloomberg) ; prix par l'aide commune (lisibles sous un centime). Éditeur :
+    « Détecter les retournements ↺ (non mesurés) », « Confiance min. retournement (40–100
+    /100) ». EQS : fiabilité « heuristique » et poids 1 quel que soit le score (avant : « fiable »
+    et poids 3 dès 75), libellé « AXIS ↺ Achat (80/100) », prix à quatre chiffres significatifs
+    sous 100 (avant : poids 2 sous 75, « 80% », quatre décimales). La détection ne change pas
+    (403 retournements sur le cas de référence).
+  - **Pré-signal** d'AXIS S/R, sous le réglage `signauxPrecoces` (`preSignalAxisSr`, pure, par
+    bougie). À la dernière bougie décidée, à plat, hors bougie d'une sortie par stop : tout est
+    réuni pour acheter SAUF la clôture au-dessus de l'EMA de tendance. Rendu : un segment
+    pointillé gris de 6 bougies au niveau de cette EMA, terminé sur la dernière bougie, et
+    l'étiquette « pré-signal » au bord droit. Infobulle : « AXIS S/R · pré-signal non mesuré —
+    achat si > X à la clôture et si le score et les filtres tiennent » (« … si le score tient »
+    quand aucun filtre n'est lu). L'EMA étant récursive, la bougie suivante clôture au-dessus de
+    son EMA si et seulement si elle clôture au-dessus de X : le cas est exact, mais conditionnel
+    et **non mesuré**. Sur le cas de référence (données déjà vues, sans valeur probante) :
+    63 bougies en pré-signal sur 3 000, en 18 épisodes ; niveau franchi 5 fois à la bougie
+    suivante ; 4 achats, soit 4 des 17 achats du cas annoncés d'une bougie. Aucune série, aucune
+    alerte, aucun marqueur n'en dépend.
+  - **Une seule copie du rendu.** `signauxAxis` et `retournementsAxis`, exportés par
+    `stratAxis.ts`, sont appelés par les deux `calc` ; `RESERVE_PRECOCE` y est déplacée.
+- **Limites du 9 novembre levées** (annotées sur place dans la section précédente).
+  - Au téléphone, la première ligne de l'infobulle ne passe plus sous le bandeau du symbole.
+  - Réticule dans une bande, la zone a toujours sa ligne, même près de trois marqueurs.
+  - Le libellé d'une zone ne commence plus par ce qui se lit déjà sur le graphe : ses
+    55 premiers caractères disent le rôle, la force, les touches et l'écart.
+- **Limites qui restent.**
+  - L'infobulle ne revient pas à la ligne. Au téléphone (390 px), une ligne est coupée vers le
+    55e caractère (57 à 59 mesurés sur les captures d'intégration) : tête d'une zone, statut
+    d'un signal, « non mesuré » d'un triangle creux ou d'un ↺, niveau du pré-signal y tiennent ;
+    le détail qui suit n'est lisible qu'au bureau.
+  - L'infobulle est dessinée sur le graphe, sans fond. Ses trois rangées recouvrent ce qui se
+    trouve dans les 50 px sous l'en-tête : repère du plus haut, bord ou bande d'une zone,
+    étiquette de zone ou de signal. Sur les captures d'intégration au téléphone, le repère du
+    plus haut recouvre quelques caractères de la deuxième rangée, et une étiquette « faible »
+    ou « R forte · n » la fin de la deuxième ou de la troisième. Au bureau, une étiquette
+    « R forte · n » et sa seconde ligne placées en haut de la fenêtre de prix recouvrent la fin
+    des deux premières rangées.
+  - Bureau : l'infobulle reste à 36 px alors que le bandeau descend à 44 px (64 px en vue
+    étroite, mesures du lot T) ; la première rangée, celle du pré-signal ou d'un signal, est
+    entamée par le bas du bandeau (vu sur les captures d'intégration en 1 440 × 900). Défaut
+    antérieur, laissé à l'arbitrage du propriétaire.
+  - « Détails » ouvert sur un pane court (paysage avec un pane d'indicateur : pane de 118 px,
+    panneau de 53 à 111 px), les trois lignes passent derrière le panneau ; le refermer suffit.
+    « Détails » ouvert, l'ordonnée n'est relue qu'au redimensionnement du conteneur ou de
+    l'en-tête, pas à l'ajout d'un pane (mesuré à la revue : 73 px gardés là où la formule donne
+    55, les deux derrière le panneau).
+  - Ligne réservée : réticule dans une bande et trois marqueurs proches, le troisième dans
+    l'ordre du tableau (signaux confirmés, triangles creux, forts mouvements, ↺) perd sa ligne à
+    cette bougie. Exemple : bougie 2 988 du cas de référence, où la ligne « AXIS forte vente —
+    … » laisse la place à la zone ; elle reparaît dès que le réticule sort de la bande.
+  - Écart au bord droit : celui de la dernière clôture décidée, donc vieux d'une bougie entière
+    au plus pendant l'approche ; une zone hors de la fenêtre de prix n'a pas d'étiquette visible
+    (au téléphone, cas de référence : « R forte · 12 » est hors fenêtre) ; sous 0,005 %, l'écart
+    s'écrit « +0.00 % ». Une étiquette de signal proche de la dernière bougie peut recouvrir les
+    étiquettes du bord droit.
+  - Pré-signal : segment et étiquette ne se voient que si le niveau est dans la fenêtre de prix,
+    et passent sous le bandeau quand il est tout en haut (bougie 2 288 du cas de référence) ;
+    l'infobulle, elle, donne alors le niveau. Il ne lit que la dernière bougie décidée, n'a ni
+    alerte ni sortie, et son réglage garde le libellé « Signaux précoces sur zone forte (non
+    mesurés) » bien qu'il le gouverne aussi.
+  - `statutAxis`, comme la fin de l'infobulle, ne lit ni les réglages du cœur (seuils, EMA de
+    tendance, Supertrend) ni ceux de la couche flux : « test 4h ≈ EMA 200 seule » s'affiche
+    encore avec une EMA de tendance de 50.
+  - Retournements ↺ : `--text-dim` reste proche de `--down` en thème Matrix et de `--up` en
+    thème Bloomberg ; c'est le signe « ↺ » qui les distingue. Les étiquettes de retournements
+    voisins se chevauchent quand ils sont denses. Sur le graphe, leurs prix gardent deux
+    décimales entre 1 et 100, là où EQS en écrit quatre chiffres significatifs.
+  - Alertes : au téléphone, l'avis est éphémère (6 s avec le bouton, 2,5 s sans) et recouvre la
+    barre de navigation basse pendant son affichage ; l'état durable est « inactives » au
+    bandeau, puis, dans le tiroir Panneaux, la section Alertes en erreur et la ligne « alertes »
+    de Santé sources (repliée par défaut). La pastille « Santé » ne distingue pas cette panne
+    d'une autre source en erreur. Dans Chromium la ligne dure jusqu'au rechargement. Si un autre
+    moteur relance la requête et réussit, la section Alertes déjà tombée reste en erreur jusqu'au
+    rechargement alors que les alertes sont actives.
+  - Relevé à l'intégration, antérieur au chantier (reproduit sur `111df0d`) : quand les bougies
+    arrivent dans l'instant qui suit le montage (réponses immédiates d'un réseau bouchonné), une
+    course du moteur du graphe peut figer le canvas du pane des prix jusqu'au prochain
+    redimensionnement. KLineChart 9.8.12 abandonne la remise à l'échelle d'un canvas quand une
+    peinture est déjà en attente (`Canvas._executeListener`). Mesuré sous Chromium : en mise en
+    page téléphone, où la première passe redimensionne les axes, à chaque essai quand les
+    réponses sont immédiates (six sur six, dont trois sur `111df0d`) et jamais avec 150 ms de
+    latence par réponse ; au bureau, une fois, sur quatre essais d'une série tronquée avec
+    cette latence. Non corrigé dans ce chantier.
+- **Choix de l'orchestrateur, à confirmer par le propriétaire.**
+  - Écart aux zones en % du cours plutôt qu'en ATR.
+  - Retournements ↺ classés « heuristique » de poids 1 dans EQS : l'ordre de la boîte de signaux
+    change.
+  - Pré-signal affiché par défaut, sous le réglage des signaux précoces, sans réglage ni
+    libellé propre.
+  - Runtime des alertes chargé après le premier rendu : la réserve de budget est comptable,
+    voir le budget.
+  - Tête d'un signal confirmé sans le mot « réussi ».
+  - Choix d'intégration : « ↺ » sur chaque marqueur de retournement ; « inactives » à la place
+    du compteur du bandeau ; niveau du pré-signal placé avant « à la clôture ».
+- **Budget.** Chargement initial, octets bruts / gzip, par `scripts/verifier-budget-build.mjs`
+  (Node 22.23.4, zlib 1.3.1), plafonds 1 220 000 / 360 000 inchangés.
+  - Avant, sur `111df0d` : **1 192 298 / 358 337**, marge gzip 1 663.
+  - Après intégration : **1 170 895 / 351 030**, soit −21 403 / −7 307 ; marge gzip **8 970**,
+    au-dessus des 3 000 exigés.
+  - Chaque lot mesuré seul contre `111df0d` : lot 0, −21 733 / −7 746 ; lot T, +823 / +265 ;
+    lot I, −748 / +145 (la factorisation du rendu rend 2 498 / 498).
+  - La réserve est comptable. Le runtime des alertes et cinq chunks partagés partent en
+    six requêtes juste après le premier rendu : 24 309 / 10 145. Avant que les alertes tournent,
+    le navigateur a donc reçu 1 195 204 / 361 175, soit +2 906 / +2 838 par rapport à
+    `111df0d` : le chemin gardé par le plafond s'allège, pas le démarrage au téléphone.
+  - Fichiers à la demande : 141 (135 avant), 1 724 944 / 635 295.
+- **Revue et tests.**
+  - Chaque lot a été revu par un agent indépendant du développeur, avec un tour de corrections
+    pour les lots 0 et T ; aucun constat bloquant ni majeur ne restait à l'intégration. Les
+    mineurs restants ont été corrigés à l'intégration, ou consignés dans les limites ci-dessus.
+  - Interactions vérifiées à l'intégration sur le vrai graphe (Chromium, 390 × 844 et
+    1 440 × 900, réseau bouchonné, cas de référence BTCUSDT 4h) : la tête d'une zone, le statut
+    d'un signal et la réserve d'un ↺ tiennent dans la partie visible d'une ligne au téléphone ;
+    le niveau du pré-signal n'y tenait pas (« … achat à la clôture si > 9 »), le texte a été
+    réordonné ; les étiquettes du bord droit, seconde ligne et « pré-signal » compris, tiennent
+    dans la marge droite et s'écartent de 11 px (largeur mesurée : 50 px au plus pour 76 px).
+  - Tests ajoutés : chargeur des alertes (18 tests : double montage, échec, nouvelle tentative,
+    ligne santé, arrêt) ; ordonnée de l'infobulle (11) ; ligne réservée et cas de référence
+    (`indicators.tooltip.test.ts`) ; pré-signal (11 : règle exacte, causalité par préfixe et
+    futur altéré, rendu, réglages) ; têtes de 55 caractères ; bougie en formation à 90 000
+    (tête, écart et âges des 12 infobulles inchangés, contre-épreuves faites) ; écart proche du
+    bord ; « inactives » au bandeau ; prix EQS entre 1 et 100.
+  - Parcours téléphone ajoutés au gate `scripts/ci.sh --mobile` : `mobile-alertes-differees`
+    (4) et `mobile-axis-sr` (3, délai de 120 s par test). Prouvés sur Chromium téléphone ;
+    WebKit n'est pas installé dans le conteneur d'intégration et ne tourne qu'en CI.
+  - Vérification de l'intégration (11 novembre 2026, Node 22.23.4, sur `fb33d59`, dernier
+    commit de code) :
+    - typage des 7 projets ; indicateurs 232 fichiers / 1 143 tests, alertes 130, backtest 131,
+      pacte 120, daemon 786, web 471 fichiers / 6 937 tests. La suite web est lancée sans
+      `chart/orderflow.cadence.test.ts`, qui ouvre une WebSocket réelle et lève une erreur non
+      gérée dans un conteneur sans réseau (antérieur au chantier, hors périmètre) ;
+    - build du web et budget verts (chiffres ci-dessus) ;
+    - parcours hermétiques des zones touchées, 43 sur 43 : `quatre-lots-indicateurs`,
+      `quatre-lots-alertes`, `gate-g4-alertes`, `multivue`, `niveaux-chart`,
+      `revue-outils-avances`, `gate-g6-screener.hermetique`, `gate-g8-session`,
+      `quatre-lots-decisions`, `analyse-expy`, `onchain-complements` ;
+    - parcours téléphone sur Chromium, 29 sur 29 ;
+    - non lancés ici : `pnpm check:e2e` complet, WebKit, Vercel et daemon réels.
+  - Hors chantier, corrigé au passage : le test « appelle l'endpoint public sans clé… » de
+    `data/onchain/tresoreriesBtc.test.ts` échouait par intermittence (deux lectures de
+    l'horloge à 1 ms d'écart) ; son horloge est figée, le code n'est pas modifié.
+- **Reporté.**
+  - Mention « réglages hors test » quand les réglages du cœur ou de la couche flux s'écartent
+    de ceux des campagnes.
+  - Retour à la ligne de l'infobulle (ou fond sous ses rangées), et son ordonnée au bureau.
+  - Lot alertes : alerte sur le pré-signal ou sur l'approche d'une zone forte, réglages de
+    l'instance lus par les alertes, libellés des sorties dans le formulaire.
+  - Amorce du backtest (BT-1).
+  - Test prospectif du signal précoce, du pré-signal et des retournements : aucun n'a été
+    soumis à des données jamais vues.

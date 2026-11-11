@@ -3022,10 +3022,14 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
     Chromium et WebKit) n'y ont pas tourné : l'installation des navigateurs expirait sur une
     panne du miroir `apt` du runner, quatre fois de suite, sur la branche puis sur `main`.
     Fusion faite sur demande explicite du propriétaire (« déploie sur Vercel et Merge sur
-    main »). **WebKit n'a exécuté aucun des 7 nouveaux parcours téléphone** ; tout échec à
-    leur premier passage est un constat neuf. Premier point à surveiller, relevé à la lecture :
-    `mobile-axis-sr.e2e.ts:138` (aucun pane sous le réticule au repos ; WebKit n'écarte les
-    évènements souris de compatibilité que 500 ms après un toucher sur le graphe).
+    main »). À cette fusion, WebKit n'avait exécuté aucun des 7 nouveaux parcours téléphone.
+    Miroir rétabli le soir même : jobs relancés à 22 h 36 UTC, et l'exécution de `main` sur
+    `bb2f77c` (n° 118, troisième tentative) est verte en entier, parcours e2e bureau et
+    téléphone compris, sur Chromium et sur WebKit. **Les 7 nouveaux parcours téléphone ont
+    passé leur premier passage sur WebKit, sans constat** ; le point relevé à la lecture
+    (`mobile-axis-sr.e2e.ts:138`, aucun pane sous le réticule au repos) ne s'est pas produit.
+    Ces parcours sont hermétiques : ils ne disent rien d'un vrai téléphone, de sa police ni
+    de son réseau.
   - **Pull request n° 11** (corrections ci-dessus). Revue par un agent indépendant, verdict
     « corrections » : code des corrections des alertes et du test sans constat (onze mutants
     tués, six scénarios de plus, vrai navigateur) ; deux majeurs — l'ordre du texte du
@@ -3034,9 +3038,10 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
     « Rechargez » de la fenêtre DATA pendant un chargement en cours. Tous corrigés dans la même
     pull request, sauf la CI. Contre-revue des corrections : majeur du texte levé, mesure à
     l'appui ; trois mineurs de documentation (borne du niveau, exemple du niveau rogné, ce
-    résumé), corrigés. À sa rédaction, sa CI tombe sur la même
-    panne du runner (typage, tests et build verts, parcours e2e sautés) ; elle n'est fusionnée
-    qu'une fois ses parcours e2e passés en CI, sauf demande contraire du propriétaire.
+    résumé), corrigés. Sa CI est d'abord tombée sur la même panne du runner (typage, tests et
+    build verts, parcours e2e sautés) ; elle n'a pas été fusionnée dans cet état. Relancée à
+    22 h 36 UTC, miroir rétabli : typage, tests, build et budget, parcours e2e bureau et
+    téléphone (Chromium et WebKit) verts sur `e957226`.
 - **Reporté.**
   - Mention « réglages hors test » quand les réglages du cœur ou de la couche flux s'écartent
     de ceux des campagnes.

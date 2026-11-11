@@ -10,7 +10,9 @@
  * `stratAxis` (« AXIS ») reste la stratégie originale sans zones S/R, figée sur
  * les campagnes de validation ; `stratAxisSr` (« AXIS S/R ») en partage tous
  * les cœurs purs (`votesAxis`, `fluxAxis`, `forceFlux`, `grosMouvementsAxis`,
- * `positionsStopAxis`, `emaDepuisPremiereDefinie`, `textesAxis`) et y ajoute :
+ * `positionsStopAxis`, `emaDepuisPremiereDefinie`, `textesAxis`) et, depuis le
+ * 11 novembre 2026, le rendu des signaux confirmés et des retournements ↺
+ * (`signauxAxis`, `retournementsAxis` : une seule copie), et y ajoute :
  *   1. la confirmation causale de pivots de swing (`pivotSr` bougies de chaque
  *      côté, défaut 5 : un pivot en p = i − g n'est connu qu'à la clôture i,
  *      zéro repaint), agrégés en zones d'épaisseur adaptative
@@ -22,7 +24,10 @@
  *      touches + rejets sur volume fort), support en `--up`, résistance en
  *      `--down` : toutes les zones fortes actives en bande pleine, d'autant plus
  *      opaque qu'elle est forte, bords en trait plein, étiquette « S fort · n » /
- *      « R forte · n » au bord droit ; les `maxZonesSr` (défaut 4) zones faibles
+ *      « R forte · n » au bord droit, suivie, pour le support fort et la résistance
+ *      forte les plus proches (par leur bord), d'une seconde ligne : l'écart en % de
+ *      la dernière clôture décidée à ce bord, ou « dans la zone » (demande du
+ *      11 novembre 2026) ; les `maxZonesSr` (défaut 4) zones faibles
  *      les plus proches du cours, sans remplissage, bords en pointillé,
  *      étiquette « faible » ; les 12 zones désactivées les plus récentes qui
  *      étaient fortes à leur dernière bougie active, estompées. Une bande part de
@@ -42,7 +47,13 @@
  *      sur la bougie qui, à sa clôture, entre dans une zone forte connue à la
  *      bougie précédente et clôture au-delà (réarmement par zone après 4
  *      bougies) ; aucun sur une bougie de signal confirmé ; signal non mesuré,
- *      lecture indicative, jamais une promesse.
+ *      lecture indicative, jamais une promesse. Sous le même réglage, depuis le
+ *      11 novembre 2026, le pré-signal (`preSignalAxisSr`) : quand, à plat à la
+ *      dernière bougie décidée, tout est réuni pour acheter sauf la clôture
+ *      au-dessus de l'EMA de tendance, un court segment pointillé gris au niveau
+ *      de cette EMA et une étiquette « pré-signal » au bord droit ; non mesuré,
+ *      conditionnel (la bougie suivante n'achète que si elle clôture au-dessus et
+ *      si le score et les filtres tiennent), sans effet sur aucune série.
  *
  * Une zone compte ses touches depuis la première bougie chargée : AXIS S/R
  * déclare une amorce de 3 000 bougies (`AMORCE_AXIS_SR`) ; AXIS garde la sienne
@@ -62,25 +73,25 @@ import type {
   TraitAnnotation,
 } from "@axiom/types";
 import { closeOf, ema, rma, trueRange } from "../utils";
-import { MAX_LABELS_SORTIE, enregistrerSpecStrategie, type EtatStrategie } from "../utils-fabrique-strategie";
+import { enregistrerSpecStrategie, type EtatStrategie } from "../utils-fabrique-strategie";
 import { adxOf } from "../trend/adx";
 import {
   ADX_ENTREE_PERIODE,
   ATR_STOP_PERIODE,
   MAX_GROS_AXIS,
   MAX_LABELS_GROS,
-  MAX_RETOURNEMENTS_AXIS,
   MAX_SIGNAUX_AXIS,
   REGIME_TESTE,
+  RESERVE_PRECOCE,
   SEUIL_DELTA_AXIS,
-  detecterRetournementsAxis,
   emaDepuisPremiereDefinie,
   fluxAxis,
   forceFlux,
   grosMouvementsAxis,
   positionsStopAxis,
+  retournementsAxis,
+  signauxAxis,
   stratAxis,
-  texteAmorce,
   textesAxis,
   votesAxis,
   type FluxBougie,
@@ -105,6 +116,8 @@ export const MAX_ZONES_CASSEES_AXIS = 12;
 export const AMORCE_AXIS_SR = 3000;
 /** Opacité de la bande d'une zone forte désactivée, estompée. */
 export const ALPHA_ZONE_CASSEE = 0.09;
+/** Longueur du segment du pré-signal, en bougies avant la dernière : court, pour ne pas se lire comme un bord de zone. */
+export const BOUGIES_PRE_SIGNAL_AXIS = 6;
 
 /** Rôle d'une zone de structure par rapport au cours (« support » ≤ cours, « resistance » > cours). */
 export type NatureZoneSrAxis = "support" | "resistance";
@@ -470,12 +483,8 @@ function plusProchesParRole<T>(elements: T[], zoneDe: (e: T) => ZoneSrAxis, prix
 
 const pct = (v: number, decimales: number): string => `${v > 0 ? "+" : ""}${v.toFixed(decimales)} %`;
 const prix = (v: number): string => (v >= 1 ? v.toFixed(2) : v.toPrecision(4));
-const fleche = (v: number): string => (v > 0 ? "▲" : v < 0 ? "▼" : "–");
 
-const RESERVE_FILTRE = "filtre flux actif : signaux hors du test du 7 octobre 2026, non mesurés — jamais une promesse";
-const SANS_REGIME = " ; sans garde-fou de régime (réglage) : signaux de la v2 testée";
 const NON_MESURE = "couche flux non mesurée";
-const RESERVE_PRECOCE = "signal précoce non mesuré — lecture indicative, jamais une promesse";
 
 /** Opacité de la bande d'une zone forte active (conception §4.4) : croît avec la force, plafonnée. PURE. */
 export function alphaZoneForte(force: number): number {
@@ -538,17 +547,59 @@ function bordsZone(evolution: PisteZoneSrAxis["evolution"], a: number, couleur: 
   });
 }
 
+/** Compte accordé : « 1 touche », « 2 touches ». */
+const compte = (k: number, nom: string): string => `${k} ${nom}${k > 1 ? "s" : ""}`;
+/** Rejets sur volume fort et inversion d'une zone. */
+const rejetsZone = (z: ZoneSrAxis): string =>
+  `${compte(z.rejetsVolume, "rejet")} sur volume fort` + (z.inversions > 0 ? ", polarité inversée" : "");
 /** Touches, rejets sur volume fort et inversion d'une zone, avec les accords du texte. */
-const decompteZone = (z: ZoneSrAxis): string =>
-  `${z.touches} ${z.touches > 1 ? "touches" : "touche"}, ` +
-  `${z.rejetsVolume} ${z.rejetsVolume > 1 ? "rejets" : "rejet"} sur volume fort` +
-  (z.inversions > 0 ? ", polarité inversée" : "");
+const decompteZone = (z: ZoneSrAxis): string => `${compte(z.touches, "touche")}, ${rejetsZone(z)}`;
 
-/** Infobulle d'une zone tracée (conception §4.7) : force, rôle, bornes, niveau, écart au cours, décompte, profondeur. */
-const texteZone = (z: ZoneSrAxis, forte: boolean, prixRef: number, bougies: number): string =>
-  `AXIS zone ${forte ? "forte" : "faible"} de ${z.nature === "support" ? "support" : "résistance"} ` +
-  `[${prix(z.bas)} – ${prix(z.haut)}] (niveau ${prix(z.niveau)}, ${pct((z.niveau / prixRef - 1) * 100, 2)} du cours) — ` +
-  `${decompteZone(z)} — touches comptées sur ${bougies} bougies`;
+/**
+ * Écart signé, en % de `prixRef`, du bord d'une zone tourné vers le cours : borne haute d'un support
+ * (négatif), borne basse d'une résistance (positif). `undefined` quand le cours est dans la zone. PURE.
+ */
+export function ecartBordZone(z: ZoneSrAxis, prixRef: number): number | undefined {
+  const support = z.nature === "support";
+  const e = ((support ? z.haut : z.bas) / prixRef - 1) * 100;
+  return (support ? e < 0 : e > 0) ? e : undefined;
+}
+
+/**
+ * Support fort et résistance forte les plus proches du cours, la proximité mesurée au BORD de la zone
+ * (`ecartBordZone`, nulle quand le cours est dedans) et non à son niveau : une zone large peut être la
+ * première touchée. Au plus une piste par rôle, la première de `fortes` à égalité. PURE.
+ */
+export function fortesProchesAxis(fortes: PisteZoneSrAxis[], prixRef: number): PisteZoneSrAxis[] {
+  const distance = (p: PisteZoneSrAxis): number => Math.abs(ecartBordZone(p.zone, prixRef) ?? 0);
+  const proches: Partial<Record<NatureZoneSrAxis, PisteZoneSrAxis>> = {};
+  for (const p of fortes) {
+    const retenue = proches[p.zone.nature];
+    if (retenue === undefined || distance(p) < distance(retenue)) proches[p.zone.nature] = p;
+  }
+  return Object.values(proches);
+}
+
+/**
+ * Infobulle d'une zone tracée. L'essentiel tient en tête, dans les 55 caractères qu'un téléphone affiche :
+ * rôle, forte ou faible, touches, écart du cours au bord de la zone. Suit le détail (bornes, niveau et son
+ * écart, rejets, inversion, profondeur), puis l'âge, compté jusqu'à la dernière bougie décidée `fin`, de
+ * `dernierIdx` : la confirmation du dernier pivot fusionné, ou l'inversion si elle est plus récente, jamais une
+ * « touche ». Une zone forte dit aussi l'âge de sa dernière réaction (`reaction`), que `dernierIdx` ne suit pas ;
+ * le moteur n'en relève pas pour une zone faible. Des décomptes, aucun taux de réussite.
+ */
+const texteZone = (z: ZoneSrAxis, forte: boolean, prixRef: number, bougies: number, fin: number, reaction: number | undefined): string => {
+  const support = z.nature === "support";
+  const ecart = ecartBordZone(z, prixRef);
+  return (
+    `AXIS ${support ? "support" : "résistance"} ${forte ? (support ? "fort" : "forte") : "faible"} · ${compte(z.touches, "touche")} · ` +
+    `${ecart === undefined ? "dans la zone" : `bord à ${pct(ecart, 1)}`} — ` +
+    `[${prix(z.bas)} – ${prix(z.haut)}] (niveau ${prix(z.niveau)}, ${pct((z.niveau / prixRef - 1) * 100, 2)} du cours) — ` +
+    `${rejetsZone(z)} — touches comptées sur ${bougies} bougies — ` +
+    `dernier pivot confirmé${z.inversions > 0 ? " ou inversion" : ""} il y a ${compte(fin - z.dernierIdx, "bougie")}` +
+    (forte ? ` ; ${reaction === undefined ? "aucune réaction" : `dernière réaction il y a ${compte(fin - reaction, "bougie")}`}` : "")
+  );
+};
 
 /**
  * Triangles creux des réactions sur zone forte (conception §4.5, §4.7) : un par bougie et par sens,
@@ -634,6 +685,10 @@ function coeurAxisSr(
   raisons: Map<number, RaisonSortieAxis>;
   fin: number;
   forceZoneForte: number;
+  /** Niveau du pré-signal à la bougie i (voir `preSignalAxisSr`), `undefined` hors du cas. */
+  preSignal: (i: number) => number | undefined;
+  /** Vrai si l'achat lit une autre condition que le score et l'EMA de tendance (flux, ADX, régime servi, marge S/R). */
+  filtres: boolean;
 } {
   const n = candles.length;
   const fin = candles[n - 1]?.closed === true ? n - 1 : n - 2;
@@ -681,17 +736,48 @@ function coeurAxisSr(
     const rBas = sr.resistanceBas[i];
     return rBas === undefined || rBas - c >= margeSr * a;
   };
+  // Conditions d'achat autres que le score et la clôture au-dessus de l'EMA de tendance.
+  const autres = (i: number): boolean => (!filtre || force(i, 1).fort) && adxSuffisant(i) && regimeVrai(i) && srSuffisant(i);
+  const seuil = Number(params.seuil ?? 5);
   const { pos, stop, raisons } = positionsStopAxis(
     score,
-    tendance.map((t, i) => (t === undefined ? undefined : (closes[i] ?? t) > t && (!filtre || force(i, 1).fort) && adxSuffisant(i) && regimeVrai(i) && srSuffisant(i))),
+    tendance.map((t, i) => (t === undefined ? undefined : (closes[i] ?? t) > t && autres(i))),
     closes,
     atr,
-    Number(params.seuil ?? 5),
+    seuil,
     Number(params.seuilVente ?? 4),
     fin,
     stopAtr
   );
-  return { votes, score, flux, atr, sr, margeSr, adx, ref, emaRef, regime, pos, stop, raisons, fin, forceZoneForte };
+  // Pré-signal : à plat à la clôture décidée de i, tout est réuni pour acheter sauf le close, resté sous (ou sur)
+  // l'EMA de tendance. La condition d'achat y étant fausse, l'armement est acquis pour i + 1 — sauf à la bougie d'une
+  // sortie par stop, qui ne l'évalue pas et exige qu'elle redevienne fausse : elle est écartée.
+  const preSignal = (i: number): number | undefined => {
+    const t = tendance[i];
+    const c = closes[i];
+    return i <= fin && pos[i] === 0 && raisons.get(i) !== "stop" && (score[i] ?? -Infinity) >= seuil && t !== undefined && c !== undefined && c <= t && autres(i)
+      ? t
+      : undefined;
+  };
+  const filtres = filtre || adx !== undefined || ref !== undefined || margeSr > 0;
+  return { votes, score, flux, atr, sr, margeSr, adx, ref, emaRef, regime, pos, stop, raisons, fin, forceZoneForte, preSignal, filtres };
+}
+
+/**
+ * Pré-signal d'achat d'AXIS S/R (demande du 11 novembre 2026), par bougie : le niveau à franchir quand, à plat à
+ * la clôture de la bougie i, toutes les conditions d'achat sont réunies SAUF « clôture au-dessus de l'EMA de
+ * tendance » ; `undefined` sinon, et toujours sur la bougie en formation. Le niveau est la valeur de cette EMA à
+ * la bougie i : l'EMA étant récursive, la bougie i + 1 clôture au-dessus de son EMA si et seulement si elle
+ * clôture au-dessus de ce niveau ; elle achète alors, pourvu que le score et les autres conditions tiennent encore
+ * à sa clôture. Un seul cas, exact ; non mesuré. Causal : la valeur à i ne lit aucune bougie plus récente. PURE.
+ */
+export function preSignalAxisSr(
+  candles: Candle[],
+  params: Record<string, number | boolean | string>,
+  ctx: CalcContext
+): Array<number | undefined> {
+  const { preSignal } = coeurAxisSr(candles, params, ctx);
+  return candles.map((_c, i) => preSignal(i));
 }
 
 /** Série d'états d'AXIS S/R pour le rejeu commun (`etatsStrategie("stratAxisSr")`). PURE. */
@@ -728,91 +814,23 @@ export const stratAxisSr: IndicatorDef = {
   ],
   calc(candles, params, ctx) {
     const n = candles.length;
-    const { votes, score, flux, atr, sr, margeSr, adx, ref, emaRef, regime, pos, stop, raisons, fin, forceZoneForte } = coeurAxisSr(
+    const coeur = coeurAxisSr(candles, params, ctx);
+    const { score, flux, atr, sr, margeSr, pos, stop, fin, forceZoneForte, preSignal, filtres } = coeur;
+    const oiBougies = Number(params.oiBougies ?? 6);
+    // Signaux confirmés : le rendu d'AXIS, complété de la mention de résistance à l'entrée et du suffixe du filtre S/R.
+    const { prixSignal, signaux, marqueurs, labels, textes } = signauxAxis(
       candles,
       params,
-      ctx
-    );
-    const seuilRvol = Number(params.seuilRvol ?? 1.5);
-    const seuilOi = Number(params.seuilOi ?? 2);
-    const oiBougies = Number(params.oiBougies ?? 6);
-    const force = (i: number, sens: number) => forceFlux(flux[i] ?? {}, sens, seuilRvol, seuilOi);
-    const filtre = params.filtreFlux === true;
-    const stopAtr = Number(params.stopAtr ?? 0);
-    const adxEntree = Number(params.adxEntree ?? 0);
-
-    const prixSignal: Array<number | undefined> = new Array(n).fill(undefined);
-    const signaux: number[] = [];
-    for (let i = 1; i < n; i++) {
-      const p = pos[i - 1];
-      if (p !== undefined && pos[i] !== p) signaux.push(i);
-      if (pos[i] === 1) prixSignal[i] = p === 1 ? prixSignal[i - 1] : candles[i]?.close;
-    }
-
-    const noms = [`EMA ${params.emaRapide}/${params.emaLente}`, "Supertrend", "DMI", "MACD", "RSI", "CMF"];
-    const textes = textesAxisSr(ctx.timeframe, stopAtr, adxEntree, regime, margeSr);
-    const baseLen = textesAxis(ctx.timeframe, 0, 0, 0).signaux.length - SANS_REGIME.length;
-    const reserve = filtre ? RESERVE_FILTRE + textes.signaux.slice(baseLen) : textes.signaux;
-    const amorce = texteAmorce(n);
-    const marqueurs: MarqueurAnnotation[] = [];
-    const labels: LabelAnnotation[] = [];
-
-    signaux.slice(-MAX_SIGNAUX_AXIS).forEach((idx, k, recents) => {
-      const b = candles[idx];
-      const v = votes[idx];
-      const s = score[idx];
-      const prixAchat = prixSignal[idx - 1];
-      if (b === undefined || v === undefined || s === undefined) return;
-      const achat = pos[idx] === 1;
-      const couleur = achat ? "--up" : "--down";
-      const valeur = achat ? b.low : b.high;
-      const resultat = pct(prixAchat === undefined ? 0 : (b.close / prixAchat - 1) * 100, 2);
-      const fo = force(idx, achat ? 1 : -1);
-      const qualite = fo.dispo === 0 ? "indisponible" : fo.fort ? "fort" : fo.contre ? "à contre-sens" : "ordinaire";
-      const parStop = !achat && raisons.get(idx) === "stop";
-      const fort = fo.fort ? (achat || parStop ? " fort" : " forte") : "";
-      const niveau = stop[idx - 1];
-      const sortie = parStop
-        ? `close sous le stop suiveur (${niveau === undefined ? "n.d." : prix(niveau)}) ; ${resultat} depuis l'achat (hors frais)`
-        : `${resultat} depuis l'achat (hors frais)`;
-      const mentionSr =
+      ctx,
+      coeur,
+      (idx, close) =>
         margeSr > 0
           ? sr.resistance[idx] !== undefined && sr.resistanceBas[idx] !== undefined && atr[idx] !== undefined && atr[idx]! > 0
-            ? `, résistance ${prix(sr.resistance[idx]!)} à ${((sr.resistanceBas[idx]! - b.close) / atr[idx]!).toFixed(1)} × ATR ≥ ${margeSr}`
+            ? `, résistance ${prix(sr.resistance[idx]!)} à ${((sr.resistanceBas[idx]! - close) / atr[idx]!).toFixed(1)} × ATR ≥ ${margeSr}`
             : `, aucune résistance active au-dessus (marge ≥ ${margeSr} × ATR)`
-          : "";
-      const entree =
-        `close au-dessus de l'EMA ${params.emaTendance}` +
-        (adx === undefined ? "" : `, ADX ${ADX_ENTREE_PERIODE} ${(adx[idx] ?? 0).toFixed(1)} ≥ ${adxEntree}`) +
-        (regime > 0
-          ? ref?.[idx] !== undefined && emaRef?.[idx] !== undefined
-            ? `, référence ${prix(ref[idx]!)} > EMA ${regime} ${prix(emaRef[idx]!)}`
-            : ", garde-fou de régime non appliqué (référence indisponible)"
-          : "") +
-        mentionSr;
-      marqueurs.push({
-        idx,
-        valeur,
-        forme: achat ? "triangleHaut" : "triangleBas",
-        couleur,
-        cible: "prix",
-        info:
-          `AXIS ${achat ? "achat" : parStop ? "stop" : "vente"}${fort} — score ${s > 0 ? "+" : ""}${s}/6 : ` +
-          `${noms.map((nom, w) => `${nom} ${fleche(v[w] ?? 0)}`).join(", ")} ; ` +
-          `${achat ? entree : sortie}${amorce} ; ` +
-          `flux ${qualite} (${texteFlux(flux[idx] ?? {}, oiBougies)} ; ${textes.qualification}) — ${reserve}`,
-      });
-      if (k >= recents.length - MAX_LABELS_SORTIE) {
-        labels.push({
-          idx,
-          valeur,
-          texte: achat ? `Achat${fort}` : `${parStop ? "Stop" : "Vente"}${fort} ${resultat}`,
-          couleur,
-          cible: "prix",
-          position: achat ? "dessous" : "dessus",
-        });
-      }
-    });
+          : "",
+      suffixeSr(margeSr)
+    );
 
     // Signaux précoces (seul le booléen faux les masque), rangés avant les forts mouvements : l'infobulle du
     // graphe prend les marqueurs proches du réticule dans l'ordre du tableau, sur 3 lignes.
@@ -847,38 +865,8 @@ export const stratAxisSr: IndicatorDef = {
       }
     });
 
-    if (Boolean(params.detecterRetournements)) {
-      const exclus = new Set(signaux);
-      detecterRetournementsAxis(candles, params, ctx)
-        .filter((r) => !exclus.has(r.idx))
-        .slice(-MAX_RETOURNEMENTS_AXIS)
-        .forEach((r, k, recents) => {
-          const c = candles[r.idx] as Candle;
-          const achat = r.sens === "achat";
-          const valeur = achat ? c.low : c.high;
-          const couleur = achat ? "--up" : "--down";
-          marqueurs.push({
-            idx: r.idx,
-            valeur,
-            forme: achat ? "triangleHaut" : "triangleBas",
-            couleur,
-            cible: "prix",
-            info:
-              `AXIS ${r.resume} · entrée ${r.prixEntree.toFixed(2)} · invalidation ${r.stopInvalidation.toFixed(2)} · ` +
-              `cible 1R ${r.cible1R.toFixed(2)} / 2R ${r.cible2R.toFixed(2)}`,
-          });
-          if (k >= recents.length - MAX_LABELS_SORTIE) {
-            labels.push({
-              idx: r.idx,
-              valeur,
-              texte: `${achat ? "↺ Achat" : "↺ Vente"} ${r.scoreConfiance}%`,
-              couleur,
-              cible: "prix",
-              position: achat ? "dessous" : "dessus",
-            });
-          }
-        });
-    }
+    // Retournements ↺ : le rendu d'AXIS.
+    retournementsAxis(candles, params, ctx, signaux, marqueurs, labels);
 
     // Zones tracées par force (conception §4.3, §4.4) : rubans des fortes, des faibles puis des fortes
     // désactivées ; bords et étiquettes au bord droit pour les actives seulement.
@@ -887,26 +875,34 @@ export const stratAxisSr: IndicatorDef = {
     const prixRef = candles[fin]?.close;
     if (prixRef !== undefined && prixRef > 0 && score.some((s) => s !== undefined)) {
       const { fortes, faibles, cassees } = zonesTraceesAxis(sr.pistes, prixRef, Number(params.maxZonesSr ?? MAX_ZONES_SR_DEFAUT), forceZoneForte);
+      // Dernière réaction de chaque zone : les réactions du moteur sont rangées par idx croissant.
+      const derniereReaction = new Map<number, number>();
+      for (const r of sr.reactions) derniereReaction.set(r.zone.id, r.idx);
+      const proches = fortesProchesAxis(fortes, prixRef);
       for (const [pistes, forte] of [[fortes, true], [faibles, false]] as const) {
-        for (const { zone: z, evolution } of pistes) {
+        for (const piste of pistes) {
+          const { zone: z, evolution } = piste;
           const surSupport = z.nature === "support";
           const couleur = surSupport ? "--up" : "--down";
+          const etiquette = (texte: string): LabelAnnotation => ({ idx: n - 1, valeur: z.niveau, texte, couleur, cible: "prix", ancrageX: "droite" });
           rubans.push({
             deIdx: z.confirmationIdx,
             ...bandeZone(evolution, z.confirmationIdx, n - 1),
             couleur,
             alpha: forte ? alphaZoneForte(z.force) : 0,
-            info: texteZone(z, forte, prixRef, n),
+            info: texteZone(z, forte, prixRef, n, fin, derniereReaction.get(z.id)),
           });
           segments.push(...bordsZone(evolution, n - 1, couleur, forte ? "plein" : "pointille"));
-          labels.push({
-            idx: n - 1,
-            valeur: z.niveau,
-            texte: forte ? `${surSupport ? "S fort" : "R forte"} · ${z.touches}` : "faible",
-            couleur,
-            cible: "prix",
-            ancrageX: "droite",
-          });
+          labels.push(etiquette(forte ? `${surSupport ? "S fort" : "R forte"} · ${z.touches}` : "faible"));
+          // Seconde ligne, sous l'étiquette du support fort et de la résistance forte les plus proches : l'écart du
+          // cours au bord de la zone, lisible au téléphone sans infobulle. Même valeur que l'étiquette : le rendu la
+          // pose 11 px dessous. L'écart est celui de la dernière clôture décidée (`prixRef` = close[fin]) : la bougie
+          // en formation n'est pas lue, il peut donc dater d'une bougie entière pendant l'approche. Douze caractères
+          // au plus, la marge droite du graphe fait 80 px.
+          if (proches.includes(piste)) {
+            const ecart = ecartBordZone(z, prixRef);
+            labels.push(etiquette(ecart === undefined ? "dans la zone" : pct(ecart, 1)));
+          }
         }
       }
       for (const { zone: z, evolution, finIdx } of cassees) {
@@ -917,6 +913,27 @@ export const stratAxisSr: IndicatorDef = {
           alpha: ALPHA_ZONE_CASSEE,
         });
       }
+    }
+
+    // Pré-signal (demande du 11 novembre 2026), sous le réglage des signaux précoces : à la dernière bougie décidée,
+    // à plat, tout est réuni pour acheter sauf la clôture au-dessus de l'EMA de tendance. Un court segment pointillé
+    // gris au niveau de cette EMA, terminé sur la dernière bougie pour que l'infobulle le lise aussi au repos, et une
+    // étiquette au bord droit. Non mesuré ; conditionnel, jamais un signal. Le niveau est celui de la dernière clôture
+    // décidée : la bougie en formation n'est pas lue. Aucune série, aucun marqueur n'en dépend.
+    const niveau = params.signauxPrecoces !== false ? preSignal(fin) : undefined;
+    if (niveau !== undefined) {
+      const couleur = "--text-dim";
+      segments.push({
+        deIdx: Math.max(0, n - 1 - BOUGIES_PRE_SIGNAL_AXIS),
+        deValeur: niveau,
+        aIdx: n - 1,
+        aValeur: niveau,
+        trait: "pointille",
+        couleur,
+        cible: "prix",
+        info: `AXIS S/R · pré-signal non mesuré — achat à la clôture si > ${prix(niveau)} et si le score ${filtres ? "et les filtres tiennent" : "tient"}`,
+      });
+      labels.push({ idx: n - 1, valeur: niveau, texte: "pré-signal", couleur, cible: "prix", ancrageX: "droite" });
     }
 
     // Sorties des alertes (conception §4.6) : 1 si la bougie close porte une réaction de ce sens, 0

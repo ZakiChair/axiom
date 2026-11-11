@@ -97,6 +97,16 @@
  * (alertes, screener), elle garde les formulations des tests 4h. Mesures
  * passées, jamais une promesse.
  *
+ * LECTURE AU TÉLÉPHONE (demande du 11 novembre 2026). L'infobulle du graphe ne
+ * revient pas à la ligne ; au téléphone elle est coupée vers le 55e caractère.
+ * Un statut court (`statutAxis`) suit donc le score, en tête de l'infobulle
+ * d'un signal : « test 4h ≈ EMA 200 seule », « 1h : test échoué », « 1w : non
+ * mesuré », « filtre flux, non mesuré » ou « réglage non validé ». Il abrège la
+ * réserve de fin d'infobulle sans jamais dire mieux qu'elle ; les formulations
+ * des campagnes restent entières à la fin, au caractère près. Les
+ * retournements ↺ (`detecterRetournements`), jamais mesurés, sont gris,
+ * s'ouvrent par la réserve des signaux précoces et donnent leur score sur 100.
+ *
  * STOP SUIVEUR (v3, 8 octobre 2026). La v2 tient une position jusqu'au
  * retournement franc de la confluence, sans stop (drawdowns de 10 % du capital
  * en médiane sur les 8 grandes cryptos vues, 46 % sur DOGE). La v3 ajoute une
@@ -507,6 +517,11 @@ const MESURE_FORT_ACHAT =
   "fort achat : sur données jamais vues (BNB/ADA/LINK/DOGE 4h, 2017-2026), +1.61 % en moyenne sur les 12 bougies suivantes (51 % de hausses, p ≤ 0.0005) — mesure passée, pas une promesse";
 const MESURE_FORTE_VENTE = "forte vente : repérée ; aucune suite mesurable à 12 bougies sur données jamais vues (BNB/ADA/LINK/DOGE 4h, 2017-2026)";
 const NON_MESURE = "couche flux non mesurée";
+/**
+ * Réserve des signaux précoces, soumis à aucun test sur données jamais vues : les triangles creux
+ * d'AXIS S/R et les retournements ↺. Elle ouvre leur infobulle, seule partie lisible au téléphone.
+ */
+export const RESERVE_PRECOCE = "signal précoce non mesuré — lecture indicative, jamais une promesse";
 const QUALIFICATION = "qualification descriptive, sans avantage mesuré pour les signaux « forts » (données jamais vues, 8 octobre 2026)";
 
 // Test du 8 octobre 2026 sur les autres unités (scripts/axis/rapport-ut-2026-10-08.md) :
@@ -624,6 +639,25 @@ function textesUnite(u: Timeframe | undefined): { signaux: string; fortAchat: st
   };
 }
 
+/**
+ * Statut de mesure d'un signal confirmé, placé en tête de son infobulle : au téléphone la ligne est
+ * coupée vers le 55e caractère, et la réserve complète est à la fin. C'en est un abrégé, jamais plus
+ * favorable qu'elle, de 23 caractères au plus :
+ *  - filtre flux actif (`filtre`) : « filtre flux, non mesuré », dans toute unité ;
+ *  - unité hors du 4h : « {u} : test échoué » ou « {u} : non mesuré », selon le texte de l'unité ;
+ *  - 4h ou unité absente : « test 4h ≈ EMA 200 seule », la réserve pré-enregistrée du test réussi
+ *    (pas mieux qu'une EMA 200 seule sur 3/4 actifs) — « réussi » n'y tient pas, la fin le dit ;
+ *    ou « réglage non validé » quand un réglage dont la fin de l'infobulle dit l'échec ou le « non
+ *    mesuré » est actif (`horsTest` : stop suiveur, filtre ADX, régime hors de 0 et de la valeur
+ *    testée, marge S/R d'AXIS S/R).
+ * Comme la fin de l'infobulle, il ne lit pas les réglages du cœur (seuils, EMA, Supertrend). PURE.
+ */
+export function statutAxis(u: Timeframe | undefined, filtre: boolean, horsTest: boolean): string {
+  if (filtre) return "filtre flux, non mesuré";
+  if (u !== undefined && u !== "4h") return `${u} : ${textesUnite(u).signaux.includes("échoué") ? "test échoué" : "non mesuré"}`;
+  return horsTest ? "réglage non validé" : "test 4h ≈ EMA 200 seule";
+}
+
 /** Niveau de prix d'une infobulle : deux décimales dès 1, quatre chiffres significatifs en dessous. */
 const prix = (v: number): string => (v >= 1 ? v.toFixed(2) : v.toPrecision(4));
 
@@ -656,6 +690,21 @@ export function emaDepuisPremiereDefinie(
   return valeurs.map((_, i) => (i < f ? undefined : suite[i - f]));
 }
 
+/** Ce que les rendus lisent du cœur : `coeurAxis` le produit, le cœur d'AXIS S/R aussi (avec ses zones en plus). */
+export interface CoeurAxis {
+  votes: Array<number[] | undefined>;
+  score: Array<number | undefined>;
+  flux: FluxBougie[];
+  adx: Array<number | undefined> | undefined;
+  ref: Array<number | undefined> | undefined;
+  emaRef: Array<number | undefined> | undefined;
+  regime: number;
+  pos: Array<number | undefined>;
+  stop: Array<number | undefined>;
+  raisons: Map<number, RaisonSortieAxis>;
+  fin: number;
+}
+
 /**
  * Cœur commun à `calc` et au rejeu `positionAxis` : votes → score → tendance
  * complétée du filtre flux (`filtreFlux`), du filtre ADX (`adxEntree`) et du
@@ -670,19 +719,7 @@ function coeurAxis(
   candles: Candle[],
   params: Record<string, number | boolean | string>,
   ctx: CalcContext
-): {
-  votes: Array<number[] | undefined>;
-  score: Array<number | undefined>;
-  flux: FluxBougie[];
-  adx: Array<number | undefined> | undefined;
-  ref: Array<number | undefined> | undefined;
-  emaRef: Array<number | undefined> | undefined;
-  regime: number;
-  pos: Array<number | undefined>;
-  stop: Array<number | undefined>;
-  raisons: Map<number, RaisonSortieAxis>;
-  fin: number;
-} {
+): CoeurAxis {
   const n = candles.length;
   const fin = candles[n - 1]?.closed === true ? n - 1 : n - 2;
   const votes = votesAxis(candles, params);
@@ -736,6 +773,164 @@ export function positionAxis(
   return coeurAxis(candles, params, ctx).pos as Array<EtatStrategie | undefined>;
 }
 
+/**
+ * Rendu des signaux confirmés, commun à AXIS et à AXIS S/R (une seule copie depuis le 11 novembre
+ * 2026) : prix d'achat tenu pendant la position, bougies de signal, marqueurs ▲/▼ et étiquettes des
+ * plus récents ; rend aussi les textes de l'unité, que le rendu des forts mouvements relit. Pour
+ * AXIS S/R seul : `mentionEntree` complète l'entrée d'un achat (résistance et marge) et `suffixe`
+ * ferme l'infobulle (filtre S/R) ; non vide, il range le signal parmi les réglages non validés.
+ */
+export function signauxAxis(
+  candles: Candle[],
+  params: Record<string, number | boolean | string>,
+  ctx: CalcContext,
+  { votes, score, flux, adx, ref, emaRef, regime, pos, stop, raisons }: CoeurAxis,
+  mentionEntree: (idx: number, close: number) => string = () => "",
+  suffixe = ""
+): {
+  prixSignal: Array<number | undefined>;
+  signaux: number[];
+  marqueurs: MarqueurAnnotation[];
+  labels: LabelAnnotation[];
+  textes: ReturnType<typeof textesAxis>;
+} {
+  const n = candles.length;
+  const seuilRvol = Number(params.seuilRvol ?? 1.5);
+  const seuilOi = Number(params.seuilOi ?? 2);
+  const oiBougies = Number(params.oiBougies ?? 6);
+  const force = (i: number, sens: number) => forceFlux(flux[i] ?? {}, sens, seuilRvol, seuilOi);
+  const filtre = params.filtreFlux === true;
+  const stopAtr = Number(params.stopAtr ?? 0);
+  const adxEntree = Number(params.adxEntree ?? 0);
+
+  // Signal = changement de position entre deux bougies définies (jamais la première).
+  const prixSignal: Array<number | undefined> = new Array(n).fill(undefined);
+  const signaux: number[] = [];
+  for (let i = 1; i < n; i++) {
+    const p = pos[i - 1];
+    if (p !== undefined && pos[i] !== p) signaux.push(i);
+    if (pos[i] === 1) prixSignal[i] = p === 1 ? prixSignal[i - 1] : candles[i]?.close;
+  }
+
+  const noms = [`EMA ${params.emaRapide}/${params.emaLente}`, "Supertrend", "DMI", "MACD", "RSI", "CMF"];
+  const textes = textesAxis(ctx.timeframe, stopAtr, adxEntree, regime);
+  const reserve =
+    (filtre ? RESERVE_FILTRE + suffixeRegime(ctx.timeframe, regime) + suffixeAdx(adxEntree) + suffixeStop(stopAtr) : textes.signaux) + suffixe;
+  // Statut court en tête, après le score : seul lisible au téléphone. La fin de l'infobulle ne change pas.
+  const statut = statutAxis(ctx.timeframe, filtre, stopAtr > 0 || adxEntree > 0 || (regime > 0 && regime !== REGIME_TESTE) || suffixe !== "");
+  // Mention d'amorce, placée avant la couche flux : la fin de l'infobulle (« ; qualification) — réserve »)
+  // reste celle que les tests croisés comparent aux formulations figées des campagnes.
+  const amorce = texteAmorce(n);
+  const marqueurs: MarqueurAnnotation[] = [];
+  const labels: LabelAnnotation[] = [];
+  // Seuls les signaux les plus récents portent une étiquette (même règle que defStrategie).
+  signaux.slice(-MAX_SIGNAUX_AXIS).forEach((idx, k, recents) => {
+    const b = candles[idx];
+    const v = votes[idx];
+    const s = score[idx];
+    const prixAchat = prixSignal[idx - 1];
+    if (b === undefined || v === undefined || s === undefined) return;
+    const achat = pos[idx] === 1;
+    const couleur = achat ? "--up" : "--down";
+    const valeur = achat ? b.low : b.high;
+    const pctSignal = prixAchat === undefined ? 0 : (b.close / prixAchat - 1) * 100;
+    const resultat = pct(pctSignal, 2);
+    const fo = force(idx, achat ? 1 : -1);
+    const qualite = fo.dispo === 0 ? "indisponible" : fo.fort ? "fort" : fo.contre ? "à contre-sens" : "ordinaire";
+    const parStop = !achat && raisons.get(idx) === "stop";
+    const fort = fo.fort ? (achat || parStop ? " fort" : " forte") : "";
+    // Niveau franchi : le stop en vigueur à la décision, fixé à la bougie précédente.
+    const niveau = stop[idx - 1];
+    const sortie = parStop
+      ? `close sous le stop suiveur (${niveau === undefined ? "n.d." : prix(niveau)}) ; ${resultat} depuis l'achat (hors frais)`
+      : `${resultat} depuis l'achat (hors frais)`;
+    // Filtre actif : la valeur d'ADX qui a laissé passer l'achat (toujours définie à un achat).
+    // Garde-fou actif, après la mention ADX : la référence au-dessus de son EMA si le
+    // garde-fou était appliqué, sinon la mention « non appliqué » (suites.communes v5).
+    const entree =
+      `close au-dessus de l'EMA ${params.emaTendance}` +
+      (adx === undefined ? "" : `, ADX ${ADX_ENTREE_PERIODE} ${(adx[idx] ?? 0).toFixed(1)} ≥ ${adxEntree}`) +
+      (regime > 0
+        ? ref?.[idx] !== undefined && emaRef?.[idx] !== undefined
+          ? `, référence ${prix(ref[idx]!)} > EMA ${regime} ${prix(emaRef[idx]!)}`
+          : ", garde-fou de régime non appliqué (référence indisponible)"
+        : "") +
+      mentionEntree(idx, b.close);
+    marqueurs.push({
+      idx,
+      valeur,
+      forme: achat ? "triangleHaut" : "triangleBas",
+      couleur,
+      cible: "prix",
+      info:
+        `AXIS ${achat ? "achat" : parStop ? "stop" : "vente"}${fort} — score ${s > 0 ? "+" : ""}${s}/6 · ${statut} — ` +
+        `${noms.map((nom, w) => `${nom} ${fleche(v[w] ?? 0)}`).join(", ")} ; ` +
+        `${achat ? entree : sortie}${amorce} ; ` +
+        `flux ${qualite} (${texteFlux(flux[idx] ?? {}, oiBougies)} ; ${textes.qualification}) — ${reserve}`,
+    });
+    if (k >= recents.length - MAX_LABELS_SORTIE) {
+      labels.push({
+        idx,
+        valeur,
+        texte: achat ? `Achat${fort}` : `${parStop ? "Stop" : "Vente"}${fort} ${resultat}`,
+        couleur,
+        cible: "prix",
+        position: achat ? "dessous" : "dessus",
+      });
+    }
+  });
+  return { prixSignal, signaux, marqueurs, labels, textes };
+}
+
+/**
+ * Retournements ↺ (réglage `detecterRetournements`), ajoutés à `marqueurs` et à `labels` ; rendu commun à
+ * AXIS et à AXIS S/R, hors bougies de signal. Heuristique jamais mesurée (revue du 6 novembre 2026, constat
+ * IND-1) : gris (--text-dim), pour ne ressembler ni à un signal confirmé (--up, --down) ni à un fort mouvement
+ * (--accent) ; la réserve des signaux précoces ouvre l'infobulle ; le score se lit sur 100, jamais en « % »
+ * (ce n'est pas une probabilité).
+ */
+export function retournementsAxis(
+  candles: Candle[],
+  params: Record<string, number | boolean | string>,
+  ctx: CalcContext,
+  signaux: number[],
+  marqueurs: MarqueurAnnotation[],
+  labels: LabelAnnotation[]
+): void {
+  if (!Boolean(params.detecterRetournements)) return;
+  const retournements = detecterRetournementsAxis(candles, params, ctx);
+  const exclus = new Set(signaux);
+  retournements
+    .filter((r) => !exclus.has(r.idx))
+    .slice(-MAX_RETOURNEMENTS_AXIS)
+    .forEach((r, k, recents) => {
+      const c = candles[r.idx] as Candle;
+      const achat = r.sens === "achat";
+      const valeur = achat ? c.low : c.high;
+      const couleur = "--text-dim";
+      marqueurs.push({
+        idx: r.idx,
+        valeur,
+        forme: achat ? "triangleHaut" : "triangleBas",
+        couleur,
+        cible: "prix",
+        info:
+          `AXIS ↺ ${RESERVE_PRECOCE} — ${r.resume} · entrée ${prix(r.prixEntree)} · invalidation ${prix(r.stopInvalidation)} · ` +
+          `cible 1R ${prix(r.cible1R)} / 2R ${prix(r.cible2R)}`,
+      });
+      if (k >= recents.length - MAX_LABELS_SORTIE) {
+        labels.push({
+          idx: r.idx,
+          valeur,
+          texte: `${achat ? "↺ Achat" : "↺ Vente"} ${r.scoreConfiance}/100`,
+          couleur,
+          cible: "prix",
+          position: achat ? "dessous" : "dessus",
+        });
+      }
+    });
+}
+
 export const stratAxis: IndicatorDef = {
   id: "stratAxis",
   name: "AXIS",
@@ -776,88 +971,10 @@ export const stratAxis: IndicatorDef = {
     { key: "score", name: "Score (−6 à +6)", style: "line", masquee: true },
   ],
   calc(candles, params, ctx) {
-    const n = candles.length;
-    const { votes, score, flux, adx, ref, emaRef, regime, pos, stop, raisons, fin } = coeurAxis(candles, params, ctx);
-    const seuilRvol = Number(params.seuilRvol ?? 1.5);
-    const seuilOi = Number(params.seuilOi ?? 2);
+    const coeur = coeurAxis(candles, params, ctx);
+    const { score, flux, pos, stop, fin } = coeur;
     const oiBougies = Number(params.oiBougies ?? 6);
-    const force = (i: number, sens: number) => forceFlux(flux[i] ?? {}, sens, seuilRvol, seuilOi);
-    const filtre = params.filtreFlux === true;
-    const stopAtr = Number(params.stopAtr ?? 0);
-    const adxEntree = Number(params.adxEntree ?? 0);
-
-    // Signal = changement de position entre deux bougies définies (jamais la première).
-    const prixSignal: Array<number | undefined> = new Array(n).fill(undefined);
-    const signaux: number[] = [];
-    for (let i = 1; i < n; i++) {
-      const p = pos[i - 1];
-      if (p !== undefined && pos[i] !== p) signaux.push(i);
-      if (pos[i] === 1) prixSignal[i] = p === 1 ? prixSignal[i - 1] : candles[i]?.close;
-    }
-
-    const noms = [`EMA ${params.emaRapide}/${params.emaLente}`, "Supertrend", "DMI", "MACD", "RSI", "CMF"];
-    const textes = textesAxis(ctx.timeframe, stopAtr, adxEntree, regime);
-    const reserve = filtre ? RESERVE_FILTRE + suffixeRegime(ctx.timeframe, regime) + suffixeAdx(adxEntree) + suffixeStop(stopAtr) : textes.signaux;
-    // Placée avant la couche flux : la fin de l'infobulle (« ; qualification) — statut »)
-    // reste celle que les tests croisés comparent aux formulations figées des campagnes.
-    const amorce = texteAmorce(n);
-    const marqueurs: MarqueurAnnotation[] = [];
-    const labels: LabelAnnotation[] = [];
-    // Seuls les signaux les plus récents portent une étiquette (même règle que defStrategie).
-    signaux.slice(-MAX_SIGNAUX_AXIS).forEach((idx, k, recents) => {
-      const b = candles[idx];
-      const v = votes[idx];
-      const s = score[idx];
-      const prixAchat = prixSignal[idx - 1];
-      if (b === undefined || v === undefined || s === undefined) return;
-      const achat = pos[idx] === 1;
-      const couleur = achat ? "--up" : "--down";
-      const valeur = achat ? b.low : b.high;
-      const pctSignal = prixAchat === undefined ? 0 : (b.close / prixAchat - 1) * 100;
-      const resultat = pct(pctSignal, 2);
-      const fo = force(idx, achat ? 1 : -1);
-      const qualite = fo.dispo === 0 ? "indisponible" : fo.fort ? "fort" : fo.contre ? "à contre-sens" : "ordinaire";
-      const parStop = !achat && raisons.get(idx) === "stop";
-      const fort = fo.fort ? (achat || parStop ? " fort" : " forte") : "";
-      // Niveau franchi : le stop en vigueur à la décision, fixé à la bougie précédente.
-      const niveau = stop[idx - 1];
-      const sortie = parStop
-        ? `close sous le stop suiveur (${niveau === undefined ? "n.d." : prix(niveau)}) ; ${resultat} depuis l'achat (hors frais)`
-        : `${resultat} depuis l'achat (hors frais)`;
-      // Filtre actif : la valeur d'ADX qui a laissé passer l'achat (toujours définie à un achat).
-      // Garde-fou actif, après la mention ADX : la référence au-dessus de son EMA si le
-      // garde-fou était appliqué, sinon la mention « non appliqué » (suites.communes v5).
-      const entree =
-        `close au-dessus de l'EMA ${params.emaTendance}` +
-        (adx === undefined ? "" : `, ADX ${ADX_ENTREE_PERIODE} ${(adx[idx] ?? 0).toFixed(1)} ≥ ${adxEntree}`) +
-        (regime > 0
-          ? ref?.[idx] !== undefined && emaRef?.[idx] !== undefined
-            ? `, référence ${prix(ref[idx]!)} > EMA ${regime} ${prix(emaRef[idx]!)}`
-            : ", garde-fou de régime non appliqué (référence indisponible)"
-          : "");
-      marqueurs.push({
-        idx,
-        valeur,
-        forme: achat ? "triangleHaut" : "triangleBas",
-        couleur,
-        cible: "prix",
-        info:
-          `AXIS ${achat ? "achat" : parStop ? "stop" : "vente"}${fort} — score ${s > 0 ? "+" : ""}${s}/6 : ` +
-          `${noms.map((nom, w) => `${nom} ${fleche(v[w] ?? 0)}`).join(", ")} ; ` +
-          `${achat ? entree : sortie}${amorce} ; ` +
-          `flux ${qualite} (${texteFlux(flux[idx] ?? {}, oiBougies)} ; ${textes.qualification}) — ${reserve}`,
-      });
-      if (k >= recents.length - MAX_LABELS_SORTIE) {
-        labels.push({
-          idx,
-          valeur,
-          texte: achat ? `Achat${fort}` : `${parStop ? "Stop" : "Vente"}${fort} ${resultat}`,
-          couleur,
-          cible: "prix",
-          position: achat ? "dessous" : "dessus",
-        });
-      }
-    });
+    const { prixSignal, signaux, marqueurs, labels, textes } = signauxAxis(candles, params, ctx, coeur);
 
     // Forts achats / fortes ventes : volume ≥ seuilGros × moyen, hors bougies de signal
     // (déjà qualifiées) et hors bougies au-delà de `fin` (dernière bougie en formation,
@@ -892,39 +1009,7 @@ export const stratAxis: IndicatorDef = {
       }
     });
 
-    if (Boolean(params.detecterRetournements)) {
-      const retournements = detecterRetournementsAxis(candles, params, ctx);
-      const exclus = new Set(signaux);
-      retournements
-        .filter((r) => !exclus.has(r.idx))
-        .slice(-MAX_RETOURNEMENTS_AXIS)
-        .forEach((r, k, recents) => {
-          const c = candles[r.idx] as Candle;
-          const achat = r.sens === "achat";
-          const valeur = achat ? c.low : c.high;
-          const couleur = achat ? "--up" : "--down";
-          marqueurs.push({
-            idx: r.idx,
-            valeur,
-            forme: achat ? "triangleHaut" : "triangleBas",
-            couleur,
-            cible: "prix",
-            info:
-              `AXIS ${r.resume} · entrée ${r.prixEntree.toFixed(2)} · invalidation ${r.stopInvalidation.toFixed(2)} · ` +
-              `cible 1R ${r.cible1R.toFixed(2)} / 2R ${r.cible2R.toFixed(2)}`,
-          });
-          if (k >= recents.length - MAX_LABELS_SORTIE) {
-            labels.push({
-              idx: r.idx,
-              valeur,
-              texte: `${achat ? "↺ Achat" : "↺ Vente"} ${r.scoreConfiance}%`,
-              couleur,
-              cible: "prix",
-              position: achat ? "dessous" : "dessus",
-            });
-          }
-        });
-    }
+    retournementsAxis(candles, params, ctx, signaux, marqueurs, labels);
 
     return marqueurs.length > 0
       ? { series: { prixSignal, stop, etat: pos, score }, annotations: { marqueurs, labels } }
@@ -948,7 +1033,10 @@ enregistrerSpecStrategie({
   }),
 });
 
-// ─────────────────────────── Détection haute précision des retournements (Achat / Vente) ───────────────────────────
+// ─────────────────────────── Détection heuristique des retournements (Achat / Vente) ───────────────────────────
+// STATUT : jamais mesurée. Aucune campagne sur données jamais vues n'a jugé ces retournements, et leurs
+// seuils sont fixés à la main ; le score sur 100 additionne des piliers, ce n'est ni une probabilité ni
+// une précision (revue du 6 novembre 2026, constat IND-1). L'interface les dit « non mesurés ».
 
 export interface ComposantesRetournementAxis {
   /** Épuisement RSI 14 (sortie de survente/surachat avec crochet d'inflexion). */
@@ -968,7 +1056,7 @@ export interface RetournementPotentielAxis {
   idx: number;
   /** Sens du retournement détecté. */
   sens: "achat" | "vente";
-  /** Score de précision / confiance sur 100 (≥ 60 = qualifié, ≥ 75 = haute précision). */
+  /** Score heuristique sur 100 : somme des points des piliers réunis (≥ 60 retenu par défaut). Jamais mesuré : ni probabilité, ni précision. */
   scoreConfiance: number;
   /** Score de confluence AXIS (−6 à +6) à la bougie du retournement. */
   scoreAxis: number;
@@ -989,8 +1077,8 @@ export interface RetournementPotentielAxis {
 }
 
 /**
- * Détecte avec haute précision les retournements potentiels à l'ACHAT (creux d'épuisement)
- * et à la VENTE (sommet d'euphorie / distribution) en combinant 5 dimensions :
+ * Repère par heuristique, jamais mesurée (voir le statut ci-dessus), les retournements potentiels à
+ * l'ACHAT (creux d'épuisement) et à la VENTE (sommet d'euphorie / distribution) en combinant 5 dimensions :
  *   1. Épuisement & crochet d'inflexion du RSI 14 (+25 pts)
  *   2. Divergence Prix vs RSI 14 ou Histogramme MACD sur fenêtre glissante (+25 pts)
  *   3. Décélération MACD & redressement/chute du score de confluence AXIS (+20 pts)

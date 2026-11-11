@@ -2,7 +2,10 @@
  * Tests des détecteurs de setups (data/signaux.ts) — valeurs attendues justifiées
  * en commentaire, fixtures construites à la main (pivots vérifiables à l'œil).
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import type { Candle, IndicatorDef } from "@axiom/types";
+import { computeIndicator, detecterRetournementsAxis, getIndicator } from "@axiom/indicators";
 import {
   agregerSignaux,
   pivotsLocaux,
@@ -301,26 +304,34 @@ describe("signalDivergenceFondamentale — Revenus vs Prix & Low-Float", () => {
   });
 });
 
+// Revue du 6 novembre 2026, constat IND-1 : les retournements d'AXIS n'ont été soumis à aucune campagne, et leur
+// score sort aussi sur du bruit pur. EQS ne les dit plus « fiables », ne leur donne plus le poids le plus lourd de
+// l'inbox, et n'écrit plus le score en « % » (ce n'est pas une probabilité).
 describe("signalRetournementAxis — conversion en signal EQS", () => {
-  it("convertit un retournement achat haute précision (≥ 75 %) en signal haussier de poids 3", () => {
-    const s = signalRetournementAxis({
-      sens: "achat",
-      scoreConfiance: 80,
-      rsi: 31.4,
-      prixEntree: 100,
-      stopInvalidation: 96,
-      cible1R: 104,
-      cible2R: 108,
-      resume: "Retournement ACHAT (80/100) : rebond RSI + divergence haussière",
-    });
-    expect(s?.id).toBe("retournement-axis");
-    expect(s?.direction).toBe("haussier");
-    expect(s?.libelle).toBe("AXIS ↺ Achat (80%)");
-    expect(s?.poids).toBe(3);
-    expect(s?.fiabilite).toBe("fiable");
+  const entree = (sens: "achat" | "vente", scoreConfiance: number, prixEntree = 100) => ({
+    sens,
+    scoreConfiance,
+    rsi: 31.4,
+    prixEntree,
+    stopInvalidation: prixEntree * 0.96,
+    cible1R: prixEntree * 1.04,
+    cible2R: prixEntree * 1.08,
+    resume: `Retournement ${sens === "achat" ? "ACHAT" : "VENTE"} (${scoreConfiance}/100) : rebond RSI + divergence haussière`,
   });
 
-  it("convertit un retournement vente qualifié (65 %) en signal baissier de poids 2", () => {
+  it("convertit un retournement achat (80/100) en signal haussier heuristique de poids 1, score sur 100", () => {
+    const s = signalRetournementAxis(entree("achat", 80));
+    expect(s).toEqual({
+      id: "retournement-axis",
+      direction: "haussier",
+      libelle: "AXIS ↺ Achat (80/100)",
+      detail: "Retournement ACHAT (80/100) : rebond RSI + divergence haussière · entrée 100.00 · invalidation 96.00 · cibles 1R 104.00 / 2R 108.00",
+      fiabilite: "heuristique",
+      poids: 1,
+    });
+  });
+
+  it("convertit un retournement vente (65/100) en signal baissier heuristique de poids 1", () => {
     const s = signalRetournementAxis({
       sens: "vente",
       scoreConfiance: 65,
@@ -333,11 +344,55 @@ describe("signalRetournementAxis — conversion en signal EQS", () => {
     });
     expect(s?.id).toBe("retournement-axis");
     expect(s?.direction).toBe("baissier");
-    expect(s?.libelle).toBe("AXIS ↺ Vente (65%)");
-    expect(s?.poids).toBe(2);
+    expect(s?.libelle).toBe("AXIS ↺ Vente (65/100)");
+    expect(s?.poids).toBe(1);
+    expect(s?.fiabilite).toBe("heuristique");
   });
 
-  it("retourne null sous le seuil de 60 % ou si absent", () => {
+  it("quel que soit le score (60 à 100) : jamais « fiable », jamais plus lourd qu'un autre signal, aucun « % »", () => {
+    for (const score of [60, 74, 75, 85, 100]) {
+      for (const sens of ["achat", "vente"] as const) {
+        const s = signalRetournementAxis(entree(sens, score));
+        expect(s?.fiabilite, `${sens} ${score}`).toBe("heuristique");
+        expect(s?.poids, `${sens} ${score}`).toBe(1);
+        expect(s?.libelle, `${sens} ${score}`).toBe(`AXIS ↺ ${sens === "achat" ? "Achat" : "Vente"} (${score}/100)`);
+        expect(`${s?.libelle} ${s?.detail}`).not.toContain("%");
+      }
+    }
+    // Dans l'inbox, un retournement seul pèse 1 : il passe après un funding extrême réglé (donnée exacte, poids 2).
+    const ligne = agregerSignaux(
+      { symbol: "XUSDT", lastPrice: 1, priceChangePct24h: 0, volumeUsd24h: 1 },
+      [signalRetournementAxis(entree("achat", 100))],
+    );
+    expect(ligne?.score).toBe(1);
+  });
+
+  it("prix sous un centime : quatre chiffres significatifs, au lieu de « 0.0000 »", () => {
+    const s = signalRetournementAxis(entree("achat", 80, 0.00001234));
+    expect(s?.detail.endsWith(" · entrée 0.00001234 · invalidation 0.00001185 · cibles 1R 0.00001283 / 2R 0.00001333")).toBe(true);
+  });
+
+  it("mêmes prix, au caractère près, que l'infobulle du retournement sur le graphe (fixture dorée, prix × 2^-24 et × 1)", () => {
+    const fixture = JSON.parse(
+      readFileSync(new URL("../../../../packages/indicators/src/golden/fixture-ohlcv.json", import.meta.url), "utf8"),
+    ) as Candle[];
+    const axis = getIndicator("stratAxis") as IndicatorDef;
+    for (const k of [1, 2 ** -24]) {
+      const bougies = fixture.map((c) => ({ ...c, open: c.open * k, high: c.high * k, low: c.low * k, close: c.close * k }));
+      const dernier = detecterRetournementsAxis(bougies).at(-1)!;
+      const graphe = (computeIndicator(axis, bougies, { detecterRetournements: true }).annotations?.marqueurs ?? []).find(
+        (m) => m.idx === dernier.idx && m.couleur === "--text-dim",
+      );
+      const prixDe = (texte: string | undefined): string[] =>
+        / · entrée (\S+) · invalidation (\S+) · cibles? 1R (\S+) \/ 2R (\S+)$/.exec(texte ?? "")?.slice(1) ?? [];
+      const eqs = prixDe(signalRetournementAxis(dernier)?.detail);
+      expect(eqs, String(k)).toHaveLength(4);
+      expect(eqs, String(k)).toEqual(prixDe(graphe?.info));
+      if (k < 1) for (const p of eqs) expect(p).toMatch(/^0\.00\d{4}$/);
+    }
+  });
+
+  it("retourne null sous le seuil de 60/100 ou si absent", () => {
     expect(signalRetournementAxis(null)).toBeNull();
     expect(
       signalRetournementAxis({

@@ -28,7 +28,7 @@
  * aux cœurs, qui ne lisent que l'OHLCV : les signaux restent AU LITTÉRAL.
  */
 import { describe, expect, it } from "vitest";
-import type { Candle, MarqueurAnnotation } from "@axiom/types";
+import type { Candle, MarqueurAnnotation, Timeframe } from "@axiom/types";
 import { buildCalcContext, computeIndicator } from "../engine";
 import { getIndicator } from "../registry";
 import { supportsIndicatorTimeframe, TIMEFRAME_REQUIS } from "../timeframes";
@@ -40,6 +40,7 @@ import { macdOf } from "../trend/macd";
 import { supertrendOf } from "../trend/supertrend";
 import { cmfOf } from "../volume/cmf";
 import fixtureRaw from "../golden/fixture-ohlcv.json";
+import { bougiesBtcusdt4h } from "./fixtures/btcusdt4h";
 import {
   ADX_ENTREE_PERIODE,
   ADX_ENTREE_TESTE,
@@ -62,6 +63,7 @@ import {
   positionsAxis,
   positionsStopAxis,
   sensGros,
+  statutAxis,
   stratAxis,
   texteAmorce,
   textesAxis,
@@ -79,6 +81,11 @@ const EMA50 = { emaTendance: 50 };
 const RESERVE =
   "test réussi sur données jamais vues (crypto 4h, 2017-2024), pas mieux qu'une EMA 200 seule sur 3/4 actifs — mesure passée, pas une promesse";
 const RESERVE_FILTRE = "filtre flux actif : signaux hors du test du 7 octobre 2026, non mesurés — jamais une promesse";
+/**
+ * Statut de mesure placé en tête de l'infobulle d'un signal confirmé le 11 novembre 2026, entre le score et les
+ * votes (« : » avant) : abrégé de la réserve, qui reste entière à la fin. Ici celui du 4h et de l'unité absente.
+ */
+const TETE_4H = " · test 4h ≈ EMA 200 seule — ";
 const NON_MESURE = "couche flux non mesurée";
 // Formulation FAVORABLE remplie du résultat du 10 octobre 2026 (suites.FAVORABLE du manifeste v5).
 const REGIME_FAVORABLE =
@@ -94,11 +101,14 @@ const MESURE_FORTE_VENTE = "forte vente : repérée ; aucune suite mesurable à 
 const fluxVolume = (qualite: string, rvol: string) =>
   `flux ${qualite} (volume ×${rvol}, delta taker n.d., OI n.d. ; ${QUALIFICATION})`;
 
-/** Signaux (▲/▼ du cœur, hors marqueurs « fort achat / forte vente ») sous la forme « 60▲ 88▼ … ». */
+/**
+ * Signaux confirmés (▲/▼ du cœur) sous la forme « 60▲ 88▼ … » : ni les marqueurs « fort achat / forte vente »
+ * (`--accent`), ni les retournements ↺ (`--text-dim` depuis le 11 novembre 2026, non mesurés).
+ */
 function resume(candlesEntree: Candle[], params: Record<string, number | boolean> = {}): string {
   const res = computeIndicator(stratAxis, candlesEntree, params);
   return (res.annotations?.marqueurs ?? [])
-    .filter((m) => m.couleur !== "--accent")
+    .filter((m) => m.couleur !== "--accent" && m.couleur !== "--text-dim")
     .map((m) => `${m.idx}${m.forme === "triangleHaut" ? "▲" : "▼"}`)
     .join(" ");
 }
@@ -106,6 +116,11 @@ function resume(candlesEntree: Candle[], params: Record<string, number | boolean
 /** Marqueurs « fort achat / forte vente » (couleur --accent) d'un résultat. */
 const grosDe = (res: ReturnType<typeof computeIndicator>) =>
   (res.annotations?.marqueurs ?? []).filter((m) => m.couleur === "--accent");
+/** Marqueurs des retournements ↺ (couleur --text-dim) d'un résultat. */
+const retournementsDe = (res: ReturnType<typeof computeIndicator>) =>
+  (res.annotations?.marqueurs ?? []).filter((m) => m.couleur === "--text-dim");
+/** Réserve des signaux précoces non mesurés, en tête de l'infobulle d'un retournement ↺ comme d'un triangle creux d'AXIS S/R. */
+const TETE_RETOURNEMENT = "AXIS ↺ signal précoce non mesuré — lecture indicative, jamais une promesse — ";
 
 /** Sens strict a vs b, sans −0 (toEqual distingue 0 et −0). */
 const sens = (a: number, b: number): number => Math.sign(a - b) + 0;
@@ -290,15 +305,15 @@ describe("stratAxis — calc sur la fixture dorée", () => {
     // toujours sous ×1,5 aux bougies de signal → « ordinaire », aucun « gros mouvement ».
     expect(res.annotations?.marqueurs).toEqual([
       { idx: 60, valeur: 60296.88, forme: "triangleHaut", couleur: "--up", cible: "prix",
-        info: `AXIS achat — score +6/6 : ${votes} ; close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ${fluxVolume("ordinaire", "1.4")} — ${RESERVE}${REGIME_FAVORABLE}` },
+        info: `AXIS achat — score +6/6${TETE_4H}${votes} ; close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ${fluxVolume("ordinaire", "1.4")} — ${RESERVE}${REGIME_FAVORABLE}` },
       { idx: 88, valeur: 61283.85, forme: "triangleBas", couleur: "--down", cible: "prix",
-        info: `AXIS vente — score -4/6 : ${baisse} ; -0.50 % depuis l'achat (hors frais)${AMORCE} ; ${fluxVolume("ordinaire", "1.1")} — ${RESERVE}${REGIME_FAVORABLE}` },
+        info: `AXIS vente — score -4/6${TETE_4H}${baisse} ; -0.50 % depuis l'achat (hors frais)${AMORCE} ; ${fluxVolume("ordinaire", "1.1")} — ${RESERVE}${REGIME_FAVORABLE}` },
       { idx: 107, valeur: 61068.78, forme: "triangleHaut", couleur: "--up", cible: "prix",
-        info: `AXIS achat — score +6/6 : ${votes} ; close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ${fluxVolume("ordinaire", "0.6")} — ${RESERVE}${REGIME_FAVORABLE}` },
+        info: `AXIS achat — score +6/6${TETE_4H}${votes} ; close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ${fluxVolume("ordinaire", "0.6")} — ${RESERVE}${REGIME_FAVORABLE}` },
       { idx: 139, valeur: 61009.07, forme: "triangleBas", couleur: "--down", cible: "prix",
-        info: `AXIS vente — score -4/6 : ${baisse} ; -1.86 % depuis l'achat (hors frais)${AMORCE} ; ${fluxVolume("ordinaire", "1.3")} — ${RESERVE}${REGIME_FAVORABLE}` },
+        info: `AXIS vente — score -4/6${TETE_4H}${baisse} ; -1.86 % depuis l'achat (hors frais)${AMORCE} ; ${fluxVolume("ordinaire", "1.3")} — ${RESERVE}${REGIME_FAVORABLE}` },
       { idx: 280, valeur: 53948.6, forme: "triangleHaut", couleur: "--up", cible: "prix",
-        info: `AXIS achat — score +6/6 : ${votes} ; close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ${fluxVolume("ordinaire", "0.9")} — ${RESERVE}${REGIME_FAVORABLE}` },
+        info: `AXIS achat — score +6/6${TETE_4H}${votes} ; close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ${fluxVolume("ordinaire", "0.9")} — ${RESERVE}${REGIME_FAVORABLE}` },
     ]);
     for (const m of res.annotations?.marqueurs ?? []) {
       const b = candles[m.idx]!;
@@ -513,14 +528,14 @@ describe("stratAxis — couche flux dans calc", () => {
 
   it("qualification : fort (2 lectures sur 3), à contre-sens (delta opposé), ordinaire, lectures absentes dites", () => {
     expect(res.annotations?.marqueurs?.map((m) => m.info)).toEqual([
-      `AXIS achat fort — score +6/6 : ${votes} ; close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ` +
+      `AXIS achat fort — score +6/6${TETE_4H}${votes} ; close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ` +
         `flux fort (volume ×1.4, delta taker +50 %, OI +3.0 % sur 6 b. ; ${QUALIFICATION}) — ${RESERVE}${REGIME_FAVORABLE}`,
-      `AXIS vente forte — score -4/6 : ${baisse} ; -0.50 % depuis l'achat (hors frais)${AMORCE} ; ` +
+      `AXIS vente forte — score -4/6${TETE_4H}${baisse} ; -0.50 % depuis l'achat (hors frais)${AMORCE} ; ` +
         `flux fort (volume ×1.1, delta taker -30 %, OI -2.5 % sur 6 b. ; ${QUALIFICATION}) — ${RESERVE}${REGIME_FAVORABLE}`,
-      `AXIS achat — score +6/6 : ${votes} ; close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ` +
+      `AXIS achat — score +6/6${TETE_4H}${votes} ; close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ` +
         `flux à contre-sens (volume ×0.6, delta taker -20 %, OI +10.0 % sur 6 b. ; ${QUALIFICATION}) — ${RESERVE}${REGIME_FAVORABLE}`,
-      `AXIS vente — score -4/6 : ${baisse} ; -1.86 % depuis l'achat (hors frais)${AMORCE} ; ${fluxVolume("ordinaire", "1.3")} — ${RESERVE}${REGIME_FAVORABLE}`,
-      `AXIS achat — score +6/6 : ${votes} ; close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ` +
+      `AXIS vente — score -4/6${TETE_4H}${baisse} ; -1.86 % depuis l'achat (hors frais)${AMORCE} ; ${fluxVolume("ordinaire", "1.3")} — ${RESERVE}${REGIME_FAVORABLE}`,
+      `AXIS achat — score +6/6${TETE_4H}${votes} ; close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ` +
         `flux ordinaire (volume ×0.9, delta taker +5 %, OI +1.0 % sur 6 b. ; ${QUALIFICATION}) — ${RESERVE}${REGIME_FAVORABLE}`,
     ]);
     expect(res.annotations?.labels?.map((l) => l.texte)).toEqual([
@@ -532,7 +547,7 @@ describe("stratAxis — couche flux dans calc", () => {
     const sansVolume = candles.map((c) => ({ ...c, volume: 0 }));
     const r = computeIndicator(stratAxis, sansVolume, EMA50);
     expect(r.annotations?.marqueurs?.[0]?.info).toBe(
-      `AXIS achat — score +5/6 : EMA 20/50 ▲, Supertrend ▲, DMI ▲, MACD ▲, RSI ▲, CMF – ; close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ` +
+      `AXIS achat — score +5/6${TETE_4H}EMA 20/50 ▲, Supertrend ▲, DMI ▲, MACD ▲, RSI ▲, CMF – ; close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ` +
         `flux indisponible (volume n.d., delta taker n.d., OI n.d. ; ${QUALIFICATION}) — ${RESERVE}${REGIME_FAVORABLE}`
     );
     expect(r.annotations?.labels?.map((l) => l.texte)).toEqual(["Achat", "Vente -1.98 %", "Achat", "Vente -1.87 %", "Achat"]);
@@ -556,7 +571,7 @@ describe("stratAxis — couche flux dans calc", () => {
     expect(resume(candles, { ...EMA50, filtreFlux: true, seuilRvol: 1.2 })).toBe("60▲ 88▼ 108▲ 139▼ 283▲");
     const r = computeIndicator(stratAxis, candles, { ...EMA50, filtreFlux: true });
     expect(r.annotations?.marqueurs?.[0]?.info).toBe(
-      `AXIS achat fort — score +6/6 : ${votes} ; close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ${fluxVolume("fort", "1.5")} — ${RESERVE_FILTRE}${REGIME_FAVORABLE}`
+      `AXIS achat fort — score +6/6 · filtre flux, non mesuré — ${votes} ; close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ${fluxVolume("fort", "1.5")} — ${RESERVE_FILTRE}${REGIME_FAVORABLE}`
     );
     expect(r.annotations?.labels?.[0]?.texte).toBe("Achat fort");
     // Filtre sans donnée de flux (forex) : aucun achat possible, et rien d'inventé.
@@ -692,7 +707,7 @@ describe("stratAxis — infobulles par unité de temps (test du 8 octobre 2026)"
 
   it("1h : signaux et forts mouvements au statut « test échoué » de l'unité ; sans delta taker, garde inchangée", () => {
     expect(computeIndicator(stratAxis, candles, EMA50, undefined, "1h").annotations?.marqueurs?.[0]?.info).toBe(
-      `AXIS achat — score +6/6 : ${votes} ; close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ` +
+      `AXIS achat — score +6/6 · 1h : test échoué — ${votes} ; close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ` +
         "flux ordinaire (volume ×1.4, delta taker n.d., OI n.d. ; qualification descriptive, non mesurée en 1h) — " +
         "en 1h : test échoué sur données jamais vues (42 alts, oct. 2023-oct. 2026) — expectancy nette ≤ 0 aux coûts x1 ou x3, " +
         "timing non significatif, PnL positif sur 21/42 actifs seulement, expectancy négative sur une moitié de la période ; " +
@@ -894,7 +909,7 @@ describe("stop suiveur (v3)", () => {
       expect(m).toEqual({
         idx: 137, valeur: candles[137]!.high, forme: "triangleBas", couleur: "--down", cible: "prix",
         info:
-          "AXIS stop fort — score -2/6 : EMA 20/50 ▲, Supertrend ▲, DMI ▼, MACD ▼, RSI ▼, CMF ▼ ; " +
+          "AXIS stop fort — score -2/6 · réglage non validé — EMA 20/50 ▲, Supertrend ▲, DMI ▼, MACD ▼, RSI ▼, CMF ▼ ; " +
           `close sous le stop suiveur (61016.78) ; -0.78 % depuis l'achat (hors frais)${AMORCE} ; ` +
           `${fluxVolume("fort", "1.6")} — ${RESERVE}${REGIME_FAVORABLE}${SUFFIXE_3}`,
       });
@@ -904,7 +919,7 @@ describe("stop suiveur (v3)", () => {
       // La vente par score garde ses textes, le suffixe du stop en plus.
       const vente = res.annotations?.marqueurs?.find((x) => x.idx === 88);
       expect(vente?.info).toBe(
-        `AXIS vente — score -4/6 : EMA 20/50 ▲, Supertrend ▼, DMI ▼, MACD ▼, RSI ▼, CMF ▼ ; -0.50 % depuis l'achat (hors frais)${AMORCE} ; ` +
+        `AXIS vente — score -4/6 · réglage non validé — EMA 20/50 ▲, Supertrend ▼, DMI ▼, MACD ▼, RSI ▼, CMF ▼ ; -0.50 % depuis l'achat (hors frais)${AMORCE} ; ` +
           `${fluxVolume("ordinaire", "1.1")} — ${RESERVE}${REGIME_FAVORABLE}${SUFFIXE_3}`
       );
       expect(res.annotations?.marqueurs?.[0]?.info?.endsWith(`close au-dessus de l'EMA 50${NON_APPLIQUE}${AMORCE} ; ${fluxVolume("ordinaire", "1.4")} — ${RESERVE}${REGIME_FAVORABLE}${SUFFIXE_3}`)).toBe(true);
@@ -1103,12 +1118,12 @@ describe("filtre ADX à l'entrée (v4, 9 octobre 2026)", () => {
     expect(marqueurs[0]).toEqual({
       idx: 73, valeur: candles[73]!.low, forme: "triangleHaut", couleur: "--up", cible: "prix",
       info:
-        "AXIS achat fort — score +6/6 : EMA 20/50 ▲, Supertrend ▲, DMI ▲, MACD ▲, RSI ▲, CMF ▲ ; " +
+        "AXIS achat fort — score +6/6 · réglage non validé — EMA 20/50 ▲, Supertrend ▲, DMI ▲, MACD ▲, RSI ▲, CMF ▲ ; " +
         `close au-dessus de l'EMA 50, ADX 14 ${adx[73]!.toFixed(1)} ≥ 25${NON_APPLIQUE}${AMORCE} ; ${fluxVolume("fort", "1.5")} — ${RESERVE}${REGIME_FAVORABLE}${suffixe(25)}`,
     });
     expect(adx[73]!.toFixed(1)).toBe("25.2");
     expect(marqueurs[1]?.info).toBe(
-      `AXIS vente — score -4/6 : EMA 20/50 ▲, Supertrend ▼, DMI ▼, MACD ▼, RSI ▼, CMF ▼ ; -2.24 % depuis l'achat (hors frais)${AMORCE} ; ` +
+      `AXIS vente — score -4/6 · réglage non validé — EMA 20/50 ▲, Supertrend ▼, DMI ▼, MACD ▼, RSI ▼, CMF ▼ ; -2.24 % depuis l'achat (hors frais)${AMORCE} ; ` +
         `${fluxVolume("ordinaire", "1.1")} — ${RESERVE}${REGIME_FAVORABLE}${suffixe(25)}`
     );
     expect((candles[88]!.close / candles[73]!.close - 1) * 100).toBeCloseTo(-2.24, 2);
@@ -1483,7 +1498,108 @@ describe("garde-fou de régime BTC (v5, 10 octobre 2026)", () => {
   });
 });
 
-describe("detecterRetournementsAxis — détection haute précision Achat / Vente", () => {
+// Demande du 11 novembre 2026 : au téléphone, l'infobulle est coupée vers le 55e caractère, et le statut de mesure
+// d'un signal était à la fin d'une ligne de plusieurs centaines. Un statut court ouvre désormais la ligne ; il abrège
+// la réserve de fin d'infobulle, qui reste entière, et ne doit jamais être plus favorable qu'elle.
+describe("statut de mesure en tête de l'infobulle d'un signal confirmé", () => {
+  const UNITES_TOUTES: Timeframe[] = ["1s", "5s", "15s", "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "3d", "1w", "1M", "3M", "6M", "12M"];
+  const confirmes = (params: Record<string, number | boolean>, tf?: Timeframe, serie: Candle[] = candles) =>
+    (computeIndicator(stratAxis, serie, { ...EMA50, ...params }, undefined, tf).annotations?.marqueurs ?? [])
+      .filter((m) => m.couleur !== "--accent")
+      .map((m) => m.info ?? "");
+  /** Tête d'une infobulle de signal : ce qui précède la liste des votes. */
+  const tete = (info: string): string => info.slice(0, info.indexOf(" — EMA 20/50 "));
+  const TETE = /^AXIS (achat|vente|stop)( forte?)? — score [+-]?\d\/6 · (.+)$/;
+
+  it("statutAxis : 4h et unité absente gardent la réserve de l'EMA 200 ; ailleurs « test échoué » ou « non mesuré », comme la fin de l'infobulle", () => {
+    expect(statutAxis(undefined, false, false)).toBe("test 4h ≈ EMA 200 seule");
+    expect(statutAxis("4h", false, false)).toBe("test 4h ≈ EMA 200 seule");
+    expect(statutAxis("1h", false, false)).toBe("1h : test échoué");
+    expect(statutAxis("1d", false, false)).toBe("1d : test échoué");
+    expect(statutAxis("1w", false, false)).toBe("1w : non mesuré");
+    expect(statutAxis("1M", false, false)).toBe("1M : non mesuré");
+    expect(statutAxis("5s", false, false)).toBe("5s : non mesuré");
+    for (const u of UNITES_TOUTES) {
+      const statut = statutAxis(u, false, false);
+      const fin = textesAxis(u).signaux;
+      // Le statut dit ce que dit la fin de l'infobulle, jamais mieux : « test réussi », avec sa réserve, n'existe qu'en 4h.
+      expect(statut.includes("test échoué"), u).toBe(fin.includes("test échoué"));
+      expect(statut.includes("non mesuré"), u).toBe(fin.startsWith(`en ${u} : non mesuré`));
+      expect(statut.includes("≈ EMA 200 seule"), u).toBe(fin.startsWith("test réussi") && fin.includes("pas mieux qu'une EMA 200 seule"));
+      expect(statut).not.toContain("réussi");
+      expect(statut.length, statut).toBeLessThanOrEqual(23);
+    }
+  });
+
+  it("statutAxis : filtre flux et réglages dont la fin de l'infobulle dit l'échec ou le « non mesuré »", () => {
+    // Filtre flux : la fin dit « signaux hors du test … non mesurés » dans toutes les unités.
+    for (const u of [undefined, "4h", "1h", "1w"] as const) expect(statutAxis(u, true, false)).toBe("filtre flux, non mesuré");
+    expect(statutAxis("4h", true, true)).toBe("filtre flux, non mesuré");
+    // Stop, filtre ADX, régime hors de 0 et de 100 : en 4h, plus de « test 4h » ; ailleurs le statut de l'unité, déjà défavorable.
+    expect(statutAxis("4h", false, true)).toBe("réglage non validé");
+    expect(statutAxis(undefined, false, true)).toBe("réglage non validé");
+    expect(statutAxis("1h", false, true)).toBe("1h : test échoué");
+    for (const s of ["filtre flux, non mesuré", "réglage non validé"]) expect(s.length).toBeLessThanOrEqual(23);
+  });
+
+  it.each([undefined, "4h", "1h", "1d", "1w", "1M", "5s"] as const)("unité %s : le statut tient dans les 55 premiers caractères de chaque signal, la réserve entière reste à la fin", (tf) => {
+    const infos = confirmes({}, tf);
+    expect(infos).toHaveLength(5);
+    for (const info of infos) {
+      const t = tete(info);
+      expect(t, t).toMatch(TETE);
+      expect(t.length, t).toBeLessThanOrEqual(55);
+      expect(t.endsWith(` · ${statutAxis(tf, false, false)}`), t).toBe(true);
+      expect(info.endsWith(` — ${textesAxis(tf).signaux}`)).toBe(true);
+    }
+    // Le statut n'a fait que s'insérer : « · statut — » à la place de « : », rien d'autre ne bouge.
+    expect(infos[0]).toContain(` — score +6/6 · ${statutAxis(tf, false, false)} — EMA 20/50 ▲, Supertrend ▲, DMI ▲, MACD ▲, RSI ▲, CMF ▲ ; close au-dessus de l'EMA 50`);
+  });
+
+  it("la plus longue des têtes (« vente forte ») fait 55 caractères en 4h", () => {
+    // Fixture enrichie de volumes taker : l'achat de 60 et la vente de 88 sont « forts ».
+    const enrichies = candles.map((c, i) =>
+      i === 60 ? { ...c, buyVolume: c.volume * 0.75, sellVolume: c.volume * 0.25 } : i === 88 ? { ...c, buyVolume: c.volume * 0.35, sellVolume: c.volume * 0.65 } : c
+    );
+    const infos = confirmes({ seuilRvol: 1 }, "4h", enrichies);
+    expect(tete(infos[0]!)).toBe("AXIS achat fort — score +6/6 · test 4h ≈ EMA 200 seule");
+    expect(tete(infos[1]!)).toBe("AXIS vente forte — score -4/6 · test 4h ≈ EMA 200 seule");
+    expect(tete(infos[1]!)).toHaveLength(55);
+    for (const info of confirmes({ seuilRvol: 1 }, "15m", enrichies)) expect(tete(info).length).toBeLessThanOrEqual(55);
+  });
+
+  it("filtre flux, stop, filtre ADX, régime hors test : la tête ne dit jamais mieux que la fin de l'infobulle", () => {
+    const tetes = (params: Record<string, number | boolean>, tf?: Timeframe) => confirmes(params, tf).map(tete);
+    // Fin de l'infobulle : la réserve et ses mentions de réglage, après la qualification du flux.
+    const fins = (params: Record<string, number | boolean>) => confirmes(params).map((info) => info.slice(info.indexOf(" ; qualification descriptive")));
+    for (const t of tetes({ filtreFlux: true })) expect(t.endsWith(" · filtre flux, non mesuré"), t).toBe(true);
+    for (const f of fins({ filtreFlux: true })) expect(f).toContain("hors du test du 7 octobre 2026, non mesurés");
+    // Stop 3 × ATR (test échoué) ou 2,5 (hors test) ; filtre ADX 25 (test échoué) ou 30 (hors test) ; régime EMA 50 (hors test).
+    for (const [params, fin] of [
+      [{ stopAtr: 3 }, "pas une amélioration validée"],
+      [{ stopAtr: 2.5 }, "non mesuré"],
+      [{ adxEntree: 25 }, "pas une amélioration validée"],
+      [{ adxEntree: 30 }, "non mesuré"],
+      [{ regimeBtc: 50 }, "non mesuré"],
+    ] as const) {
+      const t = tetes(params);
+      expect(t.length, JSON.stringify(params)).toBeGreaterThan(0);
+      for (const x of t) {
+        expect(x.endsWith(" · réglage non validé"), x).toBe(true);
+        expect(x.length, x).toBeLessThanOrEqual(55);
+      }
+      for (const f of fins(params)) expect(f.endsWith(fin), f).toBe(true);
+    }
+    // Une sortie par stop garde son début (« AXIS stop … — score ») : le test croisé du web le lit.
+    expect(tetes({ stopAtr: 3 })[3]).toBe("AXIS stop fort — score -2/6 · réglage non validé");
+    // Régime 0 (« signaux de la v2 testée ») et régime 100 (le défaut, mesuré favorable) gardent le statut du test.
+    for (const regimeBtc of [0, 100]) for (const t of tetes({ regimeBtc })) expect(t.endsWith(" · test 4h ≈ EMA 200 seule"), t).toBe(true);
+    // Hors du 4h, le statut de l'unité, déjà défavorable, passe avant celui du réglage.
+    for (const t of tetes({ stopAtr: 3 }, "1h")) expect(t.endsWith(" · 1h : test échoué"), t).toBe(true);
+  });
+});
+
+describe("detecterRetournementsAxis — détection heuristique Achat / Vente (structure seulement : jamais mesurée)", () => {
   it("détecte des retournements potentiels à l'achat et à la vente sur la fixture dorée avec stop d'invalidation et cibles 1R/2R", () => {
     const retournements = detecterRetournementsAxis(candles);
     expect(retournements.length).toBeGreaterThan(0);
@@ -1555,5 +1671,79 @@ describe("detecterRetournementsAxis — détection haute précision Achat / Vent
         m.info?.includes("Retournement ACHAT") || m.info?.includes("Retournement VENTE"),
       ),
     ).toBe(true);
+  });
+});
+
+// Revue du 6 novembre 2026, constat IND-1 : les retournements ↺ n'ont été soumis à aucune campagne. Ils ne doivent
+// ni ressembler à un signal confirmé, ni afficher un score qui se lise comme une probabilité, ni taire la réserve.
+describe("retournements ↺ — non mesurés, distincts des signaux confirmés (IND-1)", () => {
+  const AVEC = { ...EMA50, detecterRetournements: true };
+  const defaut = computeIndicator(stratAxis, candles, EMA50);
+  const avec = computeIndicator(stratAxis, candles, AVEC);
+  const retournements = retournementsDe(avec);
+
+  it("40 marqueurs sur la fixture dorée, 403 retournements sur le cas BTCUSDT 4h : la détection ne change pas", () => {
+    expect(detecterRetournementsAxis(candles)).toHaveLength(40);
+    expect(detecterRetournementsAxis(bougiesBtcusdt4h())).toHaveLength(403);
+    expect(retournements).toHaveLength(40);
+    expect(retournements.map((m) => m.idx).slice(0, 4)).toEqual([36, 42, 62, 68]);
+  });
+
+  it("la couleur --text-dim les sépare des signaux confirmés (--up, --down) et des forts mouvements (--accent) ; ceux-ci ne changent pas", () => {
+    for (const m of retournements) {
+      expect(m.couleur).toBe("--text-dim");
+      expect(m.creux).toBeUndefined();
+    }
+    // Les marqueurs d'avant restent, au caractère près, en tête du tableau ; aucun n'est gris.
+    expect((avec.annotations?.marqueurs ?? []).filter((m) => m.couleur !== "--text-dim")).toEqual(defaut.annotations?.marqueurs);
+    expect(retournementsDe(defaut)).toEqual([]);
+    // L'aide `resume` ne compte que les signaux confirmés, la case cochée ou non.
+    expect(resume(candles, AVEC)).toBe("60▲ 88▼ 107▲ 139▼ 280▲");
+    expect(resume(candles, AVEC)).toBe(resume(candles, EMA50));
+  });
+
+  it("l'infobulle commence par la réserve des signaux précoces, puis le résumé et des prix à deux décimales", () => {
+    for (const m of retournements) {
+      expect(m.info?.startsWith(TETE_RETOURNEMENT), m.info).toBe(true);
+      expect(m.info).toMatch(
+        / — Retournement (ACHAT|VENTE) \(\d+\/100\) : .+ · entrée \d+\.\d{2} · invalidation \d+\.\d{2} · cible 1R \d+\.\d{2} \/ 2R \d+\.\d{2}$/
+      );
+      expect(m.info).not.toContain("%");
+    }
+    expect(retournements[0]).toEqual({
+      idx: 36, valeur: 60495.59, forme: "triangleBas", couleur: "--text-dim", cible: "prix",
+      info:
+        `${TETE_RETOURNEMENT}Retournement VENTE (75/100) : divergence baissière Prix/Momentum + essoufflement MACD/AXIS + ` +
+        "rejet sur mèche haute / avalement + distribution vendeuse sur volume · entrée 60309.00 · invalidation 60747.69 · cible 1R 59870.31 / 2R 59431.61",
+    });
+  });
+
+  it("l'étiquette donne le score sur 100, sans « % », sur les dix marqueurs les plus récents", () => {
+    const etiquettes = (avec.annotations?.labels ?? []).filter((l) => l.texte.startsWith("↺"));
+    expect(etiquettes).toHaveLength(MAX_LABELS_SORTIE);
+    for (const l of etiquettes) {
+      expect(l.texte).toMatch(/^↺ (Achat|Vente) \d+\/100$/);
+      expect(l.couleur).toBe("--text-dim");
+    }
+    expect(etiquettes.slice(-3)).toEqual([
+      { idx: 282, valeur: 54614.96, texte: "↺ Vente 100/100", couleur: "--text-dim", cible: "prix", position: "dessus" },
+      { idx: 287, valeur: 55679.05, texte: "↺ Vente 70/100", couleur: "--text-dim", cible: "prix", position: "dessus" },
+      { idx: 292, valeur: 55157.38, texte: "↺ Vente 60/100", couleur: "--text-dim", cible: "prix", position: "dessus" },
+    ]);
+    // Les étiquettes des signaux confirmés ne changent pas.
+    expect((avec.annotations?.labels ?? []).filter((l) => !l.texte.startsWith("↺"))).toEqual(defaut.annotations?.labels);
+  });
+
+  it("prix sous un centime : quatre chiffres significatifs au lieu de « 0.00 », mêmes retournements", () => {
+    // Prix × 2^-24 (close vers 0,0036) : une puissance de deux garde les mantisses, donc chaque décision.
+    const k = 2 ** -24;
+    const minuscules = candles.map((c) => ({ ...c, open: c.open * k, high: c.high * k, low: c.low * k, close: c.close * k }));
+    const petits = retournementsDe(computeIndicator(stratAxis, minuscules, AVEC));
+    expect(petits.map((m) => m.idx)).toEqual(retournements.map((m) => m.idx));
+    for (const m of petits) {
+      expect(m.info).toMatch(/ · entrée 0\.00\d{4} · invalidation 0\.00\d{4} · cible 1R 0\.00\d{4} \/ 2R 0\.00\d{4}$/);
+      expect(m.info).not.toContain(" 0.00 ");
+    }
+    expect(petits[0]!.info?.endsWith(" · entrée 0.003595 · invalidation 0.003621 · cible 1R 0.003569 / 2R 0.003542")).toBe(true);
   });
 });

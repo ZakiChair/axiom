@@ -3252,9 +3252,13 @@ intégrés dans l'ordre « infobulle », « alertes A1 » sur la branche `feat/a
     prix sans route ticker garde sa cadence ; un composite reste figé sous l'amorce de ses
     indicateurs. La course de la référence du garde-fou de régime relit les defs par id à son
     retour : elle annulait une pause ou une prolongation posée pendant l'attente. Depuis la
-    revue globale : un composite jamais calibré, sur le marché affiché, est calibré à chaque
-    changement de définitions (la règle « évaluée aussitôt » ne valait que pour les defs
-    simples) ; un composite lisant AXIS reçoit la référence du garde-fou de régime, alignée sur
+    revue globale : un composite jamais calibré, sur le marché affiché et fait de conditions
+    de bougie seules, est calibré à chaque changement de définitions (la règle « évaluée
+    aussitôt » ne valait que pour les defs simples). Un composite qui porte une autre condition
+    (prix, funding…) garde son calibrage au premier évènement de cette condition : calibré sur
+    la dernière clôture, un niveau placé entre elle et le prix en direct sonnait à tort au
+    premier tick (régression de la première correction, relevée par la contre-revue). Un
+    composite lisant AXIS reçoit la référence du garde-fou de régime, alignée sur
     les bougies de son contexte, et attend son arrivée quand elle est en vol (en échec : évalué
     sans elle, comme une def simple).
   - **Formulaire.** AXIS S/R et AXIS en tête du sélecteur ; sorties nommées, comparateur et
@@ -3303,7 +3307,11 @@ intégrés dans l'ordre « infobulle », « alertes A1 » sur la branche `feat/a
 - **Revue globale du 12 novembre 2026 et ses corrections.** Deux regards indépendants sur
   `912ab1a`, téléphone et alertes, sur le vrai graphe et le vrai moteur ; un constat majeur,
   rejoué par un troisième agent avant correction, dix mineurs, aucun bloquant. Corrigés par un
-  agent distinct des réviseurs (`a1966f1`, `ee38ddd`, puis le commit de cette consignation).
+  agent distinct des réviseurs (`8a24854`, `905af9d`, puis le commit de cette consignation).
+  Contre-revue de ces corrections par un quatrième agent : verdict « ok », aucun constat
+  bloquant ni majeur, deux mineurs corrigés dans la foulée — un composite portant un prix
+  sonnait à tort au premier tick (voir « Règles d'évaluation » ; test du runtime qui échoue
+  sans la correction), et deux hachages de commit périmés dans cette section.
   - **Majeur — l'encart survivait au réticule.** KLineChart 9.8.12 efface son réticule chaque
     fois que ses données sont remplacées (`clearData`, `applyNewData` : `ChartStore.clear`),
     sans émettre `OnCrosshairChange`. Après « Voir » d'un avis ou une recherche d'actif vers un
@@ -3342,8 +3350,8 @@ intégrés dans l'ordre « infobulle », « alertes A1 » sur la branche `feat/a
     après l'achat, avis lu à 320 puis 390 px, « Voir » sur la bougie d'achat. Parcours
     `mobile-axis-sr` : AXIS S/R fermé encart affiché ; rotation avec le réticule sur
     l'avant-dernière bougie. Tests du runtime sur le cas de référence, vrai moteur
-    (`alerts/runtime.test.ts`, 15 tests) : signal daté, référence sous sa tendance, en vol et
-    en échec, composite créé en cours de bougie. Contre-épreuves : sept corrections retirées
+    (`alerts/runtime.test.ts`, 16 tests, dont celui de la contre-revue) : signal daté,
+    référence sous sa tendance, en vol et en échec, composite créé en cours de bougie. Contre-épreuves : sept corrections retirées
     une à une, chacune fait échouer son étape de parcours ou ses tests.
 - **Limites des sections précédentes levées** (annotées sur place).
   - 11 novembre : la ligne de l'infobulle n'est plus coupée net au milieu d'un nombre, et son
@@ -3470,8 +3478,11 @@ intégrés dans l'ordre « infobulle », « alertes A1 » sur la branche `feat/a
   - Après les corrections de la revue globale : **1 177 240 / 353 534**, soit +568 / +258 de
     plus (mesuré sur `912ab1a` juste avant : 1 176 672 / 353 276, la ligne précédente).
   - Après la correction de la pile d'avis trouvée par la CI (`Toasts.tsx`), sur la tête de la
-    branche : **1 177 441 / 353 577**, soit +201 / +43 de plus.
-  - Chantier entier : **+6 369 / +2 437** ; marge gzip **6 423**, au-dessus des 3 000 exigés.
+    branche : 1 177 441 / 353 577, soit +201 / +43 de plus.
+  - Après la correction de la contre-revue (`alerts/runtime.ts`, chargé à la demande : seul le
+    nom de son fichier change dans le chargement initial) : **1 177 441 / 353 593**, soit
+    +0 / +16 de plus.
+  - Chantier entier : **+6 369 / +2 453** ; marge gzip **6 407**, au-dessus des 3 000 exigés.
   - Fichiers à la demande : 141, 1 734 113 / 638 860 (+9 152 / +3 581 sur le chantier, dont
     +1 299 / +414 pour la revue globale) : le runtime des alertes et leur panneau, chargés
     après le premier rendu.
@@ -3509,8 +3520,8 @@ intégrés dans l'ordre « infobulle », « alertes A1 » sur la branche `feat/a
       parcours ;
     - non lancés ici : `pnpm check:e2e` complet, WebKit, Vercel et daemon réels.
   - Vérification après les corrections de la revue globale (12 novembre 2026, Node 22.23.4,
-    sur `ee38ddd`, dernier commit qui change le code exécuté ; celui de cette consignation n'y
-    touche que deux commentaires) :
+    sur `905af9d`, alors dernier commit à changer le code exécuté ; celui de cette consignation
+    n'y touche que deux commentaires) :
     - typage des 7 projets ; indicateurs 232 fichiers / 1 144 tests, alertes 147, backtest 131,
       pacte 120, daemon 786, web 473 fichiers / 7 093 tests (21 de plus, même exclusion) ;
     - build du web et budget verts (chiffres ci-dessus) ;

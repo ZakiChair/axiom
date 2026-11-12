@@ -2086,4 +2086,31 @@ describe("cas de référence BTCUSDT 4h : signal daté au retour, composites à 
     expect(alertsStore.getState().journal.map((d) => d.message).sort()).toEqual([LIBELLE_ACHAT, `${LIBELLE_ACHAT} ET rsi(rsi) > 0`].sort());
     expect(toastsStore.getState().toasts).toHaveLength(2);
   });
+
+  // Régression du calibrage immédiat, relevée par la contre-revue du 12 novembre : il valait aussi
+  // pour un composite portant un prix. Sans flux de prix déjà ouvert, le « dernier prix » du
+  // contexte est la dernière clôture : un niveau placé entre elle et le prix en direct était armé,
+  // puis sonnait au premier tick alors que la condition était déjà vraie à la pose.
+  it("composite portant un prix, créé en cours de bougie : calibré à son premier tick, il ne sonne pas sur une condition déjà vraie", () => {
+    ouvrirApres(ACHAT - 1);
+    stop = demarrerAlertes();
+    const cloture = F[ACHAT - 1]!.close;
+    const rsiVrai: AlertDef["condition"] = { type: "indicateur-seuil", indicateurId: "rsi", params: {}, output: "rsi", comparateur: ">", valeur: 0 };
+    const prixFranchi: AlertDef["condition"] = { type: "prix-croise", niveau: cloture * 1.001, sens: "hausse" };
+    expect(alertsStore.getState().ajouter({
+      symbol: "BTCUSDT", source: "binance", timeframe: "4h",
+      condition: { type: "composite", conditions: [prixFranchi as never, rsiVrai as never] },
+    })).toBe(true);
+    // Pas de calibrage sur la dernière clôture, qui est sous le niveau.
+    expect(alertsStore.getState().defs[0]?.arme).toBeUndefined();
+    const ticker = subscribeTickersMock.mock.calls.filter((args) => (args[2] as { source?: string } | undefined)?.source === "binance").at(-1)?.[1] as
+      (update: { symbol: string; price: number; changePercent: number }) => void;
+    expect(ticker).toBeDefined();
+    // Premier tick : le prix en direct est déjà au-dessus du niveau. Calibrage, ni tir ni avis.
+    horloge += 2_000;
+    ticker({ symbol: "BTCUSDT", price: cloture * 1.002, changePercent: 0 });
+    expect(alertsStore.getState().defs[0]?.arme).toBeDefined();
+    expect(alertsStore.getState().journal).toHaveLength(0);
+    expect(toastsStore.getState().toasts).toHaveLength(0);
+  });
 });

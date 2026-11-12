@@ -1100,11 +1100,15 @@ function creerRuntime(): Unsubscribe {
     // R3 : une def créée ou réactivée en cours de bougie est évaluée sur la dernière bougie
     // close sans attendre la suivante (les defs déjà évaluées pour elle ne le sont pas deux fois).
     onMarket();
-    // De même un composite jamais calibré, sur le marché affiché : il se calibre sur le contexte
-    // présent sans tirer, la clôture suivante peut donc le déclencher. Fait de conditions de
-    // bougie seules, il attendait cette clôture pour se calibrer, et son signal était perdu.
+    // De même un composite jamais calibré, sur le marché affiché, quand il est fait de conditions
+    // de bougie SEULES : il se calibre sur la dernière bougie close sans tirer, la clôture
+    // suivante peut donc le déclencher (il attendait cette clôture pour se calibrer, et son
+    // signal était perdu). Un composite qui porte une autre condition (prix, funding…) garde son
+    // calibrage au premier évènement de cette condition : ici le « dernier prix » du contexte
+    // peut n'être que la dernière clôture, et un niveau placé entre elle et le prix en direct
+    // serait armé, puis sonnerait au premier tick alors que la condition était déjà vraie.
     const { exchange, symbol } = marketStore.getState();
-    evaluerComposites(exchange, symbol, (d) => d.arme === undefined);
+    evaluerComposites(exchange, symbol, (d) => d.arme === undefined && [...typesDeDef(d)].every((type) => TYPES_BOUGIE.has(type)));
   });
   const unsubMarket = marketStore.subscribe(onMarket);
   onMarket(); // calibrage initial des conditions bougie sur le backfill présent

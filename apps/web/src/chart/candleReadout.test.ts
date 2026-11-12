@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import type { AnnotationsIndicateur, Candle, Timeframe } from "@axiom/types";
 import { computeIndicator, getIndicator } from "@axiom/indicators";
 import fixtureBtc from "../../../../packages/indicators/src/strategy/fixtures/btcusdt-4h-3000.json";
-import { enPoints, lectureBougie, texteEncart } from "./candleReadout";
+import { bougieSousReticule, enPoints, lectureBougie, texteEncart } from "./candleReadout";
 
 describe("lectureBougie", () => {
   it("bougie haussière", () => {
@@ -133,6 +133,32 @@ function manquements(rendu: string, complet: string): string[] {
   }
   return trouves;
 }
+
+// Revue globale du 12 novembre 2026. Doigt levé, quand le graphe glisse sous le réticule, l'encart
+// compare la bougie qu'il décrit à celle que le moteur met sous le même pixel. Au-delà de la dernière
+// bougie, `convertFromPixel` ne rend aucun horodatage : l'encart restait, sur une autre bougie que
+// celle du réticule, que le moteur ramène à la dernière.
+describe("bougieSousReticule — la bougie que le moteur met sous un pixel", () => {
+  const donnees = [{ timestamp: 100 }, { timestamp: 200 }, { timestamp: 300 }];
+
+  it("dans les données : la bougie de cet indice", () => {
+    expect(bougieSousReticule(0, donnees)).toBe(100);
+    expect(bougieSousReticule(1, donnees)).toBe(200);
+    expect(bougieSousReticule(2, donnees)).toBe(300);
+  });
+
+  it("au-delà de la dernière bougie (marge droite) : la dernière ; avant la première : la première", () => {
+    expect(bougieSousReticule(3, donnees)).toBe(300);
+    expect(bougieSousReticule(12, donnees)).toBe(300);
+    expect(bougieSousReticule(-1, donnees)).toBe(100);
+  });
+
+  it("sans indice ou sans donnée : aucune bougie, jamais une valeur inventée", () => {
+    expect(bougieSousReticule(undefined, donnees)).toBeUndefined();
+    expect(bougieSousReticule(Number.NaN, donnees)).toBeUndefined();
+    expect(bougieSousReticule(1, [])).toBeUndefined();
+  });
+});
 
 describe("texteEncart — règle", () => {
   const parties = (n: number, longueur: number): string => Array.from({ length: n }, (_x, i) => `partie ${i + 1} ${"x".repeat(longueur)}`).join(SEPARATEUR);

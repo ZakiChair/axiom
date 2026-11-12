@@ -593,6 +593,13 @@ export class ChartIndicators {
   /** Seul le graphe maître publie sa capacité en panes (cf. store/chartCapacite.ts). */
   private readonly estMaitre: boolean;
 
+  /**
+   * Rappel posé par `ChartInstance`, appelé après chaque montage, retrait ou recalcul (`sync`,
+   * `recompute`, arrivée d'une série auxiliaire) : les annotations du pane des prix ont pu changer,
+   * et le moteur ne le notifie pas. L'encart du téléphone y relit son texte visé (`texteVise`).
+   */
+  apresCalcul: (() => void) | null = null;
+
   constructor(chart: Chart, estMaitre = false) {
     this.chart = chart;
     this.estMaitre = estMaitre;
@@ -788,6 +795,7 @@ export class ChartIndicators {
     );
     this.annotationsPrix.appliquer(inst.instanceId, def, result.annotations, candles);
     publierStatut(this.chart, inst.instanceId, statut);
+    this.apresCalcul?.();
   }
 
   /** Restreint le cache aux clés de calcul encore référencées (borne mémoire). */
@@ -898,6 +906,7 @@ export class ChartIndicators {
 
     this.pruneCache(new Set(effectiveInstances.map((i) => computeKey(i.defId, i.params))));
     this.equilibrerHauteurs();
+    this.apresCalcul?.();
   }
 
   /**
@@ -1017,6 +1026,7 @@ export class ChartIndicators {
       this.annotationsPrix.appliquer(inst.instanceId, def, result.annotations, candles);
       publierStatut(this.chart, inst.instanceId, statut);
     }
+    this.apresCalcul?.();
   }
 
   /**

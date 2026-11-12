@@ -58,6 +58,17 @@ export function texteEncart(info: string, max = 360): string {
   return debut === info ? info : `${debut} …`;
 }
 
+/**
+ * Ouverture de la bougie que le moteur met sous un réticule resté au pixel d'indice `indice` (rendu
+ * par `convertFromPixel`). L'indice est borné aux données, comme le fait KLineChart 9.8.12
+ * (`TooltipStore.setCrosshair`) : au-delà de la dernière bougie, dans la marge droite, c'est la
+ * dernière ; avant la première, la première. `undefined` sans indice ou sans donnée. PURE.
+ */
+export function bougieSousReticule(indice: number | undefined, donnees: ReadonlyArray<Pick<KLineData, "timestamp">>): number | undefined {
+  if (indice === undefined || !Number.isFinite(indice)) return undefined;
+  return donnees[Math.max(0, Math.min(indice, donnees.length - 1))]?.timestamp;
+}
+
 /** Fond de l'encart des prix seuls : légèrement translucide, il laisse deviner les bougies. */
 const FOND = "color-mix(in srgb, var(--surface) 92%, transparent)";
 

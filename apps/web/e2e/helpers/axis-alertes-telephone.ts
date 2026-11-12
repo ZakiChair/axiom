@@ -43,6 +43,10 @@ export interface FluxAxisAlertes {
   pousserPrix: (prix: number) => number;
   /** Sockets kline et ticker ouvertes par la page. */
   ouverts: () => { kline: number; ticker: number };
+  /** La place coupe le flux kline : chaque socket tenue est fermée ; rend leur nombre. La page se reconnecte d'elle-même. */
+  couperKline: () => number;
+  /** Connexions kline ouvertes par la page depuis le début, reconnexions comprises. */
+  connexionsKline: () => number;
 }
 
 /**
@@ -64,7 +68,9 @@ export async function preparerAxisAlertes(page: Page, options: OptionsAxisAlerte
   // Flux tenus par le test : la socket s'ouvre côté page, rien ne part vers la place.
   const kline = new Set<WebSocketRoute>();
   const ticker = new Set<WebSocketRoute>();
+  let connexionsKline = 0;
   const tenir = (sockets: Set<WebSocketRoute>) => (socket: WebSocketRoute) => {
+    if (sockets === kline) connexionsKline += 1;
     sockets.add(socket);
     socket.onMessage(() => {});
     socket.onClose(() => {
@@ -93,6 +99,15 @@ export async function preparerAxisAlertes(page: Page, options: OptionsAxisAlerte
       return ticker.size;
     },
     ouverts: () => ({ kline: kline.size, ticker: ticker.size }),
+    couperKline: () => {
+      const coupees = [...kline];
+      for (const socket of coupees) {
+        kline.delete(socket);
+        void socket.close();
+      }
+      return coupees.length;
+    },
+    connexionsKline: () => connexionsKline,
   };
 }
 
@@ -229,6 +244,20 @@ export async function pousserAvisOrdinaire(page: Page, texte: string): Promise<v
     const importer = new Function("return import('/src/store/toasts.ts')") as () => Promise<{ pousserToast: (texte: string) => void }>;
     (await importer()).pousserToast(t);
   }, texte);
+}
+
+/**
+ * Pousse un avis d'alerte par `notifier` du runtime, la fonction qui pousse l'avis de chaque
+ * déclenchement (« SYMBOLE UNITÉ — message », bouton « Voir », reste jusqu'au toucher). Sans unité :
+ * « Voir » garde celle du graphe, comme pour une alerte de prix.
+ */
+export async function pousserAvisAlerte(page: Page, message: string, marche: { symbol: string; source: string; timeframe?: string }): Promise<void> {
+  await page.evaluate(async ([texte, def]) => {
+    const importer = new Function("return import('/src/alerts/runtime.ts')") as () => Promise<{
+      notifier: (d: { alertId: string; ts: number; valeur: number; message: string }, def: object) => void;
+    }>;
+    (await importer()).notifier({ alertId: "e2e-avis", ts: Date.now(), valeur: 0, message: texte }, def);
+  }, [message, marche] as const);
 }
 
 /** Messages du journal des alertes (store du produit), du plus récent au plus ancien. */

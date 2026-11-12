@@ -100,7 +100,7 @@ import { fibStore } from "./fibonacci";
 import { createRafThrottle, type RafThrottle } from "./rafThrottle";
 import { bindPriceAlertMenu } from "./priceAlertMenu";
 import { MeasureTool } from "./measureTool";
-import { CandleReadout } from "./candleReadout";
+import { bougieSousReticule, CandleReadout } from "./candleReadout";
 import { SymbolBanner } from "../components/SymbolBanner";
 import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 import { useMobileLayout } from "../hooks/useMobileLayout";
@@ -574,6 +574,8 @@ interface SlotMount {
   paneHeaders: PaneHeaders;
   overlayLegend: OverlayLegend;
   updateThrottle: RafThrottle;
+  /** Masque l'encart O/H/L/C : l'effet DONNÉES l'appelle chaque fois qu'il remplace les données du graphe. */
+  cacherEncart: () => void;
   /** Lignes des overlays de niveaux accrochables par le clic droit (renseignées par l'effet DONNÉES). */
   accroche: { lignes: () => readonly LigneNiveau[] };
   // Zoom/décalage de l'instance juste après `init()`, avant toute interaction utilisateur.
@@ -781,11 +783,35 @@ export function ChartInstance({
     // ── Crosshair synchronisé inter-slots ──────────────────────────────────
     let pointeurPresent = false;
     let dernierX: number | null = null;
-    // Abscisse du réticule et bougie que l'encart montre ; `null` quand il est masqué.
-    let encartMontre: { x: number; t: number } | null = null;
+    // Ce que l'encart montre : son réticule (abscisse `x`, bougie ouverte à `t`) et le texte visé
+    // qu'il porte ; `null` quand il est masqué.
+    let encartMontre: { reticule: Crosshair; x: number; t: number; texte: string | undefined } | null = null;
     const cacherEncart = (): void => {
       candleReadout.cacher();
       encartMontre = null;
+    };
+    // Encart de lecture : bougie pointée + pixel du curseur, et le texte complet de l'annotation
+    // visée (zone, triangle, signal), que l'encart n'affiche qu'en mise en page téléphone.
+    const montrerEncart = (reticule: Crosshair): void => {
+      const { kLineData, x, y } = reticule;
+      if (!kLineData || typeof x !== "number" || typeof y !== "number") {
+        cacherEncart();
+        return;
+      }
+      const texte = indicators.texteVise(reticule);
+      candleReadout.montrer(kLineData, x, y, texte);
+      encartMontre = { reticule, x, t: kLineData.timestamp, texte };
+    };
+    // Indicateur fermé, ajouté ou recalculé pendant que l'encart est à l'écran (au doigt il y reste,
+    // doigt levé) : l'annotation qu'il décrit a pu disparaître ou changer, et le moteur ne notifie
+    // rien. Son texte est relu ; sans annotation visée il ne garde que les prix. Avant : AXIS S/R
+    // fermé, l'encart gardait le texte d'une zone que le graphe ne dessinait plus. Si les bougies ont
+    // glissé sous l'indice du réticule (historique préfixé), l'encart est masqué.
+    indicators.apresCalcul = (): void => {
+      if (!encartMontre) return;
+      const { reticule, t, texte } = encartMontre;
+      if (chart.getDataList()[reticule.dataIndex ?? -1]?.timestamp !== t) cacherEncart();
+      else if (indicators.texteVise(reticule) !== texte) montrerEncart(reticule);
     };
     const slotLive = (position: number): boolean => {
       const replay = replayStore.getState();
@@ -876,15 +902,9 @@ export function ChartInstance({
       if (pointeurPresent && chartLayoutStore.getState().syncCrosshair && slotLive(slot)) {
         crosshairSyncStore.setState({ time: typeof t === "number" ? t : null, source: slot });
       }
-      // Encart de lecture : bougie pointée + pixel du curseur (masqué hors survol), et le texte
-      // complet de l'annotation visée (zone, triangle, signal), que l'encart n'affiche qu'en mise
-      // en page téléphone.
-      if (data?.kLineData && typeof data.x === "number" && typeof data.y === "number") {
-        candleReadout.montrer(data.kLineData, data.x, data.y, indicators.texteVise(data));
-        encartMontre = { x: data.x, t: data.kLineData.timestamp };
-      } else {
-        cacherEncart();
-      }
+      // Encart de lecture (masqué hors survol).
+      if (data) montrerEncart(data);
+      else cacherEncart();
     };
     const onPointerEnter = (): void => { pointeurPresent = true; };
     const onPointerLeave = (e: PointerEvent): void => {
@@ -933,11 +953,13 @@ export function ChartInstance({
       }
       // Doigt levé, le réticule reste au même pixel et le moteur ne notifie rien quand le graphe
       // glisse dessous (défilement lancé, rotation, bougie nouvelle) : l'encart décrirait une
-      // autre bougie que celle du réticule. Il est masqué ; le prochain toucher le rouvre.
+      // autre bougie que celle du réticule. Il est masqué ; le prochain toucher le rouvre. La
+      // bougie comparée est celle que le moteur met sous ce pixel (`bougieSousReticule`) : au-delà
+      // de la dernière, `convertFromPixel` ne rend aucun horodatage, et l'encart restait.
       if (!pointeurPresent && encartMontre) {
         const points = chart.convertFromPixel([{ x: encartMontre.x }], { paneId: CANDLE_PANE_ID });
-        const t = (Array.isArray(points) ? points[0] : points)?.timestamp;
-        if (typeof t === "number" && t !== encartMontre.t) cacherEncart();
+        const indice = (Array.isArray(points) ? points[0] : points)?.dataIndex;
+        if (bougieSousReticule(indice, chart.getDataList()) !== encartMontre.t) cacherEncart();
       }
       xhairThrottle.trigger();
     };
@@ -976,6 +998,7 @@ export function ChartInstance({
       paneHeaders,
       overlayLegend,
       updateThrottle,
+      cacherEncart,
       accroche,
       defaultBarSpace: chart.getBarSpace(),
       defaultOffsetRight: chart.getOffsetRightDistance(),
@@ -998,6 +1021,7 @@ export function ChartInstance({
       paneHeaders.dispose();
       overlayLegend.dispose();
       measureTool.dispose();
+      indicators.apresCalcul = null;
       candleReadout.dispose();
       chartDom.removeEventListener("pointerenter", onPointerEnter);
       chartDom.removeEventListener("pointerleave", onPointerLeave);
@@ -1028,7 +1052,7 @@ export function ChartInstance({
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
-    const { chart, indicators, paneHeaders, overlayLegend, updateThrottle, accroche, defaultBarSpace, defaultOffsetRight } =
+    const { chart, indicators, paneHeaders, overlayLegend, updateThrottle, cacherEncart, accroche, defaultBarSpace, defaultOffsetRight } =
       mount;
     const container = containerRef.current;
     const canvas = canvasRef.current;
@@ -1051,7 +1075,20 @@ export function ChartInstance({
     // Capture par slot : un focus déplacé ne doit jamais brancher le moteur replay
     // global sur l'orderflow d'un autre graphique.
     const replayAdapter = replayGen !== 0 ? adaptateurReplayActif() : null;
-    chart.clearData();
+    // KLineChart 9.8.12 efface son réticule chaque fois que ses données sont remplacées
+    // (`clearData`, `applyNewData` : `ChartStore.clear`), sans émettre `OnCrosshairChange`. L'encart
+    // décrit la bougie du réticule : il part avec lui. Avant (revue du 12 novembre 2026) : après un
+    // changement de marché à unité égale, il restait à l'écran, doigt levé, avec le texte et les
+    // prix du marché quitté — rien ne le distinguait du nouveau graphe, aux mêmes horodatages.
+    const viderGraphe = (): void => {
+      chart.clearData();
+      cacherEncart();
+    };
+    const remplacerBougies = (bougies: Candle[]): void => {
+      chart.applyNewData(bougies.map(toKLineData));
+      cacherEncart();
+    };
+    viderGraphe();
     // Neutralise le callback de pagination de l'identité précédente pendant le backfill.
     chart.setLoadDataCallback((params) => params.callback([], false));
 
@@ -1346,11 +1383,11 @@ export function ChartInstance({
         const { candles } = result;
         const adapter = replayAdapter ?? getAdapter(exchange);
         chart.setPriceVolumePrecision(estSerieDominance ? DECIMALES_SERIE_POURCENTAGE : derivePricePrecision(candles), 0);
-        chart.applyNewData(candles.map(toKLineData));
+        remplacerBougies(candles);
         // Le store et la série deviennent « ready » dans le même tour JS. Si l'identité
         // a changé depuis la garde ci-dessus, le commit est refusé et le chart est repurgé.
         if (!store.getState().completeDataLoad(requestedIdentity, requestId, candles)) {
-          chart.clearData();
+          viderGraphe();
           return;
         }
         if (exchange === "kraken") setLimiteKrakenVisible(true);
@@ -1515,7 +1552,7 @@ export function ChartInstance({
             // Même chemin que le resync post-reconnexion : réapplication du buffer entier,
             // puis un seul recalcul, aligné sur les bougies affichées.
             if (complet.length > avant) {
-              chart.applyNewData(complet.map(toKLineData));
+              remplacerBougies(complet);
               rafraichir(complet);
             }
           },
@@ -1563,7 +1600,7 @@ export function ChartInstance({
           const merged = prepareResyncApply(store.getState().candles, fetched);
           if (!merged) return;
           store.getState().setCandles(merged);
-          chart.applyNewData(merged.map(toKLineData));
+          remplacerBougies(merged);
           orderflow?.onCandles();
           indicators.recompute(indicatorsStore.getState().indicators, merged, exchange);
           compare?.onCandles();
@@ -1583,7 +1620,7 @@ export function ChartInstance({
           dataLoadErrorMessage(err),
         );
         if (failed) {
-          chart.clearData();
+          viderGraphe();
           chart.setLoadDataCallback((params) => params.callback([], false));
         }
         console.error("[AXIOM] Échec du backfill", err);

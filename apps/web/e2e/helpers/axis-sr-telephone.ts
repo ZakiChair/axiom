@@ -126,6 +126,21 @@ export async function persisterBtc4h(page: Page, indicateurs: Array<Pick<ActiveI
 }
 
 /**
+ * Réponse de la place à une demande de klines : `bougies`, prix multipliés par `facteur`, en
+ * respectant `startTime`, `endTime` et `limit`, comme Binance (avec `startTime` les premières
+ * bougies de la fenêtre, sinon les dernières).
+ */
+function reponseKlines(params: URLSearchParams, bougies: LigneFixture[], facteur = 1): Array<Array<number | string>> {
+  const debut = Number(params.get("startTime") ?? -Infinity);
+  const fin = Number(params.get("endTime") ?? Infinity);
+  const limite = Number(params.get("limit") ?? 500);
+  const fenetre = bougies.filter(([t]) => t >= debut && t <= fin);
+  const lignes = params.has("startTime") ? fenetre.slice(0, limite) : fenetre.slice(-limite);
+  return lignes.map(([t, o, h, l, c, v, achat]) =>
+    [t, String(o * facteur), String(h * facteur), String(l * facteur), String(c * facteur), String(v), t + QUATRE_HEURES - 1, String(v * c * facteur), 1, String(achat), String(achat * c * facteur), "0"]);
+}
+
+/**
  * Route des klines BTCUSDT 4h : `bougies` (une tranche de la fixture) servies en respectant
  * `startTime`, `endTime` et `limit`, comme Binance. Tout autre symbole ou intervalle est absent.
  */
@@ -135,15 +150,23 @@ export async function servirKlines(page: Page, bougies: LigneFixture[]): Promise
     if (params.get("symbol") !== "BTCUSDT" || params.get("interval") !== "4h") {
       return route.fulfill({ status: 503, json: { error: "fixture absente" } });
     }
-    const debut = Number(params.get("startTime") ?? -Infinity);
-    const fin = Number(params.get("endTime") ?? Infinity);
-    const limite = Number(params.get("limit") ?? 500);
-    const fenetre = bougies.filter(([t]) => t >= debut && t <= fin);
-    const lignes = params.has("startTime") ? fenetre.slice(0, limite) : fenetre.slice(-limite);
-    return route.fulfill({
-      json: lignes.map(([t, o, h, l, c, v, achat]) =>
-        [t, String(o), String(h), String(l), String(c), String(v), t + QUATRE_HEURES - 1, String(v * c), 1, String(achat), String(achat * c), "0"]),
-    });
+    return route.fulfill({ json: reponseKlines(params, bougies) });
+  });
+}
+
+/**
+ * Second marché 4h, à installer APRÈS `servirKlines` (les routes les plus récentes priment ; toute
+ * autre demande retombe sur elle) : `bougies` aux MÊMES horodatages que BTCUSDT, prix multipliés
+ * par `facteur` — deux marchés d'une même unité ouvrent leurs bougies aux mêmes instants, et le
+ * graphe les place aux mêmes pixels. `porte` : chaque réponse attend qu'elle soit résolue, le test
+ * tient ainsi le chargement.
+ */
+export async function servirSecondMarche(page: Page, symbole: string, bougies: LigneFixture[], facteur: number, porte?: Promise<void>): Promise<void> {
+  await page.route("**/api.binance.com/api/v3/klines*", async (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    if (params.get("symbol") !== symbole || params.get("interval") !== "4h") return route.fallback();
+    await porte;
+    return route.fulfill({ json: reponseKlines(params, bougies, facteur) });
   });
 }
 
@@ -208,6 +231,8 @@ export interface LectureAxisSr {
   etiquettes: string[];
   /** Réticule réel : pane et bougie (au repos, aucun pane et la dernière bougie). */
   reticule: { paneId: string | null; dataIndex: number | null };
+  /** Le pixel du réticule est hors des bougies chargées : le moteur le ramène sur la plus proche (la dernière, dans la marge droite). */
+  reticuleHorsDonnees: boolean;
   /** Lignes que la source de l'infobulle d'AXIS S/R rend pour ce réticule (3 au plus). */
   lignes: string[];
   /** Pour chaque ligne, l'annotation du graphe qui en porte le texte. */
@@ -231,7 +256,7 @@ type IndicateurMonte = {
 type ChartInterne = Chart & {
   getDrawPaneById: (id: string) => { getAxisComponent: () => Axe } | null;
   getXAxisPane: () => { getAxisComponent: () => Axe };
-  _chartStore: { getTooltipStore: () => { getCrosshair: () => { paneId?: string; dataIndex?: number } } };
+  _chartStore: { getTooltipStore: () => { getCrosshair: () => { paneId?: string; dataIndex?: number; realDataIndex?: number } } };
 };
 type Modules = [
   { getActiveChart: () => ChartInterne | null },
@@ -342,6 +367,7 @@ export async function lireAxisSr(page: Page): Promise<LectureAxisSr | null> {
       rubans: (annotations.rubans ?? []).length,
       etiquettes: (annotations.labels ?? []).filter((l) => l.ancrageX === "droite").map((l) => l.texte),
       reticule: { paneId: crosshair.paneId ?? null, dataIndex: crosshair.dataIndex ?? null },
+      reticuleHorsDonnees: crosshair.paneId !== undefined && crosshair.realDataIndex !== crosshair.dataIndex,
       lignes,
       origines: lignes.map(origine),
       bandes,

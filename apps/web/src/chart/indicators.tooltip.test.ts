@@ -511,6 +511,29 @@ describe("ChartIndicators.texteVise — le texte visé, lu sur les indicateurs m
     expect(indicateurs.texteVise(reticule(1, 1))).toBe(undefined);
   });
 
+  // Revue globale du 12 novembre 2026 (mineur) : l'encart du téléphone ne lisait son texte qu'au
+  // changement de réticule. AXIS S/R fermé doigt levé, il gardait le texte d'une zone que le graphe
+  // ne dessinait plus. `apresCalcul` prévient l'encart, APRÈS que le montage a changé.
+  it("`apresCalcul` : rappelé après chaque recalcul, montage et retrait ; AXIS S/R retiré, plus rien n'est visé au rappel", () => {
+    const { indicateurs, annotations } = monter("stratAxisSr", BTC);
+    const m = (annotations?.marqueurs ?? []).find((x) => x.creux === true)!;
+    const instance = { instanceId: "vise-0-stratAxisSr", defId: "stratAxisSr", params: {}, couleurIdx: 0 };
+    const vises: Array<string | undefined> = [];
+    indicateurs.apresCalcul = () => vises.push(indicateurs.texteVise(reticule(m.idx, m.valeur)));
+    indicateurs.recompute([instance], BTC, "binance");
+    expect(vises).toEqual([m.info]);
+    // Un second indicateur monté : rappel, le texte visé est le même.
+    indicateurs.sync([instance, { instanceId: "vise-1-sma", defId: "sma", params: {}, couleurIdx: 1 }], BTC, "binance");
+    expect(vises).toEqual([m.info, m.info]);
+    // AXIS S/R retiré : au rappel, son triangle n'est plus visé.
+    indicateurs.sync([], BTC, "binance");
+    expect(vises).toEqual([m.info, m.info, undefined]);
+    // Sans rappel posé : rien ne casse.
+    indicateurs.apresCalcul = null;
+    indicateurs.sync([instance], BTC, "binance");
+    expect(vises).toHaveLength(3);
+  });
+
   // Revue du 12 novembre 2026 (constat majeur) : avec AXIS monté avant AXIS S/R, le doigt DANS une
   // bande sans marqueur dessous lisait « AXIS forte vente … », le texte d'un marqueur d'AXIS à
   // 3 bougies et 370 px plus haut. Chaque instance rendait son meilleur texte, repli (c) compris, et

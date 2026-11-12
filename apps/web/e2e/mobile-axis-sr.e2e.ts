@@ -42,6 +42,7 @@ import {
  *    compris ; un toucher ailleurs l'efface avec le réticule ; quand le graphe glisse sous un
  *    réticule resté en place (rotation), l'encart est masqué plutôt que de décrire une autre bougie.
  *  - Panneau « Indicateurs (n) » déplié : l'encart s'arrête à son haut, ses boutons restent visibles.
+ *  - AXIS S/R fermé pendant que l'encart décrit une de ses zones : l'encart ne garde que les prix.
  * Les attentes lisent la STRUCTURE des annotations (ruban porteur d'un texte, opacité de la bande,
  * étiquette au bord droit, triangle creux), jamais le libellé d'une infobulle de zone.
  */
@@ -574,6 +575,21 @@ test("AXIS monté avant AXIS S/R : le doigt dans une bande lit la zone, pas le s
     await expect.poll(async () => (await lireEncart(page))?.affichage).toBe("none");
     await redimensionner(page, 390, 844);
 
+    // Revue globale du 12 novembre 2026. Même rotation, réticule sur l'avant-dernière bougie : son
+    // pixel passe AU-DELÀ de la dernière, sur laquelle le moteur ramène alors le réticule. Aucun
+    // horodatage n'existe sous ce pixel : l'encart restait, sur une autre bougie que le réticule.
+    const avantDerniere = libres.filter((cible) => cible.idx === repos.bougies - 2).at(-1);
+    expect(avantDerniere, "aucune bande touchable sur l'avant-dernière bougie").toBeDefined();
+    const surAvantDerniere = await poserReticule(page, avantDerniere!);
+    expect(surAvantDerniere.reticuleHorsDonnees).toBe(false);
+    await attendreEncart(page, surAvantDerniere, avantDerniere!.info);
+    await redimensionner(page, 375, 667);
+    const auBord = await lire(page);
+    expect(auBord.reticuleHorsDonnees).toBe(true);
+    expect(auBord.reticule).toEqual({ paneId: "candle_pane", dataIndex: repos.bougies - 1 });
+    await expect.poll(async () => (await lireEncart(page))?.affichage).toBe("none");
+    await redimensionner(page, 390, 844);
+
     // Un toucher ailleurs efface le réticule ; le moteur ne le notifie pas, l'encart part avec lui.
     const reposee = await poserReticule(page, premiere);
     await attendreEncart(page, reposee, premiere.info);
@@ -616,5 +632,35 @@ test("AXIS monté avant AXIS S/R : le doigt dans une bande lit la zone, pas le s
     await page.screenshot({ path: testInfo.outputPath("deux-indicateurs-panneau-deplie.png") });
     await bascule.tap();
     await expect(bascule).toHaveAttribute("aria-expanded", "false");
+  });
+
+  // Revue globale du 12 novembre 2026 (mineur). Le texte de l'encart n'était lu qu'au changement
+  // de réticule : AXIS S/R fermé, ses zones quittaient le graphe et l'encart gardait leur texte.
+  await test.step("AXIS S/R fermé pendant que l'encart décrit une de ses zones : l'encart ne garde que les prix", async () => {
+    // Une bande sans marqueur sous le doigt et sans texte d'AXIS à 3 bougies ou moins : AXIS S/R
+    // parti, plus rien n'est visé à cette bougie.
+    const plie = await lire(page);
+    const bande = plie.bandes.filter((cible) => !cible.marqueurSousLeDoigt && cible.textesAutres === 0).at(-1);
+    expect(bande, "aucune bande touchable loin de tout texte d'AXIS").toBeDefined();
+    const surBande = await poserReticule(page, bande!);
+    const avecTexte = await attendreEncart(page, surBande, bande!.info);
+
+    const bascule = page.getByRole("button", { name: /^Indicateurs \(2\)/ });
+    await bascule.tap();
+    await expect(bascule).toHaveAttribute("aria-expanded", "true");
+    // Déplier le panneau ne touche pas le graphe : réticule et encart sont restés.
+    expect((await lire(page)).reticule).toEqual({ paneId: "candle_pane", dataIndex: bande!.idx });
+    await page.locator("[data-overlay-legend]").getByRole("button", { name: "Fermer AXIS S/R" }).tap();
+    await expect(page.getByRole("button", { name: /^Indicateurs \(1\)/ })).toBeVisible();
+    await expect.poll(async () => (await lireAxisSr(page))?.indicateurs.map((i) => i.defId)).toEqual(["stratAxis"]);
+
+    // Le réticule est resté sur la même bougie ; l'encart en garde les prix, sans texte.
+    const sansTexte = await attendreEncart(page, await lire(page), null);
+    expect((await lire(page)).reticule).toEqual({ paneId: "candle_pane", dataIndex: bande!.idx });
+    expect(sansTexte.affichage).toBe("grid");
+    expect(sansTexte.cloture).toBe(avecTexte.cloture);
+    expect(sansTexte.boite.width).toBeLessThan(sansTexte.largeurEcran - 16);
+    expect(sansTexte.fondAlpha).toBeLessThan(1);
+    await page.screenshot({ path: testInfo.outputPath("deux-indicateurs-axis-sr-ferme.png") });
   });
 });

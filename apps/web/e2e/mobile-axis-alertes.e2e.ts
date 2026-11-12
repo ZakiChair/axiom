@@ -6,6 +6,7 @@ import {
   ajouterAxis,
   avis,
   barreFenetres,
+  BOUGIES,
   changerTheme,
   lireJournal,
   lireMarche,
@@ -13,6 +14,7 @@ import {
   mesurerAvis,
   ouverture,
   ouvrirAlertes,
+  pousserAvisAlerte,
   pousserAvisOrdinaire,
   preparerAxisAlertes,
   QUATRE_HEURES,
@@ -21,7 +23,7 @@ import {
   type FluxAxisAlertes,
   type GeometrieAvis,
 } from "./helpers/axis-alertes-telephone";
-import { horlogeDuNavigateur, lireAxisSr, lireEncart, redimensionner, type CibleAxisSr, type LectureAxisSr } from "./helpers/axis-sr-telephone";
+import { horlogeDuNavigateur, lireAxisSr, lireEncart, redimensionner, servirSecondMarche, type CibleAxisSr, type LectureAxisSr } from "./helpers/axis-sr-telephone";
 
 /**
  * Alertes d'AXIS au téléphone, réseau fermé, sur le harnais des parcours AXIS S/R (`figerDate` :
@@ -52,7 +54,10 @@ import { horlogeDuNavigateur, lireAxisSr, lireEncart, redimensionner, type Cible
  *  - une alerte baleines, portée par un actif et non par un marché : sa ligne ne navigue pas ;
  *  - les deux lots ensemble (intégration du 12 novembre 2026) : des avis d'alerte à l'écran, le
  *    doigt sur une bande forte puis sur un triangle creux — l'encart écrit son texte complet
- *    AU-DESSUS de la pile d'avis, chaque avis reste fermable, la navigation basse touchable.
+ *    AU-DESSUS de la pile d'avis, chaque avis reste fermable, la navigation basse touchable ;
+ *  - l'encart ne survit pas au réticule (revue globale du 12 novembre 2026) : le doigt levé sur une
+ *    zone, la place coupe le flux et le graphe se resynchronise, ou « Voir » d'un avis mène à un
+ *    autre marché de même unité — le moteur efface son réticule sans le dire, l'encart part avec lui.
  *
  * Il prouve une géométrie et des textes dans le DOM, pas une lisibilité : les captures restent à
  * regarder. Il ne dit rien d'un vrai iPhone (police, zone de sécurité, son), ni de Safari en
@@ -510,6 +515,16 @@ test("des avis d'alerte à l'écran, le doigt sur une bande forte puis sur un tr
     }
   }
 
+  /** La bande forte touchable la plus basse : la plus proche de la pile d'avis. */
+  function bandeForteBasse(lecture: LectureAxisSr): CibleAxisSr {
+    const fortes = new Set(lecture.zones.filter((zone) => zone.alpha > 0).map((zone) => zone.info));
+    const bande = lecture.bandes
+      .filter((cible) => fortes.has(cible.info) && !cible.marqueurSousLeDoigt)
+      .reduce<CibleAxisSr | undefined>((bas, cible) => (bas === undefined || cible.y > bas.y ? cible : bas), undefined);
+    if (bande === undefined) throw new Error("aucune bande forte touchable");
+    return bande;
+  }
+
   const etapes = [
     { largeur: 390, hauteur: 844, theme: "dark", avisAttendus: 2, avecCreux: true },
     // Écran court : la zone libre ne contient l'encart qu'au-dessus d'UN avis (limite consignée au
@@ -528,13 +543,8 @@ test("des avis d'alerte à l'écran, le doigt sur une bande forte puis sur un tr
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
       for (let i = 0; i < avisAttendus; i++) await attendreAvisDegage(page, lesAvis.nth(i));
       const lecture = await lire();
-      const fortes = new Set(lecture.zones.filter((zone) => zone.alpha > 0).map((zone) => zone.info));
-      // La bande forte touchable la plus basse : la plus proche de la pile d'avis.
-      const bande = lecture.bandes
-        .filter((cible) => fortes.has(cible.info) && !cible.marqueurSousLeDoigt)
-        .reduce<CibleAxisSr | undefined>((bas, cible) => (bas === undefined || cible.y > bas.y ? cible : bas), undefined);
-      expect(bande, "aucune bande forte touchable").toBeDefined();
-      await toucher(bande!, "bande forte");
+      const bande = bandeForteBasse(lecture);
+      await toucher(bande, "bande forte");
       await page.screenshot({ path: cheminCapture(testInfo, `ensemble-${largeur}x${hauteur}-zone.png`), animations: "disabled" });
 
       // Triangle creux : son texte s'ouvre par sa réserve, lue dans l'encart au-dessus de la pile.
@@ -555,6 +565,61 @@ test("des avis d'alerte à l'écran, le doigt sur une bande forte puis sur un tr
   // Chaque avis reste fermable au toucher, l'encart affiché.
   await lesAvis.first().tap({ position: { x: 12, y: 8 } });
   await expect(lesAvis).toHaveCount(0);
+
+  // Revue globale du 12 novembre 2026 (constat majeur). KLineChart efface son réticule chaque fois
+  // que ses données sont remplacées, sans le notifier. L'encart, resté à l'écran doigt levé, gardait
+  // alors le texte et les prix d'une zone que plus rien ne désignait — après « Voir », ceux d'un
+  // marché que le graphe n'affichait plus, aux mêmes horodatages et aux mêmes pixels.
+  /** Ce que l'encart écrit : son texte, « prix seuls » sans bloc de texte, ou « encart masqué ». */
+  const etatEncart = async (): Promise<string> => {
+    const lu = await lireEncart(page);
+    return lu === null || lu.affichage === "none" ? "encart masqué" : (lu.texte ?? "prix seuls");
+  };
+
+  await test.step("la place coupe le flux, le graphe se resynchronise : l'encart part avec le réticule", async () => {
+    await toucher(bandeForteBasse(await lire()), "bande forte avant la coupure");
+    const connexions = flux.connexionsKline();
+    expect(flux.couperKline()).toBeGreaterThan(0);
+    // La page se reconnecte (1 à 2 s), redemande les dernières bougies et les réapplique au graphe.
+    await expect.poll(() => flux.connexionsKline(), { timeout: 15_000 }).toBeGreaterThan(connexions);
+    await expect.poll(async () => (await lire()).reticule.paneId, { timeout: 15_000 }).toBeNull();
+    expect(await etatEncart()).toBe("encart masqué");
+    expect(await lireMarche(page)).toMatchObject({ symbol: "BTCUSDT", timeframe: "4h", bougies: ACHAT + 1 });
+  });
+
+  await test.step("« Voir » d'un avis vers un autre marché de même unité : l'encart part dès que le graphe est vidé", async () => {
+    const bande = bandeForteBasse(await lire());
+    await toucher(bande, "bande forte avant « Voir »");
+    // ETHUSDT 4h : les bougies de BTCUSDT au vingtième, aux mêmes horodatages. Le test tient sa réponse.
+    let ouvrirPorte = (): void => {};
+    const porte = new Promise<void>((resoudre) => {
+      ouvrirPorte = resoudre;
+    });
+    await servirSecondMarche(page, "ETHUSDT", BOUGIES.slice(0, ACHAT), 0.05, porte);
+    // Un avis d'alerte de prix sur ce marché : sans unité, « Voir » garde celle du graphe.
+    await pousserAvisAlerte(page, "Prix franchit 4000 à la hausse", { symbol: "ETHUSDT", source: "binance" });
+    await expect(lesAvis).toHaveCount(1);
+    expect(await texteAvis(lesAvis)).toBe("ETHUSDT — Prix franchit 4000 à la hausse");
+    // L'avis paru, l'encart décrit toujours la zone de BTCUSDT.
+    expect(await etatEncart()).toBe(bande.info);
+
+    await lesAvis.getByRole("button", { name: "Voir", exact: true }).tap();
+    await expect.poll(async () => (await lireMarche(page)).symbol).toBe("ETHUSDT");
+    // Pendant le chargement, graphe vidé : l'encart est déjà masqué.
+    await expect.poll(etatEncart).toBe("encart masqué");
+    await expect(page.locator("[data-chart-status]")).not.toHaveCount(0);
+    expect((await lireMarche(page)).bougies).toBe(0);
+    await page.screenshot({ path: cheminCapture(testInfo, "voir-autre-marche-chargement.png"), animations: "disabled" });
+
+    ouvrirPorte();
+    await expect(page.locator("[data-chart-status]")).toHaveCount(0, { timeout: 30_000 });
+    await expect.poll(async () => (await lireMarche(page)).bougies, { timeout: 60_000 }).toBe(ACHAT);
+    expect(await lireMarche(page)).toMatchObject({ symbol: "ETHUSDT", timeframe: "4h", focus: 0 });
+    // Le nouveau marché est affiché, aux mêmes horodatages : toujours ni réticule ni encart.
+    expect((await lire()).reticule.paneId).toBeNull();
+    expect(await etatEncart()).toBe("encart masqué");
+    await page.screenshot({ path: cheminCapture(testInfo, "voir-autre-marche-charge.png"), animations: "disabled" });
+  });
 });
 
 test("390 px : place sans l'historique de l'amorce — « affichez l'indicateur » tant qu'il ne l'est pas, puis « N sur A » seul", async ({ page }, testInfo) => {

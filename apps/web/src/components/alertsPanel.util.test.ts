@@ -355,6 +355,18 @@ describe("evaluationAlerte et texteEvaluation", () => {
     expect(texteEvaluation(srAffiche)).toBe("historique insuffisant : 2000 sur 3000");
   });
 
+  it("alerte muette (sortie de prix d'AXIS) sous l'amorce : « N sur A » seul — afficher l'indicateur ne la ferait pas sonner", () => {
+    // AXIS n'est pas sur la vue principale : pour une alerte ordinaire, l'afficher serait le remède.
+    const sansAxis = { ...graphe, bougies: 500, indicateurs: [] };
+    const muette: Condition = { type: "indicateur-seuil", indicateurId: "stratAxis", params: {}, output: "prixSignal", comparateur: ">", valeur: 0 };
+    expect(explicationMuette(muette)).not.toBeNull();
+    const evaluation = evaluationAlerte({ ...base, condition: muette }, sansAxis, false);
+    expect(evaluation).toEqual({ etat: "historique", bougies: 500, amorce: 1500, aAfficher: false });
+    expect(texteEvaluation(evaluation)).toBe("historique insuffisant : 500 sur 1500");
+    // Témoin : la même situation avec la sortie « etat » garde le remède.
+    expect(texteEvaluation(evaluationAlerte({ ...base, condition: axis }, sansAxis, false))).toBe("historique insuffisant : 500 sur 1500, affichez l'indicateur");
+  });
+
   it("composite portant une condition de bougie : mêmes états ; sans condition de bougie : jamais « hors graphe »", () => {
     const composite: Condition = { type: "composite", conditions: [{ type: "prix-croise", niveau: 1, sens: "hausse" }, axisSr as Extract<Condition, { type: "indicateur-seuil" }>] };
     expect(evaluationAlerte({ ...base, condition: composite }, { ...graphe, symbol: "ETHUSDT" }, false)).toEqual({ etat: "hors-graphe" });

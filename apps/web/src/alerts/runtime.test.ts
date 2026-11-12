@@ -1132,6 +1132,23 @@ describe("référence du garde-fou de régime dans les alertes web (10 octobre 2
       expect(alertsStore.getState().defs).toEqual([]);
       expect(lotsEvalues).toEqual([]);
     });
+
+    it("une def mise en pause pendant l'attente, puis réactivée dans la même bougie, est évaluée une fois sur cette clôture", () => {
+      const arrivee = demarrerReferenceEnVol(axisDef);
+      alertsStore.getState().basculerActif("axis-regime");
+      arrivee();
+      expect(alertsStore.getState().defs[0]?.arme).toBeUndefined();
+      // Réactivée : la marque « évaluée pour cette clôture », posée à la demande de la référence,
+      // a été levée à son retour — sans quoi la def attendrait la clôture suivante.
+      lotsEvalues.length = 0;
+      alertsStore.getState().basculerActif("axis-regime");
+      expect(lotsEvalues).toEqual([["axis-regime"]]);
+      expect(alertsStore.getState().defs[0]?.arme).toBeDefined();
+      // Une fois : pause puis reprise encore, dans la même bougie, sans seconde évaluation.
+      alertsStore.getState().basculerActif("axis-regime");
+      alertsStore.getState().basculerActif("axis-regime");
+      expect(lotsEvalues).toEqual([["axis-regime"]]);
+    });
   });
 });
 
@@ -1685,7 +1702,7 @@ describe("évaluation juste : une fois par bougie close, jamais sous l'amorce (1
     expect(alertsStore.getState().journal).toHaveLength(1);
   });
 
-  it("un composite lisant AXIS reste figé sous l'amorce, puis s'évalue quand elle est atteinte", () => {
+  describe("composite lisant AXIS", () => {
     const composite: AlertDef = {
       id: "composite-axis", symbol: "BTCUSDT", source: "binance", timeframe: "1m", actif: true, declenchements: [],
       condition: { type: "composite", conditions: [
@@ -1693,24 +1710,125 @@ describe("évaluation juste : une fois par bougie close, jamais sous l'amorce (1
         { type: "indicateur-seuil", indicateurId: "stratAxis", params: {}, output: "etat", comparateur: "<=", valeur: 0 },
       ] },
     };
-    const fin = Date.now() - 120_000;
-    const complet = serie(1500, fin);
-    const cloture1 = bougie(fin, 101, true);
-    const cloture2 = bougie(fin + 60_000, 102, true);
-    alertsStore.setState({ defs: [composite], journal: [] });
-    marketStore.setState({ candles: complet.slice(-500) });
-    stop = demarrerAlertes();
-    marketStore.setState({ candles: [...complet.slice(-499), cloture1] });
-    // 500 bougies : ni calibré, ni évalué (avant : calibré sur un AXIS calculé à 500 bougies).
-    expect(lotsEvalues).toEqual([]);
-    expect(alertsStore.getState().defs[0]?.arme).toBeUndefined();
-    // L'historique arrive sous la même clôture : le composite garde sa cadence, la clôture.
-    marketStore.setState({ candles: [...complet, cloture1] });
-    expect(lotsEvalues).toEqual([]);
-    // Clôture suivante, amorce atteinte : il est évalué.
-    marketStore.setState({ candles: [...complet, cloture1, cloture2] });
-    expect(lotsEvalues).toEqual([["composite-axis"]]);
-    expect(alertsStore.getState().defs[0]?.arme).toBeDefined();
+    /** Composite sans amorce, sur le même marché : évalué dès la première passe, il consomme le frein. */
+    const compositeRsi: AlertDef = {
+      ...composite, id: "composite-rsi",
+      condition: { type: "composite", conditions: [
+        { type: "variation-pct", fenetreMs: 60_000, seuilPct: 5 },
+        { type: "indicateur-seuil", indicateurId: "rsi", params: {}, output: "rsi", comparateur: ">", valeur: 0 },
+      ] },
+    };
+
+    // Modifié à dessein à l'intégration (12 novembre 2026) : ce test épinglait « l'historique
+    // arrive sous la même clôture : le composite attend la clôture suivante ». Fait de conditions
+    // de bougie seules, rien ne l'évaluait alors à l'ouverture de l'application ni au retour sur
+    // le marché, là où une alerte simple sur la même condition l'est (revue du lot).
+    it("reste figé sous l'amorce, puis est évalué une fois quand elle arrive sous la même clôture", () => {
+      const fin = Date.now() - 120_000;
+      const complet = serie(1500, fin);
+      const cloture1 = bougie(fin, 101, true);
+      const cloture2 = bougie(fin + 60_000, 102, true);
+      alertsStore.setState({ defs: [composite], journal: [] });
+      marketStore.setState({ candles: complet.slice(-500) });
+      stop = demarrerAlertes();
+      marketStore.setState({ candles: [...complet.slice(-499), cloture1] });
+      // 500 bougies : ni calibré, ni évalué (avant : calibré sur un AXIS calculé à 500 bougies).
+      expect(lotsEvalues).toEqual([]);
+      expect(alertsStore.getState().defs[0]?.arme).toBeUndefined();
+      // Une page d'historique, encore sous l'amorce : toujours rien.
+      marketStore.setState({ candles: [...complet.slice(-999), cloture1] });
+      expect(lotsEvalues).toEqual([]);
+      // L'amorce arrive sous la même clôture : évalué, une fois, à la bonne profondeur.
+      marketStore.setState({ candles: [...complet, cloture1] });
+      expect(lotsEvalues).toEqual([["composite-axis"]]);
+      expect(alertsStore.getState().defs[0]?.arme).toBeDefined();
+      // Ticks de la bougie en formation et page d'historique de plus : rien pour cette clôture.
+      marketStore.setState({ candles: [...complet, cloture1, bougie(fin + 60_000, 250, false)] });
+      marketStore.setState({ candles: [bougie(complet[0]!.time - 60_000, 100, true), ...complet, cloture1, bougie(fin + 60_000, 250, false)] });
+      expect(lotsEvalues).toEqual([["composite-axis"]]);
+      // Clôture suivante : il garde sa cadence.
+      marketStore.setState({ candles: [...complet, cloture1, cloture2] });
+      expect(lotsEvalues).toEqual([["composite-axis"], ["composite-axis"]]);
+    });
+
+    it("armé, vrai sur la dernière bougie close à l'ouverture : il tire à l'arrivée de l'amorce, une seule fois", () => {
+      // Dernière clôture en hausse de 10 % sur une série plate : la variation est vraie, AXIS à plat (≤ 0).
+      const fin = Date.now() - 60_000;
+      const complet = [...serie(1499, fin).map((c) => ({ ...c, open: 100, high: 100, low: 100, close: 100 })), bougie(fin, 110, true)];
+      alertsStore.setState({ defs: [{ ...composite, arme: true }], journal: [] });
+      marketStore.setState({ candles: complet.slice(-500) });
+      stop = demarrerAlertes();
+      expect(alertsStore.getState().journal).toHaveLength(0);
+      marketStore.setState({ candles: complet });
+      expect(alertsStore.getState().journal.map((d) => d.alertId)).toEqual(["composite-axis"]);
+      expect(toastsStore.getState().toasts).toHaveLength(1);
+      // Une page de plus sous la même clôture : ni seconde évaluation, ni second tir.
+      marketStore.setState({ candles: [bougie(complet[0]!.time - 60_000, 100, true), ...complet] });
+      expect(lotsEvalues).toEqual([["composite-axis"]]);
+      expect(alertsStore.getState().journal).toHaveLength(1);
+    });
+
+    it("le frein d'une seconde ne l'écarte pas, et les composites déjà évalués pour cette clôture ne le sont pas de nouveau", () => {
+      const fin = Date.now() - 120_000;
+      const complet = serie(1500, fin);
+      alertsStore.setState({ defs: [composite, compositeRsi], journal: [] });
+      marketStore.setState({ candles: complet.slice(-500) });
+      stop = demarrerAlertes();
+      // Première passe : le composite sans amorce est évalué (le frein est consommé), l'autre reste figé.
+      expect(lotsEvalues).toEqual([["composite-rsi"]]);
+      // L'amorce arrive dans la même seconde : seul le composite qu'elle débloque est évalué.
+      marketStore.setState({ candles: complet });
+      expect(lotsEvalues).toEqual([["composite-rsi"], ["composite-axis"]]);
+    });
+  });
+
+  it("le graphe quitte le marché : un composite évalué au tick n'y lit plus les bougies gardées", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(10_000_000);
+      const t0 = Date.now() - 3_600_000;
+      // Série en hausse : le RSI des bougies closes est au-dessus de 50.
+      const hausse = Array.from({ length: 60 }, (_v, i) => bougie(t0 + i * 60_000, 100 + i, true));
+      const def: AlertDef = {
+        id: "comp-prix-rsi", symbol: "BTCUSDT", source: "binance", timeframe: "1m", actif: true, arme: true, declenchements: [],
+        condition: { type: "composite", conditions: [
+          { type: "prix-croise", niveau: 200, sens: "hausse" },
+          { type: "indicateur-seuil", indicateurId: "rsi", params: {}, output: "rsi", comparateur: ">", valeur: 50 },
+        ] },
+      };
+      alertsStore.setState({ defs: [def], journal: [] });
+      marketStore.setState({ candles: hausse });
+      stop = demarrerAlertes();
+      const appelTicker = subscribeTickersMock.mock.calls.find((args) => (args[2] as { source?: string } | undefined)?.source === "binance");
+      const ticker = appelTicker?.[1] as (update: { symbol: string; price: number; changePercent: number }) => void;
+      expect(ticker).toBeDefined();
+      // Sur le graphe : le composite est évalué au tick, prix sous 200 — armé, pas de tir.
+      vi.setSystemTime(Date.now() + 2_000);
+      ticker({ symbol: "BTCUSDT", price: 150, changePercent: 0 });
+      expect(lotsEvalues.at(-1)).toEqual(["comp-prix-rsi"]);
+      expect(alertsStore.getState().journal).toHaveLength(0);
+      // Le graphe part sur un autre actif : la liste écrit « hors graphe ».
+      marketStore.setState({ symbol: "ETHUSDT", candles: [] });
+      // Le prix franchit 200 sur le flux de BTCUSDT : avant, le composite tirait sur le RSI des
+      // bougies gardées au départ du graphe. Il reste figé : ni tir, ni changement d'armement.
+      vi.setSystemTime(Date.now() + 2_000);
+      ticker({ symbol: "BTCUSDT", price: 250, changePercent: 0 });
+      expect(alertsStore.getState().journal).toHaveLength(0);
+      expect(alertsStore.getState().defs[0]?.arme).toBe(true);
+      expect(toastsStore.getState().toasts).toHaveLength(0);
+      // Le graphe revient sur BTCUSDT : les bougies sont republiées (avec leur dernière clôture
+      // pour prix, sous 200), le composite est de nouveau évalué ; au tick suivant il tire.
+      vi.setSystemTime(Date.now() + 2_000);
+      lotsEvalues.length = 0;
+      marketStore.setState({ symbol: "BTCUSDT", candles: hausse });
+      expect(lotsEvalues).toEqual([["comp-prix-rsi"]]);
+      expect(alertsStore.getState().journal).toHaveLength(0);
+      vi.setSystemTime(Date.now() + 2_000);
+      ticker({ symbol: "BTCUSDT", price: 250, changePercent: 0 });
+      expect(alertsStore.getState().journal.map((d) => d.alertId)).toEqual(["comp-prix-rsi"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("une def RSI garde son comportement : une évaluation par clôture, aucune sur les ticks de la bougie en formation", () => {

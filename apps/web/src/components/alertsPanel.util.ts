@@ -189,7 +189,7 @@ export interface GraphePrincipal {
 export type EvaluationAlerte =
   | { etat: "ici" }
   | { etat: "hors-graphe" }
-  /** `aAfficher` : un indicateur de la def, dont l'amorce manque, n'est pas sur la vue principale. */
+  /** `aAfficher` : un indicateur de la def, dont l'amorce manque, n'est pas sur la vue principale (et la def n'est pas « muette »). */
   | { etat: "historique"; bougies: number; amorce: number; aAfficher: boolean };
 
 /**
@@ -224,8 +224,10 @@ export function evaluationAlerte(
   if (graphe.bougies >= amorce) return { etat: "ici" };
   // Afficher l'indicateur ne fait charger l'historique que s'il ne l'est pas déjà : sinon le
   // chargement est en cours, ou la source n'a pas plus de bougies, et il n'y a rien à conseiller.
+  // Rien à conseiller non plus pour une alerte « muette » : l'historique chargé, elle le resterait,
+  // et son explication donne déjà le seul remède (la recréer).
   const conditions: readonly Condition[] = def.condition.type === "composite" ? def.condition.conditions : [def.condition];
-  const aAfficher = conditions.some(
+  const aAfficher = explicationMuette(def.condition) === null && conditions.some(
     (c) =>
       (c.type === "indicateur-seuil" || c.type === "indicateur-croisement") &&
       (getIndicator(c.indicateurId)?.amorceBougies ?? 0) > graphe.bougies &&

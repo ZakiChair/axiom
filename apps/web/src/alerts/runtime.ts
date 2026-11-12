@@ -274,11 +274,17 @@ function creerRuntime(): Unsubscribe {
     contextes.set(cle, next);
   };
 
-  const evaluerComposites = (source: AlertDef["source"], symbol: string): void => {
+  /**
+   * `tamponAvant` : l'historique du graphe vient de s'étendre sous la même clôture, depuis un
+   * tampon de cette taille. Seuls les composites que ce tampon laissait sous leur amorce sont
+   * alors évalués, une fois et sans le frein (qui n'est pas consommé) : les autres l'ont déjà été
+   * pour cette clôture.
+   */
+  const evaluerComposites = (source: AlertDef["source"], symbol: string, tamponAvant?: number): void => {
     const cle = cleMarche(source, symbol);
     const now = Date.now();
     const last = dernierEvalComposite.get(cle) ?? 0;
-    if (now - last < COMPOSITE_THROTTLE_MS) return;
+    if (tamponAvant === undefined && now - last < COMPOSITE_THROTTLE_MS) return;
     const partiel = contextes.get(cle);
     if (!partiel || partiel.dernierPrix === undefined || !Number.isFinite(partiel.dernierPrix)) return;
     const lot = alertsStore
@@ -291,10 +297,10 @@ function creerRuntime(): Unsubscribe {
         if (porteBougie && d.timeframe !== undefined && d.timeframe !== partiel.timeframeBougies) return false;
         // Sous l'amorce d'un de ses indicateurs (AXIS, AXIS S/R), le composite n'est pas évalué :
         // armement figé, jamais un ET calculé à la mauvaise profondeur.
-        return amorceAtteinte(d, partiel.bougiesTampon ?? 0);
+        return amorceAtteinte(d, partiel.bougiesTampon ?? 0) && (tamponAvant === undefined || !amorceAtteinte(d, tamponAvant));
       });
     if (lot.length === 0) return;
-    dernierEvalComposite.set(cle, now);
+    if (tamponAvant === undefined) dernierEvalComposite.set(cle, now);
     const regime = regimeStore.getState().regime;
     const regimeScore =
       regime !== null && regime.libelle !== "indéterminé" ? regime.score : undefined;
@@ -393,7 +399,14 @@ function creerRuntime(): Unsubscribe {
   //      rappelle `onMarket` de façon synchrone (abonnement aux définitions).
   //  R5. Un prix sans route ticker garde sa cadence (à l'arrivée d'une clôture seulement : son
   //      sens « les deux » tire sans calibrage) ; un composite garde la sienne, mais reste figé
-  //      sous l'amorce de ses indicateurs (`evaluerComposites`).
+  //      sous l'amorce de ses indicateurs (`evaluerComposites`). Quand l'historique atteint cette
+  //      amorce sous la même clôture, il est évalué une fois pour T, comme une def simple (R1) :
+  //      fait de conditions de bougie seules, rien d'autre ne l'évaluerait avant la clôture
+  //      suivante.
+  //  R6. Le graphe quitte un marché ou une unité : ses bougies ne sont plus tenues à jour, elles
+  //      sont retirées du contexte des composites. Un composite évalué au tick (prix, funding,
+  //      liquidations) ne lit donc jamais des bougies périmées : il reste figé hors graphe, ce
+  //      que la liste des alertes écrit.
   let derniereSource = "";
   let dernierSymbole = "";
   let dernierTf = "";
@@ -408,6 +421,10 @@ function creerRuntime(): Unsubscribe {
     // Le TF compte depuis que les defs y sont filtrées : les clôtures d'un TF plus long
     // sont ANTÉRIEURES à la dernière vue sur un TF court, et resteraient ignorées.
     if (exchange !== derniereSource || symbol !== dernierSymbole || timeframe !== dernierTf) {
+      // R6 : les bougies du marché quitté sortent du contexte des composites.
+      if (derniereSource !== "") {
+        fusionner(derniereSource as AlertDef["source"], dernierSymbole, { candles: undefined, timeframeBougies: undefined, bougiesTampon: undefined });
+      }
       derniereSource = exchange;
       dernierSymbole = symbol;
       dernierTf = timeframe;
@@ -441,6 +458,7 @@ function creerRuntime(): Unsubscribe {
       );
     // Chemin chaud (chaque tick de la bougie en formation) : rien de neuf, rien à faire.
     if (!nouvelleCloture && lot.length === 0 && candles.length === dernierNombre) return;
+    const tamponAvant = dernierNombre;
     dernierTempsCloture = barreClose.time;
     for (const d of lot) evalueePour.set(d.id, barreClose.time); // R4
 
@@ -503,6 +521,7 @@ function creerRuntime(): Unsubscribe {
       }
     }
     if (nouvelleCloture) evaluerComposites(exchange, symbol);
+    else if (candles.length !== tamponAvant) evaluerComposites(exchange, symbol, tamponAvant); // R5
   };
 
   // ── Poll funding : conditions funding-extreme ─────────────────────────────

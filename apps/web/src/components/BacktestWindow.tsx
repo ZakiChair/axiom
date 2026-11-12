@@ -1542,7 +1542,7 @@ export function BacktestWindow() {
             {intrabar
               ? "stop/objectif sur le high/low des barres détenues (au niveau touché, stop prioritaire dans la même barre)."
               : "stop/objectif évalués à la clôture puis exécutés à l'open suivant (pas d'intrabar)."}{" "}
-            Frais et slippage appliqués aux deux côtés.
+            Frais et slippage appliqués aux deux côtés. Simulation sur des données passées : une mesure, pas une promesse.
           </NoteSource>
         </section>
 

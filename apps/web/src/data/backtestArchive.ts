@@ -5,7 +5,12 @@ import type { ConfigRun } from "../store/backtestSignature";
 import { copierConfigRun, signatureRun } from "../store/backtestSignature";
 
 export const SCHEMA_ARCHIVE_BT = 1;
-export const VERSION_MOTEUR_BT = "bt-2026-09-30";
+/**
+ * Version du calcul d'un run, comparée entre deux archives (« Versions du moteur
+ * différentes »). bt-2026-11-12 : amorce chargée avant la plage, seule la plage est mesurée ;
+ * les runs archivés avant restent lisibles et comparables, avec cet avertissement.
+ */
+export const VERSION_MOTEUR_BT = "bt-2026-11-12";
 
 export interface ArchiveRunBacktest {
   id: string;
@@ -15,7 +20,10 @@ export interface ArchiveRunBacktest {
   config: ConfigRun;
   signature: string;
   source: "binance-spot" | "binance-perp";
-  /** Bornes réellement passées à l'acquisition, distinctes de la plage relative du builder. */
+  /**
+   * Bornes de la plage MESURÉE, distinctes de la plage relative du builder. Depuis
+   * bt-2026-11-12, l'amorce des indicateurs est chargée avant `debutMs` et n'est pas mesurée.
+   */
   fenetreDemandee: { debutMs: number; finMs: number };
   donnees: { premiereBougieMs: number; derniereBougieMs: number; finDonneesMs: number | null; nbBougies: number };
   funding: { modele: "aucun" | "perp-lineaire"; couverture: CouvertureFundingBacktest | null; total: number | null };

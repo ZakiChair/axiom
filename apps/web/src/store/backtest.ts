@@ -8,9 +8,12 @@
  *
  * Un run se déroule en deux temps :
  *  1. thread principal : ACCUMULATION des klines historiques (data/backtestData.ts) avec
- *     cache daemon + pagination REST, progression au fil de l'eau ;
- *  2. Web Worker : exécution du MOTEUR pur (@axiom/backtest) sur les bougies clôturées.
- *     Le worker est instancié À LA DEMANDE et terminé proprement à chaque run.
+ *     cache daemon + pagination REST, progression au fil de l'eau. Quand une règle lit un
+ *     indicateur (ou avec un stop ATR), l'AMORCE (`amorceRun`) est chargée avant la plage :
+ *     des bougies strictement antérieures, lues par les indicateurs, jamais mesurées ;
+ *  2. Web Worker : exécution du MOTEUR pur (@axiom/backtest) sur les bougies clôturées,
+ *     fills, équité et stats bornés à la plage (`debutEvaluationMs`). Le worker est
+ *     instancié À LA DEMANDE et terminé proprement à chaque run.
  *
  * 100 % fonctionnel sans daemon (repli pagination REST directe). Les données du run
  * (bougies, résultat) restent hors du render-loop : le state ne porte que le résultat final.
@@ -27,7 +30,7 @@ import type {
 } from "@axiom/backtest";
 import { raisonTimeframeBacktest } from "@axiom/backtest";
 import { marketStore } from "./market";
-import { alignAux, getIndicator } from "@axiom/indicators";
+import { alignAux, getIndicator, resolveParams } from "@axiom/indicators";
 import { binanceAdapter } from "../data/binance";
 import { refSymbolStore } from "./refSymbol";
 import {
@@ -52,21 +55,96 @@ export { BACKTEST_TIMEFRAMES, SEUIL_PROFONDEUR_BT };
 
 /** Clé localStorage des presets de stratégie UTILISATEUR. */
 const STORAGE_KEY = "axiom:backtest:v1";
-/** Minimum de bougies pour un run exploitable (amorce indicateurs + trades). */
+/** Minimum de bougies MESURÉES (dans la plage, amorce exclue) pour un run exploitable. */
 export const MIN_BOUGIES = 30;
 
-// ─────────────────────────── Référence du garde-fou de régime (AXIS) ───────────────────────────
-
-/** Vrai si une règle de la stratégie lit un indicateur déclarant `refClose` facultative. */
-export function strategieVeutRefClose(config: ConfigRun): boolean {
+/** Opérandes lus par les règles d'entrée et de sortie, dans l'ordre des règles. */
+function operandesLus(config: Pick<ConfigRun, "reglesEntree" | "reglesSortie">): Operande[] {
   const ops: Operande[] = [];
   for (const c of [...config.reglesEntree, ...config.reglesSortie]) {
     if (c.type === "comparaison") ops.push(c.gauche, c.droite);
     else ops.push(c.a, c.b);
   }
-  return ops.some(
+  return ops;
+}
+
+// ─────────────────────────── Référence du garde-fou de régime (AXIS) ───────────────────────────
+
+/** Vrai si une règle de la stratégie lit un indicateur déclarant `refClose` facultative. */
+export function strategieVeutRefClose(config: ConfigRun): boolean {
+  return operandesLus(config).some(
     (op) => op.type === "indicateur" && getIndicator(op.indicateurId)?.auxFacultatives?.includes("refClose") === true
   );
+}
+
+// ─────────────────────────── Amorce du run (12 novembre 2026) ───────────────────────────
+
+/**
+ * Plancher d'amorce d'un run qui lit un indicateur ou pose un stop ATR : 300 bougies, le
+ * warmup de la campagne v5 d'AXIS (`scripts/axis/manifeste-v5-2026-10-10.json`).
+ */
+export const AMORCE_MIN_BT = 300;
+
+/**
+ * Paramètres comptés en JOURS calendaires et non en bougies, comme dans EQS
+ * (`data/screenerRegles.ts`, `PARAMS_EN_JOURS`) : RVOL saisonnier, 84 jours par défaut. Le
+ * moteur lui impose l'unité 1h (`raisonTimeframeBacktest`) : jours × 24 bougies.
+ */
+const PARAMS_EN_JOURS_BT: Record<string, string> = { rvolSeasonal: "jours" };
+const BOUGIES_PAR_JOUR_1H = 24;
+
+/**
+ * Amorce d'un opérande « indicateur », en bougies : le plus grand de l'amorce que son def
+ * déclare (`amorceBougies` : AXIS 1 500, AXIS S/R 3 000, quelle que soit la sortie lue), de
+ * 4 × son plus grand paramètre numérique résolu (règle d'EQS, `amorceDef` : une EMA 200
+ * demande 800 bougies, une période réglée sous `slow`, `period` ou `kLength` compte autant
+ * que `length`) et, pour un paramètre en jours, de jours × 24. Def inconnu : 0 (le plancher
+ * s'applique).
+ */
+function amorceOperande(indicateurId: string, params: Record<string, number | boolean | string>): number {
+  const def = getIndicator(indicateurId);
+  if (def === undefined) return 0;
+  const resolus = resolveParams(def, params);
+  const cleJours = PARAMS_EN_JOURS_BT[indicateurId];
+  let plusGrand = 0;
+  for (const [cle, v] of Object.entries(resolus)) {
+    if (cle !== cleJours && typeof v === "number" && Number.isFinite(v)) plusGrand = Math.max(plusGrand, v);
+  }
+  const jours = cleJours === undefined ? Number.NaN : Number(resolus[cleJours]);
+  return Math.max(
+    def.amorceBougies ?? 0,
+    Math.ceil(4 * plusGrand),
+    Number.isFinite(jours) && jours > 0 ? Math.ceil(jours * BOUGIES_PAR_JOUR_1H) : 0,
+  );
+}
+
+/**
+ * Bougies d'amorce à charger AVANT la plage mesurée. 0 quand aucune règle ne lit
+ * d'indicateur et sans stop ATR : le run reste celui d'avant (mêmes bougies, même requête
+ * au moteur, même note). Sinon le plus
+ * grand de `AMORCE_MIN_BT`, de l'amorce de chaque opérande « indicateur » et de 4 × la
+ * période du stop ATR. PURE.
+ */
+export function amorceRun(config: Pick<ConfigRun, "reglesEntree" | "reglesSortie" | "stopAtr">): number {
+  const indicateurs = operandesLus(config).filter((op) => op.type === "indicateur");
+  if (indicateurs.length === 0 && config.stopAtr === null) return 0;
+  let amorce = AMORCE_MIN_BT;
+  for (const op of indicateurs) amorce = Math.max(amorce, amorceOperande(op.indicateurId, op.params));
+  const periodeAtr = config.stopAtr === null ? 0 : config.stopAtr.length;
+  if (Number.isFinite(periodeAtr) && periodeAtr > 0) amorce = Math.max(amorce, Math.ceil(4 * periodeAtr));
+  return amorce;
+}
+
+/**
+ * Mention d'amorce de la note d'un run : l'amorce obtenue, et ce qui manque quand
+ * l'historique de la source est plus court que l'amorce demandée (règle stricte : une seule
+ * bougie manquante suffit). PURE.
+ */
+export function texteAmorceBt(obtenue: number, demandee: number): string {
+  const bougies = (n: number): string => `${n} bougie${n > 1 ? "s" : ""}`;
+  return obtenue >= demandee
+    ? `amorce ${bougies(obtenue)}`
+    : `amorce courte (${bougies(obtenue)} sur ${demandee}) : premiers signaux pouvant différer de ceux d'une série longue`;
 }
 
 /**
@@ -525,6 +603,12 @@ export const BUILTIN_STRATEGIES: StrategiePreset[] = [
    * fenêtre charge la série de référence du chart (`refClose`, symbole
    * `refSymbolStore`) sur la fenêtre du run ; sans elle (échec réseau), la
    * condition retombe sur la v2 et la note du run le dit.
+   *
+   * Amorce (12 novembre 2026) : le run charge avant la plage l'amorce que le def
+   * déclare (1 500 bougies pour AXIS, 3 000 pour AXIS S/R, même pour son seul
+   * état), comme le graphe, et ne mesure que la plage. Les règles restent de
+   * NIVEAU : quand l'état vaut déjà 1 à la clôture qui précède la plage, l'entrée
+   * se fait à l'ouverture de la première bougie mesurée, et la note le dit.
    */
   {
     id: "builtin:axis",
@@ -855,17 +939,24 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
         : maintenant;
       const plage = PLAGES.find((p) => p.id === config.plage) ?? PLAGES[1]!;
       const depuis = jusqua - plage.ms;
+      const dureeBougie = dureeTimeframeMs(config.tf);
+      // Amorce : bougies chargées avant `depuis`, lues par les indicateurs, jamais remplies ni
+      // mesurées. `Math.max(0, …)` : 3 000 bougies 1w remontent avant 1970.
+      const amorce = dureeBougie === null ? 0 : amorceRun(config);
+      const debutChargement = amorce === 0 || dureeBougie === null
+        ? depuis
+        : Math.max(0, depuis - amorce * dureeBougie);
 
       let candles: Candle[];
       try {
         candles = config.modeFunding === "binance-reel"
-          ? await bf.accumulerKlinesPerpBinance(config.symbol, config.tf, depuis, jusqua, {
+          ? await bf.accumulerKlinesPerpBinance(config.symbol, config.tf, debutChargement, jusqua, {
               signal: ctrl.signal,
               onProgress: (recuperees) => {
                 if (runId === currentRunId) set({ progress: { recuperees, cible: 0 } });
               },
             })
-          : await accumulerKlines(config.symbol, config.tf, depuis, jusqua, {
+          : await accumulerKlines(config.symbol, config.tf, debutChargement, jusqua, {
               signal: ctrl.signal,
               onProgress: (p) => {
                 if (runId === currentRunId) set({ progress: p });
@@ -878,18 +969,24 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
         return;
       }
       if (runId !== currentRunId) return;
-      if (candles.length < MIN_BOUGIES) {
+      // Sans amorce demandée, tout ce qui est chargé est mesuré : chemin d'avant, inchangé.
+      // Sinon la mesure commence à la première bougie ouverte à partir de `depuis` ; s'il n'y
+      // en a aucune, tout est de l'amorce et rien n'est mesuré.
+      const indexDebut = amorce === 0 ? 0 : candles.findIndex((c) => c.time >= depuis);
+      const nbAmorce = indexDebut < 0 ? candles.length : indexDebut;
+      const nbMesurees = candles.length - nbAmorce;
+      const premiereMesuree = candles[nbAmorce];
+      if (premiereMesuree === undefined || nbMesurees < MIN_BOUGIES) {
         set({
           phase: "error",
-          nbBougiesChargees: candles.length,
+          nbBougiesChargees: nbMesurees,
           error:
-            `Trop peu de bougies (${candles.length} < ${MIN_BOUGIES}). ` +
+            `Trop peu de bougies (${nbMesurees} < ${MIN_BOUGIES}). ` +
             `Utilise « Charger 2 ans 1d », élargis la plage ou change de TF.`,
         });
         return;
       }
 
-      const dureeBougie = dureeTimeframeMs(config.tf);
       const derniere = candles.at(-1);
       const finDonneesMs = dureeBougie === null || derniere === undefined
         ? null
@@ -901,7 +998,9 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
           return;
         }
         try {
-          historiqueFunding = await bf.fetchReglementsFundingBinance(config.symbol, candles[0]!.time, finDonneesMs, fetch, {
+          // Depuis la première bougie MESURÉE : aucune position n'est tenue pendant l'amorce,
+          // et ses mois n'ont pas à être archivés (le run échouerait sur un mois manquant).
+          historiqueFunding = await bf.fetchReglementsFundingBinance(config.symbol, premiereMesuree.time, finDonneesMs, fetch, {
             signal: ctrl.signal,
             maintenantMs: maintenant,
           });
@@ -920,8 +1019,8 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
 
       // Référence du garde-fou de régime (AXIS, défaut 100 depuis le 10 octobre 2026) :
       // si une règle lit un indicateur déclarant `refClose`, la série est chargée sur
-      // la fenêtre du run et alignée par ouverture ; échec réseau → run sans aux,
-      // note explicite (positions de la v2).
+      // toutes les bougies du run, amorce comprise (comme sur le graphe), et alignée par
+      // ouverture ; échec réseau → run sans aux, note explicite (positions de la v2).
       let aux: ParamsBacktest["aux"];
       let noteRef: string | null = null;
       if (strategieVeutRefClose(config)) {
@@ -935,15 +1034,20 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
         }
       }
 
-      const profondeurFaible = candles.length < SEUIL_PROFONDEUR_BT;
-      const noteBase = `${candles.length} bougies · ${config.symbol} ${config.tf} · ${config.modeFunding === "binance-reel" ? "Binance perp" : "Binance spot"}`;
+      // Comptes de bougies seulement : la note ne porte aucun chiffre de performance.
+      const profondeurFaible = nbMesurees < SEUIL_PROFONDEUR_BT;
+      const source = config.modeFunding === "binance-reel" ? "Binance perp" : "Binance spot";
+      const noteBase = amorce === 0
+        ? `${nbMesurees} bougies · ${config.symbol} ${config.tf} · ${source}`
+        : `${nbMesurees} bougies mesurées · ${config.symbol} ${config.tf} · ${source} · ${texteAmorceBt(nbAmorce, amorce)}`;
+      const noteRun =
+        (profondeurFaible
+          ? `${noteBase} · profondeur faible (< ${SEUIL_PROFONDEUR_BT}) — « Charger 2 ans 1d » recommandé`
+          : noteBase) + (noteRef === null ? "" : ` · ${noteRef}`);
       set({
         phase: "calcul",
-        nbBougiesChargees: candles.length,
-        note:
-          (profondeurFaible
-            ? `${noteBase} · profondeur faible (< ${SEUIL_PROFONDEUR_BT}) — « Charger 2 ans 1d » recommandé`
-            : noteBase) + (noteRef === null ? "" : ` · ${noteRef}`),
+        nbBougiesChargees: nbMesurees,
+        note: noteRun,
         couvertureFunding: historiqueFunding?.couverture ?? null,
       });
 
@@ -962,17 +1066,24 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
             config, signature: signatureRun(config),
             source: config.modeFunding === "binance-reel" ? "binance-perp" : "binance-spot",
             fenetreDemandee: { debutMs: depuis, finMs: jusqua },
-            donnees: { premiereBougieMs: candles[0]!.time, derniereBougieMs: derniere!.time,
+            donnees: { premiereBougieMs: premiereMesuree.time, derniereBougieMs: derniere!.time,
               finDonneesMs, nbBougies: msg.resultat.nbBougies },
             funding: { modele: historiqueFunding === null ? "aucun" : "perp-lineaire",
               couverture: historiqueFunding?.couverture ?? null, total: msg.resultat.fundingTotal ?? null },
             stats: msg.resultat.stats,
           });
+          // Règle de NIVEAU déjà vraie à la clôture de la dernière bougie de l'amorce : le
+          // moteur remplit à l'ouverture de la première bougie mesurée. Ce trade n'a pas de
+          // signal visible dans la plage ; la note le dit.
+          const entreeOuverture = nbAmorce > 0 && msg.resultat.trades[0]?.tempsEntree === premiereMesuree.time;
           set({
             phase: "done",
             resultat: msg.resultat,
             signatureRun: signatureRun(config),
             configRunResultat: config,
+            ...(entreeOuverture
+              ? { note: `${noteRun} · 1re entrée à l'ouverture de la plage : règle déjà vraie à la clôture précédente` }
+              : {}),
           });
           terminateWorker();
         } else if (msg.type === "error") {
@@ -996,8 +1107,12 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
         ...(config.targetPct !== null ? { targetPct: config.targetPct } : {}),
         ...(config.risquePct !== null ? { risquePct: config.risquePct } : {}),
       };
+      // `candles` porte l'amorce (et `aux.refClose`, aligné sur elles) : le moteur calcule
+      // les indicateurs sur toutes, décide à la clôture, remplit à l'ouverture suivante, et
+      // ne garde que les fills, l'équité et les stats à partir de `debutEvaluationMs`.
       const params: ParamsBacktest = {
         timeframe: config.tf,
+        ...(amorce > 0 ? { debutEvaluationMs: depuis } : {}),
         ...(aux !== undefined ? { aux } : {}),
         fraisPct: config.fraisPct,
         slippagePct: config.slippagePct,

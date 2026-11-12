@@ -432,6 +432,21 @@ describe("zonesDuGraphe — les zones des instances d'AXIS S/R montées, et d'el
     expect(zonesDuGraphe(chart, { ...BTC_4H, rejeu: false })).toHaveLength(2);
   });
 
+  // Arbitrage A3 de l'orchestrateur (12 novembre 2026) : sur une série synthétique (ratio, spread,
+  // capitalisation), le moteur n'ouvre aucun flux de prix et n'évalue une alerte de prix qu'à la
+  // clôture : aucune offre, ni au téléphone ni au bureau.
+  it("source sans flux de prix au tick (« synthetic ») : aucune zone, donc ni bouton ni entrée de menu ; toute source à ticker : les zones", () => {
+    indicatorsStore.setState({ indicators: [instance("sr-1", "stratAxisSr")] });
+    const chart = fauxGraphe({ "sr-1": ANNOTATIONS_SR });
+    const ratio = { symbol: "ETHUSDT|BTCUSDT", source: "synthetic", timeframe: "4h" } as const;
+    expect(zonesDuGraphe(chart, ratio)).toEqual([]);
+    expect(offreSousReticule(chart, ratio, { paneId: "candle_pane", dataIndex: 1, y: yPane(76000) })).toBeUndefined();
+    expect(offreAuClic(chart, ratio, 200, yPane(76000) + 40)).toBeUndefined();
+    for (const source of ["binance", "bybit", "okx", "hyperliquid", "coinbase", "kraken", "twelvedata", "mexc"] as const) {
+      expect(zonesDuGraphe(chart, { ...BTC_4H, source })).toHaveLength(2);
+    }
+  });
+
   it("instance au réglage « unite » : écartée — ses zones seraient celles d'une autre unité que celle du message", () => {
     indicatorsStore.setState({ indicators: [instance("sr-1d", "stratAxisSr", { unite: "1d" })] });
     const chart = fauxGraphe({ "sr-1d": ANNOTATIONS_SR });

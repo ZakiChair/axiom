@@ -220,6 +220,11 @@ describe("menu du clic droit — alerte de prix au bord d'une zone forte", () =>
     expect(entrees(clicDroit(76_000))).toEqual([{ balise: "div", role: null, texte: "Prix 76,000.00" }, ...habituelles(76_000)]);
   });
 
+  it("série synthétique (source sans flux de prix au tick) : aucune offre, même dans une bande forte", () => {
+    marche = { symbol: "ETHUSDT|BTCUSDT", source: "synthetic", timeframe: "4h", rejeu: false };
+    expect(entrees(clicDroit(76_000))).toEqual([{ balise: "div", role: null, texte: "Prix 76,000.00" }, ...habituelles(76_000)]);
+  });
+
   it("sans AXIS S/R affiché : aucune offre", () => {
     indicatorsStore.setState({ indicators: [] });
     expect(entrees(clicDroit(76_000))).toEqual([{ balise: "div", role: null, texte: "Prix 76,000.00" }, ...habituelles(76_000)]);

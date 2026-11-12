@@ -17,6 +17,13 @@
  *    et resterait muet (`@axiom/alerts`, le premier prix calibre sans tirer).
  *  - Ni doublée (« posee »), ni muette (« franchi »), ni éternelle (échéance de 7 jours).
  *
+ *  - Sources à flux de prix au tick seulement (`isTickerSource`, arbitrage A3 de l'orchestrateur) :
+ *    sur une série synthétique (source « synthetic » : ratio, spread, capitalisation), aucune offre,
+ *    ni bouton ni entrée de menu. Le moteur n'ouvre aucun flux de prix pour elle et ne l'évalue qu'à
+ *    chaque nouvelle clôture du graphe principal, s'il affiche ce marché (`alerts/runtime.ts`) : le
+ *    cours pourrait traverser le bord et revenir dans la bougie sans que rien ne sonne. Ce ne serait
+ *    plus un avertissement en cours de bougie.
+ *
  * LIMITES : le niveau ne suit pas la zone, qui peut bouger ou casser ; chaque bord déplacé propose
  * une alerte de plus ; une zone hors de la fenêtre de prix ne se touche pas ; au téléphone, pas
  * d'offre là où l'encart, bouton compris, ne tient pas dans la zone libre du pane (paysage, écran
@@ -34,6 +41,7 @@ import { indicatorsStore } from "../store/indicators";
 import { pousserToast } from "../store/toasts";
 import { uiSectionsStore } from "../store/ui-sections";
 import { daemonSupporte } from "../data/daemon";
+import { isTickerSource } from "../data/ticker";
 import { formatDateCourte } from "../lib/format";
 import type { OffreEncart } from "./candleReadout";
 import { axiomName } from "./indicators";
@@ -164,14 +172,15 @@ export function offreBordZone(
 }
 
 /**
- * Zones fortes des instances d'AXIS S/R montées sur le pane des prix de `chart`. Aucune en rejeu.
+ * Zones fortes des instances d'AXIS S/R montées sur le pane des prix de `chart`. Aucune en rejeu,
+ * ni sur une source sans flux de prix au tick (voir l'en-tête).
  * L'instance est choisie par sa DÉFINITION, jamais par la forme de ses annotations : la prime
  * spot/perp trace aussi des rubans porteurs d'un texte. Une instance au réglage « unite » est
  * écartée : ses zones seraient celles d'une autre unité que celle que le message écrit
  * (aujourd'hui le graphe refuse de la tracer, cf. `uniteSuperieure.ts` ; la garde tient si cela change).
  */
 export function zonesDuGraphe(chart: Chart, marche: PriceAlertMarket): ZoneForteTracee[] {
-  if (marche.rejeu) return [];
+  if (marche.rejeu || !isTickerSource(marche.source)) return [];
   return indicatorsStore.getState().indicators
     .filter((i) => i.defId === "stratAxisSr" && uniteDemandee(i.params) === null)
     .flatMap((i) => {

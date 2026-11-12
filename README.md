@@ -305,7 +305,8 @@ d'achat », « Signal de vente », « Non mesuré · réaction sur support fort 
 sans comparateur ni valeur à saisir. Une alerte AXIS n'est plus évaluée tant
 que le graphe n'a pas chargé l'historique que l'indicateur demande (1 500
 bougies, 3 000 pour AXIS S/R) : la liste écrit alors « historique
-insuffisant », ou « hors graphe » quand le graphe principal n'affiche pas son
+insuffisant » (« historique en chargement » depuis le lot 4, plus bas),
+ou « hors graphe » quand le graphe principal n'affiche pas son
 actif et son unité, ou « condition déjà vraie : sonnera quand elle le
 redeviendra » pour une alerte posée alors que sa condition est déjà vraie. Au
 retour dans l'application, un signal d'achat ou de vente encore vrai sonne en
@@ -338,6 +339,22 @@ pouvant différer de ceux d'une série longue » quand l'historique manque.
 Les résultats de tous les presets qui lisent un indicateur bougent en début
 de plage ; une règle de prix seule ne change pas. Simulation sur des données
 passées : une mesure, pas une promesse.
+**Alertes AXIS sans l'indicateur affiché, réglages du graphe et pré-signal
+(12 novembre 2026)** : le graphe principal charge de lui-même l'historique
+que demandent les alertes actives de son marché (3 000 bougies pour AXIS
+S/R, 1 500 pour AXIS), indicateur affiché ou non ; la liste écrit
+« historique en chargement : 500 sur 3000 » pendant la remontée. Quand la
+place n'a pas assez d'historique, l'alerte est évaluée sur ce qu'il y a et
+le dit : « amorce courte : 2988 sur 3000 » sous son état, « · amorce courte
+(2989 bougies) » dans l'avis ; un chargement échoué est dit aussi et retenté
+une minute plus tard. Une alerte d'AXIS ou d'AXIS S/R copie à sa création
+les réglages de l'instance du graphe (« Réglages de l'instance du graphe,
+copiés à la création : l'alerte ne suit pas leurs changements. ») et porte
+la pastille « ≠ graphe » s'ils changent ensuite. Le formulaire propose
+« Non mesuré · pré-signal d'achat » (sortie `preAchat` d'AXIS S/R, libellé
+« AXIS S/R non mesuré · pré-signal d'achat (niveau sur le graphe) ») : un
+signal précoce non mesuré, jamais une promesse. Rien ne sonne Safari fermé
+ou téléphone verrouillé.
 [Méthode, réglages, limites et backtests](docs/axis-2026-10-07.md).
 
 ### COT — exposition des catégories de traders

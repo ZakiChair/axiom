@@ -288,6 +288,26 @@ ne change.
 Le module qui évalue les alertes est désormais chargé juste après le premier
 affichage ; s'il manque, ou si son chargement dépasse dix secondes, le bandeau
 écrit « ALERTES inactives » ; en cas d'échec, un avis propose de recharger.
+**Au téléphone : texte complet sous le doigt et alertes visibles (12 novembre
+2026)** : toucher une zone, un triangle creux ou un signal ouvre, dans
+l'encart des prix, le **texte complet** de ce qui est sous le doigt, renvoyé à
+la ligne sur fond opaque ; l'encart reste une fois le doigt levé. Sans
+toucher, chaque rangée du graphe s'arrête à un mot entier suivi de « … »
+(plus de nombre coupé), pour tous les indicateurs ; au bureau, les rangées
+commencent sous le bandeau du symbole. Une alerte qui se déclenche pousse un
+**avis qui reste à l'écran jusqu'au toucher**, « BTCUSDT 4h — AXIS test 4h ≈
+EMA 200 seule · signal d'achat », avec « Voir » ; son libellé dit ce qui est
+mesuré (« AXIS S/R non mesuré · réaction sur support fort ») au lieu de la
+formule brute, dans la liste, le journal et les relais du daemon. Le
+formulaire propose AXIS S/R et AXIS en tête, sous des noms (« Signal
+d'achat », « Signal de vente », « Non mesuré · réaction sur support fort »),
+sans comparateur ni valeur à saisir. Une alerte AXIS n'est plus évaluée tant
+que le graphe n'a pas chargé l'historique que l'indicateur demande (1 500
+bougies, 3 000 pour AXIS S/R) : la liste écrit alors « historique
+insuffisant », ou « hors graphe » quand le graphe principal n'affiche pas son
+actif et son unité. **Rien ne sonne Safari fermé ou téléphone verrouillé**, et
+l'application déployée ne voit jamais le daemon : une alerte posée sur
+l'iPhone n'atteint pas Telegram.
 [Méthode, réglages, limites et backtests](docs/axis-2026-10-07.md).
 
 ### COT — exposition des catégories de traders

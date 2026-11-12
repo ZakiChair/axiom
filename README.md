@@ -291,8 +291,9 @@ affichage ; s'il manque, ou si son chargement dépasse dix secondes, le bandeau
 **Au téléphone : texte complet sous le doigt et alertes visibles (12 novembre
 2026)** : toucher une zone, un triangle creux ou un signal ouvre, dans
 l'encart des prix, le **texte complet** de ce qui est sous le doigt, renvoyé à
-la ligne sur fond opaque ; l'encart reste une fois le doigt levé. Sans
-toucher, chaque rangée du graphe s'arrête à un mot entier suivi de « … »
+la ligne sur fond opaque ; l'encart reste une fois le doigt levé, tant que le
+graphe garde son réticule (il part quand le graphe change de marché ou
+recharge ses bougies). Sans toucher, chaque rangée du graphe s'arrête à un mot entier suivi de « … »
 (plus de nombre coupé), pour tous les indicateurs ; au bureau, les rangées
 commencent sous le bandeau du symbole. Une alerte qui se déclenche pousse un
 **avis qui reste à l'écran jusqu'au toucher**, « BTCUSDT 4h — AXIS test 4h ≈
@@ -305,9 +306,13 @@ sans comparateur ni valeur à saisir. Une alerte AXIS n'est plus évaluée tant
 que le graphe n'a pas chargé l'historique que l'indicateur demande (1 500
 bougies, 3 000 pour AXIS S/R) : la liste écrit alors « historique
 insuffisant », ou « hors graphe » quand le graphe principal n'affiche pas son
-actif et son unité. **Rien ne sonne Safari fermé ou téléphone verrouillé**, et
-l'application déployée ne voit jamais le daemon : une alerte posée sur
-l'iPhone n'atteint pas Telegram.
+actif et son unité, ou « condition déjà vraie : sonnera quand elle le
+redeviendra » pour une alerte posée alors que sa condition est déjà vraie. Au
+retour dans l'application, un signal d'achat ou de vente encore vrai sonne en
+datant sa bougie (« · bougie close le 21/10 à 16:00 »), et « Voir » la marque.
+**Rien ne sonne Safari fermé ou téléphone verrouillé**, et l'application
+déployée ne voit jamais le daemon : une alerte posée sur l'iPhone n'atteint
+pas Telegram.
 [Méthode, réglages, limites et backtests](docs/axis-2026-10-07.md).
 
 ### COT — exposition des catégories de traders

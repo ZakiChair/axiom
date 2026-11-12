@@ -170,7 +170,10 @@ export class CandleReadout {
         // au tiers et l'encart avec elle ; il peut alors recouvrir le bas du panneau, jamais sa part
         // repliée (32 px mesurés à 320 × 568, où les 130 px libres entre le panneau et le bouton
         // sont moins que l'encart, 131 à 147 px selon le thème). Pane trop court pour les deux
-        // bornes : celle du haut d'abord, l'encart dépasse vers le bas.
+        // bornes : celle du haut d'abord, l'encart dépasse vers le bas. C'est le cas en paysage
+        // dès qu'un pane d'indicateur ou « Détails » raccourcit la zone libre : il déborde sur le
+        // pane voisin et, sur les écrans les plus courts, sur le bouton (mesures au contrat,
+        // section du 12 novembre 2026, « Encart en paysage »).
         haut += this.chart.getStyles().candle.tooltip.offsetTop;
         // Panneau « Indicateurs (n) » déplié : il monte depuis ces 80 px, l'encart s'arrête à son
         // haut (replié ou au bureau, sa hauteur est nulle). Sans place au-dessus, le panneau passe
@@ -181,7 +184,9 @@ export class CandleReadout {
         // Pile d'avis (`Toasts.tsx`) : un avis d'alerte reste jusqu'au toucher, par-dessus le
         // graphe. L'encart s'arrête 4 px au-dessus d'elle. LIMITES : il ne se replace pas quand un
         // avis paraît après lui (le toucher suivant le replace) ; pile plus haute que la zone libre
-        // (deux avis à 320 × 568), il passe en partie dessous, fermer un avis le découvre.
+        // (deux avis à 320 × 568 ; deux avis en paysage, où la pile n'occupe pourtant que les
+        // 320 px de droite), il passe en partie dessous, fermer un avis le découvre. En portrait,
+        // à 360 px de large et plus, il tient au-dessus de trois avis (mesures au contrat).
         const pile = document.querySelector("[data-pile-avis]")?.getBoundingClientRect();
         if (pile?.height) bas = Math.min(bas, pile.top - this.container.getBoundingClientRect().top - 4);
       }

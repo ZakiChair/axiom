@@ -39,9 +39,9 @@ import {
  *  - rejeu actif sur la vue : le texte de la zone, pas de bouton ; le direct revenu, le bouton ;
  *  - le doigt sur un signal d'AXIS dessiné dans une bande forte : le texte d'AXIS et le bouton de
  *    la zone ; AXIS S/R fermé, ce texte reste et le bouton part avec la zone ;
- *  - à 320 × 568 en chasse fixe (Bloomberg) : texte de la zone lu en entier ; le bouton, quand la
- *    place le laisse rendre (voir plus bas), entier dans l'écran et dans l'encart, « niveau fixe »
- *    lisible ; avis et liste lus en entier, aussi en thème par défaut ;
+ *  - à 320 × 568 en chasse fixe (Bloomberg) : texte de la zone lu en entier ; le bouton entier dans
+ *    l'écran et dans l'encart, « niveau fixe » lisible — EXIGÉ sur Chromium, sous la règle seule sur
+ *    WebKit (voir plus bas) ; avis et liste lus en entier, aussi en thème par défaut ;
  *  - JAMAIS un bouton hors de la zone libre du pane : il n'est rendu que si l'encart, bouton
  *    compris, y tient — sous l'ordonnée de l'infobulle, au-dessus du bouton « Indicateurs (n) »,
  *    du bas du pane et de la pile d'avis. En paysage 844 × 390 il ne tient pas : le texte de la
@@ -55,10 +55,13 @@ import {
  * WebKit ne tourne qu'en CI, et les thèmes écrivent dans les polices du système : un autre moteur
  * ou une autre machine peut donner une ligne de plus (15,4 px) au texte de la zone. À 320 × 568
  * en chasse fixe la zone libre (204 px) ne dépasse l'encart avec son bouton (195 px) que de 9 px,
- * mesure Chromium d'ici ; à 390 × 844 elle le dépasse de 300 px. Le parcours à 320 px tient donc
- * la RÈGLE (un bouton rendu est entier dans la zone libre ; sinon pas de bouton), pas la présence
- * du bouton, et note ce que le moteur a rendu (annotation « limite »). Sans bouton, l'alerte est
- * posée par le store, la même, pour que l'avis et la liste soient lus quand même.
+ * mesure Chromium d'ici ; à 390 × 844 elle le dépasse de 300 px. Arbitrage A4 de l'orchestrateur
+ * (12 novembre 2026) : sur le projet `chromium-phone`, où cette marge est mesurée, le bouton est
+ * EXIGÉ à 320 × 568 en Bloomberg, rendu entier dans la zone libre — une retouche qui allonge
+ * l'encart d'une ligne fait échouer le parcours au lieu de passer sans bouton. Sur `webkit-phone`
+ * (CI seulement), le parcours tient la RÈGLE (un bouton rendu est entier dans la zone libre ; sinon
+ * pas de bouton) et note ce que le moteur a rendu (annotation « limite ») ; sans bouton, l'alerte
+ * y est posée par le store, la même, pour que l'avis et la liste soient lus quand même.
  */
 const BORD = 76601.83;
 const OFFRE = "Alerte de prix ↓ 76,601.83 · bord du support fort · niveau fixe, 7 jours";
@@ -584,6 +587,8 @@ test("paysage puis 320 × 568, en chasse fixe : jamais un bouton hors de la zone
   // écran l'encart, bouton compris, occupe l'essentiel du pane des prix).
   const offre = await offreRendue(page);
   const pane = (await lire(page)).pane;
+  // Arbitrage A4 : exigé sur Chromium (9 px de marge mesurés ici) ; la règle seule sur WebKit.
+  if (testInfo.project.name === "chromium-phone") expect(offre, "320 × 568 Bloomberg : le bouton d'offre doit être rendu, entier dans la zone libre").not.toBeNull();
   if (offre !== null) {
     await expect(bouton(page)).toHaveText(OFFRE);
     expect(await luEnEntier(bouton(page))).toMatchObject({ dansEcran: true, sansCoupe: true, decouvert: true });
@@ -616,7 +621,7 @@ test("paysage puis 320 × 568, en chasse fixe : jamais un bouton hors de la zone
     await lesAvis.tap({ position: { x: 12, y: 8 } });
     await expect(lesAvis).toHaveCount(0);
   } else {
-    // Pas de bouton sous ce moteur : la même alerte, par le store (voir l'en-tête).
+    // Pas de bouton sous ce moteur (WebKit seulement, Chromium l'exige) : la même alerte, par le store (voir l'en-tête).
     await poserParLeStore(page);
   }
   expect(await lireAlertes(page)).toMatchObject([{ condition: { type: "prix-croise", niveau: BORD, sens: "baisse" }, message: MESSAGE, expireTs: HORLOGE_AXIS_SR + SEPT_JOURS }]);

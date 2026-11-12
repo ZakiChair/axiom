@@ -11,7 +11,8 @@
  * Depuis le 12 novembre 2026 : chaque ligne porte le libellé de l'alerte (`decrireAlerte`, qui
  * dit ce qui est mesuré) suivi de son unité, en entier (retour à la ligne, jamais coupé) ; une
  * def de bougie que rien n'évalue l'écrit (« hors graphe », « historique insuffisant ») au lieu
- * de « armée » ; le formulaire d'indicateur nomme les sorties, pose comparateur et valeur quand
+ * de « armée » ; une alerte posée alors que sa condition est déjà vraie l'écrit au lieu de
+ * « déclenchée » ; le formulaire d'indicateur nomme les sorties, pose comparateur et valeur quand
  * une seule lecture a un sens, et dit sous lui ce que l'alerte portera et ce qui ne sonnera pas.
  *
  * Ce composant se re-rend uniquement sur ÉVÉNEMENT (création, bascule, déclenchement) :
@@ -52,6 +53,7 @@ import {
   cibleAlerte,
   construireConditionCroisement,
   construireConditionSeuil,
+  etatArmement,
   evaluationAlerte,
   explicationMuette,
   INDICATEURS_CROISEMENT,
@@ -102,13 +104,6 @@ const FENETRES: Array<{ label: string; ms: number }> = [
 ];
 
 const COMPARATEURS: Comparateur[] = [">", ">=", "<", "<="];
-
-/** Libellé + couleur de l'état d'armement d'une alerte. */
-function etatArmement(arme: boolean | undefined): { texte: string; classe: string } {
-  if (arme === undefined) return { texte: "calibrage", classe: "text-text-dim" };
-  if (arme) return { texte: "armée", classe: "text-up" };
-  return { texte: "déclenchée", classe: "text-serie-3" };
-}
 
 /**
  * État du dernier scan d'une alerte de preset : pastille + libellé. Un échec avalé ne
@@ -425,7 +420,7 @@ export function AlertsPanel() {
           </div>
         )}
         {defs.map((d) => {
-          const arm = etatArmement(d.arme);
+          const arm = etatArmement(d);
           const expiree = d.expireTs !== undefined && maintenant >= d.expireTs;
           const derniere = d.declenchements[d.declenchements.length - 1];
           const whaleUnusable = IS_VERCEL && d.condition.type === "whale-flux";
@@ -437,9 +432,11 @@ export function AlertsPanel() {
           // ailleurs, ou historique plus court que l'amorce de l'indicateur).
           const evaluation = evaluationAlerte(d, graphe, daemonAlertes);
           const nonEvaluee = expiree || !d.actif ? null : texteEvaluation(evaluation);
+          const etatTexte = expiree ? "expirée" : !d.actif ? "en pause" : nonEvaluee ?? arm.texte;
+          const etatClasse = expiree || nonEvaluee !== null ? "text-warn" : arm.classe;
           // « historique insuffisant : N sur A », suivi de « affichez l'indicateur » quand il n'est pas
-          // sur la vue principale : trop long pour la ligne du symbole.
-          const etatLong = nonEvaluee !== null && evaluation.etat === "historique";
+          // sur la vue principale, et « condition déjà vraie… » : trop longs pour la ligne du symbole.
+          const etatLong = nonEvaluee !== null ? evaluation.etat === "historique" : !expiree && d.actif && arm.long === true;
           // Def créée avant que le formulaire cesse de proposer les sorties de prix d'une stratégie.
           const muette = explicationMuette(d.condition);
           return (
@@ -477,11 +474,7 @@ export function AlertsPanel() {
                         front-only
                       </Badge>
                     )}
-                    {!etatLong && (
-                      <span data-etat-alerte className={`text-[10px] ${expiree || nonEvaluee !== null ? "text-warn" : arm.classe}`}>
-                        {expiree ? "expirée" : !d.actif ? "en pause" : nonEvaluee ?? arm.texte}
-                      </span>
-                    )}
+                    {!etatLong && <span data-etat-alerte className={`text-[10px] ${etatClasse}`}>{etatTexte}</span>}
                   </span>
                 </span>
                 {/* Le libellé revient à la ligne : jamais coupé, « non mesuré » compris. */}
@@ -493,7 +486,7 @@ export function AlertsPanel() {
                     {formatHeure(derniere ?? 0)}
                   </span>
                 </span>
-                {etatLong && <span data-etat-alerte className="block break-words text-[10px] text-warn">{nonEvaluee}</span>}
+                {etatLong && <span data-etat-alerte className={`block break-words text-[10px] ${etatClasse}`}>{etatTexte}</span>}
                 {muette !== null && <span className="block break-words text-[10px] text-warn">{muette}</span>}
                 {d.expireTs !== undefined && (
                   <span className="block text-[10px] tabular-nums text-text-dim">

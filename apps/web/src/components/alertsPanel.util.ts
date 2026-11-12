@@ -5,7 +5,8 @@
  *    une seule lecture a un sens (signal d'achat, réaction sur zone forte) ;
  *  - profondeur d'historique qu'une def demande (`amorceAlerte`) et ce qu'il en manque : le
  *    runtime n'évalue pas en deçà, la liste le dit ;
- *  - état d'évaluation d'une def (ici, hors graphe, historique insuffisant) et note du formulaire ;
+ *  - état d'évaluation d'une def (ici, hors graphe, historique insuffisant), état d'armement
+ *    (armée, déclenchée, condition déjà vraie à la pose) et note du formulaire ;
  *  - cible de navigation d'un déclenchement du journal, et les defs qui n'ont pas de marché à montrer.
  * Extraits ici pour être testables sans DOM.
  */
@@ -234,6 +235,22 @@ export function evaluationAlerte(
       !graphe.indicateurs.includes(c.indicateurId),
   );
   return { etat: "historique", bougies: graphe.bougies, amorce, aAfficher };
+}
+
+/**
+ * État d'armement d'une alerte dans la liste : texte, couleur, et `long` quand le texte demande sa
+ * propre ligne. Désarmée sans avoir jamais sonné, la condition était déjà vraie quand l'alerte a
+ * été posée (« Signal de vente » posé à plat, « Signal d'achat » posé en position) : le calibrage
+ * la désarme sans tirer, et elle sonnera quand la condition, redevenue fausse, sera de nouveau
+ * vraie. « déclenchée » y était faux : rien n'avait sonné.
+ */
+export function etatArmement(def: Pick<AlertDef, "arme" | "declenchements">): { texte: string; classe: string; long?: true } {
+  if (def.arme === undefined) return { texte: "calibrage", classe: "text-text-dim" };
+  if (def.arme) return { texte: "armée", classe: "text-up" };
+  if (def.declenchements.length === 0) {
+    return { texte: "condition déjà vraie : sonnera quand elle le redeviendra", classe: "text-text-dim", long: true };
+  }
+  return { texte: "déclenchée", classe: "text-serie-3" };
 }
 
 /**

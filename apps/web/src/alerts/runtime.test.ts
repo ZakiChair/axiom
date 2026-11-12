@@ -73,7 +73,7 @@ vi.mock("../store/regime", () => ({
   regimeStore: { getState: () => ({ regime: null }), subscribe: () => () => {} },
 }));
 
-import { clotureBougie, demarrerAlertes, mentionRattrapage, notifier } from "./runtime";
+import { clotureBougie, demarrerAlertes, mentionRattrapage, notifier, ouvertureSignal } from "./runtime";
 import { alertsStore } from "../store/alerts";
 import { chartLayoutStore } from "../store/chart-layout";
 import { toastsStore } from "../store/toasts";
@@ -92,6 +92,7 @@ import "../data/onchain/fluxCapitaux";
 import { fluxCapitauxStore } from "../store/fluxCapitaux";
 import { remplacerLectures } from "../store/analyseMultidomaine";
 import type { LectureAnalyse } from "../data/analyseMultidomaine";
+import fixtureBtc from "../../../../packages/indicators/src/strategy/fixtures/btcusdt-4h-3000.json";
 
 /** Bougie plate au prix donné (les champs OHLC égaux suffisent au moteur). */
 function bougie(time: number, close: number, closed: boolean): Candle {
@@ -1843,5 +1844,246 @@ describe("évaluation juste : une fois par bougie close, jamais sous l'amorce (1
     expect(lotsEvalues).toEqual([["rsi"]]);
     marketStore.setState({ candles: [...hausse, bougie(maintenant, 141, true)] });
     expect(lotsEvalues).toEqual([["rsi"], ["rsi"]]);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────────────────────
+// Revue globale du 12 novembre 2026 : le VRAI moteur sur le cas de référence BTCUSDT 4h, bougie
+// par bougie, comme le graphe principal les publie. AXIS achète à la clôture de la bougie 2 937
+// et vend à celle de la bougie 2 942 (avec ou sans série de référence neutre).
+// ───────────────────────────────────────────────────────────────────────────────────────────
+describe("cas de référence BTCUSDT 4h : signal daté au retour, composites à la référence et calibrés (revue globale du 12 novembre 2026)", () => {
+  type Ligne = [number, number, number, number, number, number, number];
+  const F: Candle[] = (fixtureBtc.bougies as Ligne[]).map(([time, open, high, low, close, volume, buyVolume]) => ({
+    time, open, high, low, close, volume, buyVolume, sellVolume: volume - buyVolume, closed: true,
+  }));
+  const H4 = 14_400_000;
+  const ACHAT = 2937;
+  const VENTE = 2942;
+  const LIBELLE_ACHAT = "AXIS test 4h ≈ EMA 200 seule · signal d'achat";
+  const AXIS_ACHAT: AlertDef["condition"] = { type: "indicateur-seuil", indicateurId: "stratAxis", params: {}, output: "etat", comparateur: ">=", valeur: 1 };
+  const AXIS_VENTE: AlertDef["condition"] = { ...AXIS_ACHAT, comparateur: "<=", valeur: 0 };
+  const def4h = (id: string, condition: AlertDef["condition"], plus: Partial<AlertDef> = {}): AlertDef => ({
+    id, symbol: "BTCUSDT", source: "binance", timeframe: "4h", actif: true, declenchements: [], condition, ...plus,
+  });
+  const deux = (n: number): string => String(n).padStart(2, "0");
+  /** « JJ/MM à HH:MM » en heure locale, écrit sans passer par les aides de format du produit. */
+  const jourHeure = (t: number): string => {
+    const d = new Date(t);
+    return `${deux(d.getDate())}/${deux(d.getMonth() + 1)} à ${deux(d.getHours())}:${deux(d.getMinutes())}`;
+  };
+
+  /** Tampon du graphe : bougies 0 à `i` closes, puis la bougie `i + 1` en formation, à son ouverture. */
+  function tampon(i: number): Candle[] {
+    const suivante = F[i + 1]!;
+    return [...F.slice(0, i + 1), { ...suivante, high: suivante.open, low: suivante.open, close: suivante.open, volume: 1, buyVolume: 0, sellVolume: 1, closed: false }];
+  }
+  let horloge = 0;
+  /** L'horloge suit la bougie en formation : une demi-heure après la clôture de la bougie `i`. */
+  function ouvrirApres(i: number): void {
+    horloge = F[i]!.time + H4 + 30 * 60_000;
+    marketStore.setState({ exchange: "binance", symbol: "BTCUSDT", timeframe: "4h", candles: tampon(i) });
+  }
+  /** La bougie `i` clôture en direct : elle devient close, la suivante s'ouvre, puis un tick. */
+  function cloturer(i: number): void {
+    horloge = F[i]!.time + H4 + 2_000;
+    const marche = marketStore.getState();
+    marche.upsertCandle({ ...F[i]!, closed: true });
+    const suivante = tampon(i).at(-1)!;
+    marche.upsertCandle(suivante);
+    marche.upsertCandle({ ...suivante, close: suivante.open * 1.0001 });
+  }
+  /** Bougie que « Voir » du premier avis marque (indice dans la fixture). */
+  async function bougieMarquee(): Promise<number> {
+    toastsStore.getState().toasts[0]!.action!.executer();
+    await vi.waitFor(() => expect(navigateToMock).toHaveBeenCalledTimes(1));
+    const marque = (navigateToMock.mock.calls[0]![0] as { markTime: number }).markTime;
+    return F.findIndex((c) => c.time === marque);
+  }
+
+  beforeEach(() => {
+    vi.spyOn(Date, "now").mockImplementation(() => horloge);
+  });
+
+  describe("ouvertureSignal — la bougie où un seuil d'indicateur est devenu vrai", () => {
+    const jusqua = (i: number) => ({ candles: F.slice(0, i + 1) });
+
+    it("AXIS acheté : la bougie d'achat, que la dernière bougie lue soit celle-là ou une suivante", () => {
+      expect(ouvertureSignal(AXIS_ACHAT, jusqua(ACHAT))).toBe(F[ACHAT]!.time);
+      expect(ouvertureSignal(AXIS_ACHAT, jusqua(ACHAT + 1))).toBe(F[ACHAT]!.time);
+      expect(ouvertureSignal(AXIS_ACHAT, jusqua(VENTE - 1))).toBe(F[ACHAT]!.time);
+    });
+
+    it("AXIS revenu à plat : la bougie de vente ; condition fausse : rien", () => {
+      expect(ouvertureSignal(AXIS_VENTE, jusqua(VENTE))).toBe(F[VENTE]!.time);
+      expect(ouvertureSignal(AXIS_VENTE, jusqua(VENTE + 2))).toBe(F[VENTE]!.time);
+      expect(ouvertureSignal(AXIS_ACHAT, jusqua(ACHAT - 1))).toBeUndefined();
+      expect(ouvertureSignal(AXIS_ACHAT, jusqua(VENTE))).toBeUndefined();
+    });
+
+    it("début du signal inconnu ou autre condition : rien, jamais une bougie inventée", () => {
+      // RSI > 0 : vrai dès sa première valeur, aucune bougie « fausse » avant.
+      const rsi: AlertDef["condition"] = { type: "indicateur-seuil", indicateurId: "rsi", params: {}, output: "rsi", comparateur: ">", valeur: 0 };
+      expect(ouvertureSignal(rsi, jusqua(ACHAT))).toBeUndefined();
+      expect(ouvertureSignal({ ...AXIS_ACHAT, output: "inconnue" }, jusqua(ACHAT))).toBeUndefined();
+      expect(ouvertureSignal({ ...AXIS_ACHAT, indicateurId: "inconnu" }, jusqua(ACHAT))).toBeUndefined();
+      expect(ouvertureSignal({ type: "variation-pct", fenetreMs: H4, seuilPct: 1 }, jusqua(ACHAT))).toBeUndefined();
+      expect(ouvertureSignal(AXIS_ACHAT, {})).toBeUndefined();
+    });
+
+    it("la référence du garde-fou de régime est lue comme le moteur la lit : sous sa tendance, pas d'achat", () => {
+      const baissiere = Array.from({ length: ACHAT + 1 }, (_v, i) => 100_000 - i);
+      expect(ouvertureSignal(AXIS_ACHAT, { ...jusqua(ACHAT), aux: { refClose: baissiere } })).toBeUndefined();
+    });
+  });
+
+  // Avant : « Signal d'achat », armée, sonnait à la réouverture tant qu'AXIS était acheté, sans
+  // dire depuis quand, et « Voir » marquait la dernière bougie close, où il n'y a pas de signal.
+  describe("retour dans l'application sur un état qui dure : le message date le signal, « Voir » le marque", () => {
+    const suffixe = ` · bougie close le ${jourHeure(F[ACHAT]!.time + H4)}`;
+
+    it("ouverte dans la bougie qui suit l'achat : le signal est la bougie évaluée, aucun ajout", async () => {
+      alertsStore.setState({ defs: [def4h("achat", AXIS_ACHAT, { arme: true })], journal: [] });
+      ouvrirApres(ACHAT);
+      stop = demarrerAlertes();
+      expect(alertsStore.getState().journal.map((d) => d.message)).toEqual([LIBELLE_ACHAT]);
+      expect(toastsStore.getState().toasts.map((a) => a.texte)).toEqual([`BTCUSDT 4h — ${LIBELLE_ACHAT}`]);
+      expect(await bougieMarquee()).toBe(ACHAT);
+    });
+
+    for (const derniereClose of [ACHAT + 1, ACHAT + 3]) {
+      it(`ouverte ${derniereClose - ACHAT} bougie(s) après l'achat : la clôture de la bougie d'achat est écrite, « Voir » marque cette bougie`, async () => {
+        alertsStore.setState({ defs: [def4h("achat", AXIS_ACHAT, { arme: true })], journal: [] });
+        ouvrirApres(derniereClose);
+        stop = demarrerAlertes();
+        expect(alertsStore.getState().journal.map((d) => d.message)).toEqual([`${LIBELLE_ACHAT}${suffixe}`]);
+        expect(toastsStore.getState().toasts.map((a) => a.texte)).toEqual([`BTCUSDT 4h — ${LIBELLE_ACHAT}${suffixe}`]);
+        // La bougie du signal, pas la dernière close (avant : `derniereClose`).
+        expect(await bougieMarquee()).toBe(ACHAT);
+      });
+    }
+
+    it("« Signal de vente » au retour, deux bougies après la vente : même règle", async () => {
+      alertsStore.setState({ defs: [def4h("vente", AXIS_VENTE, { arme: true })], journal: [] });
+      ouvrirApres(VENTE + 2);
+      stop = demarrerAlertes();
+      expect(alertsStore.getState().journal.map((d) => d.message)).toEqual([
+        `AXIS test 4h ≈ EMA 200 seule · signal de vente · bougie close le ${jourHeure(F[VENTE]!.time + H4)}`,
+      ]);
+      expect(await bougieMarquee()).toBe(VENTE);
+    });
+
+    it("en direct : l'achat clôture application ouverte, aucun ajout, « Voir » marque la bougie d'achat", async () => {
+      alertsStore.setState({ defs: [def4h("achat", AXIS_ACHAT, { arme: true })], journal: [] });
+      ouvrirApres(ACHAT - 1);
+      stop = demarrerAlertes();
+      expect(alertsStore.getState().journal).toHaveLength(0);
+      cloturer(ACHAT);
+      expect(alertsStore.getState().journal.map((d) => d.message)).toEqual([LIBELLE_ACHAT]);
+      expect(await bougieMarquee()).toBe(ACHAT);
+    });
+
+    it("LIMITE : ouverte après la vente, l'achat et la vente sont passés sans avis (seule la dernière clôture est rattrapée)", () => {
+      alertsStore.setState({ defs: [def4h("achat", AXIS_ACHAT, { arme: true })], journal: [] });
+      ouvrirApres(VENTE);
+      stop = demarrerAlertes();
+      expect(alertsStore.getState().journal).toHaveLength(0);
+      expect(toastsStore.getState().toasts).toHaveLength(0);
+      expect(alertsStore.getState().defs[0]?.arme).toBe(true);
+    });
+  });
+
+  // Avant : un composite lisant AXIS était évalué SANS la référence du garde-fou de régime, que
+  // l'alerte simple et le graphe reçoivent. Il tirait « AXIS … · signal d'achat ET … » sur une
+  // bougie où le garde-fou avait bloqué l'achat.
+  describe("composite lisant AXIS : évalué avec la référence du garde-fou de régime", () => {
+    const COMPOSITE: AlertDef["condition"] = { type: "composite", conditions: [AXIS_ACHAT as never, { type: "prix-croise", niveau: 1, sens: "hausse" }] };
+    const LIBELLE_COMPOSITE = `${LIBELLE_ACHAT} ET Prix franchit 1 à la hausse`;
+    /** Référence strictement décroissante, alignée : toujours sous sa tendance, le garde-fou bloque tout achat. */
+    const baissiere = (req: unknown) => ({ refClose: Array.from({ length: (req as { candleTimes: number[] }).candleTimes.length }, (_v, i) => 100_000 - i) });
+    const deuxDefs = () => [def4h("simple", AXIS_ACHAT, { arme: true }), def4h("composite", COMPOSITE, { arme: true })];
+
+    it("référence sous sa tendance : ni l'alerte simple ni le composite ne tirent à la clôture d'achat", () => {
+      getAlignedMock.mockImplementation((req: unknown): unknown => ({ status: "ready", aux: baissiere(req) }));
+      alertsStore.setState({ defs: deuxDefs(), journal: [] });
+      ouvrirApres(ACHAT - 1);
+      stop = demarrerAlertes();
+      auxRecus.length = 0;
+      lotsEvalues.length = 0;
+      cloturer(ACHAT);
+      expect(lotsEvalues).toEqual([["simple"], ["composite"]]);
+      // Les deux évaluations ont reçu la référence, alignée sur leurs bougies closes.
+      expect(auxRecus.map((aux) => (aux as { refClose?: number[] } | undefined)?.refClose?.length)).toEqual([ACHAT + 1, ACHAT + 1]);
+      expect(alertsStore.getState().journal).toHaveLength(0);
+      expect(toastsStore.getState().toasts).toHaveLength(0);
+    });
+
+    it("témoin, référence neutre : les deux tirent à la clôture d'achat", () => {
+      alertsStore.setState({ defs: deuxDefs(), journal: [] });
+      ouvrirApres(ACHAT - 1);
+      stop = demarrerAlertes();
+      cloturer(ACHAT);
+      expect(alertsStore.getState().journal.map((d) => d.message).sort()).toEqual([LIBELLE_ACHAT, LIBELLE_COMPOSITE].sort());
+    });
+
+    it("référence en vol : le composite attend son arrivée, un composite qui ne la lit pas est évalué ; puis une seule évaluation", () => {
+      const rappels: Array<() => void> = [];
+      let prete = false;
+      getAlignedMock.mockImplementation((req: unknown, cb: () => void): unknown => {
+        if (prete) return { status: "ready", aux: baissiere(req) };
+        rappels.push(cb);
+        return { status: "pending" };
+      });
+      const sansAxis = def4h("sans-axis", { type: "composite", conditions: [
+        { type: "variation-pct", fenetreMs: H4, seuilPct: 50 },
+        { type: "prix-croise", niveau: 1, sens: "hausse" },
+      ] }, { arme: true });
+      alertsStore.setState({ defs: [def4h("composite", COMPOSITE, { arme: true }), sansAxis], journal: [] });
+      ouvrirApres(ACHAT - 1);
+      stop = demarrerAlertes();
+      lotsEvalues.length = 0;
+      cloturer(ACHAT);
+      // Seul le composite sans AXIS est évalué ; l'autre n'a ni tiré ni changé d'armement.
+      expect(lotsEvalues).toEqual([["sans-axis"]]);
+      expect(alertsStore.getState().journal).toHaveLength(0);
+      prete = true;
+      for (const rappel of rappels) rappel();
+      expect(lotsEvalues).toEqual([["sans-axis"], ["composite"]]);
+      // Référence sous sa tendance : pas de tir (sans elle, il tirait).
+      expect(alertsStore.getState().journal).toHaveLength(0);
+      expect(alertsStore.getState().defs.find((d) => d.id === "composite")?.arme).toBe(true);
+    });
+
+    it("référence en échec : évalué sans elle (condition de la v2), comme l'alerte simple", () => {
+      getAlignedMock.mockReturnValue({ status: "error", message: "réseau" });
+      alertsStore.setState({ defs: [def4h("composite", COMPOSITE, { arme: true })], journal: [] });
+      ouvrirApres(ACHAT - 1);
+      stop = demarrerAlertes();
+      auxRecus.length = 0;
+      cloturer(ACHAT);
+      expect(auxRecus).toEqual([undefined]);
+      expect(alertsStore.getState().journal.map((d) => d.message)).toEqual([LIBELLE_COMPOSITE]);
+    });
+  });
+
+  // Avant : R3 ne valait que pour les defs simples. Un composite fait de conditions de bougie
+  // seules, créé en cours de bougie, n'était calibré qu'à la clôture suivante : son signal était perdu.
+  it("composite de conditions de bougie seules, créé en cours de bougie : calibré aussitôt, la clôture d'achat le déclenche", () => {
+    ouvrirApres(ACHAT - 1);
+    stop = demarrerAlertes();
+    const rsiVrai: AlertDef["condition"] = { type: "indicateur-seuil", indicateurId: "rsi", params: {}, output: "rsi", comparateur: ">", valeur: 0 };
+    const marche = { symbol: "BTCUSDT", source: "binance", timeframe: "4h" } as const;
+    expect(alertsStore.getState().ajouter({ ...marche, condition: AXIS_ACHAT })).toBe(true);
+    expect(alertsStore.getState().ajouter({ ...marche, condition: { type: "composite", conditions: [AXIS_ACHAT as never, rsiVrai as never] } })).toBe(true);
+    // AXIS à plat sur la dernière bougie close : les deux sont armés, sans tir (avant : composite non calibré).
+    expect(alertsStore.getState().defs.map((d) => d.arme)).toEqual([true, true]);
+    expect(alertsStore.getState().journal).toHaveLength(0);
+    // Pause puis reprise, autre alerte créée : le composite déjà calibré n'est pas réévalué hors cadence.
+    lotsEvalues.length = 0;
+    expect(alertsStore.getState().ajouter({ ...marche, condition: rsiVrai })).toBe(true);
+    expect(lotsEvalues.flat()).toEqual([alertsStore.getState().defs[2]!.id]);
+    cloturer(ACHAT);
+    expect(alertsStore.getState().journal.map((d) => d.message).sort()).toEqual([LIBELLE_ACHAT, `${LIBELLE_ACHAT} ET rsi(rsi) > 0`].sort());
+    expect(toastsStore.getState().toasts).toHaveLength(2);
   });
 });

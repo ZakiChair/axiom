@@ -10,6 +10,7 @@ import {
   changerTheme,
   lireJournal,
   lireMarche,
+  lireMarque,
   luEnEntier,
   mesurerAvis,
   ouverture,
@@ -36,7 +37,10 @@ import { horlogeDuNavigateur, lireAxisSr, lireEncart, redimensionner, servirSeco
  * Ce que le parcours tient, sur le vrai produit :
  *  - le formulaire nomme les sorties, pose comparateur et valeur, et dit ce que l'alerte portera ;
  *  - une alerte créée en cours de bougie est calibrée tout de suite (« armée ») et la clôture
- *    suivante la déclenche ;
+ *    suivante la déclenche ; posée alors que sa condition est déjà vraie, la liste le dit au lieu
+ *    de « déclenchée » ;
+ *  - au retour dans l'application deux clôtures après l'achat, l'avis date la bougie du signal
+ *    (« · bougie close le JJ/MM à HH:MM »), lisible à 320 px, et « Voir » marque cette bougie ;
  *  - le déclenchement pousse UN avis à l'écran, « SYMBOLE UNITÉ — libellé », avec « Voir », qui
  *    reste (encore là après 7 s), une entrée au journal ; la même clôture repoussée n'en produit
  *    pas un second ; une alerte de prix pousse le sien aussi ;
@@ -78,6 +82,16 @@ function cheminCapture(testInfo: TestInfo, nom: string): string {
   if (dossier === undefined || dossier === "") return testInfo.outputPath(nom);
   mkdirSync(dossier, { recursive: true });
   return join(dossier, `${testInfo.project.name}-${nom}`);
+}
+
+/**
+ * Mention de rattrapage d'un avis dont le signal est la bougie d'indice `i` : sa clôture en heure
+ * locale, écrite comme le produit l'écrit (« · bougie close le JJ/MM à HH:MM »).
+ */
+function mentionCloture(i: number): string {
+  const cloture = new Date(ouverture(i) + QUATRE_HEURES);
+  const deux = (n: number): string => String(n).padStart(2, "0");
+  return ` · bougie close le ${deux(cloture.getDate())}/${deux(cloture.getMonth() + 1)} à ${deux(cloture.getHours())}:${deux(cloture.getMinutes())}`;
 }
 
 /**
@@ -191,6 +205,22 @@ test("390 px : AXIS affiché, « Signal d'achat » créé au toucher, la clôtur
   await expect(ligne.locator("[data-libelle-alerte]")).toHaveText(`${LIBELLE_ACHAT} · 4h`);
   // Créée en cours de bougie : calibrée tout de suite sur la dernière bougie close (AXIS à plat : armée).
   await expect(ligne.locator("[data-etat-alerte]")).toHaveText("armée");
+
+  // Revue globale du 12 novembre 2026 (mineur). « Signal de vente » posé à plat : sa condition est
+  // déjà vraie, le calibrage la désarme sans tirer. La liste écrivait « déclenchée » : rien n'avait sonné.
+  await sortie.selectOption({ label: "Signal de vente" });
+  await panneaux.getByRole("button", { name: "Ajouter sur BTCUSDT" }).tap();
+  await expect(ligne).toHaveCount(2);
+  const vente = ligne.nth(1);
+  await expect(vente.locator("[data-libelle-alerte]")).toHaveText("AXIS test 4h ≈ EMA 200 seule · signal de vente · 4h");
+  await expect(vente.locator("[data-etat-alerte]")).toHaveText("condition déjà vraie : sonnera quand elle le redeviendra");
+  expect(await luEnEntier(vente.locator("[data-etat-alerte]"))).toMatchObject({ dansEcran: true, sansCoupe: true, decouvert: true });
+  await expect(avis(page)).toHaveCount(0);
+  expect(await lireJournal(page)).toEqual([]);
+  // Supprimée (deux appuis : le premier arme la confirmation) : la suite ne suit que l'achat.
+  await vente.getByRole("button", { name: "Supprimer l'alerte BTCUSDT" }).tap();
+  await vente.getByRole("button", { name: "Confirmer la suppression de l'alerte BTCUSDT" }).tap();
+  await expect(ligne).toHaveCount(1);
   await page.getByRole("button", { name: "Fermer les panneaux" }).tap();
 
   await cloturerAchat(page, flux);
@@ -282,7 +312,11 @@ test.describe("écrans étroits", () => {
   const THEMES = ["dark", "bloomberg"] as const;
   test.use({ viewport: ECRANS[0] });
 
-  /** Deux alertes déjà enregistrées : l'achat d'AXIS, armé, et une réaction d'AXIS S/R que rien n'évaluera ici. */
+  /**
+   * Trois alertes déjà enregistrées : l'achat d'AXIS, armé ; une réaction d'AXIS S/R que rien
+   * n'évaluera ici ; un RSI au-dessus de 0, toujours vrai, désarmé sans avoir jamais sonné — l'état
+   * d'une alerte posée alors que sa condition était déjà vraie.
+   */
   const ALERTES = [
     {
       id: "e2e-achat", symbol: "BTCUSDT", source: "binance", timeframe: "4h", actif: true, arme: true, declenchements: [],
@@ -291,6 +325,10 @@ test.describe("écrans étroits", () => {
     {
       id: "e2e-reaction", symbol: "BTCUSDT", source: "binance", timeframe: "4h", actif: true, declenchements: [],
       condition: { type: "indicateur-seuil", indicateurId: "stratAxisSr", params: {}, output: "reactionSupport", comparateur: ">=", valeur: 1 },
+    },
+    {
+      id: "e2e-deja-vraie", symbol: "BTCUSDT", source: "binance", timeframe: "4h", actif: true, arme: false, declenchements: [],
+      condition: { type: "indicateur-seuil", indicateurId: "rsi", params: {}, output: "rsi", comparateur: ">", valeur: 0 },
     },
   ];
 
@@ -323,6 +361,10 @@ test.describe("écrans étroits", () => {
     const etat = reaction.locator("[data-etat-alerte]");
     await expect(etat).toHaveText("historique insuffisant : 1501 sur 3000, affichez l'indicateur");
     expect(await luEnEntier(etat), `état à ${largeur} px`).toMatchObject({ dansEcran: true, sansCoupe: true, decouvert: true });
+    // Désarmée sans avoir jamais sonné : la liste le dit, en entier, au lieu de « déclenchée ».
+    const dejaVraie = panneaux.locator('[data-alerte="e2e-deja-vraie"] [data-etat-alerte]');
+    await expect(dejaVraie).toHaveText("condition déjà vraie : sonnera quand elle le redeviendra");
+    expect(await luEnEntier(dejaVraie), `état « déjà vraie » à ${largeur} px`).toMatchObject({ dansEcran: true, sansCoupe: true, decouvert: true });
   }
 
   test("320, 360 et 375 px, thème par défaut puis Bloomberg : l'avis tient dans l'écran au-dessus de la navigation, la liste se lit en entier", async ({ page }, testInfo) => {
@@ -411,6 +453,11 @@ test.describe("écrans étroits", () => {
       { ...armee, id: "e2e-3-variation", timeframe: "4h", condition: { type: "variation-pct", fenetreMs: QUATRE_HEURES, seuilPct: 1 } },
       { ...armee, id: "e2e-4-achat-sans-unite", condition: seuil("stratAxis", "etat", ">=", 1) },
     ];
+    // Modifié à dessein (revue globale du 12 novembre 2026) : cet avis s'écrivait « rsi(rsi) > 50 »
+    // seul. À l'ouverture le RSI est au-dessus de 50 depuis la bougie 2 931 (45,08 à la bougie
+    // 2 930, 55,92 à la suivante : calculé sur la fixture), cinq clôtures avant la dernière. Le
+    // message date maintenant la bougie du signal, comme pour AXIS au retour dans l'application.
+    const RSI = `rsi(rsi) > 50${mentionCloture(2931)}`;
     const SYNTHESE = "+ 2 alertes plus anciennes — voir le journal";
     const VARIATION = "BTCUSDT 4h — Variation +1% sur 4 h";
     const SANS_UNITE = "BTCUSDT — AXIS non mesuré hors 4h · signal d'achat";
@@ -419,7 +466,7 @@ test.describe("écrans étroits", () => {
     const lesAvis = avis(page);
     // À l'ouverture le RSI est déjà au-dessus de 50 : son alerte, armée, tire, et son avis reste sans être touché.
     await expect(lesAvis).toHaveCount(1);
-    expect(await textesDesAvis(lesAvis)).toEqual(["BTCUSDT 4h — rsi(rsi) > 50"]);
+    expect(await textesDesAvis(lesAvis)).toEqual([`BTCUSDT 4h — ${RSI}`]);
     await afficherAxis(page);
     await cloturerAchat(page, flux);
 
@@ -431,7 +478,7 @@ test.describe("écrans étroits", () => {
       "AXIS non mesuré hors 4h · signal d'achat",
       "Variation +1% sur 4 h",
       LIBELLE_ACHAT,
-      "rsi(rsi) > 50",
+      RSI,
     ]);
     // La synthèse ne désigne aucun marché : pas de « Voir » ; les deux autres le gardent.
     await expect(lesAvis.nth(0).getByRole("button")).toHaveCount(0);
@@ -460,6 +507,40 @@ test.describe("écrans étroits", () => {
     await expect(lesAvis).toHaveCount(2);
     expect(await textesDesAvis(lesAvis)).toEqual([VARIATION, SANS_UNITE]);
   });
+});
+
+// Revue globale du 12 novembre 2026 (mineur). « Signal d'achat », armée, sonnait à la réouverture
+// tant qu'AXIS était acheté, sans dire depuis quand, et « Voir » marquait la dernière bougie close,
+// où il n'y a pas de signal.
+test("320 px puis 390 px : retour dans l'application deux clôtures après l'achat — l'avis date la bougie du signal, « Voir » la marque", async ({ page }, testInfo) => {
+  const ALERTE_ACHAT = {
+    id: "e2e-achat", symbol: "BTCUSDT", source: "binance", timeframe: "4h", actif: true, arme: true, declenchements: [],
+    condition: { type: "indicateur-seuil", indicateurId: "stratAxis", params: {}, output: "etat", comparateur: ">=", valeur: 1 },
+  };
+  await page.setViewportSize({ width: 320, height: 568 });
+  // La place sert les bougies 0 à 2 938, l'application s'ouvre dans la bougie 2 939 : l'achat
+  // (bougie 2 937) a clôturé depuis plus d'une durée de bougie. AXIS est affiché : le graphe
+  // remonte à son amorce, l'alerte est évaluée à son arrivée.
+  await demarrer(page, [ALERTE_ACHAT], ACHAT + 2, [{ defId: "stratAxis", params: {} }]);
+  await expect.poll(async () => (await lireMarche(page)).bougies, { timeout: 60_000 }).toBe(AMORCE_AXIS);
+  expect((await lireMarche(page)).derniere).toBe(ouverture(ACHAT + 1));
+
+  const mention = mentionCloture(ACHAT);
+  const lesAvis = avis(page);
+  await expect(lesAvis).toHaveCount(1);
+  expect(await texteAvis(lesAvis)).toBe(`BTCUSDT 4h — ${LIBELLE_ACHAT}${mention}`);
+  expect(await lireJournal(page)).toEqual([`${LIBELLE_ACHAT}${mention}`]);
+  // Le texte le plus long d'un avis d'AXIS : il tient dans l'écran à 320 px, puis à 390 px.
+  await attendreAvisDegage(page, lesAvis);
+  await page.screenshot({ path: cheminCapture(testInfo, "avis-signal-date-320x568.png"), animations: "disabled" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await attendreAvisDegage(page, lesAvis);
+
+  // « Voir » marque la bougie d'achat, pas la dernière close.
+  await lesAvis.getByRole("button", { name: "Voir", exact: true }).tap();
+  await expect(lesAvis).toHaveCount(0);
+  await expect.poll(() => lireMarque(page)).toBe(ouverture(ACHAT));
+  expect(await lireMarche(page)).toMatchObject({ symbol: "BTCUSDT", timeframe: "4h", focus: 0 });
 });
 
 // Intégration du 12 novembre 2026 : les deux lots au même toucher. Un avis d'alerte reste jusqu'au

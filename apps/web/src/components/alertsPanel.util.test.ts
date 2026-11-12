@@ -13,6 +13,7 @@ import {
   cibleAlerte,
   construireConditionCroisement,
   construireConditionSeuil,
+  etatArmement,
   evaluationAlerte,
   explicationMuette,
   INDICATEURS_CROISEMENT,
@@ -410,6 +411,26 @@ describe("evaluationAlerte et texteEvaluation", () => {
       const ordinaire: Condition = { type: "composite", conditions: [{ type: "prix-croise", niveau: 1, sens: "hausse" }, variation] };
       expect(evaluationAlerte({ ...base, timeframe, condition: ordinaire }, ailleurs, true)).toEqual({ etat: "ici" });
     }
+  });
+});
+
+// Revue globale du 12 novembre 2026 (mineur) : une alerte posée alors que sa condition est déjà
+// vraie (« Signal de vente » posé à plat) est calibrée aussitôt, désarmée sans tirer. La liste
+// écrivait « déclenchée » : rien n'avait sonné.
+describe("etatArmement", () => {
+  it("jamais évaluée : calibrage ; armée : armée ; déclenchée au moins une fois : déclenchée", () => {
+    expect(etatArmement({ declenchements: [] })).toEqual({ texte: "calibrage", classe: "text-text-dim" });
+    expect(etatArmement({ arme: true, declenchements: [] })).toEqual({ texte: "armée", classe: "text-up" });
+    expect(etatArmement({ arme: true, declenchements: [5] })).toEqual({ texte: "armée", classe: "text-up" });
+    expect(etatArmement({ arme: false, declenchements: [5] })).toEqual({ texte: "déclenchée", classe: "text-serie-3" });
+  });
+
+  it("désarmée sans avoir jamais sonné : la condition était déjà vraie à la pose, dit sur sa propre ligne", () => {
+    expect(etatArmement({ arme: false, declenchements: [] })).toEqual({
+      texte: "condition déjà vraie : sonnera quand elle le redeviendra",
+      classe: "text-text-dim",
+      long: true,
+    });
   });
 });
 

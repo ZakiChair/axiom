@@ -6,6 +6,7 @@
  */
 
 export * from "./types";
+export * from "./comparer";
 export * from "./describe";
 export * from "./libelles";
 export * from "./engine";

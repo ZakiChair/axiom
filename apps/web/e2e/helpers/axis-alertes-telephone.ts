@@ -260,6 +260,14 @@ export async function pousserAvisAlerte(page: Page, message: string, marche: { s
   }, [message, marche] as const);
 }
 
+/** Ouverture (ms) de la bougie que la dernière navigation a marquée sur le graphe (« Voir », journal) ; `null` sans marque. */
+export async function lireMarque(page: Page): Promise<number | null> {
+  return page.evaluate(async () => {
+    const importer = new Function("return import('/src/lib/navigation.ts')") as () => Promise<{ navMarkStore: { getState: () => { time: number | null } } }>;
+    return (await importer()).navMarkStore.getState().time;
+  });
+}
+
 /** Messages du journal des alertes (store du produit), du plus récent au plus ancien. */
 export async function lireJournal(page: Page): Promise<string[]> {
   return page.evaluate(async () => {

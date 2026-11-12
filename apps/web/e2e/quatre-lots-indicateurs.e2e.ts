@@ -1,6 +1,9 @@
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 import { preparerPrereglages, lirePaneAnalyse, lireInstances } from "./helpers/prereglages-indicateurs";
+import { HORLOGE_AXIS_SR, lireAxisSr, lireZonesAxisSr, preparerAxisSr } from "./helpers/axis-sr-telephone";
 
 test.beforeEach(async ({ page }) => {
   await bouchonnerReseau(page);
@@ -222,3 +225,115 @@ for (const module of ["IndicatorMenu", "StrategyMenu", "FootprintSettingsPanel"]
     expect(appels).toBe(2);
   });
 }
+
+// Phase 2 d'AXIS, lot 2 (12 novembre 2026) : au bureau, l'alerte de prix au bord d'une zone forte
+// d'AXIS S/R se pose par le menu du clic droit. Cas de référence des parcours AXIS (BTCUSDT 4h,
+// 3 000 bougies, date figée par `figerDate`), à 1 440 × 900. Le parcours téléphone du même lot
+// est `mobile-alerte-zone.e2e.ts`.
+test("AXIS S/R au bureau : le clic droit dans une bande forte propose l'alerte de prix à son bord, sous l'en-tête du menu", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await preparerAxisSr(page, [{ defId: "stratAxisSr", params: {} }]);
+  await page.goto("/");
+  await expect(page.locator("[data-chart-status]")).toHaveCount(0, { timeout: 30_000 });
+  await expect.poll(async () => (await lireAxisSr(page))?.calculees, { timeout: 60_000 }).toBe(3000);
+  const lireDefs = () => page.evaluate(async () => {
+    const { alertsStore } = await import("/src/store/alerts.ts");
+    return alertsStore.getState().defs as Array<Record<string, unknown>>;
+  });
+  const menu = page.locator("#axiom-price-alert-menu");
+  const clicDroit = async (point: { x: number; y: number }): Promise<void> => {
+    await page.mouse.click(point.x, point.y, { button: "right" });
+    await expect(menu).toBeVisible();
+  };
+  /** Textes des entrées du menu, dans l'ordre : l'en-tête puis les lignes. */
+  const lignes = () => menu.locator(":scope > *").allTextContents();
+  const habituelles = [/^Alerte croisement ↑ /, /^Alerte croisement ↓ /, /^Alerte croisement ↕ /];
+
+  // Le support fort le plus proche du cours, dont la bande est à l'écran : son dernier bord haut
+  // est relu sur les rubans du vrai graphe.
+  const lecture = (await lireAxisSr(page))!;
+  const zones = await lireZonesAxisSr(page);
+  const forte = zones
+    .filter((z) => z.forte && z.role === "support" && lecture.bandes.some((c) => c.info === z.info && !c.marqueurSousLeDoigt))
+    .sort((a, b) => b.haut - a.haut)[0];
+  expect(forte, "aucun support fort à l'écran").toBeDefined();
+  expect(forte!.haut).toBeCloseTo(76601.83, 2);
+  const cible = lecture.bandes.filter((c) => c.info === forte!.info && !c.marqueurSousLeDoigt).at(-1)!;
+  const offre = "Alerte de prix ↓ 76,601.83 · bord du support fort · niveau\u00a0fixe,\u00a07\u00a0jours";
+
+  // La souris dans la bande, au bureau : l'encart des prix n'offre rien, le clic droit suffit.
+  await page.mouse.move(cible.x, cible.y);
+  await expect(page.locator("[data-candle-readout]")).toBeVisible();
+  await expect(page.locator("[data-candle-readout] [data-alerte-zone]")).toHaveCount(0);
+
+  // Clic droit dans la bande : l'en-tête reste le premier div ; l'offre vient dessous, puis les
+  // trois entrées au prix du clic.
+  await clicDroit(cible);
+  expect(await menu.locator("div").first().textContent()).toMatch(/^Prix [\d,.]+$/);
+  const ouvert = await lignes();
+  expect(ouvert).toHaveLength(5);
+  expect(ouvert[0]).toMatch(/^Prix [\d,.]+$/);
+  expect(ouvert[1]).toBe(offre);
+  habituelles.forEach((motif, i) => expect(ouvert[2 + i]).toMatch(motif));
+  const dossier = process.env.AXIOM_CAPTURES;
+  if (dossier) mkdirSync(dossier, { recursive: true });
+  await page.screenshot({ path: dossier ? join(dossier, "bureau-1440x900-menu-zone-forte.png") : testInfo.outputPath("menu-zone-forte.png"), animations: "disabled" });
+
+  // Clic sur l'offre : une alerte de prix au bord, à niveau fixe, qui expire dans 7 jours ; le
+  // menu se ferme, l'avis de pose paraît avec « Annuler ».
+  await menu.getByRole("menuitem", { name: offre, exact: true }).click();
+  await expect(menu).toHaveCount(0);
+  const date = new Date(HORLOGE_AXIS_SR).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+  expect(await lireDefs()).toMatchObject([{
+    symbol: "BTCUSDT",
+    source: "binance",
+    condition: { type: "prix-croise", niveau: 76601.83, sens: "baisse" },
+    message: `≤ 76,601.83 · bord du support fort AXIS S/R 4h du ${date} · niveau fixe`,
+    expireTs: HORLOGE_AXIS_SR + 7 * 24 * 3_600_000,
+  }]);
+  const avisPose = page.locator('[aria-live="polite"] > [role="button"]').filter({ hasText: "Alerte de prix posée : BTCUSDT ↓ 76,601.83 · niveau fixe · expire dans 7 jours" });
+  await expect(avisPose).toBeVisible();
+  await expect(avisPose.getByRole("button", { name: "Annuler", exact: true })).toBeVisible();
+
+  // Second clic droit au même endroit : « déjà posée », grisée, sans effet ; rien n'est doublé.
+  await clicDroit(cible);
+  const posee = menu.locator("[data-alerte-zone]");
+  await expect(posee).toHaveText("Alerte déjà posée ↓ 76,601.83 · bord du support fort");
+  await expect(posee).toHaveAttribute("aria-disabled", "true");
+  expect(await lignes()).toHaveLength(5);
+  await posee.click({ force: true });
+  await expect(menu).toBeVisible();
+  expect(await lireDefs()).toHaveLength(1);
+
+  // Clic droit hors de toute bande, puis dans la bande d'une zone FAIBLE : le menu d'origine,
+  // sans bloc de zone.
+  const faibles = zones.filter((z) => !z.forte).map((z) => z.info);
+  const surFaible = lecture.bandes.filter((c) => faibles.includes(c.info) && !c.marqueurSousLeDoigt).at(-1);
+  expect(lecture.libres.at(-1), "aucun point libre à l'écran").toBeDefined();
+  expect(surFaible, "aucune bande faible à l'écran").toBeDefined();
+  for (const point of [lecture.libres.at(-1)!, surFaible!]) {
+    await clicDroit(point);
+    await expect(menu.locator("[data-alerte-zone]")).toHaveCount(0);
+    const origine = await lignes();
+    expect(origine).toHaveLength(4);
+    expect(origine[0]).toMatch(/^Prix [\d,.]+$/);
+    habituelles.forEach((motif, i) => expect(origine[1 + i]).toMatch(motif));
+  }
+
+  // Rejeu actif sur la vue (le drapeau du store que le graphe lit : un vrai rejeu demande le
+  // daemon) : dans la bande forte, le menu d'origine, sans rien au bord de la zone. Le direct
+  // revenu, l'entrée revient. Le point est relu : le bandeau du rejeu peut déplacer le pane.
+  const basculerRejeu = (actif: boolean) => page.evaluate(async (a) => {
+    const { replayStore } = await import("/src/store/replay.ts");
+    replayStore.setState({ active: a, slot: 0 });
+  }, actif);
+  const dansLaBande = async () => (await lireAxisSr(page))!.bandes.filter((c) => c.info === forte!.info && !c.marqueurSousLeDoigt).at(-1)!;
+  await basculerRejeu(true);
+  await clicDroit(await dansLaBande());
+  await expect(menu.locator("[data-alerte-zone]")).toHaveCount(0);
+  expect(await lignes()).toHaveLength(4);
+  await basculerRejeu(false);
+  await clicDroit(await dansLaBande());
+  await expect(menu.locator("[data-alerte-zone]")).toHaveText("Alerte déjà posée ↓ 76,601.83 · bord du support fort");
+  expect(await lireDefs()).toHaveLength(1);
+});

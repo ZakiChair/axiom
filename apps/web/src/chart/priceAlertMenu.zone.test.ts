@@ -140,7 +140,7 @@ describe("menu du clic droit — alerte de prix au bord d'une zone forte", () =>
     const m = clicDroit(76_000);
     expect(entrees(m)).toEqual([
       { balise: "div", role: null, texte: "Prix 76,000.00" },
-      { balise: "button", role: "menuitem", texte: "Alerte de prix ↓ 76,601.83 · bord du support fort · niveau fixe, 7 jours" },
+      { balise: "button", role: "menuitem", texte: "Alerte de prix ↓ 76,601.83 · bord du support fort · niveau\u00a0fixe,\u00a07\u00a0jours" },
       ...habituelles(76_000),
     ]);
     const offre = m.children[1]!;
@@ -155,7 +155,7 @@ describe("menu du clic droit — alerte de prix au bord d'une zone forte", () =>
   });
 
   it("dans la bande d'une résistance forte : « ↑ », bas de la zone", () => {
-    expect(clicDroit(86_000).children[1]?.textContent).toBe("Alerte de prix ↑ 85,314.76 · bord de la résistance forte · niveau fixe, 7 jours");
+    expect(clicDroit(86_000).children[1]?.textContent).toBe("Alerte de prix ↑ 85,314.76 · bord de la résistance forte · niveau\u00a0fixe,\u00a07\u00a0jours");
   });
 
   it("clic sur l'offre : UNE alerte au bord, à niveau fixe, qui expire dans 7 jours ; le menu se ferme, l'avis de pose paraît", () => {
@@ -235,7 +235,7 @@ describe("menu du clic droit — alerte de prix au bord d'une zone forte", () =>
     const m = clicDroit(76_000);
     expect(entrees(m)).toEqual([
       { balise: "div", role: null, texte: "PDH · Prix 76,050.00" },
-      { balise: "button", role: "menuitem", texte: "Alerte de prix ↓ 76,601.83 · bord du support fort · niveau fixe, 7 jours" },
+      { balise: "button", role: "menuitem", texte: "Alerte de prix ↓ 76,601.83 · bord du support fort · niveau\u00a0fixe,\u00a07\u00a0jours" },
       ...habituelles(76_050),
     ]);
   });
@@ -249,7 +249,7 @@ describe("menu du clic droit — alerte de prix au bord d'une zone forte", () =>
     /** Ouvre le menu sur l'offre du support fort, laisse `changer` modifier l'état, puis clique l'entrée. */
     const cliquerApres = (changer: () => void): void => {
       const entree = clicDroit(76_000).children[1]!;
-      expect(entree.textContent).toBe("Alerte de prix ↓ 76,601.83 · bord du support fort · niveau fixe, 7 jours");
+      expect(entree.textContent).toBe("Alerte de prix ↓ 76,601.83 · bord du support fort · niveau\u00a0fixe,\u00a07\u00a0jours");
       changer();
       entree.emettre("click");
       expect(menu()).toBeUndefined();
@@ -298,7 +298,7 @@ describe("menu du clic droit — alerte de prix au bord d'une zone forte", () =>
       expect(alertsStore.getState().defs).toEqual([]);
       expect(lesAvis()).toEqual(avisCourt("Pas d'alerte : le bord de la zone forte a bougé"));
       // Le clic droit suivant propose le nouveau bord.
-      expect(clicDroit(76_000).children[1]?.textContent).toBe("Alerte de prix ↓ 76,529.83 · bord du support fort · niveau fixe, 7 jours");
+      expect(clicDroit(76_000).children[1]?.textContent).toBe("Alerte de prix ↓ 76,529.83 · bord du support fort · niveau\u00a0fixe,\u00a07\u00a0jours");
     });
 
     it("rien n'a changé : l'alerte est posée, avec l'avis de pose et « Annuler »", () => {

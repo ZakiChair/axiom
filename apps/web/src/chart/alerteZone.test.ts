@@ -176,7 +176,7 @@ describe("offreBordZone — états et textes", () => {
   it("support, cours au-dessus du bord : offre, alerte prix-croise à la baisse, échéance à 7 jours, textes exacts", () => {
     const offre = offreBordZone(SUPPORT, BTC_4H, COURS, [], MAINTENANT);
     expect(offre.etat).toBe("offre");
-    expect(offre.libelle).toBe("Alerte de prix ↓ 76,601.83 · bord du support fort · niveau fixe, 7 jours");
+    expect(offre.libelle).toBe("Alerte de prix ↓ 76,601.83 · bord du support fort · niveau\u00a0fixe,\u00a07\u00a0jours");
     expect(offre.avis).toBe("Alerte de prix posée : BTCUSDT ↓ 76,601.83 · niveau fixe · expire dans 7 jours");
     expect(offre.alerte).toEqual({
       symbol: "BTCUSDT",
@@ -193,7 +193,7 @@ describe("offreBordZone — états et textes", () => {
   it("résistance : à la hausse, « ≥ », « ↑ », « de la résistance forte »", () => {
     const offre = offreBordZone(RESISTANCE, BTC_4H, COURS, [], MAINTENANT);
     expect(offre.etat).toBe("offre");
-    expect(offre.libelle).toBe("Alerte de prix ↑ 85,314.76 · bord de la résistance forte · niveau fixe, 7 jours");
+    expect(offre.libelle).toBe("Alerte de prix ↑ 85,314.76 · bord de la résistance forte · niveau\u00a0fixe,\u00a07\u00a0jours");
     expect(offre.avis).toBe("Alerte de prix posée : BTCUSDT ↑ 85,314.76 · niveau fixe · expire dans 7 jours");
     expect(offre.alerte?.condition).toEqual({ type: "prix-croise", niveau: 85314.76, sens: "hausse" });
     expect(offre.alerte?.message).toBe("≥ 85,314.76 · bord de la résistance forte AXIS S/R 4h du 31/10 · niveau fixe");
@@ -212,7 +212,7 @@ describe("offreBordZone — états et textes", () => {
     it("2.34567 : alerte à 2.3457, écrite « 2.3457 » sur le bouton, dans l'avis et dans le message", () => {
       const offre = offreAu(2.34567);
       expect(offre.alerte?.condition).toEqual({ type: "prix-croise", niveau: 2.3457, sens: "baisse" });
-      expect(offre.libelle).toBe("Alerte de prix ↓ 2.3457 · bord du support fort · niveau fixe, 7 jours");
+      expect(offre.libelle).toBe("Alerte de prix ↓ 2.3457 · bord du support fort · niveau\u00a0fixe,\u00a07\u00a0jours");
       expect(offre.avis).toBe("Alerte de prix posée : XRPUSDT ↓ 2.3457 · niveau fixe · expire dans 7 jours");
       expect(offre.alerte?.message).toBe("≤ 2.3457 · bord du support fort AXIS S/R 4h du 31/10 · niveau fixe");
     });
@@ -221,14 +221,14 @@ describe("offreBordZone — états et textes", () => {
       const support = zone("support", 0.12, 0.123456);
       const offre = offreAu(0.123456);
       expect(offre.alerte?.condition).toEqual({ type: "prix-croise", niveau: 0.12346, sens: "baisse" });
-      expect(offre.libelle).toBe("Alerte de prix ↓ 0.12346 · bord du support fort · niveau fixe, 7 jours");
+      expect(offre.libelle).toBe("Alerte de prix ↓ 0.12346 · bord du support fort · niveau\u00a0fixe,\u00a07\u00a0jours");
       expect(offre.avis).toBe("Alerte de prix posée : XRPUSDT ↓ 0.12346 · niveau fixe · expire dans 7 jours");
       expect(offre.alerte?.message).toBe("≤ 0.12346 · bord du support fort AXIS S/R 4h du 31/10 · niveau fixe");
       const posee = defPrix({ symbol: "XRPUSDT", condition: { type: "prix-croise", niveau: 0.12346, sens: "baisse" } });
       expect(offreBordZone(support, XRP_4H, 0.13, [posee], MAINTENANT).libelle).toBe("Alerte déjà posée ↓ 0.12346 · bord du support fort");
       expect(offreBordZone(support, XRP_4H, 0.12346, [], MAINTENANT).libelle).toBe("Pas d'alerte : le cours a déjà franchi le bord du support fort (0.12346)");
       const resistance = offreAu(0.123456, "resistance");
-      expect(resistance.libelle).toBe("Alerte de prix ↑ 0.12346 · bord de la résistance forte · niveau fixe, 7 jours");
+      expect(resistance.libelle).toBe("Alerte de prix ↑ 0.12346 · bord de la résistance forte · niveau\u00a0fixe,\u00a07\u00a0jours");
       expect(resistance.alerte?.message).toBe("≥ 0.12346 · bord de la résistance forte AXIS S/R 4h du 31/10 · niveau fixe");
     });
 
@@ -246,7 +246,7 @@ describe("offreBordZone — états et textes", () => {
     ])("bord %f : alerte à %f, écrite « %s » — le texte, relu comme un nombre, EST le niveau de l'alerte", (bord, niveau, ecrit) => {
       const offre = offreAu(bord);
       expect(offre.alerte?.condition).toMatchObject({ niveau });
-      expect(offre.libelle).toBe(`Alerte de prix ↓ ${ecrit} · bord du support fort · niveau fixe, 7 jours`);
+      expect(offre.libelle).toBe(`Alerte de prix ↓ ${ecrit} · bord du support fort · niveau\u00a0fixe,\u00a07\u00a0jours`);
       expect(offre.alerte?.message).toBe(`≤ ${ecrit} · bord du support fort AXIS S/R 4h du 31/10 · niveau fixe`);
       expect(Number(ecrit.replace(/,/g, ""))).toBe(niveau);
     });
@@ -369,7 +369,7 @@ describe("offreBordZone — états et textes", () => {
         const offre = offreBordZone(z, BTC_4H, prix, defs, MAINTENANT);
         textes.push(offre.libelle, offre.avis, ...(offre.alerte?.message ? [offre.alerte.message] : []));
         if (offre.etat === "offre") {
-          expect(offre.libelle).toContain("niveau fixe");
+          expect(offre.libelle).toContain("niveau\u00a0fixe,\u00a07\u00a0jours");
           expect(offre.avis).toContain("niveau fixe");
           expect(offre.alerte?.message).toContain("niveau fixe");
         }
@@ -570,12 +570,12 @@ describe("poserAlerteZone et offres prêtes pour l'encart et le menu", () => {
   it("l'offre relue suit le graphe : AXIS S/R fermé ou rejeu lancé, plus d'offre ; bord déplacé, un autre texte", () => {
     const reticule = { paneId: "candle_pane", dataIndex: 1, y: yPane(76000) };
     const affichee = offreSousReticule(chart, BTC_4H, reticule)!;
-    expect(affichee.libelle).toBe("Alerte de prix ↓ 76,601.83 · bord du support fort · niveau fixe, 7 jours");
+    expect(affichee.libelle).toBe("Alerte de prix ↓ 76,601.83 · bord du support fort · niveau\u00a0fixe,\u00a07\u00a0jours");
     // Relue sans que rien ait changé : le même texte (l'encart ne se réaffiche pas).
     expect(offreSousReticule(chart, BTC_4H, reticule)?.libelle).toBe(affichee.libelle);
     // Le bord du support a bougé à la clôture suivante : le texte porte le nouveau niveau.
     const deplace = fauxGraphe({ "sr-1": { rubans: [rubanFort("--up", 75626.55, 76529.83)] } });
-    expect(offreSousReticule(deplace, BTC_4H, reticule)?.libelle).toBe("Alerte de prix ↓ 76,529.83 · bord du support fort · niveau fixe, 7 jours");
+    expect(offreSousReticule(deplace, BTC_4H, reticule)?.libelle).toBe("Alerte de prix ↓ 76,529.83 · bord du support fort · niveau\u00a0fixe,\u00a07\u00a0jours");
     // Rejeu lancé sur la vue : aucune offre, au téléphone comme au clic droit.
     expect(offreSousReticule(chart, { ...BTC_4H, rejeu: true }, reticule)).toBeUndefined();
     expect(offreAuClic(chart, { ...BTC_4H, rejeu: true }, 200, yPane(76000) + 40)).toBeUndefined();
@@ -606,8 +606,8 @@ describe("poserAlerteZone et offres prêtes pour l'encart et le menu", () => {
 
   it("offreSousReticule : la bande forte SOUS le réticule du pane des prix, sans tolérance", () => {
     const sur = (reticule: { paneId?: string; dataIndex?: number; y?: number }) => offreSousReticule(chart, BTC_4H, reticule);
-    expect(sur({ paneId: "candle_pane", dataIndex: 1, y: yPane(76000) })).toMatchObject({ etat: "offre", libelle: "Alerte de prix ↓ 76,601.83 · bord du support fort · niveau fixe, 7 jours" });
-    expect(sur({ paneId: "candle_pane", dataIndex: 1, y: yPane(86000) })).toMatchObject({ etat: "offre", libelle: "Alerte de prix ↑ 85,314.76 · bord de la résistance forte · niveau fixe, 7 jours" });
+    expect(sur({ paneId: "candle_pane", dataIndex: 1, y: yPane(76000) })).toMatchObject({ etat: "offre", libelle: "Alerte de prix ↓ 76,601.83 · bord du support fort · niveau\u00a0fixe,\u00a07\u00a0jours" });
+    expect(sur({ paneId: "candle_pane", dataIndex: 1, y: yPane(86000) })).toMatchObject({ etat: "offre", libelle: "Alerte de prix ↑ 85,314.76 · bord de la résistance forte · niveau\u00a0fixe,\u00a07\u00a0jours" });
     // Bords de la bande compris ; un pixel dehors : rien.
     expect(sur({ paneId: "candle_pane", dataIndex: 1, y: yPane(76601.83) })?.etat).toBe("offre");
     expect(sur({ paneId: "candle_pane", dataIndex: 1, y: yPane(76601.83) - 1 })).toBeUndefined();
@@ -624,7 +624,7 @@ describe("poserAlerteZone et offres prêtes pour l'encart et le menu", () => {
   it("offreAuClic : ordonnée relative à la racine du graphe, bande à 6 px près", () => {
     const HAUT_PANE = 40;
     const au = (y: number) => offreAuClic(chart, BTC_4H, 200, y);
-    expect(au(yPane(76000) + HAUT_PANE)).toMatchObject({ etat: "offre", libelle: "Alerte de prix ↓ 76,601.83 · bord du support fort · niveau fixe, 7 jours" });
+    expect(au(yPane(76000) + HAUT_PANE)).toMatchObject({ etat: "offre", libelle: "Alerte de prix ↓ 76,601.83 · bord du support fort · niveau\u00a0fixe,\u00a07\u00a0jours" });
     // L'ordonnée du prix 76 500 DANS LE PANE est, depuis la racine, 40 px au-dessus de sa place :
     // 30 px au-dessus de la bande. Lue dans le mauvais repère, elle serait dans la bande.
     expect(au(yPane(76500))).toBeUndefined();

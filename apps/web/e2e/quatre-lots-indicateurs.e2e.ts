@@ -259,7 +259,7 @@ test("AXIS S/R au bureau : le clic droit dans une bande forte propose l'alerte d
   expect(forte, "aucun support fort à l'écran").toBeDefined();
   expect(forte!.haut).toBeCloseTo(76601.83, 2);
   const cible = lecture.bandes.filter((c) => c.info === forte!.info && !c.marqueurSousLeDoigt).at(-1)!;
-  const offre = "Alerte de prix ↓ 76,601.83 · bord du support fort · niveau fixe, 7 jours";
+  const offre = "Alerte de prix ↓ 76,601.83 · bord du support fort · niveau\u00a0fixe,\u00a07\u00a0jours";
 
   // La souris dans la bande, au bureau : l'encart des prix n'offre rien, le clic droit suffit.
   await page.mouse.move(cible.x, cible.y);

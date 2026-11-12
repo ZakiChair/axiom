@@ -163,7 +163,9 @@ export function offreBordZone(
   return {
     etat: "offre",
     avis,
-    libelle: `Alerte de prix ${cible} · ${bord} · niveau fixe, 7 jours`,
+    // Espaces insécables : « niveau fixe, 7 jours » ne se coupe pas (à 390 px, « jours » restait
+    // seul sur la seconde ligne du bouton, loin de son « 7 »).
+    libelle: `Alerte de prix ${cible} · ${bord} · niveau\u00a0fixe,\u00a07\u00a0jours`,
     alerte: {
       ...alertePrixAuNiveau(symbole, marche.source, niveau, sens, message),
       expireTs: maintenant + DUREE_ALERTE_ZONE_MS,

@@ -64,7 +64,7 @@ import {
  * y est posée par le store, la même, pour que l'avis et la liste soient lus quand même.
  */
 const BORD = 76601.83;
-const OFFRE = "Alerte de prix ↓ 76,601.83 · bord du support fort · niveau fixe, 7 jours";
+const OFFRE = "Alerte de prix ↓ 76,601.83 · bord du support fort · niveau\u00a0fixe,\u00a07\u00a0jours";
 const POSEE = "Alerte déjà posée ↓ 76,601.83 · bord du support fort";
 const SEPT_JOURS = 7 * 24 * 3_600_000;
 
@@ -328,6 +328,25 @@ async function attendreSousAvis(page: Page): Promise<SousAvis> {
   return mesure;
 }
 
+/**
+ * Lignes du libellé du bouton telles que le moteur les a coupées, espaces insécables rendus en
+ * espaces : chaque caractère est rangé sur la ligne de sa boîte.
+ */
+async function lignesDuBouton(page: Page): Promise<string[]> {
+  return bouton(page).evaluate((el) => {
+    const texte = el.firstChild as Text;
+    const plage = document.createRange();
+    const lignes = new Map<number, string>();
+    for (let i = 0; i < texte.length; i++) {
+      plage.setStart(texte, i);
+      plage.setEnd(texte, i + 1);
+      const haut = Math.round(plage.getBoundingClientRect().top);
+      lignes.set(haut, (lignes.get(haut) ?? "") + texte.data[i]);
+    }
+    return [...lignes.values()].map((l) => l.replace(/\u00a0/g, " ").trim());
+  });
+}
+
 /** Un toucher au centre du bouton, au doigt : grisé (`aria-disabled`), il reçoit le toucher comme un autre. */
 async function toucherBouton(page: Page): Promise<void> {
   const boite = await bouton(page).boundingBox();
@@ -383,6 +402,8 @@ test("390 px : le doigt sur le support fort offre l'alerte de prix à son bord �
   await expect(bouton(page)).not.toHaveAttribute("aria-disabled", "true");
   await attendreBoutonDegage(page);
   expect(await luEnEntier(bouton(page))).toMatchObject({ dansEcran: true, sansCoupe: true, decouvert: true });
+  // « niveau fixe, 7 jours » ne se coupe pas : avant, à 390 px, « jours » restait seul en seconde ligne.
+  expect((await lignesDuBouton(page)).at(-1)).toMatch(/niveau fixe, 7 jours$/);
   expect(await lireAlertes(page)).toEqual([]);
   await page.screenshot({ path: cheminCapture(testInfo, "390x844-offre.png"), animations: "disabled" });
 
@@ -592,7 +613,8 @@ test("paysage puis 320 × 568, en chasse fixe : jamais un bouton hors de la zone
   if (offre !== null) {
     await expect(bouton(page)).toHaveText(OFFRE);
     expect(await luEnEntier(bouton(page))).toMatchObject({ dansEcran: true, sansCoupe: true, decouvert: true });
-    expect(OFFRE).toContain("niveau fixe");
+    expect(OFFRE).toContain("niveau\u00a0fixe");
+    expect((await lignesDuBouton(page)).at(-1)).toMatch(/niveau fixe, 7 jours$/);
   }
   testInfo.annotations.push({
     type: "limite",

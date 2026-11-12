@@ -53,23 +53,34 @@ export function Toasts() {
   const visible = toasts.length > 0;
   const [hautNavigation, setHautNavigation] = useState<number | null>(null);
   // Mesure avant la peinture, tant que la pile est affichée : à son apparition, quand la fenêtre
-  // change (rotation), et quand une barre paraît ou disparaît (plein écran, première fenêtre
+  // change (rotation), quand une barre paraît ou disparaît (plein écran, première fenêtre
   // ouverte, dernière fermée : chacune est un enfant direct de la racine de l'application, la
-  // fenêtre ne change pas de taille).
+  // fenêtre ne change pas de taille), et quand une barre change de HAUTEUR sans que la fenêtre
+  // change : ses libellés passent à la ligne ou changent de police avec le thème, son haut
+  // bouge. Sans ce dernier suivi, l'avis gardait sa place et recouvrait le haut de la navigation
+  // (vu sur WebKit le 12 novembre 2026 : 2 px à 320 px, au retour d'un thème à chasse fixe).
   useLayoutEffect(() => {
     if (!mobile || !visible) {
       setHautNavigation(null);
       return;
     }
     const mesurer = (): void => setHautNavigation(hautBarresBasses());
-    mesurer();
+    const tailles = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(mesurer);
+    /** Mesure, et suit la taille des barres présentes à cet instant (bordure et marges intérieures comprises). */
+    const suivre = (): void => {
+      mesurer();
+      tailles?.disconnect();
+      for (const barre of document.querySelectorAll(BARRES_BASSES)) tailles?.observe(barre, { box: "border-box" });
+    };
+    suivre();
     window.addEventListener("resize", mesurer);
     const racine = document.querySelector(".axiom-app");
-    const observateur = racine === null ? null : new MutationObserver(mesurer);
+    const observateur = racine === null ? null : new MutationObserver(suivre);
     if (racine !== null) observateur?.observe(racine, { childList: true });
     return () => {
       window.removeEventListener("resize", mesurer);
       observateur?.disconnect();
+      tailles?.disconnect();
     };
   }, [mobile, visible]);
 

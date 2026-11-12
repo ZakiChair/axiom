@@ -122,7 +122,10 @@ async function cloturerAchat(page: Page, flux: FluxAxisAlertes): Promise<void> {
 async function attendreAvisDegage(page: Page, avisUnique: Locator): Promise<GeometrieAvis> {
   let mesure: GeometrieAvis | undefined;
   await expect(async () => {
-    await expect(avisUnique).toBeInViewport({ ratio: 1 });
+    // 0,999 et non 1 : WebKit rend 0,9999 pour une boîte entièrement à l'écran dont la largeur
+    // n'est pas entière (il lui manque un soixante-quatrième de pixel, son unité de mise en page).
+    // Les bords exacts de la boîte sont mesurés juste dessous.
+    await expect(avisUnique).toBeInViewport({ ratio: 0.999 });
     const g = await mesurerAvis(page, avisUnique);
     expect(g.avis.gauche).toBeGreaterThanOrEqual(16);
     // Demi-pixel de marge : un moteur peut arrondir la largeur de la fenêtre autrement que Chromium.
@@ -346,6 +349,16 @@ test.describe("écrans étroits", () => {
     await poserTheme(page, "dark");
     const sansBarre = await attendreAvisDegage(page, lesAvis);
     expect(sansBarre.barreFenetres).toBeNull();
+    expect(Math.abs(sansBarre.avis.bas - (sansBarre.hautBarres - 8))).toBeLessThanOrEqual(0.5);
+
+    // La navigation grandit sans que la fenêtre change (libellés qui passent à la ligne, police
+    // d'un autre thème) : son haut monte, l'avis monte avec elle au lieu de la recouvrir.
+    const epaissir = await page.addStyleTag({ content: ".axiom-mobile-navigation { padding-top: 14px !important; }" });
+    await expect.poll(async () => (await mesurerAvis(page, lesAvis)).navigation.haut).toBeLessThan(sansBarre.navigation.haut);
+    const navigationHaute = await attendreAvisDegage(page, lesAvis);
+    expect(Math.abs(navigationHaute.avis.bas - (navigationHaute.hautBarres - 8))).toBeLessThanOrEqual(0.5);
+    await epaissir.evaluate((style) => style.remove());
+    await expect.poll(async () => (await mesurerAvis(page, lesAvis)).avis.bas).toBe(sansBarre.avis.bas);
     await reduireFenetreData(page);
     await expect(barreFenetres(page)).toBeVisible();
     await expect.poll(async () => (await mesurerAvis(page, lesAvis)).avis.bas).toBeLessThan(sansBarre.avis.bas);

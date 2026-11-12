@@ -3070,7 +3070,8 @@ change ; aucun chiffre de performance nouveau dans l'interface.** AXIS S/R garde
   - Lot alertes : alerte sur le pré-signal ou sur l'approche d'une zone forte, réglages de
     l'instance lus par les alertes, libellés des sorties dans le formulaire. (12 novembre
     2026 : libellés des sorties livrés ; le reste est reporté aux lots suivants de la phase 2.)
-  - Amorce du backtest (BT-1).
+  - Amorce du backtest (BT-1). (Livrée le 12 novembre 2026 : voir « AXIS — le backtest charge
+    l'amorce des indicateurs ».)
   - Test prospectif du signal précoce, du pré-signal et des retournements : aucun n'a été
     soumis à des données jamais vues.
 
@@ -3566,7 +3567,8 @@ intégrés dans l'ordre « infobulle », « alertes A1 » sur la branche `feat/a
   - Alertes A2 : historique chargé pour l'alerte sans l'indicateur affiché, amorce courte,
     réglages de l'instance lus par l'alerte, pastille « ≠ graphe », sortie `preAchat` du
     pré-signal.
-  - Amorce du backtest (BT-1).
+  - Amorce du backtest (BT-1). (Livrée le 12 novembre 2026 : voir « AXIS — le backtest charge
+    l'amorce des indicateurs ».)
   - Daemon : alertes sur plusieurs unités, fenêtre à la profondeur de l'amorce.
   - Notification du navigateur onglet masqué.
   - Un chemin vers l'iPhone verrouillé : il n'existe dans aucun lot et ne peut pas exister sous
@@ -3866,4 +3868,250 @@ du lot intégré a relevé un majeur (« Annuler » pouvait supprimer une autre 
   - Appui long sur la bande ; offre en paysage (dessin de l'encart à refaire, voir le lot 1).
   - Alertes A2 : historique chargé pour l'alerte sans l'indicateur affiché, amorce courte,
     réglages de l'instance lus par l'alerte, pastille « ≠ graphe », sortie `preAchat`.
-  - Amorce du backtest (BT-1).
+  - Amorce du backtest (BT-1). (Livrée le 12 novembre 2026 : voir « AXIS — le backtest charge
+    l'amorce des indicateurs ».)
+
+## AXIS — le backtest charge l'amorce des indicateurs (phase 2, lot 3, 12 novembre 2026)
+
+Demande du propriétaire, le 9 novembre 2026 : « améliorer les signaux d'AXIS », puis « j'aimerais
+les voir apparaître suffisamment tôt, que je puisse voir quelle zone marque une forte résistance ou
+support » ; le 11 novembre : « Top, merge dans main et poursuit l'amélioration d'axis », puis « Top
+après ça merge directement les pr et déploie ». Les lots 1 et 2 de la phase 2 (sections
+précédentes) sont fusionnés dans `main`. Ce troisième lot corrige le constat **BT-1** de la revue
+du 6 novembre : la fenêtre BT calculait ses indicateurs **à froid** au début de la plage, si bien
+que ses trades AXIS n'étaient pas ceux du graphe. Désormais, quand une règle lit un indicateur (ou
+avec un stop ATR), la fenêtre charge avant la plage une **amorce** de bougies strictement
+antérieures, et le moteur ne mesure que la plage (`debutEvaluationMs`, qu'il savait déjà honorer).
+**Aucun fournisseur, hôte, indicateur, dépendance ni champ de `@axiom/types` nouveau ; aucun
+fichier de `packages/` modifié (moteur compris) ; aucune série, aucun signal, aucun marqueur, aucun
+texte ni aucune sortie d'alerte existants ne changent.** La note du run n'ajoute que des comptes de
+bougies : **aucun chiffre de performance nouveau** dans l'interface. Les résultats des presets
+bougent : ce sont des simulations sur des données déjà vues, et ce contrat ne cite que des comptes
+de trades et de changements d'état, jamais un PnL. Le lot a été conçu sur un prototype jetable,
+développé en cinq étapes, revu par un agent indépendant (calcul financier, AGENTS.md), puis
+intégré : l'intégration ajoute un test (mineur de la revue), vérifie au téléphone et consigne.
+
+- **Constat BT-1, rejoué sur le cas de référence** (BTCUSDT 4h, fixture
+  `packages/indicators/src/strategy/fixtures/btcusdt-4h-3000.json` close le 31 octobre 2026,
+  horloge une demi-heure après la dernière clôture). Preset « AXIS confluence (4h) », plage
+  « 3 mois » : 539 bougies. Calcul d'avant (plage seule) : AXIS n'a aucun état sur les
+  49 premières bougies, un état différent de la série complète sur 186 des 539, 4 changements
+  d'état sur 8, et **2 trades** (fixture 2741→2851 et 2938→2943) quand le graphe montre 4 cycles.
+  Après : 8 changements d'état sur 8, 0 bougie d'état différent, **4 trades**, fills à l'ouverture
+  de la bougie qui suit chaque changement d'état (achats aux clôtures 2475, 2552, 2740 et 2937,
+  ventes à 2507, 2689, 2850 et 2942 ; trades 2476→2508, 2553→2690, 2741→2851, 2938→2943 ; à plat à
+  la clôture 2460, avant la plage). Trades et statistiques identiques à ceux du moteur lancé sur
+  les 3 000 bougies avec la même borne. L'égalité avec le graphe (qui charge 1 500 bougies pour
+  AXIS, dont 961 avant la plage) est **une propriété de cette fixture sur 3 mois, pas une propriété
+  générale.**
+- **Arbitrages de l'orchestrateur, à confirmer par le propriétaire** (appliqués tels quels).
+  - **(a) Règle de niveau gardée.** Les presets restent `etat ≥ 1` / `etat ≤ 0`. Quand la règle
+    d'entrée est déjà vraie à la clôture qui précède la plage, le BT entre à l'ouverture de la
+    première bougie mesurée, et la note le dit. L'autre choix (entrée par croisement, comme les
+    campagnes v2 à v5) changerait la définition des presets et un test épinglé.
+  - **(b) L'amorce vaut pour tout run qui lit un indicateur ou pose un stop ATR**, pas pour AXIS
+    seul : les résultats de **tous** les presets bougent en début de plage. C'est le seul effet
+    visible hors d'AXIS (tableau plus bas).
+  - **(c) Note « Honnêteté »** de `BacktestWindow.tsx` : elle finit par « Simulation sur des
+    données passées : une mesure, pas une promesse. » Rien d'autre ne change dans ce fichier.
+  - **(d) Version du moteur `bt-2026-11-12`.** Aucun run archivé n'est supprimé ; comparer un run
+    d'avant à un run d'après affiche « Versions du moteur différentes ».
+  - **(e) Les réactions sur zone forte n'entrent pas dans le BT** : signal non mesuré ; elles
+    produiraient des chiffres de performance pour un signal jamais testé. Elles dépendent en
+    outre de la première bougie chargée (mesure plus bas).
+- **Ce qui change.** Fichiers : `apps/web/src/store/backtest.ts`, `apps/web/src/data/backtestArchive.ts`
+  (version et commentaires), `apps/web/src/components/BacktestWindow.tsx` (une phrase) ; tests
+  `apps/web/src/store/backtest-amorce.test.ts` (19) et `backtest-amorce-chargeur.test.ts` (2),
+  nouveaux ; parcours `apps/web/e2e/mobile-backtest-amorce.e2e.ts` (1, nouveau). Aucun test ni
+  helper existant n'est modifié.
+  - **Amorce demandée** (`amorceRun`, pure) : 0 quand aucune règle ne lit d'indicateur et sans
+    stop ATR. Sinon le plus grand de : `AMORCE_MIN_BT` = 300 (le warmup de la campagne v5) ;
+    l'`amorceBougies` déclarée par chaque indicateur lu (AXIS 1 500, AXIS S/R **3 000, même pour
+    lire son seul état**) ; 4 × le plus grand paramètre numérique résolu de chaque opérande, quelle
+    que soit sa clé (`length`, `slow`, `period`, `kLength`… : règle d'EQS, fonction locale) ;
+    jours × 24 pour RVOL saisonnier (fenêtre en jours, unité 1h imposée par le moteur) ; 4 × la
+    période du stop ATR. Aux réglages du catalogue : 300 pour tous les opérandes, sauf RVOL
+    saisonnier 2 016, AXIS 1 500, AXIS S/R 3 000 ; EMA 200 réglée à la main : 800.
+  - **Chargement** : depuis `Math.max(0, début de plage − amorce × durée d'une bougie)` (3 000
+    bougies 1w remontent avant 1970), par les deux chargeurs (spot et perp). Sans amorce, le
+    chemin d'avant est gardé à l'identique : mêmes bougies, même requête au moteur, même note.
+  - **Mesure** : à partir de la première bougie ouverte au début de la plage ou après.
+    `MIN_BOUGIES` (30), « profondeur faible » (< 500) et « Historique insuffisant » comptent les
+    bougies **mesurées**. Le funding réel est demandé depuis la première bougie mesurée (aucune
+    position n'est tenue pendant l'amorce ; ses mois n'ont pas à être archivés). La référence du
+    garde-fou de régime est chargée sur **toutes** les bougies, amorce comprise, comme au graphe.
+  - **Moteur** : `debutEvaluationMs` = début de la plage, passé seulement quand l'amorce est
+    positive. Il décide à la clôture, remplit à l'ouverture suivante, et ne garde fills, équité et
+    statistiques qu'à partir de la borne ; la bougie en formation reste écartée au chargement.
+  - **Archive** : `premiereBougieMs` = première bougie mesurée ; `fenetreDemandee` inchangée
+    (bornes de la plage) ; `nbBougies` vient du moteur (bougies mesurées). Aucun champ nouveau.
+  - **Textes**, au caractère près (épinglés par les tests) :
+    - AXIS 3 mois : « 539 bougies mesurées · BTCUSDT 4h · Binance spot · amorce 1500 bougies ·
+      référence BTCUSDT chargée (3000 bougies) » ;
+    - amorce courte (AXIS 1 an) : « 2189 bougies mesurées · BTCUSDT 4h · Binance spot · amorce
+      courte (811 bougies sur 1500) : premiers signaux pouvant différer de ceux d'une série
+      longue · référence BTCUSDT chargée (3000 bougies) » ;
+    - AXIS S/R 3 mois : « 539 bougies mesurées · BTCUSDT 4h · Binance spot · amorce courte (2461
+      bougies sur 3000) : premiers signaux pouvant différer de ceux d'une série longue ·
+      référence BTCUSDT chargée (3000 bougies) » ;
+    - position déjà tenue (AXIS 6 mois) : « 1091 bougies mesurées · BTCUSDT 4h · Binance spot ·
+      amorce 1500 bougies · référence BTCUSDT chargée (3000 bougies) · 1re entrée à l'ouverture
+      de la plage : règle déjà vraie à la clôture précédente » (suffixe ajouté à la réception du
+      résultat, quand le 1er trade entre à l'ouverture de la première bougie mesurée) ;
+    - RVOL saisonnier 1h : « 2159 bougies mesurées · BTCUSDT 1h · Binance spot · amorce 2016
+      bougies » ;
+    - funding réel : « 539 bougies mesurées · BTCUSDT 4h · Binance perp · amorce 1500 bougies ·
+      référence BTC indisponible : garde-fou de régime non appliqué (signaux de la v2) » ;
+    - profondeur faible (source arrêtée 100 bougies après le début de la plage) : « 100 bougies
+      mesurées · BTCUSDT 4h · Binance spot · amorce 1500 bougies · profondeur faible (< 500) —
+      « Charger 2 ans 1d » recommandé · référence BTCUSDT chargée (2000 bougies) » ;
+    - sans indicateur ni stop ATR, inchangé : « 539 bougies · BTCUSDT 4h · Binance spot » ;
+    - erreur : « Trop peu de bougies (20 < 30). Utilise « Charger 2 ans 1d », élargis la plage
+      ou change de TF. » (N = bougies mesurées) ;
+    - mention seule (`texteAmorceBt`) : « amorce 1500 bougies », ou « amorce courte (0 bougie sur
+      300) : premiers signaux pouvant différer de ceux d'une série longue » ; « bougie » au
+      singulier pour 0 et 1 ; jamais le mot « référence » (épinglé par
+      `backtest-indicateurs.test.ts` pour une stratégie sans référence).
+- **Ce qui bouge pour tous les presets.** Mesuré à l'intégration sur la fixture, en 4h (EMA 9/21
+  est livré en 1h, compté ici en 4h pour comparaison), avant → après, comptes de trades seulement.
+  « o » : le 1er trade entre à l'ouverture de la plage (règle déjà vraie à la clôture précédente) ;
+  « = » : trades identiques ; « ≠ » : même nombre, trades différents.
+
+  | Preset (amorce) | 3 mois | 6 mois | 1 an |
+  |---|---|---|---|
+  | RSI (300) | 2 → 2 = | 4 → 4 = | 7 → 7 = |
+  | EMA 9/21 (300) | 13 → 14 | 30 → 30 ≠ | 55 → 55 = |
+  | MACD (300) | 17 → 20 o | 37 → 38 o | 78 → 79 o |
+  | Supertrend (300) | 7 → 7 ≠ | 13 → 13 o | 30 → 29 |
+  | Bollinger (300) | 13 → 13 = | 26 → 26 = | 49 → 50 |
+  | EMA + ADX (300) | 7 → 6 | 16 → 16 ≠ | 26 → 26 = |
+  | MACD + Supertrend (300) | 9 → 11 | 20 → 21 o | 49 → 49 = |
+  | Triple confirmation (300) | 9 → 11 | 20 → 21 o | 48 → 48 = |
+  | PSAR + ADX (300) | 16 → 17 o | 33 → 35 | 62 → 63 o |
+  | AXIS (1 500) | 2 → 4 | 5 → 6 o | 12 → 13 (amorce 811 sur 1 500) |
+  | AXIS S/R (3 000) | 2 → 4 (2 461 sur 3 000) | 5 → 6 o (1 909 sur 3 000) | 12 → 13 (811 sur 3 000) |
+
+  Changements d'état d'AXIS dans la plage, à froid → avec l'amorce (= série complète) : 4 → 8 sur
+  3 mois, 10 → 11 sur 6 mois, 24 → 26 sur 1 an ; bougies d'état différent de la série complète :
+  186, 86 et 54 → 0. Bougies chargées sur 3 mois : 539 sans amorce, 839 avec 300, 2 039 pour AXIS,
+  3 000 (toute la fixture) pour AXIS S/R.
+- **Plafond de la CI relevé** (commit de l'orchestrateur, sur `main` avant ce lot) : l'étape des
+  parcours téléphone passe de 9 à 12 minutes, le job de 15 à 18. Elle joue Chromium puis WebKit ;
+  durée observée 5,3 min, puis 7 min 07 s le 12 novembre après le lot 2 (41 parcours par moteur) :
+  il ne restait que 2 min de marge. Ce lot y ajoute un parcours par moteur.
+- **Vérifié au téléphone à l'intégration** (Chromium, réseau bouchonné et date figée comme les
+  parcours, cas de référence, AXIS sur le graphe ; script jetable hors dépôt, captures remises au
+  propriétaire). Fonctions → BT → « AXIS confluence (4h) » → « 3 mois » → « Lancer le backtest » :
+  « BTCUSDT · 4h · 3 mois · 4 trades », quatre lignes à la table.
+  - Note du run, lue en entier dans l'écran (rien de coupé ni de recouvert) : **2 lignes** à
+    390 × 844 (356 × 30 px), thème par défaut comme Bloomberg ; **3 lignes** à 320 × 568
+    (286 × 45 px), dans les deux thèmes ; 1 ligne à 1 440 × 900 (686 px).
+  - « Trades sur le chart » : sur le graphe (1 500 bougies), les 4 triangles creux d'entrée sont
+    chacun **une bougie après** un ▲ plein d'AXIS (bougies 975, 1052, 1240, 1437 → 976, 1053,
+    1241, 1438), et les 4 cercles de sortie une bougie après un ▼ (1007, 1189, 1350, 1442 → 1008,
+    1190, 1351, 1443). Les autres triangles pleins du graphe (forts achats et fortes ventes, en
+    couleur d'accent) ne sont pas des signaux d'AXIS.
+  - Toucher une ligne de la table cale le graphe sur l'entrée du trade, posée au **bord droit**
+    (vue 1015–1055 pour l'entrée 1053 à 390 px) : le segment du trade part hors de l'écran, il
+    faut glisser. Sous la date figée des parcours, ce calage n'a lieu que si l'horloge avance :
+    l'animation de 250 ms de KLineChart mesure le temps par `new Date()` (le script avance la date
+    figée ; un navigateur réel n'est pas concerné). Comportement antérieur au lot.
+  - À 390 px, la table des trades ne montre que « Funding », « Sens » et « Entrée » : « Sortie »,
+    « Durée », PnL, MAE, MFE et R se lisent en la faisant défiler en largeur (antérieur au lot).
+- **Limites**, dites sans détour.
+  - **Chargement plus long.** Pages de 1 000 klines espacées de 120 ms, plus la référence du
+    garde-fou (pages de 1 000). Mesuré sur la fixture : AXIS 3 mois, 6 requêtes de klines (3 pour
+    le run, 3 pour la référence) là où 539 bougies tenaient en une page chacune ; les autres
+    presets 3 mois en 4h, toujours 1 requête (839 bougies). Calculé pour Binance réel : AXIS S/R
+    3 mois en 4h, 3 539 bougies, 4 pages de klines et 4 de référence au lieu d'une chacune. Une
+    amorce de 300 ajoute au plus une page de klines.
+  - **Amorce courte**, toujours dite dans la note : actif récent ; 1d (AXIS 1 500 jours, environ
+    4,1 ans ; AXIS S/R 3 000 jours, environ 8,2 ans) ; 1w (amorce toujours courte : 1 500
+    semaines font près de 29 ans, et les 3 000 d'AXIS S/R remontent avant 1970, d'où un
+    chargement qui part de 0). Une seule bougie manquante (un trou de cotation) suffit à l'écrire.
+  - **Plafond de 50 000 bougies** : les plus récentes sont gardées, donc l'amorce est rognée en
+    premier et la plage ne l'est jamais par elle. Quand la plage seule dépasse 50 000 bougies (1m ;
+    5m dès 6 mois ; 15m sur 2 ans), elle était déjà tronquée en silence (défaut antérieur) et la
+    note dit « amorce courte (0 bougie sur N) ».
+  - **AXIS S/R demande 3 000 bougies même pour son état** (c'est l'amorce que le def déclare) :
+    sur la fixture, la note dit « amorce courte (2461 bougies sur 3000) » alors que l'état et le
+    score sont ceux de la série complète dès 1 500 (mêmes 4 trades qu'AXIS). Avertissement plus
+    large que le besoin ; sur la fixture, il vient de ce qu'elle n'a que 3 000 bougies.
+  - **Égalité BT–graphe** : prouvée sur la fixture et sur 3 mois seulement. Sur une plage plus
+    longue, le BT a plus d'historique que le graphe (1 500 bougies pour AXIS). Les sorties
+    « support », « résistance » et les réactions d'AXIS S/R dépendent de la première bougie
+    chargée. Mesuré à l'intégration sur les 539 bougies de la plage de 3 mois, écarts à la série
+    complète (3 000 bougies) : avec 2 500 bougies chargées, aucun ; avec 2 039 (l'amorce
+    d'AXIS), support 210, résistance 329, réaction sur support 19, sur résistance 19 ; avec
+    1 500, 257, 343, 21 et 19. L'état et le score sont identiques dans les trois cas.
+  - **Indicateur sans fenêtre finie réglé long** (EMA longue) : 4 × la période rapproche la série
+    longue sans l'égaler.
+  - **La règle des 4 × compte aussi des paramètres qui ne sont pas des longueurs** : facteurs
+    d'annualisation (`annual`, `periodsPerYear`, `periodesParAn` : 365 par défaut, soit 1 460
+    bougies), valeurs de départ (`start` de NVI et PVI : 1 000, soit 4 000), sensibilité de Waddah
+    Attar (150, soit 600). Défaut **latent** : aucun de ces indicateurs n'est au catalogue du
+    builder ; seul un preset utilisateur retouché à la main (sauvegarde restaurée) peut les faire
+    entrer, avec un chargement surdimensionné (borné par le plafond de 50 000) et une note
+    d'amorce démesurée, sans effet sur la causalité ni les signaux. EQS applique la même règle. À
+    traiter si le catalogue du BT s'ouvre à ces indicateurs (exclure leurs clés, sur le modèle de
+    `PARAMS_EN_JOURS_BT`). Pour RVOL saisonnier, le paramètre « minimum » (nombre de références,
+    au plus 100) compte encore : jusqu'à 400 bougies pour 7 jours, sans effet sur les signaux.
+  - **Archives d'avant** : lisibles et comparables, marquées « Versions du moteur différentes ».
+    Leur `premiereBougieMs` était la première bougie chargée, alors égale à la première de la
+    plage. L'amorce obtenue n'est pas archivée (la note la dit ; la version signale les anciens
+    runs).
+  - **Un run « prix + stop ATR »** reçoit 300 bougies d'amorce : il peut lui aussi entrer à
+    l'ouverture de la plage, avec la note « 1re entrée… ».
+  - **Rien n'est prouvé sur WebKit ici** : ce parcours sera le premier run BT, donc le premier
+    worker de backtest, exécuté sur WebKit, en CI. Un échec y serait un vrai constat pour
+    l'iPhone. Rien sur un vrai iPhone, ni sur les API réelles (réseau bouchonné, données déjà
+    vues).
+- **Budget.** Mesuré à l'intégration par `scripts/verifier-budget-build.mjs` (Node 22.23.4),
+  build du code d'avant le lot puis du lot intégré ; plafonds 1 220 000 / 360 000 inchangés.
+  - Chargement initial, octets bruts / gzip : **1 181 923 / 355 208** avant, **1 181 923 /
+    355 212** après (0 / +4). `index-*.js` (618 383 octets des deux côtés) ne diffère que par les
+    empreintes des noms de chunks qu'il référence (identique une fois ces empreintes remplacées
+    par un motif fixe) ; `index.html`, `indicators`, `vendor-klinecharts` et `vendor-react` sont
+    inchangés. Aucun code du lot n'entre dans le chemin initial : le store du BT et sa fenêtre
+    restent à la demande (garde `chargementInitial.test.ts`, verte). Marge gzip : **4 788**.
+  - Chunk du store BT : 26 329 / 8 125 → 27 652 / 8 690 (+1 323 / +565). Chunk de la fenêtre BT :
+    38 036 / 12 468 → 38 105 / 12 504 (+69 / +36).
+  - Fichiers à la demande : 141, 1 734 145 / 638 771 → 1 735 537 / 639 550 (+1 392 / +779).
+- **Revues et tests.**
+  - Prototype jetable (typage, tests, parcours), puis développement en cinq étapes.
+  - Revue indépendante (calcul financier) : aucun bloquant ni majeur, deux mineurs. (1) Aucun
+    test ne gardait la « profondeur faible » sur les bougies mesurées (le mutant
+    `candles.length < SEUIL_PROFONDEUR_BT` passait toute la suite) : corrigé à l'intégration par un
+    test au caractère près (note « 100 bougies mesurées … profondeur faible … »), rouge sous ce
+    mutant. (2) La règle des 4 × compte des paramètres qui ne sont pas des longueurs : consigné
+    (limite ci-dessus), pas de correction.
+  - Mutants rejoués à l'intégration sur les deux fichiers de tests du lot (21 tests), tous
+    détectés : sans `debutEvaluationMs` (8 tests rouges) ; funding depuis la première bougie
+    chargée (1) ; `MIN_BOUGIES` sur le total chargé (1) ; amorce forcée à 0 (10) ; profondeur
+    faible sur le total chargé (1) ; sans `Math.max(0, …)` (1) ; référence chargée sur les seules
+    bougies mesurées (6) ; `premiereBougieMs` = première bougie chargée (1).
+  - Témoin du parcours téléphone, rejoué à l'intégration avec le store d'avant le lot : échec
+    attendu, « Expected: "BTCUSDT · 4h · 3 mois · 4 trades" », « Received: "BTCUSDT · 4h · 3 mois
+    · 2 trades" ».
+  - Vérification de l'intégration (12 novembre 2026, Node 22.23.4) : typage des 7 projets ;
+    indicateurs 232 fichiers / 1 144 tests, alertes 147, backtest 131 (paquet non modifié),
+    pacte 120, daemon 786, web 478 fichiers / 7 212 tests (sans `chart/orderflow.cadence.test.ts`,
+    qui lève une erreur sans réseau) ; build du web et budget verts ; parcours du bureau
+    `quatre-lots-backtest`, `revue-outils-avances` (dont « Backtest distingue bootstrap, spot sans
+    funding et absence du funding réel »), `quatre-lots-indicateurs`, `quatre-lots-alertes` et
+    `gate-g4-alertes`, 22 sur 22 en 51,5 s ; parcours téléphone sur Chromium, 42 sur 42 en
+    2,9 min, dont `mobile-backtest-amorce` (4,3 s). Non lancés ici : WebKit, `pnpm check:e2e`
+    complet, Vercel, daemon et flux réels.
+- **Limites des sections précédentes levées** (annotées sur place) : « Amorce du backtest
+  (BT-1) », dans les « Reporté » des sections « AXIS — lisible, honnête et annonciateur », lot 1
+  et lot 2 de la phase 2.
+- **Reporté.**
+  - Alertes A2 : historique chargé pour l'alerte sans l'indicateur affiché, amorce courte,
+    réglages de l'instance lus par l'alerte, pastille « ≠ graphe », sortie `preAchat` du
+    pré-signal.
+  - Test prospectif du signal précoce, du pré-signal et des retournements : aucun n'a été
+    soumis à des données jamais vues.
+  - Daemon : alertes sur plusieurs unités, fenêtre à la profondeur de l'amorce.
+  - Backtest : entrée des presets par croisement (a) ; réactions sur zone forte comme conditions
+    (e) ; amorce obtenue dans l'archive ; amorce d'AXIS S/R réduite à 1 500 quand seuls l'état ou
+    le score sont lus ; exclusion des paramètres qui ne sont pas des longueurs.

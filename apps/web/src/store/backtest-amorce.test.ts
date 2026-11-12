@@ -358,4 +358,14 @@ describe("run sur le cas de référence BTCUSDT 4h", () => {
     expect(backtestStore.getState().nbBougiesChargees).toBe(20);
     expect(postes).toHaveLength(0);
   });
+
+  it("profondeur faible comptée sur les bougies MESURÉES, pas sur le total chargé avec l'amorce", async () => {
+    // La source s'arrête 100 bougies après le début de la plage : 1 500 d'amorce + 100
+    // mesurées = 1 600 chargées (au-dessus du seuil de 500), mais 100 mesurées seulement.
+    derniereServie = 2560;
+    const req = await lancer("builtin:axis", "3m");
+    expect(req.candles).toHaveLength(1600);
+    expect(backtestStore.getState().nbBougiesChargees).toBe(100);
+    expect(backtestStore.getState().note).toBe("100 bougies mesurées · BTCUSDT 4h · Binance spot · amorce 1500 bougies · profondeur faible (< 500) — « Charger 2 ans 1d » recommandé · référence BTCUSDT chargée (2000 bougies)");
+  });
 });

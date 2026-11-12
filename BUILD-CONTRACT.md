@@ -4207,7 +4207,8 @@ sorties existantes d'AXIS S/R, ses signaux, marqueurs et textes, et les sorties 
 existantes ne changent pas (épinglés) ; aucun chiffre de performance.** Le lot a été développé en
 trois livrables sur une branche, revu par un agent indépendant (sondes sur le vrai graphe,
 contre-épreuves), puis intégré en un commit ; l'intégration corrige les deux mineurs de la revue,
-vérifie le parcours du propriétaire au téléphone et consigne.
+vérifie le parcours du propriétaire au téléphone et consigne. Une revue finale, sur la branche
+intégrée, a relevé trois mineurs, corrigés (voir « Revues et tests »).
 
 - **Arbitrages de l'orchestrateur, à confirmer par le propriétaire.** Aucun n'a été demandé mot
   pour mot ; chacun sert la demande du 9 novembre.
@@ -4215,13 +4216,21 @@ vérifie le parcours du propriétaire au téléphone et consigne.
     principale étend son historique pour les indicateurs des alertes ACTIVES de son marché, pas
     seulement pour ceux qu'elle affiche. Coût : une alerte AXIS S/R fait charger 3 000 bougies
     (5 à 6 pages de 500 en 4h), AXIS 1 500. Une alerte VWAP ou pivots active fait de même charger
-    sa session ; une alerte RSI déclenche une passe sans requête.
-  - **Copie figée des réglages.** À sa création depuis le formulaire, l'alerte copie les réglages
-    de la PREMIÈRE instance de l'indicateur sur la vue principale, et ne la suit pas ensuite : la
-    liste porte la pastille « ≠ graphe » quand ils diffèrent. Pour AXIS et AXIS S/R seulement ;
-    les autres indicateurs gardent les réglages par défaut, comme avant. Refus motivé pour une
-    instance au réglage « unite », et pour un filtre flux sur la sortie `etat` ou `preAchat`
-    (l'alerte ne lit pas l'open interest).
+    sa session ; une alerte RSI déclenche une passe sans requête, sauf quand une amorce attend
+    encore sur une place à sec : une page, vide, est alors redemandée, et l'état publié repasse
+    par « en cours » le temps de cette page (l'alerte qui attend son amorce n'est pas évaluée
+    pendant ce temps : sa clôture est différée, ni perdue ni doublée). Un indicateur ajouté au
+    graphe fait de même, comme avant le lot pour un indicateur à amorce affiché. Coût consigné
+    plutôt que supprimé (revue finale ; épinglé par un test de `extensionSession.test.ts`) :
+    l'éviter demanderait de distinguer, dans la boucle d'extension, une place à sec d'un plafond de
+    pages atteint.
+  - **Copie figée des réglages.** À sa création depuis le formulaire, alerte de seuil ou de
+    croisement (le croisement depuis la revue finale), l'alerte copie les réglages de la PREMIÈRE
+    instance de l'indicateur sur la vue principale, et ne la suit pas ensuite : la liste porte la
+    pastille « ≠ graphe » quand ils diffèrent. Pour AXIS et AXIS S/R seulement ; les autres
+    indicateurs gardent les réglages par défaut, comme avant. Refus motivé pour une instance au
+    réglage « unite », et pour un filtre flux sur la sortie `etat` ou `preAchat` (pour un
+    croisement, sur l'une de ses deux sorties ; l'alerte ne lit pas l'open interest).
   - **Neuvième sortie d'AXIS S/R, `preAchat`**, ajoutée en fin de liste, masquée.
   - **Amorce courte évaluée et dite, plutôt que bloquée.** Quand la remontée de l'historique est
     finie sans atteindre l'amorce (place plus courte : unité 1w, actif récent, ou chargement
@@ -4230,8 +4239,8 @@ vérifie le parcours du propriétaire au téléphone et consigne.
     est levé : une alerte armée sur une telle place sonne désormais, avec la mention.
   - Choix d'intégration (revue du lot) : un **échec réseau** pendant la remontée est dit comme
     tel (« chargement échoué »), jamais comme une place plus courte, et **retenté 60 s plus
-    tard** ; la note du formulaire nomme les deux causes ; ses guillemets « amorce courte »
-    tiennent par des espaces insécables.
+    tard**, sauf si une passe réussit entre-temps (revue finale) ; la note du formulaire nomme
+    les deux causes ; ses guillemets « amorce courte » tiennent par des espaces insécables.
   - Décisions du développeur entérinées : l'état publié porte l'amorce visée (`amorceVisee`),
     pour qu'une alerte AXIS S/R posée pendant la remontée d'AXIS vers 1 500 ne soit pas évaluée
     à 1 500 (correction 2 de la critique) ; le N du message compte les bougies closes lues par le
@@ -4251,7 +4260,8 @@ vérifie le parcours du propriétaire au téléphone et consigne.
   `packages/indicators/src/strategy/stratAxisSr.ts`, `packages/alerts/src/libelles.ts` ; tests
   `alerts/amorceGraphe.test.ts` (13, nouveau), `strategy/stratAxisSr.preAchat.test.ts` (7,
   nouveau), et des cas ajoutés à `alerts/runtime.test.ts` (90 → 102),
-  `chart/extensionSession.test.ts` (36 → 49), `components/alertsPanel.util.test.ts` (49 → 67),
+  `chart/extensionSession.test.ts` (36 → 53, dont 4 de la revue finale),
+  `components/alertsPanel.util.test.ts` (49 → 72, dont 5 de la revue finale),
   `engine.axisSr.test.ts` (7 → 9), `libelles.test.ts` (12 → 13),
   `alerts/libellesEtEncart.test.ts` (1 → 2) ; un parcours ajouté à
   `e2e/mobile-axis-alertes.e2e.ts` (8 → 9), lectures ajoutées à
@@ -4271,8 +4281,9 @@ vérifie le parcours du propriétaire au téléphone et consigne.
     du buffer, quelle que soit l'issue (rien à charger, amorce atteinte, place à sec, plafond de
     pages, échec réseau), rien après une identité invalidée. Après un échec, une nouvelle passe
     est programmée 60 s plus tard (`creerRelanceExtension`, `RELANCE_EXTENSION_MS`), une seule
-    en attente, annulée au démontage. Au début de chaque cycle de données, la vue principale
-    publie `null` AVANT que le buffer ne soit vidé (`demarrerCycleDonnees`).
+    en attente, annulée par une passe finie sans échec, « rien à charger » compris
+    (`annulerRelance`, revue finale), et au démontage. Au début de chaque cycle de données, la
+    vue principale publie `null` AVANT que le buffer ne soit vidé (`demarrerCycleDonnees`).
   - **Règle R2, commune au runtime et à la liste** (`profondeurAlerte`, chargé à la demande) :
     « atteinte » si le tampon compte l'amorce A (règle du lot 1, même décompte que l'extension) ;
     « courte » si l'extension de CE marché est terminée et visait au moins A ; « attente » sinon
@@ -4307,13 +4318,25 @@ vérifie le parcours du propriétaire au téléphone et consigne.
       graphe : l'alerte ne lit pas l'open interest, elle ne suivrait pas ses signaux. Retirez ce
       réglage de l'instance pour poser l'alerte. » ; pour « unite », le motif existant
       (`motifUniteHorsGraphe`), « Paramètre « unité » [1d] réservé au graphe : l'alerte
-      calculerait sur ses propres bougies, sans unité supérieure. Retire ce paramètre. ».
+      calculerait sur ses propres bougies, sans unité supérieure. Retire ce paramètre. » ;
+    - note du formulaire de croisement (revue finale, `noteAlerteCroisement`,
+      `data-note-croisement`), une phrase par ligne : « Évalué à la clôture de bougie 4h (TF
+      figé à la création). Onglet fermé, le daemon ne couvre que la minute. » (inchangée) ; pour
+      AXIS et AXIS S/R, la ligne d'historique de l'alerte de seuil ; puis, pour tout indicateur,
+      sa ligne d'origine des réglages ou de refus (« Réglages par défaut de l'indicateur, pas
+      ceux de l'instance du graphe. » hors AXIS : ligne nouvelle sous un croisement MACD). Ses
+      trois sélecteurs ont un nom accessible : « Indicateur du croisement », « Sortie A du
+      croisement », « Sortie B du croisement ».
   - **Réglages de l'instance** (`paramsInstancePourAlerte`, pur) : valeurs de la première
     instance lues comme le calcul les lit (`resolveParams`), limitées aux clés de `def.inputs`
     qui diffèrent du défaut ; sans instance, aucune (défauts). Le libellé reste juste hors test
     (« AXIS S/R réglage non validé · signal d'achat » pour un stop copié). Prouvé par le runtime
     sur le vrai moteur : une alerte copiée d'une instance à force de zone 8 sonne à la bougie
-    2 985 et pas à 2 988, où la réaction n'est que de force 6.
+    2 985 et pas à 2 988, où la réaction n'est que de force 6. Le croisement suit les mêmes
+    règles (`reglagesCroisement`, revue finale) : réglages de `paramsInstancePourAlerte`, filtre
+    flux refusé si l'une des deux sorties croisées est `etat` ou `preAchat` ;
+    `construireConditionCroisement` reçoit ces réglages (avant : toujours `params: {}`, et
+    « ≠ graphe » dès la création).
   - **Pré-signal.** Sortie `{ key: "preAchat", name: "Pré-signal d'achat (non mesuré)", style:
     "line", masquee: true }` : 1 si `preSignalAxisSr` est défini à la bougie close i, 0 sinon,
     indéfinie sur la bougie en formation ; ni `signauxPrecoces` ni `maxZonesSr` n'y touchent.
@@ -4379,9 +4402,15 @@ vérifie le parcours du propriétaire au téléphone et consigne.
     une relance part chaque minute.
   - **Une page qui ne répond jamais** laisse « historique en chargement » sans fin (aucun délai
     ajouté, lu dans le code). Une extension en cours va à son terme quand l'alerte est supprimée.
+  - **Sur une place plus courte que l'amorce**, chaque passe nouvelle (alerte créée, supprimée,
+    mise en pause ou reprise qui change la liste triée ; indicateur ajouté au graphe) redemande
+    une page, vide, et repasse par « en cours » le temps de cette page (revue finale, sonde F4 :
+    une page de plus par passe). Un armement, un tir ou une passe réussie après un échec ne
+    redemandent aucune page.
   - **« ≠ graphe » ne compare qu'à la première instance** ; la def ne suit jamais l'instance ; le
-    refus du filtre flux ne vaut que pour les sorties `etat` et `preAchat` : une réaction posée
-    sur une instance au filtre flux copie ce réglage sans refus.
+    refus du filtre flux ne vaut que pour les sorties `etat` et `preAchat` (pour un croisement :
+    l'une de ses deux sorties) : une réaction posée sur une instance au filtre flux copie ce
+    réglage sans refus.
   - **Référence du garde-fou en cache** (60 s, alignée en LOCF, antérieur au lot) : à la
     clôture, si le cache a moins d'une minute, la dernière bougie lit la clôture précédente de
     la référence. Mesuré à l'intégration : la place bouchonnée ne servant pas la bougie 2 168 à
@@ -4395,16 +4424,20 @@ vérifie le parcours du propriétaire au téléphone et consigne.
   - Les fronts du pré-signal (6 et 5 relevés) viennent de données déjà vues : aucune
     performance, aucun test prospectif.
 - **Budget.** Chargement initial, octets bruts / gzip, par `scripts/verifier-budget-build.mjs`
-  (Node 22.23.4), plafonds 1 220 000 / 360 000 inchangés ; trois builds dans le même dépôt.
+  (Node 22.23.4), plafonds 1 220 000 / 360 000 inchangés ; trois builds dans le même dépôt, deux
+  de plus à la revue finale.
   - Avant, sur `main` : **1 181 923 / 355 212**.
   - Lot réuni : 1 183 594 / 355 746 (+1 671 / +534), la mesure du développeur retrouvée.
   - Après les corrections de l'intégration : **1 183 959 / 355 914** (+365 / +168).
-  - Lot entier : **+2 036 / +702**, sous le seuil d'arrêt de +1 200 ; marge gzip **4 086**,
+  - Après les corrections de la revue finale : **1 184 044 / 355 948** (+85 / +34 : l'annulation
+    de la relance dans la passe extraite ; le croisement est chargé à la demande). Mesure d'avant
+    retrouvée en reconstruisant avec les sources de `13245f4`.
+  - Lot entier : **+2 121 / +736**, sous le seuil d'arrêt de +1 200 ; marge gzip **4 052**,
     au-dessus des 3 000 exigés. Sur le chemin initial : `alerts/amorceGraphe.ts`, la passe
     extraite de `ChartInstance.tsx`, la sortie `preAchat` et le libellé ; la règle R2, ses
     textes et le formulaire restent dans des fichiers chargés à la demande.
   - Fichiers à la demande : 141, 1 735 537 / 639 550 → 1 738 534 / 640 391 (lot réuni) →
-    1 738 776 / 640 563.
+    1 738 776 / 640 563 → 1 739 426 / 640 642 (revue finale : réglages et note du croisement).
 - **Revues et tests.**
   - Contre-épreuves du développeur : 21 règles retirées une à une, toutes détectées, plus celle
     des empreintes ; sur le vrai graphe, sans les indicateurs d'alerte dans l'extension, deux
@@ -4434,6 +4467,37 @@ vérifie le parcours du propriétaire au téléphone et consigne.
     (46 s cumulées, le nouveau 4,9 s). Non lancés ici : WebKit, `pnpm check:e2e` complet,
     Vercel, daemon et flux réels. L'étape téléphone de la CI (plafond 12 min, 7 min 04 s au
     lot 3) reçoit un parcours de plus par moteur.
+  - Revue finale, sur la branche intégrée (sondes hors dépôt sur le vrai graphe : retour sur le
+    marché BTCUSDT → ETHUSDT → BTCUSDT, multivue, composite AXIS S/R ET RSI sans indicateur
+    affiché, place à sec puis alerte RSI, échec puis passe réussie ; sonde vitest du
+    croisement) : aucune alerte perdue ni doublée, aucun constat bloquant ni majeur ; trois
+    mineurs, corrigés :
+    - Relance inutile : après un échec, une passe réussie pour une autre cause (indicateur
+      ajouté, alerte créée) ne désarmait pas la relance, qui repartait 60 s après l'échec (page
+      vide redemandée sur la place à sec, « en cours » republié, alerte non évaluée le temps de
+      la page). Corrigé : `annulerRelance`, appelé par `passeExtension` en fin de passe sans
+      échec ; trois tests sous horloge simulée, la vue de test reliée à la vraie minuterie.
+      Sonde rejouée : aucune page ni aucun état publié dans les 63 s qui suivent l'échec (avant :
+      une page et deux états).
+    - Phrase fausse de ce contrat, « une alerte RSI déclenche une passe sans requête » : fausse
+      sur une place à sec où une amorce attend. Corrigée (arbitrages, limites, documentation du
+      propriétaire) ; le coût est épinglé par un test plutôt que supprimé. Sonde rejouée :
+      inchangée, une page vide par passe nouvelle, comme consigné.
+    - Croisement d'AXIS et d'AXIS S/R toujours aux réglages par défaut, sans refus ni mot dans la
+      note, et « ≠ graphe » dès la création. Corrigé : `reglagesCroisement`,
+      `noteAlerteCroisement`, cinq tests, et le parcours téléphone A2 étendu d'une alerte de
+      croisement sur AXIS S/R posée au toucher (note au caractère près, `forceZoneForte: 8`
+      copié, libellé, pas de « ≠ graphe », une capture).
+  - Contre-épreuves de la revue finale : sept mutants (pas d'annulation en fin de passe, ni sur
+    « rien à charger », réglages du croisement ignorés, seconde sortie ignorée, note sans la
+    ligne des réglages, croisement hors des règles d'AXIS, formulaire qui n'envoie pas les
+    réglages), tous détectés, le dernier par le parcours téléphone.
+  - Vérification de la revue finale (12 novembre 2026, Node 22.23.4) : typage des 7 projets ;
+    indicateurs 233 fichiers / 1 151 tests, alertes 150, backtest 131, pacte 120, daemon 786,
+    web 479 fichiers / 7 279 tests (sans `chart/orderflow.cadence.test.ts`) ; build du web et
+    budget verts ; mêmes parcours du bureau, 30 sur 30 en 1,3 min ; parcours téléphone sur
+    Chromium, 43 sur 43 en 2,9 min, le parcours A2 étendu en 4,8 s. Non lancés ici : WebKit,
+    `pnpm check:e2e` complet, Vercel, daemon et flux réels.
 - **Limites des sections précédentes levées** (annotées sur place) : lot 1, « historique
   insuffisant … affichez l'indicateur » (la liste et la note) ; lot 1, une alerte d'AXIS ou
   d'AXIS S/R évaluée avec les réglages PAR DÉFAUT ; lot 1, l'alerte AXIS S/R sans l'indicateur

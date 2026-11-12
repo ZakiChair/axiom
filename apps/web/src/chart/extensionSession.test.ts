@@ -889,6 +889,24 @@ describe("historique chargé pour les alertes de la vue principale (lot A2)", ()
     v.desabonner();
   });
 
+  // Revue finale du lot A2 (sonde F4) : coût épinglé et consigné au contrat, pas corrigé. Sur une
+  // place à sec, l'amorce n'est jamais atteinte : toute passe nouvelle (liste des indicateurs
+  // d'alerte changée, indicateur ajouté au graphe) redemande une page, vide, et repasse par « en
+  // cours » le temps de cette page.
+  it("place à sec, alerte AXIS S/R active : une alerte RSI créée relance une passe, qui redemande une page vide et repasse par « en cours »", async () => {
+    const v = vue(2988, []);
+    poser(SR);
+    await vi.waitFor(() => expect(v.publies).toHaveLength(2));
+    poser({ type: "indicateur-seuil", indicateurId: "rsi", params: {}, output: "rsi", comparateur: ">", valeur: 70 });
+    await vi.waitFor(() => expect(v.publies).toHaveLength(4));
+    expect(v.publies.slice(2)).toEqual([
+      { terminee: false, echec: false, amorceVisee: 3000, bougies: 2988 },
+      { terminee: true, echec: false, amorceVisee: 3000, bougies: 2988 },
+    ]);
+    expect(v.pages).toEqual([500, 500, 500, 500, 488, 0, 0]);
+    v.desabonner();
+  });
+
   it("armements et déclenchements réécrivent les définitions sans relancer l'extension (correction 3)", async () => {
     const v = vue(2988, []);
     poser(SR);

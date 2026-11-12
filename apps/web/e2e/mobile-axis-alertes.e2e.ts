@@ -870,4 +870,25 @@ test("390 px puis 320 px en Bloomberg : aucun indicateur affiché, place de 2 98
   await page.waitForTimeout(1_000);
   await expect(lesAvis).toHaveCount(1);
   expect(await lireJournal(page)).toEqual([message]);
+
+  // Revue finale du lot A2 : une alerte de CROISEMENT sur AXIS S/R copie elle aussi la force 8 de
+  // l'instance, sa note le dit, et elle ne porte pas « ≠ graphe ».
+  await page.setViewportSize({ width: 390, height: 844 });
+  const panneauxCroisement = await ouvrirAlertes(page);
+  await panneauxCroisement.getByRole("combobox").filter({ has: page.locator('option[value="indicateur-seuil"]') }).selectOption("indicateur-croisement");
+  await panneauxCroisement.getByLabel("Indicateur du croisement").selectOption("stratAxisSr");
+  await panneauxCroisement.getByLabel("Sortie A du croisement").selectOption("support");
+  await panneauxCroisement.getByLabel("Sortie B du croisement").selectOption("resistance");
+  await expect(panneauxCroisement.locator("[data-note-croisement] p")).toHaveText([
+    "Évalué à la clôture de bougie 4h (TF figé à la création). Onglet fermé, le daemon ne couvre que la minute.",
+    "Le graphe charge 3000 bougies pour elle ; s'il en obtient moins (place plus courte, chargement échoué), elle est évaluée sur celles-là, avec la mention «\u00a0amorce courte\u00a0».",
+    "Réglages de l'instance du graphe, copiés à la création : l'alerte ne suit pas leurs changements.",
+  ]);
+  await panneauxCroisement.locator("[data-note-croisement]").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: cheminCapture(testInfo, "formulaire-croisement-390x844-bloomberg.png"), animations: "disabled" });
+  await panneauxCroisement.getByRole("button", { name: "Ajouter sur BTCUSDT" }).tap();
+  await expect(ligne).toHaveCount(3);
+  expect(await lireReglagesAlertes(page), "réglages des trois alertes").toEqual([{}, { forceZoneForte: 8 }, { forceZoneForte: 8 }]);
+  await expect(ligne.nth(2).locator("[data-libelle-alerte]")).toHaveText("AXIS S/R non mesuré · Support actif proche croise à la hausse Résistance active proche · 4h");
+  await expect(ligne.nth(2).locator("[data-ecart-graphe]")).toHaveCount(0);
 });

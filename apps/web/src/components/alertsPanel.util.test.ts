@@ -18,11 +18,13 @@ import {
   explicationMuette,
   INDICATEURS_CROISEMENT,
   INDICATEURS_SEUIL,
+  noteAlerteCroisement,
   noteAlerteSeuil,
   differeDuGraphe,
   EXPLICATION_ECART_GRAPHE,
   MOTIF_FILTRE_FLUX,
   paramsInstancePourAlerte,
+  reglagesCroisement,
   sansMarche,
   SORTIES_PRIX_STRATEGIE,
   sortiesAlerte,
@@ -682,6 +684,72 @@ describe("noteAlerteSeuil : d'où viennent les réglages (lot A2)", () => {
   it("refusée : pas de libellé annoncé (aucune alerte ne sera posée)", () => {
     const reglages = paramsInstancePourAlerte(sr, [{ defId: "stratAxisSr", params: { unite: "1d" } }], "reactionSupport");
     expect(noteAlerteSeuil(null, sortie, marche, { daemonAlertes: false }, reglages).some((l) => l.startsWith("Libellé : "))).toBe(false);
+  });
+});
+
+// Revue finale du lot A2 : le formulaire « Croisement » propose AXIS et AXIS S/R ; il posait
+// toujours `params: {}`, sans rien en dire, et l'alerte portait « ≠ graphe » dès sa création.
+describe("croisement d'AXIS et d'AXIS S/R : les réglages de l'instance du graphe, mêmes refus, note (revue finale du lot A2)", () => {
+  const sr = getIndicator("stratAxisSr")!;
+  const axis = getIndicator("stratAxis")!;
+  const instance = (defId: string, params: Record<string, number | boolean | string>) => ({ defId, params });
+  const PORTEE = "Évalué à la clôture de bougie 4h (TF figé à la création). Onglet fermé, le daemon ne couvre que la minute.";
+
+  it("AXIS et AXIS S/R sont proposés au croisement", () => {
+    const ids = INDICATEURS_CROISEMENT.map((d) => d.id);
+    expect(ids).toContain("stratAxisSr");
+    expect(ids).toContain("stratAxis");
+  });
+
+  it("force de zone 8 sur l'instance : copiée dans la condition, pas de « ≠ graphe » à la création", () => {
+    const instances = [instance("stratAxisSr", { forceZoneForte: 8 })];
+    const reglages = reglagesCroisement(sr, instances, "support", "resistance");
+    expect(reglages).toEqual({ origine: "instance", params: { forceZoneForte: 8 } });
+    const c = construireConditionCroisement("stratAxisSr", "support", "resistance", "hausse", reglages.origine === "instance" ? reglages.params : {});
+    expect(c).toEqual({ type: "indicateur-croisement", indicateurId: "stratAxisSr", params: { forceZoneForte: 8 }, outputA: "support", outputB: "resistance", sens: "hausse" });
+    expect(differeDuGraphe(c!, instances)).toBe(false);
+    // Les réglages passés sont copiés : la condition ne partage pas l'objet du formulaire.
+    const params = { forceZoneForte: 8 };
+    const copie = construireConditionCroisement("stratAxisSr", "support", "resistance", "hausse", params);
+    params.forceZoneForte = 12;
+    expect(copie).toMatchObject({ params: { forceZoneForte: 8 } });
+  });
+
+  it("sans instance : réglages par défaut ; autres indicateurs : défauts du registre, comme avant", () => {
+    expect(reglagesCroisement(sr, [], "support", "resistance")).toEqual({ origine: "defaut", params: {} });
+    expect(reglagesCroisement(getIndicator("macd")!, [instance("macd", { fast: 8 })], "macd", "signal")).toEqual({ origine: "registre", params: {} });
+  });
+
+  it("refus motivés : instance au réglage « unité » ; filtre flux quand l'une des deux sorties est etat ou preAchat", () => {
+    expect(reglagesCroisement(sr, [instance("stratAxisSr", { unite: "1d" })], "support", "resistance")).toEqual({
+      origine: "refus",
+      refus: "Paramètre « unité » [1d] réservé au graphe : l'alerte calculerait sur ses propres bougies, sans unité supérieure. Retire ce paramètre.",
+    });
+    for (const [idef, a, b] of [[sr, "etat", "support"], [sr, "support", "preAchat"], [axis, "prixSignal", "etat"]] as const) {
+      expect(reglagesCroisement(idef, [instance(idef.id, { filtreFlux: true })], a, b)).toEqual({ origine: "refus", refus: MOTIF_FILTRE_FLUX });
+    }
+    // Ni etat ni preAchat : le filtre flux est copié, comme pour une réaction.
+    expect(reglagesCroisement(sr, [instance("stratAxisSr", { filtreFlux: true })], "support", "resistance")).toEqual({ origine: "instance", params: { filtreFlux: true } });
+  });
+
+  it("note du croisement, au caractère près : portée inchangée, historique d'AXIS, origine des réglages ou refus", () => {
+    const note = (id: string, a: string, b: string, instances: Array<{ defId: string; params: Record<string, number | boolean | string> }>): string[] => {
+      const reglages = reglagesCroisement(getIndicator(id)!, instances, a, b);
+      const c = reglages.origine === "refus" ? null : construireConditionCroisement(id, a, b, "hausse", reglages.params);
+      return noteAlerteCroisement(c, "4h", reglages);
+    };
+    expect(note("macd", "macd", "signal", [])).toEqual([PORTEE, "Réglages par défaut de l'indicateur, pas ceux de l'instance du graphe."]);
+    expect(note("stratAxisSr", "support", "resistance", [instance("stratAxisSr", { forceZoneForte: 8 })])).toEqual([
+      PORTEE,
+      "Le graphe charge 3000 bougies pour elle ; s'il en obtient moins (place plus courte, chargement échoué), elle est évaluée sur celles-là, avec la mention «\u00a0amorce courte\u00a0».",
+      "Réglages de l'instance du graphe, copiés à la création : l'alerte ne suit pas leurs changements.",
+    ]);
+    expect(note("stratAxis", "prixSignal", "stop", [])).toEqual([
+      PORTEE,
+      "Le graphe charge 1500 bougies pour elle ; s'il en obtient moins (place plus courte, chargement échoué), elle est évaluée sur celles-là, avec la mention «\u00a0amorce courte\u00a0».",
+      "Réglages par défaut de l'indicateur, absent du graphe.",
+    ]);
+    expect(note("stratAxisSr", "etat", "support", [instance("stratAxisSr", { filtreFlux: true })])).toEqual([PORTEE, `Pas d'alerte : ${MOTIF_FILTRE_FLUX}`]);
   });
 });
 

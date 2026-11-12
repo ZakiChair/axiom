@@ -35,20 +35,22 @@ export const INDICATEURS_CROISEMENT: IndicatorDef[] = INDICATORS.filter(
  * Construit la condition `indicateur-croisement` depuis l'état du formulaire, ou
  * `null` si la saisie est invalide (indicateur inconnu, sortie absente, ou deux fois
  * la même sortie — le moteur comparerait une série à elle-même et ne déclencherait jamais).
- * Params vides → défauts du registry côté moteur (comme `indicateur-seuil`).
+ * `params` : réglages de la condition (`reglagesCroisement` : ceux de l'instance du graphe pour
+ * AXIS et AXIS S/R) ; vides → défauts du registre côté moteur (comme `indicateur-seuil`).
  */
 export function construireConditionCroisement(
   indicateurId: string,
   outputA: string,
   outputB: string,
   sens: SensCroisement,
+  params: Record<string, number | boolean | string> = {},
 ): Condition | null {
   if (outputA === outputB) return null;
   const idef = getIndicator(indicateurId);
   if (!idef) return null;
   const cles = new Set(idef.outputs.map((o) => o.key));
   if (!cles.has(outputA) || !cles.has(outputB)) return null;
-  return { type: "indicateur-croisement", indicateurId, params: {}, outputA, outputB, sens };
+  return { type: "indicateur-croisement", indicateurId, params: { ...params }, outputA, outputB, sens };
 }
 
 // ─────────────────────────── Sorties de l'alerte de seuil ───────────────────────────
@@ -186,6 +188,17 @@ export function paramsInstancePourAlerte(def: IndicatorDef, instances: readonly 
   }
   if (params.filtreFlux === true && SORTIES_FILTRE_FLUX.has(output)) return { origine: "refus", refus: MOTIF_FILTRE_FLUX };
   return { origine: "instance", params };
+}
+
+/**
+ * Réglages d'une alerte de croisement posée depuis le formulaire (revue finale du lot A2) : mêmes
+ * règles que l'alerte de seuil (`paramsInstancePourAlerte`) — AXIS et AXIS S/R copient la première
+ * instance de la vue principale, mêmes refus —, le filtre flux étant refusé si L'UNE des deux
+ * sorties croisées est `etat` ou `preAchat`.
+ */
+export function reglagesCroisement(def: IndicatorDef, instances: readonly IndicatorInstance[], outputA: string, outputB: string): ReglagesAlerte {
+  const a = paramsInstancePourAlerte(def, instances, outputA);
+  return a.origine === "refus" ? a : paramsInstancePourAlerte(def, instances, outputB);
 }
 
 /** Explication de la pastille « ≠ graphe », écrite sous la ligne de l'alerte (lisible au doigt) et en titre. */
@@ -399,6 +412,22 @@ export interface HoteAlerte {
   daemonAlertes: boolean;
 }
 
+/** Ligne de la note : l'historique que le graphe charge pour une alerte d'amorce `amorce` (AXIS 1 500, AXIS S/R 3 000). */
+function ligneAmorceNote(amorce: number): string {
+  return `Le graphe charge ${amorce} bougies pour elle ; s'il en obtient moins (place plus courte, chargement échoué), elle est évaluée sur celles-là, avec la mention «\u00a0amorce courte\u00a0».`;
+}
+
+/** Ligne de la note : d'où viennent les réglages (lot A2), ou le refus motivé. */
+function ligneReglagesNote(reglages: ReglagesAlerte): string {
+  return reglages.origine === "refus"
+    ? `Pas d'alerte : ${reglages.refus}`
+    : reglages.origine === "instance"
+      ? "Réglages de l'instance du graphe, copiés à la création : l'alerte ne suit pas leurs changements."
+      : reglages.origine === "defaut"
+        ? "Réglages par défaut de l'indicateur, absent du graphe."
+        : "Réglages par défaut de l'indicateur, pas ceux de l'instance du graphe.";
+}
+
 /**
  * Note sous le formulaire d'une alerte de seuil, une phrase par ligne : la portée de l'évaluation,
  * le libellé exact que portera l'alerte, la réserve d'une sortie non mesurée, l'historique que le
@@ -425,19 +454,9 @@ export function noteAlerteSeuil(
       lignes.push("Sortie non mesurée — lecture indicative, jamais une promesse.");
     }
     const amorce = amorceAlerte({ condition });
-    if (amorce > 0 && condition.type === "indicateur-seuil") {
-      lignes.push(`Le graphe charge ${amorce} bougies pour elle ; s'il en obtient moins (place plus courte, chargement échoué), elle est évaluée sur celles-là, avec la mention «\u00a0amorce courte\u00a0».`);
-    }
+    if (amorce > 0) lignes.push(ligneAmorceNote(amorce));
   }
-  lignes.push(
-    reglages.origine === "refus"
-      ? `Pas d'alerte : ${reglages.refus}`
-      : reglages.origine === "instance"
-        ? "Réglages de l'instance du graphe, copiés à la création : l'alerte ne suit pas leurs changements."
-        : reglages.origine === "defaut"
-          ? "Réglages par défaut de l'indicateur, absent du graphe."
-          : "Réglages par défaut de l'indicateur, pas ceux de l'instance du graphe.",
-  );
+  lignes.push(ligneReglagesNote(reglages));
   const rienNeSonne = "Rien ne sonne application fermée ou téléphone verrouillé";
   lignes.push(
     !hote.daemonAlertes
@@ -446,6 +465,20 @@ export function noteAlerteSeuil(
         ? "Application fermée : seul le daemon local sonne, en 1m sur Binance."
         : `${rienNeSonne} : le daemon local n'évalue que le 1m sur Binance.`,
   );
+  return lignes;
+}
+
+/**
+ * Note sous le formulaire d'une alerte de croisement, une phrase par ligne : la portée de
+ * l'évaluation (texte d'avant le lot A2, inchangé), l'historique que le graphe charge pour AXIS et
+ * AXIS S/R, et l'origine des réglages ou le refus motivé (`reglagesCroisement`, revue finale du lot
+ * A2 : mêmes lignes que l'alerte de seuil). `condition` nulle : saisie incomplète, ou réglages refusés.
+ */
+export function noteAlerteCroisement(condition: Condition | null, timeframe: Timeframe, reglages: ReglagesAlerte): string[] {
+  const lignes = [`Évalué à la clôture de bougie ${timeframe} (TF figé à la création). Onglet fermé, le daemon ne couvre que la minute.`];
+  const amorce = condition === null ? 0 : amorceAlerte({ condition });
+  if (amorce > 0) lignes.push(ligneAmorceNote(amorce));
+  lignes.push(ligneReglagesNote(reglages));
   return lignes;
 }
 

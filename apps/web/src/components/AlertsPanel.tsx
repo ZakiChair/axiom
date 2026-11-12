@@ -67,8 +67,10 @@ import {
   explicationMuette,
   INDICATEURS_CROISEMENT,
   INDICATEURS_SEUIL,
+  noteAlerteCroisement,
   noteAlerteSeuil,
   paramsInstancePourAlerte,
+  reglagesCroisement,
   sansMarche,
   sortiesAlerte,
   texteAmorceCourte,
@@ -264,6 +266,17 @@ export function AlertsPanel() {
   const outputsCroisement = useMemo(() => {
     return getIndicator(indicateurCroise)?.outputs ?? [];
   }, [indicateurCroise]);
+  // Croisement : mêmes réglages que l'alerte de seuil (AXIS, AXIS S/R : instance du graphe ou
+  // défauts, refus motivé ; autres : défauts du registre), revue finale du lot A2.
+  const reglagesCroise = useMemo((): ReglagesAlerte => {
+    const idef = getIndicator(indicateurCroise);
+    return idef !== undefined
+      ? reglagesCroisement(idef, indicateursActifs, outputA, outputB)
+      : { origine: "registre", params: {} };
+  }, [indicateurCroise, outputA, outputB, indicateursActifs]);
+  const conditionCroise = reglagesCroise.origine === "refus"
+    ? null
+    : construireConditionCroisement(indicateurCroise, outputA, outputB, sensCroisement, reglagesCroise.params);
 
   const onChangeIndicateurCroise = (id: string) => {
     setIndicateurCroise(id);
@@ -314,12 +327,16 @@ export function AlertsPanel() {
       }
       condition = conditionSeuil;
     } else if (type === "indicateur-croisement") {
-      const c = construireConditionCroisement(indicateurCroise, outputA, outputB, sensCroisement);
-      if (c === null) {
+      // Réglages de l'instance du graphe (AXIS, AXIS S/R) ou défauts du registre, comme le seuil.
+      if (reglagesCroise.origine === "refus") {
+        setErreurForm(reglagesCroise.refus);
+        return;
+      }
+      if (conditionCroise === null) {
         setErreurForm("Deux sorties DIFFÉRENTES du même indicateur requises.");
         return;
       }
-      condition = c;
+      condition = conditionCroise;
     } else if (type === "funding-extreme") {
       // funding-extreme : seuilAbs en fraction (saisie % → /100) ; z optionnel.
       const absPct = Number(seuilAbsPct);
@@ -743,6 +760,7 @@ export function AlertsPanel() {
             <select
               value={indicateurCroise}
               onChange={(e) => onChangeIndicateurCroise(e.target.value)}
+              aria-label="Indicateur du croisement"
               className="w-full rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
             >
               {INDICATEURS_CROISEMENT.map((d) => (
@@ -755,6 +773,7 @@ export function AlertsPanel() {
               <select
                 value={outputA}
                 onChange={(e) => setOutputA(e.target.value)}
+                aria-label="Sortie A du croisement"
                 className="min-w-0 flex-1 rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
               >
                 {outputsCroisement.map((o) => (
@@ -769,6 +788,7 @@ export function AlertsPanel() {
               <select
                 value={outputB}
                 onChange={(e) => setOutputB(e.target.value)}
+                aria-label="Sortie B du croisement"
                 className="min-w-0 flex-1 rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
               >
                 {outputsCroisement.map((o) => (
@@ -787,10 +807,11 @@ export function AlertsPanel() {
               <option value="baisse">↓ A croise B à la baisse</option>
               <option value="les-deux">↕ les deux</option>
             </select>
-            <p className="px-0.5 text-[10px] text-text-dim">
-              Évalué à la clôture de bougie {tfCourant} (TF figé à la création). Onglet
-              fermé, le daemon ne couvre que la minute.
-            </p>
+            <div data-note-croisement className="space-y-0.5 px-0.5 text-[10px] text-text-dim">
+              {noteAlerteCroisement(conditionCroise, tfCourant, reglagesCroise).map((ligne) => (
+                <p key={ligne} className="break-words">{ligne}</p>
+              ))}
+            </div>
           </div>
         )}
 

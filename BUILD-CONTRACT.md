@@ -3447,7 +3447,8 @@ intégrés dans l'ordre « infobulle », « alertes A1 » sur la branche `feat/a
     `touchstart`, la position de la pile d'avis ; et, depuis la revue globale, la fermeture d'un
     flux par le test (`WebSocketRoute.close`) suivie de la reconnexion, la route d'un second
     marché tenue par une promesse, la mention de rattrapage écrite en heure locale par le
-    moteur de rendu. **Rien n'a été prouvé sur un vrai iPhone**
+    moteur de rendu. Ces passages ont eu lieu en CI le 12 novembre (voir « Première exécution
+    de la CI », plus bas) : trois échecs, corrigés. **Rien n'a été prouvé sur un vrai iPhone**
     (police, zone de sécurité, barre d'outils de Safari, bip, retour d'arrière-plan) **ni sur
     les API réelles** : flux bouchonnés, cas de référence déjà vu. Sous l'émulation Chromium le
     canvas est dessiné à l'échelle 1 : son texte paraît plus flou que sur un appareil réel.
@@ -3468,7 +3469,9 @@ intégrés dans l'ordre « infobulle », « alertes A1 » sur la branche `feat/a
   - Après les corrections d'intégration : **1 176 672 / 353 276**, soit +684 / +199 de plus.
   - Après les corrections de la revue globale : **1 177 240 / 353 534**, soit +568 / +258 de
     plus (mesuré sur `912ab1a` juste avant : 1 176 672 / 353 276, la ligne précédente).
-  - Chantier entier : **+6 168 / +2 394** ; marge gzip **6 466**, au-dessus des 3 000 exigés.
+  - Après la correction de la pile d'avis trouvée par la CI (`Toasts.tsx`), sur la tête de la
+    branche : **1 177 441 / 353 577**, soit +201 / +43 de plus.
+  - Chantier entier : **+6 369 / +2 437** ; marge gzip **6 423**, au-dessus des 3 000 exigés.
   - Fichiers à la demande : 141, 1 734 113 / 638 860 (+9 152 / +3 581 sur le chantier, dont
     +1 299 / +414 pour la revue globale) : le runtime des alertes et leur panneau, chargés
     après le premier rendu.
@@ -3520,6 +3523,27 @@ intégrés dans l'ordre « infobulle », « alertes A1 » sur la branche `feat/a
       face à un, deux et trois avis dans 10 configurations, « Détails » ouvert dans 6, le
       paysage avec un pane d'indicateur dans 9, les rangées de l'infobulle dans 25 ;
     - non lancés ici : `pnpm check:e2e` complet, WebKit, Vercel et daemon réels.
+  - Première exécution de la CI (12 novembre 2026), seul endroit où WebKit joue ces parcours :
+    - sur `912ab1a`, le job `mobile` était rouge : trois parcours de `mobile-axis-alertes`
+      échouaient sur WebKit, aucun sur Chromium ;
+    - un défaut réel : la pile d'avis ne mesurait le haut des barres du bas qu'à son
+      apparition, au redimensionnement de la fenêtre et quand une barre paraît ou disparaît.
+      À 320 px, au retour d'un thème à chasse fixe vers le thème par défaut, la navigation
+      basse change de hauteur sur WebKit sans que la fenêtre change : l'avis gardait sa place
+      et en recouvrait 2 px (bas de l'avis à 458 px, haut de la navigation à 456).
+      `Toasts.tsx` suit maintenant la taille de chaque barre, bordure et marges intérieures
+      comprises ; une étape du parcours épaissit la navigation sans toucher à la fenêtre et
+      échoue sans la correction, sur Chromium aussi ;
+    - deux attentes trop strictes : WebKit rend 0,9999 à « entièrement dans l'écran » pour un
+      avis dont la largeur n'est pas entière (il lui manque un soixante-quatrième de pixel,
+      son unité de mise en page). L'attente accepte 0,999 ; les bords de la boîte restent
+      mesurés au demi-pixel juste après ;
+    - sur `08944a0` (ces corrections), les jobs `check` et `mobile` sont verts ; sur `905af9d`
+      (corrections de la revue globale comprises), le job `mobile` l'est aussi : 77 parcours
+      passés et 1 sauté sur les deux moteurs, en 5,3 minutes pour une étape plafonnée à 9 ;
+    - ces échecs n'ont pas pu être rejoués dans le conteneur : WebKit ne s'y installe pas,
+      son hôte de téléchargement est refusé par la politique réseau de l'environnement. La
+      correction du défaut est prouvée ici sur Chromium, et sur WebKit par la CI seule.
 - **Reporté.**
   - Alerte de prix au bord d'une zone forte, posée au toucher : le seul avertissement plus tôt
     que la clôture (lot suivant).

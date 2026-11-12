@@ -76,6 +76,8 @@ export function Toasts() {
   return (
     <div
       aria-live="polite"
+      // Repère lu par l'encart du graphe (`chart/candleReadout.ts`), qui s'arrête au-dessus de la pile.
+      data-pile-avis=""
       // Au-dessus des barres : le bas de la pile est posé sur le haut de la plus haute (translation de sa propre hauteur).
       style={hautNavigation === null ? undefined : { top: hautNavigation - ECART_NAVIGATION_PX, bottom: "auto", transform: "translateY(-100%)" }}
       className="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2"

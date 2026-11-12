@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
 import type { Locator, Page, WebSocketRoute } from "@playwright/test";
+import { BOUGIES, figerDate, persisterBtc4h, QUATRE_HEURES, reglerDate, servirKlines } from "./axis-sr-telephone";
 
 /**
  * Aide du parcours « alertes d'AXIS au téléphone » (mobile-axis-alertes.e2e.ts). Réseau fermé :
@@ -8,21 +8,12 @@ import type { Locator, Page, WebSocketRoute } from "@playwright/test";
  * la place le ferait. Aucune horloge de test : seule `Date` est figée (et réglable), les minuteurs
  * et la peinture du graphe tournent normalement.
  *
- * Aide propre à ce parcours : elle n'importe pas `axis-sr-telephone.ts`, qu'un autre lot modifie
- * en parallèle. La lecture de la fixture et la route des klines y font double emploi, à unifier.
+ * Harnais commun avec `axis-sr-telephone.ts` (intégration du 12 novembre 2026) : la fixture, la
+ * date figée (`figerDate`, déplacée par `reglerDate`), l'état persisté et la route des klines en
+ * viennent. Seuls les flux poussés et les lectures propres aux alertes sont ici.
  */
 
-/** Une ligne de la fixture : time, open, high, low, close, volume, buyVolume. */
-type LigneFixture = [number, number, number, number, number, number, number];
-
-export const QUATRE_HEURES = 14_400_000;
-
-/** Cas de référence : 3 000 bougies BTCUSDT 4h, lues telles quelles dans le dépôt. */
-export const BOUGIES = (
-  JSON.parse(
-    readFileSync(new URL("../../../../packages/indicators/src/strategy/fixtures/btcusdt-4h-3000.json", import.meta.url), "utf8"),
-  ) as { bougies: LigneFixture[] }
-).bougies;
+export { BOUGIES, QUATRE_HEURES };
 
 /** Ouverture (ms) de la bougie d'indice `i`. */
 export function ouverture(i: number): number {
@@ -38,6 +29,8 @@ export interface OptionsAxisAlertes {
   maintenant: number;
   /** Définitions d'alerte déjà enregistrées (forme persistée de `axiom:alerts:v1`). */
   alertes?: unknown[];
+  /** Indicateurs déjà persistés sur la vue principale (défaut : aucun). */
+  indicateurs?: Parameters<typeof persisterBtc4h>[1];
 }
 
 /** Flux de marché bouchonnés : ce que le parcours pousse vers la page. */
@@ -54,63 +47,19 @@ export interface FluxAxisAlertes {
 
 /**
  * À installer APRÈS `bouchonnerReseau` (les routes les plus récentes priment) : BTCUSDT 4h sur la
- * vue principale, sans indicateur ; klines servies depuis la fixture en respectant `startTime`,
+ * vue principale, sans indicateur sauf `indicateurs` ; klines servies depuis la fixture en respectant `startTime`,
  * `endTime` et `limit`, comme Binance ; flux kline 4h et ticker de BTCUSDT tenus par le test.
  * BTCUSDT est aussi le symbole de référence par défaut : la même route sert le garde-fou de régime.
  */
 export async function preparerAxisAlertes(page: Page, options: OptionsAxisAlertes): Promise<FluxAxisAlertes> {
-  const servies = BOUGIES.slice(0, options.servies);
-
-  await page.addInitScript(
-    ({ maintenant, alertes }) => {
-      // Seule `Date` est figée : `Date.now()` et `new Date()` rendent l'instant réglé par le test.
-      const DateReelle = Date;
-      let instant = maintenant;
-      class DateFigee extends DateReelle {
-        constructor(...args: unknown[]) {
-          if (args.length === 0) super(instant);
-          else super(...(args as [number]));
-        }
-        static override now(): number {
-          return instant;
-        }
-      }
-      const fenetre = window as unknown as { Date: DateConstructor; __axiomReglerHorloge: (t: number) => void };
-      fenetre.Date = DateFigee as unknown as DateConstructor;
-      fenetre.__axiomReglerHorloge = (t: number) => {
-        instant = t;
-      };
-
-      const btc4h = { exchange: "binance", symbol: "BTCUSDT", timeframe: "4h" };
-      localStorage.setItem("axiom:onboarding:v1", JSON.stringify({ completed: true, step: 0 }));
-      if (!localStorage.getItem("axiom:chartState:v1")) {
-        localStorage.setItem("axiom:chartState:v1", JSON.stringify({ ...btc4h, chartType: "candle_solid", indicators: [] }));
-      }
-      if (!localStorage.getItem("axiom:chartLayout:v1")) {
-        localStorage.setItem("axiom:chartLayout:v1", JSON.stringify({ layout: "1", slots: [btc4h, btc4h, btc4h] }));
-      }
-      if (alertes !== null && !localStorage.getItem("axiom:alerts:v1")) {
-        localStorage.setItem("axiom:alerts:v1", JSON.stringify({ defs: alertes, journal: [] }));
-      }
-    },
-    { maintenant: options.maintenant, alertes: options.alertes ?? null },
-  );
-
-  await page.route("**/api.binance.com/api/v3/klines*", (route) => {
-    const params = new URL(route.request().url()).searchParams;
-    if (params.get("symbol") !== "BTCUSDT" || params.get("interval") !== "4h") {
-      return route.fulfill({ status: 503, json: { error: "fixture absente" } });
+  await figerDate(page, options.maintenant);
+  await persisterBtc4h(page, options.indicateurs);
+  await page.addInitScript((alertes) => {
+    if (alertes !== null && !localStorage.getItem("axiom:alerts:v1")) {
+      localStorage.setItem("axiom:alerts:v1", JSON.stringify({ defs: alertes, journal: [] }));
     }
-    const debut = Number(params.get("startTime") ?? -Infinity);
-    const fin = Number(params.get("endTime") ?? Infinity);
-    const limite = Number(params.get("limit") ?? 500);
-    const fenetre = servies.filter(([t]) => t >= debut && t <= fin);
-    const lignes = params.has("startTime") ? fenetre.slice(0, limite) : fenetre.slice(-limite);
-    return route.fulfill({
-      json: lignes.map(([t, o, h, l, c, v, achat]) =>
-        [t, String(o), String(h), String(l), String(c), String(v), t + QUATRE_HEURES - 1, String(v * c), 1, String(achat), String(achat * c), "0"]),
-    });
-  });
+  }, options.alertes ?? null);
+  await servirKlines(page, BOUGIES.slice(0, options.servies));
 
   // Flux tenus par le test : la socket s'ouvre côté page, rien ne part vers la place.
   const kline = new Set<WebSocketRoute>();
@@ -126,8 +75,7 @@ export async function preparerAxisAlertes(page: Page, options: OptionsAxisAlerte
   await page.routeWebSocket(/stream\.binance\.com(:\d+)?\/stream\?streams=.*btcusdt@ticker/, tenir(ticker));
 
   return {
-    reglerHorloge: (maintenant) =>
-      page.evaluate((t) => (window as unknown as { __axiomReglerHorloge: (t: number) => void }).__axiomReglerHorloge(t), maintenant),
+    reglerHorloge: (maintenant) => reglerDate(page, maintenant),
     pousserCloture: (i) => {
       const ligne = BOUGIES[i];
       if (ligne === undefined) throw new Error(`bougie ${i} absente de la fixture`);

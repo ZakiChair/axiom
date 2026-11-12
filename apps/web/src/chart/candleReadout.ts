@@ -167,6 +167,12 @@ export class CandleReadout {
         // caché dessous resterait actif.
         const panneau = this.container.querySelector<HTMLElement>("[data-overlay-legend]");
         bas = Math.min(bas, this.container.clientHeight - 80 - (panneau?.offsetHeight ?? 0));
+        // Pile d'avis (`Toasts.tsx`) : un avis d'alerte reste jusqu'au toucher, par-dessus le
+        // graphe. L'encart s'arrête 4 px au-dessus d'elle. LIMITES : il ne se replace pas quand un
+        // avis paraît après lui (le toucher suivant le replace) ; pile plus haute que la zone libre
+        // (deux avis à 320 × 568), il passe en partie dessous, fermer un avis le découvre.
+        const pile = document.querySelector("[data-pile-avis]")?.getBoundingClientRect();
+        if (pile?.height) bas = Math.min(bas, pile.top - this.container.getBoundingClientRect().top - 4);
       }
       if (left + bw > bound.left + bound.width) left = x - OFFSET - bw;
       if (top + bh > bas) top = y - OFFSET - bh;

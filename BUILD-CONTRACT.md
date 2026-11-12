@@ -3890,6 +3890,8 @@ bougent : ce sont des simulations sur des données déjà vues, et ce contrat ne
 de trades et de changements d'état, jamais un PnL. Le lot a été conçu sur un prototype jetable,
 développé en cinq étapes, revu par un agent indépendant (calcul financier, AGENTS.md), puis
 intégré : l'intégration ajoute un test (mineur de la revue), vérifie au téléphone et consigne.
+La CI a ensuite trouvé, sous WebKit, un défaut du harnais des parcours (pas du produit), corrigé
+avant la fusion, puis la revue finale l'a contre-vérifié (« Revues et tests »).
 
 - **Constat BT-1, rejoué sur le cas de référence** (BTCUSDT 4h, fixture
   `packages/indicators/src/strategy/fixtures/btcusdt-4h-3000.json` close le 31 octobre 2026,
@@ -3922,8 +3924,12 @@ intégré : l'intégration ajoute un test (mineur de la revue), vérifie au tél
 - **Ce qui change.** Fichiers : `apps/web/src/store/backtest.ts`, `apps/web/src/data/backtestArchive.ts`
   (version et commentaires), `apps/web/src/components/BacktestWindow.tsx` (une phrase) ; tests
   `apps/web/src/store/backtest-amorce.test.ts` (19) et `backtest-amorce-chargeur.test.ts` (2),
-  nouveaux ; parcours `apps/web/e2e/mobile-backtest-amorce.e2e.ts` (1, nouveau). Aucun test ni
-  helper existant n'est modifié.
+  nouveaux ; parcours `apps/web/e2e/mobile-backtest-amorce.e2e.ts` (1, nouveau). Aucun test
+  existant n'est modifié. Un helper existant l'est, `apps/web/e2e/helpers/reseau-bouchonne.ts`
+  (défaut trouvé par la CI sous WebKit, voir « Revues et tests ») : les modules servis par Vite
+  (`MODULES_VITE` : `/src`, `/@fs`, `/@vite`, `/@id`, `/node_modules`, `/@react-refresh`)
+  passent quel que soit leur type de ressource annoncé ; les API et les proxys de développement
+  restent fermés.
   - **Amorce demandée** (`amorceRun`, pure) : 0 quand aucune règle ne lit d'indicateur et sans
     stop ATR. Sinon le plus grand de : `AMORCE_MIN_BT` = 300 (le warmup de la campagne v5) ;
     l'`amorceBougies` déclarée par chaque indicateur lu (AXIS 1 500, AXIS S/R **3 000, même pour
@@ -3995,10 +4001,12 @@ intégré : l'intégration ajoute un test (mineur de la revue), vérifie au tél
   3 mois, 10 → 11 sur 6 mois, 24 → 26 sur 1 an ; bougies d'état différent de la série complète :
   186, 86 et 54 → 0. Bougies chargées sur 3 mois : 539 sans amorce, 839 avec 300, 2 039 pour AXIS,
   3 000 (toute la fixture) pour AXIS S/R.
-- **Plafond de la CI relevé** (commit de l'orchestrateur, sur `main` avant ce lot) : l'étape des
-  parcours téléphone passe de 9 à 12 minutes, le job de 15 à 18. Elle joue Chromium puis WebKit ;
-  durée observée 5,3 min, puis 7 min 07 s le 12 novembre après le lot 2 (41 parcours par moteur) :
-  il ne restait que 2 min de marge. Ce lot y ajoute un parcours par moteur.
+- **Plafond de la CI relevé** (commit de l'orchestrateur `604b01b`, premier commit de la branche
+  de ce lot, qui entre dans `main` avec lui) : l'étape des parcours téléphone passe de 9 à
+  12 minutes, le job de 15 à 18. Elle joue Chromium puis WebKit ; durée observée 5,3 min, puis
+  7 min 07 s le 12 novembre après le lot 2 (41 parcours par moteur) : il ne restait que 2 min de
+  marge. Ce lot y ajoute un parcours par moteur : 7 min 24 s sur `ebb0518` (42 par moteur, 83
+  passés et 1 sauté).
 - **Vérifié au téléphone à l'intégration** (Chromium, réseau bouchonné et date figée comme les
   parcours, cas de référence, AXIS sur le graphe ; script jetable hors dépôt, captures remises au
   propriétaire). Fonctions → BT → « AXIS confluence (4h) » → « 3 mois » → « Lancer le backtest » :
@@ -4062,10 +4070,13 @@ intégré : l'intégration ajoute un test (mineur de la revue), vérifie au tél
     runs).
   - **Un run « prix + stop ATR »** reçoit 300 bougies d'amorce : il peut lui aussi entrer à
     l'ouverture de la plage, avec la note « 1re entrée… ».
-  - **Rien n'est prouvé sur WebKit ici** : ce parcours sera le premier run BT, donc le premier
-    worker de backtest, exécuté sur WebKit, en CI. Un échec y serait un vrai constat pour
-    l'iPhone. Rien sur un vrai iPhone, ni sur les API réelles (réseau bouchonné, données déjà
-    vues).
+  - **WebKit, en CI seulement, sur le serveur de développement.** Le parcours y est le premier
+    run BT, donc le premier worker de backtest, exécuté sous WebKit : il a d'abord échoué, par un
+    défaut du harnais, corrigé (« Revues et tests »), puis passé. Les parcours tournent sur le
+    serveur de développement de Vite, qui sert le worker module par module : ni le worker
+    construit pour la production (un fichier servi de la même origine) ni un vrai iPhone ne
+    sont prouvés. Rien non plus sur les API réelles (réseau bouchonné, données déjà vues).
+    WebKit ne s'installe pas dans le conteneur : la CI est son seul témoin.
 - **Budget.** Mesuré à l'intégration par `scripts/verifier-budget-build.mjs` (Node 22.23.4),
   build du code d'avant le lot puis du lot intégré ; plafonds 1 220 000 / 360 000 inchangés.
   - Chargement initial, octets bruts / gzip : **1 181 923 / 355 208** avant, **1 181 923 /
@@ -4102,6 +4113,44 @@ intégré : l'intégration ajoute un test (mineur de la revue), vérifie au tél
     `gate-g4-alertes`, 22 sur 22 en 51,5 s ; parcours téléphone sur Chromium, 42 sur 42 en
     2,9 min, dont `mobile-backtest-amorce` (4,3 s). Non lancés ici : WebKit, `pnpm check:e2e`
     complet, Vercel, daemon et flux réels.
+  - Première exécution de la CI (12 novembre 2026), seul endroit où WebKit joue ce parcours :
+    - sur `127ea89`, `e519704`, `5ed1b10` et `83d26e8`, le job `mobile` était rouge (job `check`
+      vert) : `mobile-backtest-amorce` échouait sous WebKit, à l'essai comme à la reprise, et
+      passait sous Chromium ; les 82 autres parcours passaient. Sur `127ea89`, « Terminé »
+      n'était pas paru en 30 s ; `e519704` attend en lisant le store, qui finissait en phase
+      « error » ; `83d26e8` fait écrire l'état complet par l'attente ;
+    - l'erreur écrite : « Worker du backtest en échec. » (2 039 bougies reçues sur 2 040), après
+      37 réponses 503 dans la console ;
+    - la cause était dans le harnais, pas dans le produit. `bouchonnerReseau` ne laissait passer
+      que les GET de l'origine annoncés ni « fetch » ni « xhr » ; WebKit annonce « fetch » les
+      imports d'un worker de module ; chacun recevait la 503 des API fermées, et `onerror` du
+      worker, dans le store, écrivait ce message. Chromium annonce « script » le worker et ses
+      241 imports (sonde hors dépôt), d'où le parcours vert sous Chromium ;
+    - corrigé par `ebb0518` (helper seul ; le parcours n'est ni sauté ni assoupli) : sur ce
+      commit, jobs `check` et `mobile` verts, `mobile-backtest-amorce` passé sous WebKit du
+      premier coup (7,5 s), 83 parcours passés et 1 sauté en 7,4 min ;
+    - contre-épreuve hors dépôt, sous Chromium : le harnais d'avant `ebb0518`, les imports du
+      worker annoncés « fetch » comme sous WebKit, reproduit l'erreur (« Worker du backtest en
+      échec. », 36 réponses 503) ;
+    - ces échecs n'ont pas pu être rejoués sous WebKit dans le conteneur, où il ne s'installe
+      pas : le correctif est prouvé sous WebKit par la CI seule, et sous Chromium par la garde
+      ci-dessous.
+  - Revue finale (12 novembre 2026), sur `5ed1b10` : un constat bloquant, le job `mobile` rouge
+    sous WebKit sans cause lue ; contre-vérifié, il est retenu mineur, la cause étant dans le
+    harnais et déjà corrigée par `ebb0518` (CI verte). Deux mineurs : l'attente n'écrivait que la
+    phase (déjà corrigé par `83d26e8`, dont l'attente a nommé l'erreur ci-dessus) ; le commit du
+    plafond de la CI était dit « sur `main` », il est le premier de cette branche. Corrigés par
+    un agent distinct des réviseurs :
+    - cette consignation (« Ce qui change », plafond de la CI, limite WebKit, CI ci-dessus) ;
+    - garde du harnais dans le parcours : un `fetch` de la page, annoncé « fetch » par les deux
+      moteurs, doit recevoir le module du worker (200) et la 503 d'un proxy fermé (`/fredapi`).
+      Sans la correction de `ebb0518`, cette étape échoue sous Chromium aussi (« Received:
+      [503, 503] ») ;
+    - l'attente du run ne s'arrête que sur une phase finale (« done » ou « error ») ; celle de
+      `83d26e8` s'arrêtait sur toute phase autre que « chargement » et « calcul », donc aussi sur
+      un « idle » lu avant que le toucher ne lance le run. Message vérifié sous Chromium en
+      forçant l'échec du worker (route 503, hors commit) : « run du backtest :
+      {"phase":"error","error":"Worker du backtest en échec.", … } », en 6 s.
 - **Limites des sections précédentes levées** (annotées sur place) : « Amorce du backtest
   (BT-1) », dans les « Reporté » des sections « AXIS — lisible, honnête et annonciateur », lot 1
   et lot 2 de la phase 2.

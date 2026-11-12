@@ -101,6 +101,16 @@ test("AXIS confluence sur 3 mois : les 4 cycles du graphe, la note de l'amorce l
   const attendus = tradesDuGraphe(graphe, HORLOGE_AXIS_SR - 90 * JOUR);
   expect(attendus).toHaveLength(4);
 
+  // Garde du harnais (CI du 12 novembre 2026) : WebKit annonce « fetch » les imports d'un
+  // worker de module, et le réseau bouchonné leur répondait 503 (« Worker du backtest en
+  // échec. »). Un fetch de la page, annoncé « fetch » par les deux moteurs, doit recevoir le
+  // module du worker, et un proxy de développement doit rester fermé : sans la correction de
+  // `bouchonnerReseau`, cette étape échoue sous Chromium aussi.
+  const statuts = await page.evaluate(() => Promise.all(
+    ["/src/workers/backtest.worker.ts?worker_file&type=module", "/fredapi/series"].map(async (u) => (await fetch(u)).status),
+  ));
+  expect(statuts, "module du worker servi, proxy fermé").toEqual([200, 503]);
+
   // Fenêtre BT au toucher.
   await page.getByRole("navigation", { name: "Navigation du terminal" }).getByRole("button", { name: "Fonctions", exact: true }).tap();
   await page.getByRole("menuitem", { name: /^BT\b/ }).tap();
@@ -109,11 +119,12 @@ test("AXIS confluence sur 3 mois : les 4 cycles du graphe, la note de l'amorce l
   await bt.getByLabel("Plage historique").selectOption("3m");
   await bt.getByRole("button", { name: "Lancer le backtest" }).tap();
   // Le premier run charge le worker du backtest et tout son graphe de modules, servis un à un
-  // par le serveur de développement : plus lent sous WebKit que sous Chromium (le 12 novembre,
-  // « Terminé » n'était pas paru au bout de 30 s sous WebKit en CI). L'attente lit l'état du
-  // store et, si elle échoue, dit la phase atteinte, l'erreur et les erreurs de la page.
-  await expect.poll(async () => (await etatDuRun(page)).phase, { timeout: 90_000, message: "run du backtest encore en cours" })
-    .not.toMatch(/^(chargement|calcul)$/);
+  // par le serveur de développement : l'attente est large. Elle lit l'état du store jusqu'à
+  // une phase finale (« done » ou « error » ; un « idle » lu avant que le toucher ne lance le
+  // run ne la termine pas), puis, si le run a échoué, écrit la phase, l'erreur, l'avancement et
+  // les erreurs de la page : c'est ce qui a nommé, en CI, l'échec du worker sous WebKit.
+  await expect.poll(async () => (await etatDuRun(page)).phase, { timeout: 90_000, message: "run du backtest sans phase finale" })
+    .toMatch(/^(done|error)$/);
   const etatFinal = await etatDuRun(page);
   expect(etatFinal.phase, `run du backtest : ${JSON.stringify({ ...etatFinal, erreursPage })}`).toBe("done");
   await expect(bt.getByText("Terminé", { exact: true })).toBeVisible();

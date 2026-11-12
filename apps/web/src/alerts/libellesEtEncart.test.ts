@@ -85,6 +85,26 @@ describe("alerte et encart : un même évènement, la même mention", () => {
     }
   });
 
+  // Alertes A2 (12 novembre 2026) : l'alerte du pré-signal et le segment du graphe disent tous deux
+  // « non mesuré » et « pré-signal ». Le segment écrit « AXIS pré-signal », son texte d'avant le lot,
+  // inchangé ; le libellé de l'alerte porte le nom de l'indicateur, « AXIS S/R ».
+  it("pré-signal d'achat : « non mesuré » dans le libellé comme sous le doigt, aux bougies où la sortie vaut 1", () => {
+    const libelle = decrireAlerte({ condition: seuil("stratAxisSr", "preAchat", ">=", 1), timeframe: "4h" });
+    expect(libelle).toBe(`AXIS S/R ${NON_MESURE} · pré-signal d'achat (niveau sur le graphe)`);
+    const bougies = aUn(sr.series.preAchat);
+    expect(bougies.length).toBe(63);
+    // Le segment n'est dessiné qu'à la dernière bougie décidée : graphe arrêté à quelques-unes d'entre elles.
+    for (const idx of [bougies[0]!, 2168, bougies.at(-1)!]) {
+      const prefixe = BTC.slice(0, idx + 1);
+      const res = computeIndicator(getIndicator("stratAxisSr")!, prefixe, {}, { refClose: prefixe.map((c) => c.close) }, "4h");
+      expect(res.series.preAchat?.[idx], `bougie ${idx}`).toBe(1);
+      const segment = (res.annotations?.segments ?? []).find((s) => s.info?.includes("pré-signal") === true);
+      expect(segment, `segment du pré-signal à la bougie ${idx}`).toBeDefined();
+      const sousLeDoigt = texteEncart(segment!.info!);
+      expect(sousLeDoigt.startsWith(`AXIS pré-signal ${NON_MESURE} > `), sousLeDoigt).toBe(true);
+    }
+  });
+
   it("hors 4h et sans unité : le libellé ne dit jamais mieux que le graphe", () => {
     // Autre unité : le statut du libellé est celui de l'infobulle calculée dans cette unité.
     for (const unite of ["1h", "1d", "1w"] as const) {

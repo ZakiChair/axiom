@@ -3113,7 +3113,10 @@ intégrés dans l'ordre « infobulle », « alertes A1 » sur la branche `feat/a
     n'est plus évaluée tant que le tampon du graphe ne la compte pas. Avant : évaluée sur le
     tampon présent, 500 bougies à l'ouverture. Recul assumé : sur un marché dont l'historique
     est plus court que l'amorce, l'alerte n'est jamais évaluée, alors que le graphe y dessine
-    les signaux (mention « amorce courte »).
+    les signaux (mention « amorce courte »). (Recul levé le 12 novembre 2026, lot 4 : le graphe
+    charge l'historique des alertes actives de son marché et, remontée finie sous l'amorce,
+    l'alerte est évaluée en le disant. Voir « AXIS — alertes sans l'indicateur affiché,
+    réglages du graphe et pré-signal ».)
   - Convention : ni `def.message` ni le libellé d'une alerte ne portent le symbole ou l'unité ;
     l'hôte les ajoute (« SYMBOLE UNITÉ — libellé » pour l'avis du web, « AXIOM — SYMBOLE » pour
     le daemon). Écrite en tête de `packages/alerts/src/libelles.ts`, à suivre par le lot
@@ -3270,11 +3273,17 @@ intégrés dans l'ordre « infobulle », « alertes A1 » sur la branche `feat/a
     formulaire, une note dit la portée (« Évaluée à chaque clôture 4h, application ouverte sur
     BTCUSDT 4h. »), le libellé exact, la réserve d'une sortie non mesurée, l'historique demandé,
     l'origine des réglages (« Réglages par défaut de l'indicateur, pas ceux de l'instance du
-    graphe. ») et « Rien ne sonne application fermée ou téléphone verrouillé. ».
+    graphe. ») et « Rien ne sonne application fermée ou téléphone verrouillé. ». (Depuis le
+    12 novembre 2026, lot 4 : la ligne d'historique dit que le graphe charge l'historique pour
+    l'alerte ; pour AXIS et AXIS S/R, celle des réglages dit qu'ils viennent de l'instance du
+    graphe, ou des défauts quand l'indicateur est absent, ou pourquoi l'alerte est refusée.)
   - **Liste.** Le libellé et l'unité reviennent à la ligne, jamais coupés. Une def de bougie que
     rien n'évalue l'écrit à la place de « armée » : « hors graphe » (le graphe principal
     n'affiche pas son actif ou son unité), « historique insuffisant : N sur A », suivi de
-    « , affichez l'indicateur » seulement quand l'afficher peut y remédier. Une alerte
+    « , affichez l'indicateur » seulement quand l'afficher peut y remédier. (Levé le 12 novembre
+    2026, lot 4 : « , affichez l'indicateur » n'est plus écrit, le graphe chargeant l'historique
+    de l'alerte ; « historique en chargement : N sur A » pendant la remontée, puis, sous l'état
+    d'armement, « amorce courte : N sur A » quand la place n'a pas l'amorce.) Une alerte
     désarmée qui n'a jamais sonné — posée alors que sa condition était déjà vraie — écrit
     « condition déjà vraie : sonnera quand elle le redeviendra », sur sa propre ligne, au lieu
     de « déclenchée » (`etatArmement`, revue globale). Le dossier de décision
@@ -3289,7 +3298,8 @@ intégrés dans l'ordre « infobulle », « alertes A1 » sur la branche `feat/a
       figé, et l'état « hors graphe » de la liste est vrai (avant : la liste l'écrivait, le
       runtime évaluait quand même).
     - Alerte « muette » sous l'amorce : plus de « affichez l'indicateur », qui ne la ferait pas
-      sonner.
+      sonner. (Périmé depuis le 12 novembre 2026, lot 4 : ce remède n'est plus écrit pour aucune
+      alerte.)
 - **Les deux lots ensemble**, mesurés à l'intégration sur le vrai graphe (Chromium, réseau
   bouchonné, bougies 0 à 2 937 du cas de référence, AXIS et AXIS S/R affichés).
   - Harnais commun : `mobile-axis-alertes` part de `figerDate` (`axis-sr-telephone.ts`), sans
@@ -3388,10 +3398,16 @@ intégrés dans l'ordre « infobulle », « alertes A1 » sur la branche `feat/a
     (inchangé, à corriger côté daemon).
   - **Une alerte d'indicateur n'est évaluée que si le graphe principal affiche son actif et son
     unité**, avec les réglages PAR DÉFAUT de l'indicateur, pas ceux de l'instance du graphe.
+    (Levée en partie le 12 novembre 2026, lot 4 : une alerte d'AXIS ou d'AXIS S/R copie à sa
+    création les réglages de l'instance du graphe, pastille « ≠ graphe » s'ils divergent ensuite ;
+    l'actif et l'unité restent requis.)
   - **Une alerte AXIS S/R sans l'indicateur affiché reste en « historique insuffisant »** : le
     graphe ne charge 3 000 bougies que pour lui (1 500 pour AXIS). Sur un marché plus court que
     l'amorce — unité 1w, actif récent — elle n'est jamais évaluée, et la liste l'écrit sans
-    remède. Chargement de l'historique pour l'alerte : lot A2.
+    remède. Chargement de l'historique pour l'alerte : lot A2. (Levée le 12 novembre 2026, lot 4 :
+    le graphe charge l'historique des alertes actives de son marché ; sur un marché plus court,
+    l'alerte est évaluée avec la mention « amorce courte ». Voir « AXIS — alertes sans
+    l'indicateur affiché, réglages du graphe et pré-signal ».)
   - Une alerte de réaction sonne aussi sur une bougie de signal confirmé, où le graphe ne
     dessine pas de triangle creux (bougie 2 850 du cas de référence).
   - `statutAxis` ne lit pas les réglages du cœur : le libellé non plus (inchangé).
@@ -3566,7 +3582,8 @@ intégrés dans l'ordre « infobulle », « alertes A1 » sur la branche `feat/a
     bord d'une zone forte ».)
   - Alertes A2 : historique chargé pour l'alerte sans l'indicateur affiché, amorce courte,
     réglages de l'instance lus par l'alerte, pastille « ≠ graphe », sortie `preAchat` du
-    pré-signal.
+    pré-signal. (Livrées le 12 novembre 2026 : voir « AXIS — alertes sans l'indicateur affiché,
+    réglages du graphe et pré-signal ».)
   - Amorce du backtest (BT-1). (Livrée le 12 novembre 2026 : voir « AXIS — le backtest charge
     l'amorce des indicateurs ».)
   - Daemon : alertes sur plusieurs unités, fenêtre à la profondeur de l'amorce.
@@ -3867,7 +3884,9 @@ du lot intégré a relevé un majeur (« Annuler » pouvait supprimer une autre 
   - Liste des zones fortes dans le panneau Alertes, pour une zone hors de la fenêtre de prix.
   - Appui long sur la bande ; offre en paysage (dessin de l'encart à refaire, voir le lot 1).
   - Alertes A2 : historique chargé pour l'alerte sans l'indicateur affiché, amorce courte,
-    réglages de l'instance lus par l'alerte, pastille « ≠ graphe », sortie `preAchat`.
+    réglages de l'instance lus par l'alerte, pastille « ≠ graphe », sortie `preAchat`. (Livrées le
+    12 novembre 2026 : voir « AXIS — alertes sans l'indicateur affiché, réglages du graphe et
+    pré-signal ».)
   - Amorce du backtest (BT-1). (Livrée le 12 novembre 2026 : voir « AXIS — le backtest charge
     l'amorce des indicateurs ».)
 
@@ -4163,10 +4182,332 @@ avant la fusion, puis la revue finale l'a contre-vérifié (« Revues et tests �
 - **Reporté.**
   - Alertes A2 : historique chargé pour l'alerte sans l'indicateur affiché, amorce courte,
     réglages de l'instance lus par l'alerte, pastille « ≠ graphe », sortie `preAchat` du
-    pré-signal.
+    pré-signal. (Livrées le 12 novembre 2026 : voir « AXIS — alertes sans l'indicateur affiché,
+    réglages du graphe et pré-signal ».)
   - Test prospectif du signal précoce, du pré-signal et des retournements : aucun n'a été
     soumis à des données jamais vues.
   - Daemon : alertes sur plusieurs unités, fenêtre à la profondeur de l'amorce.
   - Backtest : entrée des presets par croisement (a) ; réactions sur zone forte comme conditions
     (e) ; amorce obtenue dans l'archive ; amorce d'AXIS S/R réduite à 1 500 quand seuls l'état ou
     le score sont lus ; exclusion des paramètres qui ne sont pas des longueurs.
+
+## AXIS — alertes sans l'indicateur affiché, réglages du graphe et pré-signal (phase 2, lot 4, 12 novembre 2026)
+
+Demande du propriétaire, le 9 novembre 2026 : « améliorer les signaux d'AXIS », puis « j'aimerais
+les voir apparaître suffisamment tôt, que je puisse voir quelle zone marque une forte résistance ou
+support » ; le 11 novembre : « Top, merge dans main et poursuit l'amélioration d'axis », puis « Top
+après ça merge directement les pr et déploie ». Les lots 1 à 3 de la phase 2 (sections
+précédentes) sont fusionnés dans `main`. Ce quatrième lot livre les « alertes A2 » que la critique
+avait reportées du lot 1 : au téléphone, une alerte AXIS ou AXIS S/R **sonne sans que l'indicateur
+soit affiché** (le graphe charge lui-même l'historique qu'elle demande, et dit quand la place n'en
+a pas assez) ; elle **copie les réglages de l'instance du graphe** à sa création ; et une alerte
+sur le **pré-signal d'achat** d'AXIS S/R, non mesuré, devient possible. **Aucun fournisseur, hôte,
+dépendance ni champ de `@axiom/types` nouveau ; AXIS (`stratAxis`) n'est pas touché ; les huit
+sorties existantes d'AXIS S/R, ses signaux, marqueurs et textes, et les sorties d'alerte
+existantes ne changent pas (épinglés) ; aucun chiffre de performance.** Le lot a été développé en
+trois livrables sur une branche, revu par un agent indépendant (sondes sur le vrai graphe,
+contre-épreuves), puis intégré en un commit ; l'intégration corrige les deux mineurs de la revue,
+vérifie le parcours du propriétaire au téléphone et consigne. Une revue finale, sur la branche
+intégrée, a relevé trois mineurs, corrigés (voir « Revues et tests »).
+
+- **Arbitrages de l'orchestrateur, à confirmer par le propriétaire.** Aucun n'a été demandé mot
+  pour mot ; chacun sert la demande du 9 novembre.
+  - **Le graphe charge l'historique d'une alerte AXIS, indicateur affiché ou non.** La vue
+    principale étend son historique pour les indicateurs des alertes ACTIVES de son marché, pas
+    seulement pour ceux qu'elle affiche. Coût : une alerte AXIS S/R fait charger 3 000 bougies
+    (5 à 6 pages de 500 en 4h), AXIS 1 500. Une alerte VWAP ou pivots active fait de même charger
+    sa session ; une alerte RSI déclenche une passe sans requête, sauf quand une amorce attend
+    encore sur une place à sec : une page, vide, est alors redemandée, et l'état publié repasse
+    par « en cours » le temps de cette page (l'alerte qui attend son amorce n'est pas évaluée
+    pendant ce temps : sa clôture est différée, ni perdue ni doublée). Un indicateur ajouté au
+    graphe fait de même, comme avant le lot pour un indicateur à amorce affiché. Coût consigné
+    plutôt que supprimé (revue finale ; épinglé par un test de `extensionSession.test.ts`) :
+    l'éviter demanderait de distinguer, dans la boucle d'extension, une place à sec d'un plafond de
+    pages atteint.
+  - **Copie figée des réglages.** À sa création depuis le formulaire, alerte de seuil ou de
+    croisement (le croisement depuis la revue finale), l'alerte copie les réglages de la PREMIÈRE
+    instance de l'indicateur sur la vue principale, et ne la suit pas ensuite : la liste porte la
+    pastille « ≠ graphe » quand ils diffèrent. Pour AXIS et AXIS S/R seulement ; les autres
+    indicateurs gardent les réglages par défaut, comme avant. Refus motivé pour une instance au
+    réglage « unite », et pour un filtre flux sur la sortie `etat` ou `preAchat` (pour un
+    croisement, sur l'une de ses deux sorties ; l'alerte ne lit pas l'open interest).
+  - **Neuvième sortie d'AXIS S/R, `preAchat`**, ajoutée en fin de liste, masquée.
+  - **Amorce courte évaluée et dite, plutôt que bloquée.** Quand la remontée de l'historique est
+    finie sans atteindre l'amorce (place plus courte : unité 1w, actif récent, ou chargement
+    échoué), l'alerte est évaluée sur les bougies obtenues et son déclenchement le dit. Le recul
+    assumé au lot 1 (« sur un marché plus court que l'amorce, l'alerte n'est jamais évaluée »)
+    est levé : une alerte armée sur une telle place sonne désormais, avec la mention.
+  - Choix d'intégration (revue du lot) : un **échec réseau** pendant la remontée est dit comme
+    tel (« chargement échoué »), jamais comme une place plus courte, et **retenté 60 s plus
+    tard**, sauf si une passe réussit entre-temps (revue finale) ; la note du formulaire nomme
+    les deux causes ; ses guillemets « amorce courte » tiennent par des espaces insécables.
+  - Décisions du développeur entérinées : l'état publié porte l'amorce visée (`amorceVisee`),
+    pour qu'une alerte AXIS S/R posée pendant la remontée d'AXIS vers 1 500 ne soit pas évaluée
+    à 1 500 (correction 2 de la critique) ; le N du message compte les bougies closes lues par le
+    moteur, celui de la liste le tampon, bougie en formation comprise (comme « historique
+    insuffisant » du lot 1) ; la mention d'amorce courte précède celle de rattrapage.
+  - Tests épinglés modifiés à dessein, expliqués dans les messages de commit : états et note de
+    `alertsPanel.util.test.ts` ; trois parcours de `mobile-axis-alertes.e2e.ts` (note du
+    parcours 1 ; « écrans étroits », où l'alerte AXIS S/R fait remonter les 2 937 bougies
+    servies ; « place sans l'historique de l'amorce », réécrit : son texte « affichez
+    l'indicateur » n'existe plus et l'alerte armée y sonne, « · amorce courte (1200 bougies) »
+    puis la date du signal) ; liste des sorties de `stratAxisSr.test.ts` ; table de classement
+    de `libelles.test.ts` ; à l'intégration, le test d'échec réseau de la passe d'extension
+    (échec publié, relance programmée). Aucun test désactivé, sauté ou supprimé.
+- **Ce qui change.** Fichiers : `apps/web/src/alerts/amorceGraphe.ts` (nouveau, chemin initial,
+  sans import du runtime), `alerts/runtime.ts`, `chart/ChartInstance.tsx`,
+  `components/AlertsPanel.tsx`, `components/alertsPanel.util.ts`,
+  `packages/indicators/src/strategy/stratAxisSr.ts`, `packages/alerts/src/libelles.ts` ; tests
+  `alerts/amorceGraphe.test.ts` (13, nouveau), `strategy/stratAxisSr.preAchat.test.ts` (7,
+  nouveau), et des cas ajoutés à `alerts/runtime.test.ts` (90 → 102),
+  `chart/extensionSession.test.ts` (36 → 53, dont 4 de la revue finale),
+  `components/alertsPanel.util.test.ts` (49 → 72, dont 5 de la revue finale),
+  `engine.axisSr.test.ts` (7 → 9), `libelles.test.ts` (12 → 13),
+  `alerts/libellesEtEncart.test.ts` (1 → 2) ; un parcours ajouté à
+  `e2e/mobile-axis-alertes.e2e.ts` (8 → 9), lectures ajoutées à
+  `e2e/helpers/axis-alertes-telephone.ts` (`retenirPagesHistorique`, `poserInstance`,
+  `lireReglagesAlertes`). Le daemon n'est pas modifié.
+  - **Historique chargé pour l'alerte** (`indicateursAlertesMarche`, `indicateursExtension`,
+    purs). Indicateurs des alertes actives du marché de la vue principale : même source et même
+    symbole, unité de la def ou def sans unité, sous-conditions des composites comprises, triés
+    et sans doublon ; ajoutés aux indicateurs affichés pour la vue PRINCIPALE seulement (une vue
+    secondaire ne sert aucune alerte). L'ordonnanceur d'extension n'est relancé que si la LISTE
+    TRIÉE de ces indicateurs change (`surIndicateursAlertes`) : un armement ou un tir réécrit les
+    définitions sans relancer de page (correction 3 de la critique).
+  - **État publié de l'extension** (`extensionGrapheStore`, `publierExtension`) :
+    `{ cle, terminee, echec, amorceVisee, bougies }` pour la clé « source|symbole|unité » de la
+    vue principale. La passe (`passeExtension`, extraite de `ChartInstance.tsx`, testée sans
+    React) publie « en cours » avant la première page, puis « terminée » APRÈS la réapplication
+    du buffer, quelle que soit l'issue (rien à charger, amorce atteinte, place à sec, plafond de
+    pages, échec réseau), rien après une identité invalidée. Après un échec, une nouvelle passe
+    est programmée 60 s plus tard (`creerRelanceExtension`, `RELANCE_EXTENSION_MS`), une seule
+    en attente, annulée par une passe finie sans échec, « rien à charger » compris
+    (`annulerRelance`, revue finale), et au démontage. Au début de chaque cycle de données, la
+    vue principale publie `null` AVANT que le buffer ne soit vidé (`demarrerCycleDonnees`).
+  - **Règle R2, commune au runtime et à la liste** (`profondeurAlerte`, chargé à la demande) :
+    « atteinte » si le tampon compte l'amorce A (règle du lot 1, même décompte que l'extension) ;
+    « courte » si l'extension de CE marché est terminée et visait au moins A ; « attente » sinon
+    (rien de connu, remontée en cours, autre marché, amorce visée plus courte) — aucune
+    évaluation, ni calibrage ni tir. Le runtime s'abonne à l'état publié : une def devient
+    évaluable sous la même clôture quand la remontée finit (R1). Même règle pour les composites.
+  - **Textes**, au caractère près (épinglés par les tests) :
+    - message d'un déclenchement : « <libellé> · amorce courte (N bougies) », par exemple « AXIS
+      S/R non mesuré · réaction sur support fort · amorce courte (2989 bougies) » ; après un
+      échec : « … · amorce courte (501 bougies, chargement échoué) » ; avec rattrapage : « AXIS
+      test 4h ≈ EMA 200 seule · signal d'achat · amorce courte (1200 bougies) · bougie close le
+      JJ/MM à HH:MM » ;
+    - avis : « BTCUSDT 4h — AXIS S/R non mesuré · réaction sur support fort · amorce courte
+      (2989 bougies) », bouton « Voir » ;
+    - liste, à la place de « armée » : « historique en chargement : 500 sur 3000 » pendant la
+      remontée ; « historique insuffisant : 1500 sur 3000 » quand rien n'est connu ; « hors
+      graphe » inchangé. Sous l'état d'armement, qui reste à sa place (`data-amorce-alerte`) :
+      « amorce courte : 2988 sur 3000 », ou « amorce courte : 500 sur 3000, chargement échoué :
+      nouvel essai sous 1 min ». « , affichez l'indicateur » n'est plus jamais écrit ;
+    - pastille « ≠ graphe » (`differeDuGraphe` : une clé de `def.inputs` lue autrement que par
+      l'instance, ou instance sur une unité supérieure ; sous-conditions comprises), expliquée
+      sous la ligne et en titre : « Réglages différents de l'instance du graphe : l'alerte garde
+      ceux de sa création, ses signaux peuvent différer de ceux affichés. » ;
+    - note du formulaire, ligne d'historique (AXIS 1500, AXIS S/R 3000) : « Le graphe charge 3000
+      bougies pour elle ; s'il en obtient moins (place plus courte, chargement échoué), elle est
+      évaluée sur celles-là, avec la mention « amorce courte ». » ;
+    - note du formulaire, origine des réglages, une ligne parmi : « Réglages de l'instance du
+      graphe, copiés à la création : l'alerte ne suit pas leurs changements. » ; « Réglages par
+      défaut de l'indicateur, absent du graphe. » ; « Pas d'alerte : <motif> » ; hors AXIS,
+      inchangé : « Réglages par défaut de l'indicateur, pas ceux de l'instance du graphe. » ;
+    - motifs du refus, écrits dans la note et à l'envoi : « Filtre flux réglé sur l'instance du
+      graphe : l'alerte ne lit pas l'open interest, elle ne suivrait pas ses signaux. Retirez ce
+      réglage de l'instance pour poser l'alerte. » ; pour « unite », le motif existant
+      (`motifUniteHorsGraphe`), « Paramètre « unité » [1d] réservé au graphe : l'alerte
+      calculerait sur ses propres bougies, sans unité supérieure. Retire ce paramètre. » ;
+    - note du formulaire de croisement (revue finale, `noteAlerteCroisement`,
+      `data-note-croisement`), une phrase par ligne : « Évalué à la clôture de bougie 4h (TF
+      figé à la création). Onglet fermé, le daemon ne couvre que la minute. » (inchangée) ; pour
+      AXIS et AXIS S/R, la ligne d'historique de l'alerte de seuil ; puis, pour tout indicateur,
+      sa ligne d'origine des réglages ou de refus (« Réglages par défaut de l'indicateur, pas
+      ceux de l'instance du graphe. » hors AXIS : ligne nouvelle sous un croisement MACD). Ses
+      trois sélecteurs ont un nom accessible : « Indicateur du croisement », « Sortie A du
+      croisement », « Sortie B du croisement ».
+  - **Réglages de l'instance** (`paramsInstancePourAlerte`, pur) : valeurs de la première
+    instance lues comme le calcul les lit (`resolveParams`), limitées aux clés de `def.inputs`
+    qui diffèrent du défaut ; sans instance, aucune (défauts). Le libellé reste juste hors test
+    (« AXIS S/R réglage non validé · signal d'achat » pour un stop copié). Prouvé par le runtime
+    sur le vrai moteur : une alerte copiée d'une instance à force de zone 8 sonne à la bougie
+    2 985 et pas à 2 988, où la réaction n'est que de force 6. Le croisement suit les mêmes
+    règles (`reglagesCroisement`, revue finale) : réglages de `paramsInstancePourAlerte`, filtre
+    flux refusé si l'une des deux sorties croisées est `etat` ou `preAchat` ;
+    `construireConditionCroisement` reçoit ces réglages (avant : toujours `params: {}`, et
+    « ≠ graphe » dès la création).
+  - **Pré-signal.** Sortie `{ key: "preAchat", name: "Pré-signal d'achat (non mesuré)", style:
+    "line", masquee: true }` : 1 si `preSignalAxisSr` est défini à la bougie close i, 0 sinon,
+    indéfinie sur la bougie en formation ; ni `signauxPrecoces` ni `maxZonesSr` n'y touchent.
+    Les huit séries existantes sont identiques (empreintes FNV-1a 64 bits sur la fixture,
+    relevées sur le fichier d'avant) ; causalité par préfixe sur les indices 2 400 à 2 999.
+    Libellé : « AXIS S/R non mesuré · pré-signal d'achat (niveau sur le graphe) » ; comparaison
+    brute : « AXIS S/R non mesuré · Pré-signal d'achat (non mesuré) <= 0 ». Formulaire : entrée
+    « Non mesuré · pré-signal d'achat », préréglée (>= 1), note « Signal précoce non mesuré —
+    lecture indicative, jamais une promesse. ». Fronts au moteur sur les préfixes depuis 1 500,
+    confirmés sans écart avec les listes du concepteur : avec la référence du garde-fou 1 540,
+    1 546, 1 549, 1 585, 2 168, 2 277 ; sans elle 1 540, 1 545, 1 585, 2 165, 2 277.
+  - **Daemon**, lu et non modifié : ses relais écrivent le même libellé (Telegram « 🔔 AXIOM —
+    BTCUSDT » puis le libellé) ; il n'évalue pas une alerte 4h (`evaluableSurBougie1m` faux).
+- **Vérifié au téléphone à l'intégration** (Chromium, réseau bouchonné et date figée comme les
+  parcours, cas de référence BTCUSDT 4h servi jusqu'à la bougie 2 987 ; script jetable hors
+  dépôt, captures à l'échelle 2 remises au propriétaire). Parcours du propriétaire à 390 × 844
+  et 320 × 568, thème par défaut et Bloomberg : sans AXIS S/R affiché, alerte « Non mesuré ·
+  réaction sur support fort » créée au toucher ; la liste écrit « historique en chargement :
+  500 sur 3000 », puis « armée » et « amorce courte : 2988 sur 3000 » ; la clôture de 2 988
+  pousse UN avis, « BTCUSDT 4h — AXIS S/R non mesuré · réaction sur support fort · amorce
+  courte (2989 bougies) », et la même clôture repoussée aucun autre ; AXIS S/R affiché à force
+  de zone 8, la note écrit « Réglages de l'instance du graphe, copiés à la création… » et
+  l'alerte créée porte `forceZoneForte: 8`, la première alerte la pastille « ≠ graphe » ;
+  l'alerte de pré-signal se crée, sa note et son libellé se lisent. Chaque texte est entier,
+  dans l'écran, sans rien par-dessus ; nombre de lignes :
+
+  | Écran, thème | État pendant | Avis | Note des réglages | Libellé du pré-signal | Explication « ≠ graphe » |
+  |---|---|---|---|---|---|
+  | 390 × 844, défaut | 1 | 3 | 2 | 2 | 3 |
+  | 390 × 844, Bloomberg | 1 | 3 | 2 | 2 | 3 |
+  | 320 × 568, défaut | 1 | 3 | 2 | 2 | 3 |
+  | 320 × 568, Bloomberg | 2 (« 3000 » seul) | 3 | 3 | 3 | 4 |
+
+  - Échec réseau (pages d'historique en erreur 500) : état publié « terminée, échec, 500
+    bougies » ; liste « amorce courte : 500 sur 3000, chargement échoué : nouvel essai sous
+    1 min » (2 lignes à 390 × 844, 3 à 320 × 568 en Bloomberg) ; la clôture de 2 988 pousse
+    « BTCUSDT 4h — AXIS S/R non mesuré · réaction sur support fort · amorce courte (501 bougies,
+    chargement échoué) ». Réseau rétabli : la relance part 60 s après la page en échec (61 s
+    après l'ouverture), remonte toute la place (2 989 bougies), la liste écrit « amorce courte :
+    2989 sur 3000 », aucun second avis.
+  - Pré-signal, place servie jusqu'à 2 167 puis clôture de 2 168 : « BTCUSDT 4h — AXIS S/R non
+    mesuré · pré-signal d'achat (niveau sur le graphe) · amorce courte (2169 bougies) », 3 lignes
+    à 390 × 844 en thème par défaut, 4 à 320 × 568 en Bloomberg, lu en entier.
+  - Vu sur les captures, antérieur au lot (mise en page du lot 1) : le tiret « — » de la colonne
+    du dernier déclenchement se pose au bout de la première ligne du libellé (« AXIS S/R non
+    mesuré · réaction — », puis « sur support fort · 4h ») ; à 320 px le sélecteur natif rogne
+    « Non mesuré · pré-signal d'achat » (« non mesuré » reste lisible) ; l'avis recouvre le bas
+    du graphe tant qu'il n'est pas touché.
+- **Limites**, dites sans détour.
+  - **Rien ne sonne Safari fermé ou téléphone verrouillé** : une alerte n'est évaluée que par
+    l'application ouverte, au premier plan.
+  - **Pas de daemon sur Vercel** : une alerte posée sur l'iPhone n'atteint ni Telegram ni macOS.
+    Et **le daemon n'évalue pas les alertes 4h** ; une def `preAchat` en 1m ou sans unité y
+    serait évaluée sur 1 500 bougies (`FENETRE_BOUGIES`), sous l'amorce de 3 000 et sans
+    référence du garde-fou (limite antérieure).
+  - **Une alerte n'est évaluée que si le graphe principal affiche son actif et son unité.** Le
+    graphe ne charge l'historique que pour les alertes du marché qu'il affiche.
+  - **Rien n'est prouvé sur un vrai iPhone ni sur les API réelles** : flux bouchonnés, cas de
+    référence déjà vu ; WebKit ne tourne qu'en CI (il ne s'installe pas dans le conteneur).
+  - **Évaluée sur une amorce courte, l'alerte peut sonner autrement que sur une série longue.**
+    La mention le dit, sans dire de combien. Après un échec réseau, elle est évaluée sur le
+    tampon obtenu (500 bougies au démarrage) jusqu'à ce qu'une relance réussisse ; hors ligne,
+    une relance part chaque minute.
+  - **Une page qui ne répond jamais** laisse « historique en chargement » sans fin (aucun délai
+    ajouté, lu dans le code). Une extension en cours va à son terme quand l'alerte est supprimée.
+  - **Sur une place plus courte que l'amorce**, chaque passe nouvelle (alerte créée, supprimée,
+    mise en pause ou reprise qui change la liste triée ; indicateur ajouté au graphe) redemande
+    une page, vide, et repasse par « en cours » le temps de cette page (revue finale, sonde F4 :
+    une page de plus par passe). Un armement, un tir ou une passe réussie après un échec ne
+    redemandent aucune page.
+  - **« ≠ graphe » ne compare qu'à la première instance** ; la def ne suit jamais l'instance ; le
+    refus du filtre flux ne vaut que pour les sorties `etat` et `preAchat` (pour un croisement :
+    l'une de ses deux sorties) : une réaction posée sur une instance au filtre flux copie ce
+    réglage sans refus.
+  - **Référence du garde-fou en cache** (60 s, alignée en LOCF, antérieur au lot) : à la
+    clôture, si le cache a moins d'une minute, la dernière bougie lit la clôture précédente de
+    la référence. Mesuré à l'intégration : la place bouchonnée ne servant pas la bougie 2 168 à
+    la référence relue à la clôture (4 requêtes), le pré-signal n'y sonne pas ; servie, il
+    sonne. Le graphe lit le même cache (`chart/auxProvider.ts`). Sur Binance réel, la référence
+    est relue à la clôture quand le cache a expiré (lu dans le code, non prouvé en direct).
+  - Le segment du graphe écrit « AXIS pré-signal non mesuré », l'alerte « AXIS S/R non mesuré ·
+    pré-signal… » (texte du segment inchangé, par doctrine). Le libellé dit « (niveau sur le
+    graphe) », mais le niveau n'y est tracé que si AXIS S/R est affiché, avec les signaux
+    précoces, et dans la fenêtre de prix (vu sur la capture de l'avis, sans indicateur affiché).
+  - Les fronts du pré-signal (6 et 5 relevés) viennent de données déjà vues : aucune
+    performance, aucun test prospectif.
+- **Budget.** Chargement initial, octets bruts / gzip, par `scripts/verifier-budget-build.mjs`
+  (Node 22.23.4), plafonds 1 220 000 / 360 000 inchangés ; trois builds dans le même dépôt, deux
+  de plus à la revue finale.
+  - Avant, sur `main` : **1 181 923 / 355 212**.
+  - Lot réuni : 1 183 594 / 355 746 (+1 671 / +534), la mesure du développeur retrouvée.
+  - Après les corrections de l'intégration : **1 183 959 / 355 914** (+365 / +168).
+  - Après les corrections de la revue finale : **1 184 044 / 355 948** (+85 / +34 : l'annulation
+    de la relance dans la passe extraite ; le croisement est chargé à la demande). Mesure d'avant
+    retrouvée en reconstruisant avec les sources de `13245f4`.
+  - Lot entier : **+2 121 / +736**, sous le seuil d'arrêt de +1 200 ; marge gzip **4 052**,
+    au-dessus des 3 000 exigés. Sur le chemin initial : `alerts/amorceGraphe.ts`, la passe
+    extraite de `ChartInstance.tsx`, la sortie `preAchat` et le libellé ; la règle R2, ses
+    textes et le formulaire restent dans des fichiers chargés à la demande.
+  - Fichiers à la demande : 141, 1 735 537 / 639 550 → 1 738 534 / 640 391 (lot réuni) →
+    1 738 776 / 640 563 → 1 739 426 / 640 642 (revue finale : réglages et note du croisement).
+- **Revues et tests.**
+  - Contre-épreuves du développeur : 21 règles retirées une à une, toutes détectées, plus celle
+    des empreintes ; sur le vrai graphe, sans les indicateurs d'alerte dans l'extension, deux
+    parcours échouent.
+  - Revue indépendante (sondes hors dépôt sur le vrai graphe : coût réseau, changement d'unité
+    pendant la remontée, échec réseau, pause et reprise, refus du formulaire) : aucun constat
+    bloquant ni majeur ne restait ; deux mineurs, corrigés à l'intégration. Mesures de la revue :
+    une alerte AXIS S/R sans indicateur affiché sur une place de 2 988 bougies fait 6 pages
+    d'extension (5 × 500 puis 12), remontée finie environ 4,8 s après l'ouverture, aucune
+    requête de plus en 5 s, aucune relance après le tir.
+    - Échec réseau dit comme une place à sec, évaluation figée à 500 bougies pour la session :
+      corrigé (drapeau `echec`, textes, relance à 60 s, note).
+    - Remise à `null` au début d'un cycle de données couverte par rien : extraite
+      (`demarrerCycleDonnees`) et épinglée ; deux tests du runtime montrent ce qu'elle empêche
+      (à marché égal, l'état « terminée » du cycle précédent faisait évaluer le backfill de
+      500 bougies) et qu'avec elle la def attend la nouvelle remontée.
+  - Contre-épreuves de l'intégration : neuf mutants (échec non publié, pas de relance, relances
+    empilées, pas de remise à `null`, remise après le vidage, mention, liste et runtime sans
+    l'échec, publication qui ignore l'échec), tous détectés par les tests.
+  - Vérification de l'intégration (12 novembre 2026, Node 22.23.4) : typage des 7 projets ;
+    indicateurs 233 fichiers / 1 151 tests, alertes 150, backtest 131, pacte 120, daemon 786,
+    web 479 fichiers / 7 270 tests (sans `chart/orderflow.cadence.test.ts`, qui lève une erreur
+    sans réseau) ; build du web et budget verts ; parcours hermétiques du bureau
+    `quatre-lots-indicateurs`, `quatre-lots-alertes`, `gate-g4-alertes`, `multivue`,
+    `niveaux-chart`, `analyse-expy`, `quatre-lots-decisions`, 30 sur 30 en 77 s ; parcours
+    téléphone sur Chromium, 43 sur 43 en 3,0 min, dont les 9 de `mobile-axis-alertes`
+    (46 s cumulées, le nouveau 4,9 s). Non lancés ici : WebKit, `pnpm check:e2e` complet,
+    Vercel, daemon et flux réels. L'étape téléphone de la CI (plafond 12 min, 7 min 04 s au
+    lot 3) reçoit un parcours de plus par moteur.
+  - Revue finale, sur la branche intégrée (sondes hors dépôt sur le vrai graphe : retour sur le
+    marché BTCUSDT → ETHUSDT → BTCUSDT, multivue, composite AXIS S/R ET RSI sans indicateur
+    affiché, place à sec puis alerte RSI, échec puis passe réussie ; sonde vitest du
+    croisement) : aucune alerte perdue ni doublée, aucun constat bloquant ni majeur ; trois
+    mineurs, corrigés :
+    - Relance inutile : après un échec, une passe réussie pour une autre cause (indicateur
+      ajouté, alerte créée) ne désarmait pas la relance, qui repartait 60 s après l'échec (page
+      vide redemandée sur la place à sec, « en cours » republié, alerte non évaluée le temps de
+      la page). Corrigé : `annulerRelance`, appelé par `passeExtension` en fin de passe sans
+      échec ; trois tests sous horloge simulée, la vue de test reliée à la vraie minuterie.
+      Sonde rejouée : aucune page ni aucun état publié dans les 63 s qui suivent l'échec (avant :
+      une page et deux états).
+    - Phrase fausse de ce contrat, « une alerte RSI déclenche une passe sans requête » : fausse
+      sur une place à sec où une amorce attend. Corrigée (arbitrages, limites, documentation du
+      propriétaire) ; le coût est épinglé par un test plutôt que supprimé. Sonde rejouée :
+      inchangée, une page vide par passe nouvelle, comme consigné.
+    - Croisement d'AXIS et d'AXIS S/R toujours aux réglages par défaut, sans refus ni mot dans la
+      note, et « ≠ graphe » dès la création. Corrigé : `reglagesCroisement`,
+      `noteAlerteCroisement`, cinq tests, et le parcours téléphone A2 étendu d'une alerte de
+      croisement sur AXIS S/R posée au toucher (note au caractère près, `forceZoneForte: 8`
+      copié, libellé, pas de « ≠ graphe », une capture).
+  - Contre-épreuves de la revue finale : sept mutants (pas d'annulation en fin de passe, ni sur
+    « rien à charger », réglages du croisement ignorés, seconde sortie ignorée, note sans la
+    ligne des réglages, croisement hors des règles d'AXIS, formulaire qui n'envoie pas les
+    réglages), tous détectés, le dernier par le parcours téléphone.
+  - Vérification de la revue finale (12 novembre 2026, Node 22.23.4) : typage des 7 projets ;
+    indicateurs 233 fichiers / 1 151 tests, alertes 150, backtest 131, pacte 120, daemon 786,
+    web 479 fichiers / 7 279 tests (sans `chart/orderflow.cadence.test.ts`) ; build du web et
+    budget verts ; mêmes parcours du bureau, 30 sur 30 en 1,3 min ; parcours téléphone sur
+    Chromium, 43 sur 43 en 2,9 min, le parcours A2 étendu en 4,8 s. Non lancés ici : WebKit,
+    `pnpm check:e2e` complet, Vercel, daemon et flux réels.
+- **Limites des sections précédentes levées** (annotées sur place) : lot 1, « historique
+  insuffisant … affichez l'indicateur » (la liste et la note) ; lot 1, une alerte d'AXIS ou
+  d'AXIS S/R évaluée avec les réglages PAR DÉFAUT ; lot 1, l'alerte AXIS S/R sans l'indicateur
+  affiché et le recul sur un marché plus court que l'amorce ; « Alertes A2 », reportées par les
+  lots 1, 2 et 3 (le pré-signal compris).
+- **Reporté.**
+  - Notification du navigateur onglet masqué.
+  - Daemon : alertes sur plusieurs unités, fenêtre à la profondeur de l'amorce, référence du
+    garde-fou.
+  - Test prospectif du signal précoce, du pré-signal et des retournements : aucun n'a été
+    soumis à des données jamais vues.
+  - Comparer « ≠ graphe » à toutes les instances, et proposer de recopier les réglages
+    actuels ; délai pour une page qui ne répond jamais.

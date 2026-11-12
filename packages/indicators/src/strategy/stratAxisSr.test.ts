@@ -79,6 +79,8 @@ describe("stratAxisSr — contrat et séparation d'avec stratAxis", () => {
       { key: "resistance", name: "Résistance active proche", style: "line", masquee: true },
       { key: "reactionSupport", name: "Réaction sur support fort", style: "line", masquee: true },
       { key: "reactionResistance", name: "Réaction sur résistance forte", style: "line", masquee: true },
+      // Modifié à dessein (alertes A2, 12 novembre 2026) : neuvième sortie, en fin de liste.
+      { key: "preAchat", name: "Pré-signal d'achat (non mesuré)", style: "line", masquee: true },
     ]);
     expect(PIVOT_SR_DEFAUT).toBe(5);
     expect(ZONE_SR_ATR_DEFAUT).toBe(0.5);

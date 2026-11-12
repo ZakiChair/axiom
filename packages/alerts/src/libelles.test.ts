@@ -35,6 +35,13 @@ describe("decrireAlerte — AXIS et AXIS S/R, au caractère près", () => {
     expect(libelle(seuil("stratAxisSr", "reactionSupport", ">", 0.5))).toBe("AXIS S/R non mesuré · réaction sur support fort");
   });
 
+  it("pré-signal d'achat (sortie preAchat, alertes A2) : « non mesuré » juste après le nom, le niveau est sur le graphe", () => {
+    expect(libelle(seuil("stratAxisSr", "preAchat", ">=", 1), "4h")).toBe("AXIS S/R non mesuré · pré-signal d'achat (niveau sur le graphe)");
+    expect(libelle(seuil("stratAxisSr", "preAchat", ">", 0))).toBe("AXIS S/R non mesuré · pré-signal d'achat (niveau sur le graphe)");
+    // Lu autrement que par son évènement : la comparaison est écrite, toujours « non mesuré ».
+    expect(libelle(seuil("stratAxisSr", "preAchat", "<=", 0), "4h")).toBe("AXIS S/R non mesuré · Pré-signal d'achat (non mesuré) <= 0");
+  });
+
   it("signal confirmé (sortie etat) : le statut du graphe, puis achat ou vente", () => {
     expect(libelle(seuil("stratAxis", "etat", ">=", 1), "4h")).toBe("AXIS test 4h ≈ EMA 200 seule · signal d'achat");
     expect(libelle(seuil("stratAxisSr", "etat", ">=", 1), "1h")).toBe("AXIS S/R 1h : test échoué · signal d'achat");
@@ -88,7 +95,7 @@ describe("decrireAlerte — propriétés", () => {
    * Classement de chaque sortie des deux indicateurs. Une sortie ajoutée au registre fait
    * échouer le premier test : il faut décider ici de son libellé avant de la proposer en alerte.
    */
-  const CLASSEMENT: Readonly<Record<string, "etat" | "reaction" | "brute">> = {
+  const CLASSEMENT: Readonly<Record<string, "etat" | "reaction" | "presignal" | "brute">> = {
     prixSignal: "brute",
     stop: "brute",
     etat: "etat",
@@ -97,6 +104,8 @@ describe("decrireAlerte — propriétés", () => {
     resistance: "brute",
     reactionSupport: "reaction",
     reactionResistance: "reaction",
+    // Alertes A2 (12 novembre 2026) : neuvième sortie d'AXIS S/R, non mesurée.
+    preAchat: "presignal",
   };
   const IDS = ["stratAxis", "stratAxisSr"] as const;
   const sorties = (id: string) => getIndicator(id)!.outputs;

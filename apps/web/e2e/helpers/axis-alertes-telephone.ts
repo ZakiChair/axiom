@@ -111,6 +111,45 @@ export async function preparerAxisAlertes(page: Page, options: OptionsAxisAlerte
   };
 }
 
+/** Pages d'historique retenues par `retenirPagesHistorique`. */
+export interface PagesRetenues {
+  /** Laisse passer les pages retenues et toutes les suivantes. */
+  liberer: () => void;
+  /** Pages en attente. */
+  retenues: () => number;
+}
+
+/**
+ * Retient les pages d'historique de la place — requêtes klines portant `endTime` : extension du
+ * graphe, pages suivantes de la référence du garde-fou — jusqu'à `liberer()` ; le backfill (sans
+ * `endTime`) passe. À installer APRÈS `preparerAxisAlertes` (la route la plus récente prime) : la
+ * page libérée est servie par la route de la fixture (`route.fallback`). Sert à lire l'état de la
+ * liste pendant la remontée de l'historique, qui sinon dure quelques millisecondes.
+ */
+export async function retenirPagesHistorique(page: Page): Promise<PagesRetenues> {
+  let ouvrir: () => void = () => {};
+  const porte = new Promise<void>((resolve) => {
+    ouvrir = resolve;
+  });
+  let ouverte = false;
+  let enAttente = 0;
+  await page.route("**/api.binance.com/api/v3/klines*", async (route) => {
+    if (!ouverte && new URL(route.request().url()).searchParams.has("endTime")) {
+      enAttente += 1;
+      await porte;
+      enAttente -= 1;
+    }
+    await route.fallback();
+  });
+  return {
+    liberer: () => {
+      ouverte = true;
+      ouvrir();
+    },
+    retenues: () => enAttente,
+  };
+}
+
 /** État du graphe principal, tel que le runtime des alertes le lit (`marketStore`). */
 export interface LectureMarche {
   symbol: string;
@@ -265,6 +304,31 @@ export async function lireMarque(page: Page): Promise<number | null> {
   return page.evaluate(async () => {
     const importer = new Function("return import('/src/lib/navigation.ts')") as () => Promise<{ navMarkStore: { getState: () => { time: number | null } } }>;
     return (await importer()).navMarkStore.getState().time;
+  });
+}
+
+/**
+ * Pose une instance d'indicateur sur la vue principale par le store du produit, réglages compris
+ * (comme l'éditeur de paramètres du menu Indicateurs). Rend son identifiant.
+ */
+export async function poserInstance(page: Page, defId: string, params: Record<string, number | boolean | string>): Promise<string> {
+  return page.evaluate(async ([id, reglages]) => {
+    const importer = new Function("return import('/src/store/indicators.ts')") as () => Promise<{
+      indicatorsStore: { getState: () => { append: (instances: Array<{ defId: string; params: object }>) => string[] } };
+    }>;
+    const [instanceId] = (await importer()).indicatorsStore.getState().append([{ defId: id, params: reglages }]);
+    if (instanceId === undefined) throw new Error(`instance ${id} non posée`);
+    return instanceId;
+  }, [defId, params] as const);
+}
+
+/** Réglages (`condition.params`) de chaque alerte enregistrée, dans l'ordre de la liste. */
+export async function lireReglagesAlertes(page: Page): Promise<Array<Record<string, unknown>>> {
+  return page.evaluate(async () => {
+    const importer = new Function("return import('/src/store/alerts.ts')") as () => Promise<{
+      alertsStore: { getState: () => { defs: Array<{ condition: { params?: Record<string, unknown> } }> } };
+    }>;
+    return (await importer()).alertsStore.getState().defs.map((d) => d.condition.params ?? {});
   });
 }
 

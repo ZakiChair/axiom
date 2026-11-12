@@ -551,6 +551,24 @@ describe("poserAlerteZone et offres prêtes pour l'encart et le menu", () => {
     expect(offreSousReticule(chart, BTC_4H, { paneId: "candle_pane", dataIndex: 1, y: yPane(76000) })?.etat).toBe("offre");
   });
 
+  // Constat majeur de la revue finale du lot : l'abonné du runtime (`alerts/runtime.ts`) réévalue de
+  // façon synchrone pendant `ajouter` — régime, puis composites — et `appliquerMisesAJour` remplace
+  // alors, à sa place, une composite qui sonne ou se réarme par un NOUVEL objet. Retrouver l'alerte
+  // créée par l'identité des objets rendait cette composite à « Annuler », qui la supprimait.
+  it("« Annuler » supprime l'alerte posée même quand un abonné synchrone réécrit une autre alerte pendant la pose", () => {
+    alertsStore.getState().ajouter({ symbol: "BTCUSDT", source: "binance", condition: { type: "prix-croise", niveau: 85000, sens: "hausse" } });
+    const autre = alertsStore.getState().defs[0]!;
+    // Comme le runtime : au changement des définitions, l'autre alerte est réécrite (ici réarmée).
+    const desabonner = alertsStore.subscribe((etat, precedent) => {
+      if (etat.defs !== precedent.defs && etat.defs.includes(autre)) alertsStore.getState().appliquerMisesAJour([{ ...autre, arme: true }]);
+    });
+    poserAlerteZone(chart, BTC_4H, support());
+    desabonner();
+    expect(alertsStore.getState().defs.map((d) => [d.id === autre.id, d.arme])).toEqual([[true, true], [false, undefined]]);
+    toastsStore.getState().toasts.find((t) => t.action?.libelle === "Annuler")!.action!.executer();
+    expect(alertsStore.getState().defs).toEqual([{ ...autre, arme: true }]);
+  });
+
   it("l'offre est relue AU MOMENT DU GESTE : le cours a franchi le bord entre l'affichage et le toucher, rien n'est créé", () => {
     const affichee = offreSousReticule(chart, BTC_4H, { paneId: "candle_pane", dataIndex: 1, y: yPane(76000) })!;
     expect(affichee.etat).toBe("offre");

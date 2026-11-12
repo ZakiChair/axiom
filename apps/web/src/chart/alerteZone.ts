@@ -223,10 +223,12 @@ export function poserAlerteZone(chart: Chart, marche: PriceAlertMarket, zone: Zo
     pousserToast(offre ? offre.libelle : `Pas d'alerte : ${memeRole.some((z) => z.deIdx === zone.deIdx) ? "le bord de la zone forte a bougé" : "la zone forte n'est plus tracée"}`);
     return offre;
   }
-  const alertes = alertsStore.getState();
-  if (!alertes.ajouter(offre.alerte)) return offre;
-  // `ajouter` ne rend pas l'identifiant : c'est celui de la seule def absente avant l'appel.
-  const { id } = alertsStore.getState().defs.find((d) => !alertes.defs.includes(d))!;
+  const avant = new Set(alertsStore.getState().defs.map((d) => d.id));
+  if (!alertsStore.getState().ajouter(offre.alerte)) return offre;
+  // `ajouter` ne rend pas l'identifiant : c'est le seul ABSENT avant l'appel. Comparer les
+  // identifiants, jamais les objets : l'abonné synchrone du runtime réévalue pendant `ajouter` et
+  // peut réécrire une autre def (composite qui sonne ou se réarme) ; « Annuler » la supprimerait.
+  const { id } = alertsStore.getState().defs.find((d) => !avant.has(d.id))!;
   uiSectionsStore.getState().setOpen(SECTION_ALERTES, true);
   const relayee = daemonSupporte("alerts") && marche.source === "binance";
   pousserToast(`${offre.avis}${relayee ? "" : " · sonne application ouverte seulement"}`, {

@@ -3599,7 +3599,8 @@ d'alerte existants ne changent ; aucun chiffre de performance.** Une alerte de p
 n'est jamais appelée « signal » ni « réaction ». Le lot a été développé par étapes, revu deux fois
 par des agents indépendants avec un tour de correction entre les deux, réuni en un commit,
 interrompu à l'intégration par une limite d'usage, puis repris : l'intégration applique les
-arbitrages A1 à A4 ci-dessous, une correction de lecture, et cette consignation.
+arbitrages A1 à A4 ci-dessous, une correction de lecture, et cette consignation ; la revue finale
+du lot intégré a relevé un majeur (« Annuler » pouvait supprimer une autre alerte), corrigé.
 
 - **Arbitrages de l'orchestrateur, à confirmer par le propriétaire.** Aucun n'a été demandé mot
   pour mot ; chacun sert la demande du 9 novembre et s'écarte d'une règle écrite ou d'un brief.
@@ -3614,7 +3615,7 @@ arbitrages A1 à A4 ci-dessous, une correction de lecture, et cette consignation
   - **Zones fortes seulement** (actives, bande pleine) ; ni zone faible, ni zone cassée.
   - **Échéance de 7 jours**, une des durées du panneau Alertes, prolongeable par son « +24 h ».
   - **Pose directe** au toucher ou au clic, sans confirmation ; l'avis de pose porte « Annuler »
-    pendant 6 s.
+    pendant 6 s, qui supprime l'alerte posée et elle seule, retrouvée par son identifiant.
   - **A1 — message.** Il finit par « · niveau fixe » ; « zone mobile » est retiré. La règle qui
     retirait cette mention au-delà de 90 caractères n'a plus d'objet et disparaît (constante
     `MAX_MESSAGE_ZONE` retirée) : 69 caractères pour le support du cas de référence, 76 pour sa
@@ -3654,7 +3655,7 @@ arbitrages A1 à A4 ci-dessous, une correction de lecture, et cette consignation
     n'est modifié ; aucun test désactivé, sauté ou supprimé.
 - **Ce qui change.** Fichiers : `apps/web/src/chart/alerteZone.ts` (nouveau),
   `chart/candleReadout.ts`, `chart/priceAlertMenu.ts`, `chart/ChartInstance.tsx` ; tests
-  `alerteZone.test.ts` (52), `candleReadout.offre.test.ts` (26), `priceAlertMenu.zone.test.ts`
+  `alerteZone.test.ts` (53), `candleReadout.offre.test.ts` (26), `priceAlertMenu.zone.test.ts`
   (17), nouveaux ; parcours `e2e/mobile-alerte-zone.e2e.ts` (2, nouveau), une étape « AXIS S/R au
   bureau » ajoutée à `e2e/quatre-lots-indicateurs.e2e.ts`, deux lectures ajoutées à
   `e2e/helpers/axis-sr-telephone.ts` (`lireZonesAxisSr`, `lireSignauxDansBandesFortes`).
@@ -3796,11 +3797,13 @@ arbitrages A1 à A4 ci-dessous, une correction de lecture, et cette consignation
   - Avant, sur `main` (fin du lot 1) : **1 177 441 / 353 593**.
   - Lot réuni, après les deux revues et la correction : 1 181 693 / 355 046 (+4 252 / +1 453).
   - A1 : 1 181 650 / 355 056 ; A2 : 1 181 885 / 355 183 ; A3 : 1 181 900 / 355 192 ; espaces
-    insécables : **1 181 903 / 355 186**.
-  - Lot entier : **+4 462 / +1 593**, sous les +1 700 accordés ; marge gzip **4 814**, au-dessus
+    insécables : 1 181 903 / 355 186 ; correction de la revue finale (« Annuler ») :
+    **1 181 935 / 355 190** (+32 / +4).
+  - Lot entier : **+4 494 / +1 597**, sous les +1 700 accordés ; marge gzip **4 810**, au-dessus
     des 3 000 exigés. `alerteZone.ts` est dans le chargement initial : pas de `?.` (la cible du
     build le réécrit en long), aucun `import()`.
-  - Fichiers à la demande : 141, 1 734 145 / 638 935 ; aucun module du lot n'y est.
+  - Fichiers à la demande : 141, 1 734 145 / 638 935 avant la correction de la revue finale,
+    1 734 145 / 638 834 après (mêmes octets bruts) ; aucun module du lot n'y est.
 - **Revues et tests.**
   - Développement par étapes ; contre-épreuves du développeur : 61 règles retirées une à une côté
     unitaire, 60 détectées d'emblée, la dernière révélant une garde redondante, retirée ; 13 sur
@@ -3828,7 +3831,28 @@ arbitrages A1 à A4 ci-dessous, une correction de lecture, et cette consignation
     `quatre-lots-decisions`) ; parcours téléphone sur Chromium, 41 sur 41 en 2,8 min, dont les
     deux de `mobile-alerte-zone` (20 s et 6 s). Non lancés ici : WebKit, `pnpm check:e2e` complet,
     Vercel, daemon et flux réels.
-  - Revue finale du lot intégré : à venir.
+  - Revue finale du lot intégré : un constat, majeur, confirmé par une contre-vérification
+    indépendante sur le vrai runtime des alertes. « Annuler » retrouvait l'alerte posée par
+    l'identité des objets (la seule absente de la liste avant l'appel). Or l'abonné du runtime
+    réévalue de façon synchrone pendant `ajouter` (régime, puis composites) : une composite qui
+    sonne ou se réarme à cet instant est remplacée, à sa place et donc avant l'alerte neuve, par un
+    nouvel objet ; « Annuler » supprimait cette composite — sans aucun avis quand elle s'était
+    seulement réarmée — et laissait l'alerte de zone. Il y faut un régime déterminé, une alerte de
+    régime active et une composite dont l'évaluation attend sa cadence d'une seconde.
+  - Correction : l'alerte posée est retrouvée par son identifiant. Test unitaire (un abonné
+    synchrone réécrit une autre alerte pendant la pose ; « Annuler » ne supprime que l'alerte
+    posée) : rouge sans la correction, vert avec. Rejoué sur le vrai graphe (Chromium
+    1 440 × 900, réseau bouchonné, cas de référence, régime réglé sur « risk-on », alerte de
+    régime et composite témoin, clic droit dans la bande du support fort) : après la pose, alerte
+    de régime, composite (un déclenchement, son avis à l'écran) et alerte de zone ; après
+    « Annuler », il reste l'alerte de régime et la composite. Témoin sans composite : « Annuler »
+    fait passer de 1 alerte à 0. Avant la correction, la revue mesurait l'inverse : la composite
+    supprimée, l'alerte de zone restée.
+  - Vérification de la correction (12 novembre 2026, Node 22.23.4) : typage des 7 projets ; web
+    476 fichiers / 7 191 tests (sans `chart/orderflow.cadence.test.ts`) ; build du web et budget
+    verts ; parcours téléphone sur Chromium, 41 sur 41 en 2,8 min ; parcours du bureau
+    `quatre-lots-indicateurs`, `quatre-lots-alertes` et `gate-g4-alertes`, 16 sur 16. Les autres
+    paquets, que la correction ne touche pas, n'ont pas été relancés.
 - **Limites des sections précédentes levées** (annotées sur place).
   - Lot 1 : l'encart se replace au-dessus de la pile d'avis après tout changement des alertes
     (en partie : pas après un avis ordinaire).

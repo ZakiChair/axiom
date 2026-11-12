@@ -266,7 +266,7 @@ export function offreSousReticule(chart: Chart, marche: PriceAlertMarket, reticu
 export function offreAuClic(chart: Chart, marche: PriceAlertMarket, x: number, y: number): OffreEncart | undefined {
   // Une liste de points en entrée, une liste en sortie ; `flat` couvre aussi un point seul.
   const point = [chart.convertFromPixel([{ x, y }], { paneId: CANDLE_PANE_ID, absolute: true })].flat()[0];
-  return offreAuPoint(chart, marche, point?.dataIndex, y, true);
+  return offreAuPoint(chart, marche, point && point.dataIndex, y, true);
 }
 
 /** Prévient à chaque changement des définitions d'alerte (pose, « Annuler », suppression, échéance prolongée). Rend le désabonnement. */

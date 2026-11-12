@@ -3798,8 +3798,10 @@ du lot intégré a relevé un majeur (« Annuler » pouvait supprimer une autre 
   - Lot réuni, après les deux revues et la correction : 1 181 693 / 355 046 (+4 252 / +1 453).
   - A1 : 1 181 650 / 355 056 ; A2 : 1 181 885 / 355 183 ; A3 : 1 181 900 / 355 192 ; espaces
     insécables : 1 181 903 / 355 186 ; correction de la revue finale (« Annuler ») :
-    **1 181 935 / 355 190** (+32 / +4).
-  - Lot entier : **+4 494 / +1 597**, sous les +1 700 accordés ; marge gzip **4 810**, au-dessus
+    1 181 935 / 355 190 (+32 / +4) ; dernier `?.` du module retiré (relevé par la contre-revue) :
+    **1 181 923 / 355 208** (−12 octets bruts, +18 gzip : le gzip varie d'une dizaine d'octets
+    pour une retouche d'une ligne).
+  - Lot entier : **+4 482 / +1 615**, sous les +1 700 accordés ; marge gzip **4 792**, au-dessus
     des 3 000 exigés. `alerteZone.ts` est dans le chargement initial : pas de `?.` (la cible du
     build le réécrit en long), aucun `import()`.
   - Fichiers à la demande : 141, 1 734 145 / 638 935 avant la correction de la revue finale,

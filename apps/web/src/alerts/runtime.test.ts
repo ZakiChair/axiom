@@ -74,6 +74,9 @@ vi.mock("../store/regime", () => ({
 }));
 
 import { clotureBougie, demarrerAlertes, mentionRattrapage, notifier, ouvertureSignal } from "./runtime";
+import { extensionGrapheStore, publierExtension } from "./amorceGraphe";
+import { construireConditionSeuil, paramsInstancePourAlerte } from "../components/alertsPanel.util";
+import { getIndicator } from "@axiom/indicators";
 import { alertsStore } from "../store/alerts";
 import { chartLayoutStore } from "../store/chart-layout";
 import { toastsStore } from "../store/toasts";
@@ -2112,5 +2115,207 @@ describe("cas de référence BTCUSDT 4h : signal daté au retour, composites à 
     expect(alertsStore.getState().defs[0]?.arme).toBeDefined();
     expect(alertsStore.getState().journal).toHaveLength(0);
     expect(toastsStore.getState().toasts).toHaveLength(0);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────────────────────
+// Lot A2 (12 novembre 2026) : la vue principale charge l'historique des alertes de son marché et
+// publie l'état de son extension. Le VRAI moteur sur le cas de référence servi jusqu'à la bougie
+// 2 987 (2 988 bougies, la place n'en a pas plus) : l'amorce d'AXIS S/R (3 000) n'est jamais
+// atteinte. Réaction sur support fort à la bougie 2 988, pas à la 2 987 (fixture).
+// ───────────────────────────────────────────────────────────────────────────────────────────
+describe("lot A2 : historique chargé pour l'alerte, amorce courte dite (12 novembre 2026)", () => {
+  type Ligne = [number, number, number, number, number, number, number];
+  const F: Candle[] = (fixtureBtc.bougies as Ligne[]).map(([time, open, high, low, close, volume, buyVolume]) => ({
+    time, open, high, low, close, volume, buyVolume, sellVolume: volume - buyVolume, closed: true,
+  }));
+  const H4 = 14_400_000;
+  const SERVIES = 2988;
+  const CLE = "binance|BTCUSDT|4h";
+  const LIBELLE = "AXIS S/R non mesuré · réaction sur support fort";
+  const REACTION_SR: AlertDef["condition"] = { type: "indicateur-seuil", indicateurId: "stratAxisSr", params: {}, output: "reactionSupport", comparateur: ">=", valeur: 1 };
+  const def4h = (id: string, condition: AlertDef["condition"], plus: Partial<AlertDef> = {}): AlertDef => ({
+    id, symbol: "BTCUSDT", source: "binance", timeframe: "4h", actif: true, declenchements: [], condition, ...plus,
+  });
+  let horloge = 0;
+  /** État publié par la vue principale (`chart/ChartInstance.tsx`). */
+  const publier = (terminee: boolean, amorceVisee: number, bougies: number, cle = CLE): void =>
+    publierExtension({ cle, terminee, amorceVisee, bougies });
+  /** La place sert les bougies 0 à 2 987, closes ; l'horloge est dans la bougie 2 988, une demi-heure après son ouverture. */
+  function ouvrir(symbol = "BTCUSDT"): void {
+    horloge = F[SERVIES]!.time + 30 * 60_000;
+    marketStore.setState({ exchange: "binance", symbol, timeframe: "4h", candles: F.slice(0, SERVIES) });
+  }
+  /** La bougie `i` clôture en direct, poussée par le flux. */
+  function cloturer(i: number): void {
+    horloge = F[i]!.time + H4 + 2_000;
+    marketStore.getState().upsertCandle({ ...F[i]!, closed: true });
+  }
+  const messagesJournal = (): string[] => alertsStore.getState().journal.map((d) => d.message);
+  const textesAvis = (): string[] => toastsStore.getState().toasts.map((t) => t.texte);
+
+  beforeEach(() => {
+    vi.spyOn(Date, "now").mockImplementation(() => horloge);
+    extensionGrapheStore.setState({ extension: null });
+  });
+  afterEach(() => {
+    extensionGrapheStore.setState({ extension: null });
+  });
+
+  it("place à sec : rien tant que la remontée n'est pas finie, calibrée à sa fin, la clôture de 2 988 sonne en le disant, une seule fois", () => {
+    alertsStore.setState({ defs: [def4h("sr", REACTION_SR)], journal: [] });
+    ouvrir();
+    stop = demarrerAlertes();
+    // Rien de connu de l'extension, puis remontée en cours : ni calibrage ni évaluation.
+    expect(lotsEvalues).toEqual([]);
+    publier(false, 3000, 500);
+    marketStore.setState({ candles: F.slice(0, SERVIES) });
+    expect(lotsEvalues).toEqual([]);
+    // Remontée finie, la place n'a que 2 988 bougies : évaluée une fois sous la même clôture (calibrage, réaction 0 à 2 987).
+    publier(true, 3000, SERVIES);
+    expect(lotsEvalues).toEqual([["sr"]]);
+    expect(alertsStore.getState().defs[0]?.arme).toBe(true);
+    expect(alertsStore.getState().journal).toEqual([]);
+    // Une seconde passe (alerte ajoutée, indicateur affiché) sous la même clôture : rien de plus.
+    publier(false, 3000, SERVIES);
+    publier(true, 3000, SERVIES);
+    expect(lotsEvalues).toEqual([["sr"]]);
+    // La clôture de la bougie 2 988 : réaction sur support fort, sur 2 989 bougies closes.
+    cloturer(SERVIES);
+    expect(lotsEvalues).toEqual([["sr"], ["sr"]]);
+    expect(messagesJournal()).toEqual([`${LIBELLE} · amorce courte (2989 bougies)`]);
+    expect(textesAvis()).toEqual([`BTCUSDT 4h — ${LIBELLE} · amorce courte (2989 bougies)`]);
+    // La même clôture repoussée : ni seconde évaluation, ni second avis.
+    cloturer(SERVIES);
+    expect(lotsEvalues).toEqual([["sr"], ["sr"]]);
+    expect(textesAvis()).toHaveLength(1);
+  });
+
+  it("témoin : sans la fin de la remontée, la clôture de 2 988 ne sonne pas (règle A1, tampon sous l'amorce)", () => {
+    alertsStore.setState({ defs: [def4h("sr", REACTION_SR, { arme: true })], journal: [] });
+    ouvrir();
+    stop = demarrerAlertes();
+    publier(false, 3000, 500);
+    cloturer(SERVIES);
+    expect(lotsEvalues).toEqual([]);
+    expect(textesAvis()).toEqual([]);
+    // La remontée finit après la clôture, tant qu'elle reste la dernière : évaluée une fois, elle tire en le disant.
+    publier(true, 3000, SERVIES + 1);
+    expect(lotsEvalues).toEqual([["sr"]]);
+    expect(messagesJournal()).toEqual([`${LIBELLE} · amorce courte (2989 bougies)`]);
+  });
+
+  it("la mention ne vaut que sous l'amorce : à 3 000 bougies, le message est le libellé seul", () => {
+    // Score au-dessus de −100 : toujours vrai ; armées, les deux defs tirent à leur première évaluation.
+    const score: AlertDef["condition"] = { type: "indicateur-seuil", indicateurId: "stratAxisSr", params: {}, output: "score", comparateur: ">", valeur: -100 };
+    const libelle = "AXIS S/R non mesuré · Score (−6 à +6) > -100";
+    alertsStore.setState({ defs: [def4h("a", score, { arme: true }), def4h("b", score, { arme: true, actif: false })], journal: [] });
+    horloge = F[2999]!.time + 30 * 60_000;
+    marketStore.setState({ exchange: "binance", symbol: "BTCUSDT", timeframe: "4h", candles: F.slice(0, 2999) });
+    stop = demarrerAlertes();
+    publier(true, 3000, 2999);
+    expect(messagesJournal()).toEqual([`${libelle} · amorce courte (2999 bougies)`]);
+    // La bougie 2 999 clôture : 3 000 bougies, l'amorce est là. La def en pause, reprise, tire sans mention.
+    cloturer(2999);
+    alertsStore.getState().basculerActif("b");
+    expect(messagesJournal()).toEqual([libelle, `${libelle} · amorce courte (2999 bougies)`]);
+  });
+
+  it("extension terminée qui ne visait que 1 500 bougies (AXIS seul) : AXIS S/R n'est pas évaluée à 1 500 (correction 2 de la critique)", () => {
+    alertsStore.setState({ defs: [def4h("sr", REACTION_SR)], journal: [] });
+    horloge = F[SERVIES]!.time + 30 * 60_000;
+    marketStore.setState({ exchange: "binance", symbol: "BTCUSDT", timeframe: "4h", candles: F.slice(SERVIES - 1500, SERVIES) });
+    stop = demarrerAlertes();
+    publier(true, 1500, 1500);
+    expect(lotsEvalues).toEqual([]);
+    // La passe suivante vise 3 000 : en cours, rien ; finie à sec, évaluée.
+    publier(false, 3000, 1500);
+    marketStore.setState({ candles: F.slice(0, SERVIES) });
+    expect(lotsEvalues).toEqual([]);
+    publier(true, 3000, SERVIES);
+    expect(lotsEvalues).toEqual([["sr"]]);
+  });
+
+  it("état publié pour une autre unité ou un autre actif : rien n'est évalué ; au changement de marché, l'état du marché quitté ne vaut pas", () => {
+    alertsStore.setState({ defs: [def4h("sr", REACTION_SR), { ...def4h("sr-eth", REACTION_SR), symbol: "ETHUSDT" }], journal: [] });
+    ouvrir();
+    stop = demarrerAlertes();
+    publier(true, 3000, SERVIES, "binance|BTCUSDT|1h");
+    publier(true, 3000, SERVIES, "binance|ETHUSDT|4h");
+    expect(lotsEvalues).toEqual([]);
+    publier(true, 3000, SERVIES);
+    expect(lotsEvalues).toEqual([["sr"]]);
+    // Le graphe passe sur ETHUSDT (mêmes bougies) : l'état publié est encore celui de BTCUSDT.
+    ouvrir("ETHUSDT");
+    expect(lotsEvalues).toEqual([["sr"]]);
+    publier(true, 3000, SERVIES, "binance|ETHUSDT|4h");
+    expect(lotsEvalues).toEqual([["sr"], ["sr-eth"]]);
+  });
+
+  it("alerte supprimée pendant la remontée : ni évaluation ni avis à sa fin", () => {
+    alertsStore.setState({ defs: [def4h("sr", REACTION_SR, { arme: true })], journal: [] });
+    ouvrir();
+    stop = demarrerAlertes();
+    publier(false, 3000, 500);
+    alertsStore.getState().supprimer("sr");
+    publier(true, 3000, SERVIES);
+    cloturer(SERVIES);
+    expect(lotsEvalues).toEqual([]);
+    expect(textesAvis()).toEqual([]);
+  });
+
+  it("une def RSI et une variation ne dépendent pas de l'extension : une évaluation par clôture, aucune de plus quand son état change", () => {
+    alertsStore.setState({
+      defs: [
+        def4h("rsi", { type: "indicateur-seuil", indicateurId: "rsi", params: {}, output: "rsi", comparateur: ">", valeur: 70 }),
+        def4h("var", { type: "variation-pct", fenetreMs: H4, seuilPct: 50 }),
+      ],
+      journal: [],
+    });
+    ouvrir();
+    stop = demarrerAlertes();
+    expect(lotsEvalues).toEqual([["rsi", "var"]]);
+    publier(false, 3000, 500);
+    publier(true, 3000, SERVIES);
+    expect(lotsEvalues).toEqual([["rsi", "var"]]);
+    cloturer(SERVIES);
+    expect(lotsEvalues).toEqual([["rsi", "var"], ["rsi", "var"]]);
+    expect(messagesJournal().some((m) => m.includes("amorce courte"))).toBe(false);
+  });
+
+  it("composite lisant AXIS S/R sur une place à sec : figé pendant la remontée, évalué une fois à sa fin, son déclenchement le dit", () => {
+    const rsiVrai = { type: "indicateur-seuil", indicateurId: "rsi", params: {}, output: "rsi", comparateur: ">", valeur: 0 } as const;
+    const composite = def4h("comp", { type: "composite", conditions: [REACTION_SR as Extract<AlertDef["condition"], { type: "indicateur-seuil" }>, rsiVrai] });
+    alertsStore.setState({ defs: [composite], journal: [] });
+    ouvrir();
+    stop = demarrerAlertes();
+    publier(false, 3000, 500);
+    expect(lotsEvalues).toEqual([]);
+    publier(true, 3000, SERVIES);
+    expect(lotsEvalues).toEqual([["comp"]]);
+    expect(alertsStore.getState().defs[0]?.arme).toBe(true);
+    cloturer(SERVIES);
+    expect(lotsEvalues).toEqual([["comp"], ["comp"]]);
+    expect(messagesJournal()).toEqual([`${LIBELLE} ET rsi(rsi) > 0 · amorce courte (2989 bougies)`]);
+  });
+
+  it("réglages copiés de l'instance du graphe (force de zone 8) : l'alerte tire aux réactions de ce réglage, 2 985 et pas 2 988", () => {
+    // Chaîne du formulaire : instance d'AXIS S/R à force 8 sur la vue principale → réglages copiés → condition.
+    const sr = getIndicator("stratAxisSr")!;
+    const reglages = paramsInstancePourAlerte(sr, [{ defId: "stratAxisSr", params: { forceZoneForte: 8 } }], "reactionSupport");
+    expect(reglages).toEqual({ origine: "instance", params: { forceZoneForte: 8 } });
+    const force8 = construireConditionSeuil("stratAxisSr", "reactionSupport", ">", "", reglages.origine === "instance" ? reglages.params : {})!;
+    alertsStore.setState({ defs: [def4h("defaut", REACTION_SR), def4h("force8", force8)], journal: [] });
+    horloge = F[2984]!.time + 30 * 60_000;
+    marketStore.setState({ exchange: "binance", symbol: "BTCUSDT", timeframe: "4h", candles: F.slice(0, 2984) });
+    stop = demarrerAlertes();
+    publier(true, 3000, 2984);
+    for (let i = 2984; i <= SERVIES; i++) cloturer(i);
+    // Réactions sur support fort de 2 984 à 2 988 : force 6 (défaut) à 2 985 et 2 988, force 8 à 2 985 seulement.
+    expect(alertsStore.getState().journal.map((d) => `${d.alertId} ${d.message}`).reverse()).toEqual([
+      `defaut ${LIBELLE} · amorce courte (2986 bougies)`,
+      `force8 ${LIBELLE} · amorce courte (2986 bougies)`,
+      `defaut ${LIBELLE} · amorce courte (2989 bougies)`,
+    ]);
   });
 });

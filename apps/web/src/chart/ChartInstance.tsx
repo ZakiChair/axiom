@@ -100,6 +100,8 @@ import { fibStore } from "./fibonacci";
 import { createRafThrottle, type RafThrottle } from "./rafThrottle";
 import { bindPriceAlertMenu, type PriceAlertMarket } from "./priceAlertMenu";
 import { offreSousReticule, suivreAlertes } from "./alerteZone";
+import { alertsStore } from "../store/alerts";
+import { cleMarcheGraphe, indicateursExtension, publierExtension, surIndicateursAlertes } from "../alerts/amorceGraphe";
 import { MeasureTool } from "./measureTool";
 import { bougieSousReticule, CandleReadout } from "./candleReadout";
 import { SymbolBanner } from "../components/SymbolBanner";
@@ -401,6 +403,69 @@ export function creerOrdonnanceurExtension(params: ParamsOrdonnanceurExtension):
     });
   };
   return { demander };
+}
+
+/** État d'une passe d'extension, tel que la vue principale le publie (`publierExtension`, avec la clé de son marché). */
+export interface EtatPasseExtension {
+  terminee: boolean;
+  /** Plus grande amorce des indicateurs étendus (0 sans amorce). */
+  amorceVisee: number;
+  /** Bougies du tampon, bougie en formation comprise : au départ, puis à la fin de la passe. */
+  bougies: number;
+}
+
+export interface ParamsPasseExtension {
+  /** Tampon courant du slot, bougie en formation comprise. */
+  lireBuffer: () => Candle[];
+  /** Indicateurs pour lesquels étendre (`indicateursExtension`) : affichés, et ceux des alertes du marché sur la vue principale. */
+  lireIds: () => string[];
+  /** Pages successives jusqu'à la session et à l'amorce demandées (`etendreSessionJusqua`). */
+  etendre: (cible: number | undefined, bougiesMin: number | undefined) => Promise<void>;
+  /** Pendant l'extension : pagination au scroll en attente, recalculs différés. */
+  marquerEnCours: (enCours: boolean) => void;
+  /** Le slot vit encore, identité et révision inchangées. */
+  estValide: () => boolean;
+  /** Réapplique au graphe le buffer étendu, puis un seul recalcul. */
+  appliquer: (complet: Candle[]) => void;
+  /** Publie l'état de la passe (la vue principale seulement : un slot secondaire passe un no-op). */
+  publier: (etat: EtatPasseExtension) => void;
+}
+
+/**
+ * Une passe de l'ordonnanceur d'extension. Publie « en cours » avant la première page, puis
+ * « terminée » APRÈS la réapplication du buffer — le runtime des alertes réévalue alors sur le
+ * tampon final —, quelle qu'en soit l'issue : rien à charger, amorce atteinte, place à sec, plafond
+ * de pages ou échec réseau (le tampon obtenu est publié tel quel). Rien après une identité
+ * invalidée : le cycle de données suivant publie son propre état (`null` à son début).
+ */
+export async function passeExtension(p: ParamsPasseExtension): Promise<void> {
+  const buffer = p.lireBuffer();
+  const premier = buffer[0];
+  const dernier = buffer[buffer.length - 1];
+  if (premier === undefined || dernier === undefined) return;
+  const defIds = p.lireIds();
+  const amorce = amorceMinimale(defIds);
+  const amorceVisee = amorce === undefined ? 0 : amorce;
+  if (!doitEtendreHistorique(defIds, premier.time, dernier.time, buffer.length)) {
+    p.publier({ terminee: true, amorceVisee, bougies: buffer.length });
+    return;
+  }
+  const avant = buffer.length;
+  p.marquerEnCours(true);
+  p.publier({ terminee: false, amorceVisee, bougies: avant });
+  try {
+    await p.etendre(cibleSessionUTC(defIds, dernier.time), amorce);
+  } catch (err) {
+    console.error("[AXIOM] extension d'historique échouée", err);
+  } finally {
+    p.marquerEnCours(false);
+  }
+  if (!p.estValide()) return;
+  const complet = p.lireBuffer();
+  // Même chemin que le resync post-reconnexion : réapplication du buffer entier, puis un seul
+  // recalcul, aligné sur les bougies affichées.
+  if (complet.length > avant) p.appliquer(complet);
+  p.publier({ terminee: true, amorceVisee, bougies: complet.length });
 }
 
 /** Sources proposées dans l'en-tête d'un slot secondaire. */
@@ -1079,6 +1144,8 @@ export function ChartInstance({
     // pagination ou tick d'un ancien flux devra présenter CE couple identité/révision pour
     // pouvoir réécrire les données.
     const requestedIdentity: MarketIdentity = { exchange, symbol, timeframe };
+    // Alertes A2 : le tampon repart de zéro, rien n'est encore connu de l'extension de ce cycle.
+    if (isMaster) publierExtension(null);
     const requestId = store.getState().startDataLoad(requestedIdentity);
     if (requestId === null) return;
     // Capture par slot : un focus déplacé ne doit jamais brancher le moteur replay
@@ -1320,6 +1387,7 @@ export function ChartInstance({
     // paresseux la lit dès la première activation).
     let unsubscribe: Unsubscribe | null = null;
     let unsubscribeExtensionChaud: (() => void) | null = null;
+    let unsubscribeExtensionAlertes: (() => void) | null = null;
     setLimiteKrakenVisible(false);
     // Chien de garde du backfill : coupé par `teardownData` si le run d'effet s'arrête
     // pendant que la requête REST est encore en vol.
@@ -1537,39 +1605,39 @@ export function ChartInstance({
           });
         };
 
+        // Alertes A2 (12 novembre 2026) : la vue PRINCIPALE remonte aussi l'historique des
+        // indicateurs des alertes actives de son marché, affichés ou non, et publie l'état de son
+        // extension pour la clé de ce marché (en cours, puis terminée avec les bougies obtenues) :
+        // le runtime des alertes n'évalue pas pendant la remontée, et évalue, en le disant, une
+        // def dont la place n'a pas l'amorce. Une vue secondaire ne sert aucune alerte.
+        const marcheSlot = { exchange, symbol, timeframe };
         const ordonnanceurExtension = creerOrdonnanceurExtension({
           estAnnule: () => cancelled,
           peutLancer: () => isMarketDataReady(store.getState(), requestedIdentity, requestId),
-          executer: async () => {
-            const buffer = store.getState().candles;
-            const premier = buffer[0];
-            const dernier = buffer[buffer.length - 1];
-            if (premier === undefined || dernier === undefined) return;
-            const defIds = indicatorsStore.getState().indicators.map((i) => i.defId);
-            if (!doitEtendreHistorique(defIds, premier.time, dernier.time, buffer.length)) return;
-            const avant = buffer.length;
-            extensionSessionEnCours = true;
-            try {
-              await etendreHistorique(cibleSessionUTC(defIds, dernier.time), amorceMinimale(defIds));
-            } catch (err) {
-              console.error("[AXIOM] extension d'historique échouée", err);
-            } finally {
-              extensionSessionEnCours = false;
-            }
-            if (cancelled || !isMarketDataReady(store.getState(), requestedIdentity, requestId)) return;
-            const complet = store.getState().candles;
-            // Même chemin que le resync post-reconnexion : réapplication du buffer entier,
-            // puis un seul recalcul, aligné sur les bougies affichées.
-            if (complet.length > avant) {
+          executer: () => passeExtension({
+            lireBuffer: () => store.getState().candles,
+            lireIds: () => indicateursExtension(indicatorsStore.getState().indicators.map((i) => i.defId), alertsStore.getState().defs, marcheSlot, Date.now(), isMaster),
+            etendre: etendreHistorique,
+            marquerEnCours: (enCours) => {
+              extensionSessionEnCours = enCours;
+            },
+            estValide: () => !cancelled && isMarketDataReady(store.getState(), requestedIdentity, requestId),
+            appliquer: (complet) => {
               remplacerBougies(complet);
               rafraichir(complet);
-            }
-          },
+            },
+            publier: (etat) => {
+              if (isMaster && !cancelled) publierExtension({ cle: cleMarcheGraphe(marcheSlot), ...etat });
+            },
+          }),
         });
 
         unsubscribeExtensionChaud = indicatorsStore.subscribe(() => {
           ordonnanceurExtension.demander();
         });
+        // Relancée quand la LISTE TRIÉE des indicateurs d'alerte du marché change, pas à chaque
+        // armement ni tir (qui réécrivent les définitions) : correction 3 de la critique.
+        if (isMaster) unsubscribeExtensionAlertes = surIndicateursAlertes(marcheSlot, () => ordonnanceurExtension.demander());
         ordonnanceurExtension.demander();
 
         const onKline = (candle: Candle) => {
@@ -1646,6 +1714,7 @@ export function ChartInstance({
       indicators.dispose();
       unsubscribeIndicators();
       unsubscribeExtensionChaud?.();
+      unsubscribeExtensionAlertes?.();
       unsubscribeRefSymbol();
       unsubscribePriceScale();
       unsubscribeFocusOf();

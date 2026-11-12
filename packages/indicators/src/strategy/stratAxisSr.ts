@@ -53,7 +53,11 @@
  *      au-dessus de l'EMA de tendance, un court segment pointillé gris au niveau
  *      de cette EMA et une étiquette « pré-signal » au bord droit ; non mesuré,
  *      conditionnel (la bougie suivante n'achète que si elle clôture au-dessus et
- *      si le score et les filtres tiennent), sans effet sur aucune série.
+ *      si le score et les filtres tiennent), sans effet sur aucune des huit
+ *      premières séries. Depuis le 12 novembre 2026 (alertes A2), une neuvième
+ *      sortie masquée, `preAchat`, ajoutée en fin de liste : 1 si le pré-signal
+ *      est défini à la bougie close, 0 sinon, indéfinie sur la bougie en
+ *      formation ; pour l'alerte « pré-signal d'achat », non mesurée.
  *
  * Une zone compte ses touches depuis la première bougie chargée : AXIS S/R
  * déclare une amorce de 3 000 bougies (`AMORCE_AXIS_SR`) ; AXIS garde la sienne
@@ -821,6 +825,8 @@ export const stratAxisSr: IndicatorDef = {
     { key: "resistance", name: "Résistance active proche", style: "line", masquee: true },
     { key: "reactionSupport", name: "Réaction sur support fort", style: "line", masquee: true },
     { key: "reactionResistance", name: "Réaction sur résistance forte", style: "line", masquee: true },
+    // Alertes A2 (12 novembre 2026) : en fin de liste, les huit sorties précédentes inchangées.
+    { key: "preAchat", name: "Pré-signal d'achat (non mesuré)", style: "line", masquee: true },
   ],
   calc(candles, params, ctx) {
     const n = candles.length;
@@ -957,6 +963,10 @@ export const stratAxisSr: IndicatorDef = {
     const reactionSupport = Array.from({ length: n }, (_v, i): number | undefined => (i <= fin ? 0 : undefined));
     const reactionResistance = [...reactionSupport];
     for (const r of sr.reactions) (r.sens > 0 ? reactionSupport : reactionResistance)[r.idx] = 1;
+    // Pré-signal pour l'alerte (alertes A2) : 1 si `preSignalAxisSr` est défini à la bougie close i,
+    // 0 sinon, indéfini sur la bougie en formation. Ni `signauxPrecoces` ni `maxZonesSr` n'y touchent
+    // (le segment du graphe, lui, suit `signauxPrecoces`). Non mesuré.
+    const preAchat = Array.from({ length: n }, (_v, i): number | undefined => (i <= fin ? (preSignal(i) === undefined ? 0 : 1) : undefined));
 
     const annotations: AnnotationsIndicateur = {};
     if (marqueurs.length > 0) annotations.marqueurs = marqueurs;
@@ -972,6 +982,7 @@ export const stratAxisSr: IndicatorDef = {
       resistance: sr.resistance,
       reactionSupport,
       reactionResistance,
+      preAchat,
     };
     return Object.keys(annotations).length > 0 ? { series, annotations } : { series };
   },

@@ -10,10 +10,16 @@
  *
  * Depuis le 12 novembre 2026 : chaque ligne porte le libellé de l'alerte (`decrireAlerte`, qui
  * dit ce qui est mesuré) suivi de son unité, en entier (retour à la ligne, jamais coupé) ; une
- * def de bougie que rien n'évalue l'écrit (« hors graphe », « historique insuffisant ») au lieu
- * de « armée » ; une alerte posée alors que sa condition est déjà vraie l'écrit au lieu de
- * « déclenchée » ; le formulaire d'indicateur nomme les sorties, pose comparateur et valeur quand
- * une seule lecture a un sens, et dit sous lui ce que l'alerte portera et ce qui ne sonnera pas.
+ * def de bougie que rien n'évalue l'écrit (« hors graphe », « historique en chargement »,
+ * « historique insuffisant ») au lieu de « armée » ; une def évaluée sur une place qui n'a pas
+ * l'amorce de son indicateur porte, sous son état, « amorce courte : N sur A » (lot A2 : le graphe
+ * principal charge l'historique des alertes de son marché) ; une alerte posée alors que sa
+ * condition est déjà vraie l'écrit au lieu de « déclenchée » ; le formulaire d'indicateur nomme
+ * les sorties, pose comparateur et valeur quand une seule lecture a un sens, et dit sous lui ce
+ * que l'alerte portera et ce qui ne sonnera pas. Lot A2 : une alerte d'AXIS ou d'AXIS S/R copie à
+ * sa création les réglages de la première instance de l'indicateur sur la vue principale (la note
+ * dit d'où ils viennent, ou pourquoi l'alerte est refusée) ; la liste porte la pastille « ≠ graphe »,
+ * expliquée sous la ligne, quand ils diffèrent ensuite de ceux de l'instance.
  *
  * Ce composant se re-rend uniquement sur ÉVÉNEMENT (création, bascule, déclenchement) :
  * aucune donnée haute fréquence n'y transite (le runtime écrit le store hors render-loop).
@@ -44,6 +50,7 @@ import { decisionDossiersStore } from "../store/decisionDossiers";
 import { windowManagerStore } from "../store/windowManager";
 import { presetAlertsStore, type AlertePreset } from "../store/presetAlerts";
 import { demanderPermissionNotifications, voirAlerte } from "../alerts/runtime";
+import { extensionGrapheStore } from "../alerts/amorceGraphe";
 import { useExpirationClock } from "../alerts/useExpirationClock";
 import { daemonSupporte } from "../data/daemon";
 import { IS_VERCEL } from "../lib/deployment";
@@ -53,15 +60,20 @@ import {
   cibleAlerte,
   construireConditionCroisement,
   construireConditionSeuil,
+  differeDuGraphe,
   etatArmement,
   evaluationAlerte,
+  EXPLICATION_ECART_GRAPHE,
   explicationMuette,
   INDICATEURS_CROISEMENT,
   INDICATEURS_SEUIL,
   noteAlerteSeuil,
+  paramsInstancePourAlerte,
   sansMarche,
   sortiesAlerte,
+  texteAmorceCourte,
   texteEvaluation,
+  type ReglagesAlerte,
 } from "./alertsPanel.util";
 import { refusAlertePerp, titreOptionsPerp } from "./optionsPerp.util";
 import { SidebarSection } from "./SidebarSection";
@@ -137,11 +149,13 @@ export function AlertsPanel() {
   // Taille du tampon du graphe principal (change à chaque bougie et à chaque page d'historique,
   // pas à chaque tick) : une alerte n'est pas évaluée sous l'amorce de son indicateur.
   const bougiesGraphe = useStore(marketStore, (s) => s.candles.length);
-  // Indicateurs de la vue principale : le graphe étend son historique à leur amorce, « affichez
-  // l'indicateur » n'est donc un remède que pour celui qui n'y est pas.
+  // Extension d'historique de la vue principale (lot A2) : elle remonte l'amorce des indicateurs
+  // affichés ET des alertes actives de son marché ; en cours, puis terminée (place à sec comprise).
+  const extensionGraphe = useStore(extensionGrapheStore, (s) => s.extension);
+  // Instances de la vue principale : une alerte d'AXIS ou d'AXIS S/R copie à sa création les
+  // réglages de la première, et la liste dit quand ils en diffèrent ensuite (« ≠ graphe »).
   const indicateursActifs = useStore(indicatorsStore, (s) => s.indicators);
-  const indicateursAffiches = useMemo(() => indicateursActifs.map((i) => i.defId), [indicateursActifs]);
-  const graphe = { exchange: exchangeCourant, symbol: symbolCourant, timeframe: tfCourant, bougies: bougiesGraphe, indicateurs: indicateursAffiches };
+  const graphe = { exchange: exchangeCourant, symbol: symbolCourant, timeframe: tfCourant, bougies: bougiesGraphe, extension: extensionGraphe };
   // Le daemon local, quand il est là, évalue aussi les alertes de bougie en 1m sur Binance.
   const daemonAlertes = daemonSupporte("alerts");
   // Alertes de scan (EQS) : liste réactive + message discret sur refus de reprise (limite).
@@ -228,8 +242,17 @@ export function AlertsPanel() {
     return idef ? sortiesAlerte(idef) : [];
   }, [indicateurId]);
   const sortieChoisie = sortiesDispo.find((s) => s.cle === sortieCle);
-  // Condition en cours de saisie (null : incomplète) : le formulaire affiche le libellé qu'elle portera.
-  const conditionSeuil = construireConditionSeuil(indicateurId, sortieCle, comparateur, valeurInd);
+  // Réglages copiés de l'instance du graphe (AXIS, AXIS S/R), ou défauts, ou refus motivé.
+  const reglagesSeuil = useMemo((): ReglagesAlerte => {
+    const idef = getIndicator(indicateurId);
+    return idef !== undefined && sortieChoisie !== undefined
+      ? paramsInstancePourAlerte(idef, indicateursActifs, sortieChoisie.output)
+      : { origine: "registre", params: {} };
+  }, [indicateurId, sortieChoisie, indicateursActifs]);
+  // Condition en cours de saisie (null : incomplète ou refusée) : le formulaire affiche le libellé qu'elle portera.
+  const conditionSeuil = reglagesSeuil.origine === "refus"
+    ? null
+    : construireConditionSeuil(indicateurId, sortieCle, comparateur, valeurInd, reglagesSeuil.params);
 
   const onChangeIndicateur = (id: string) => {
     setIndicateurId(id);
@@ -280,7 +303,11 @@ export function AlertsPanel() {
       }
       condition = { type: "variation-pct", seuilPct: s, fenetreMs };
     } else if (type === "indicateur-seuil") {
-      // Params vides → défauts du registry côté moteur. Une sortie nommée porte son seuil.
+      // Réglages de l'instance du graphe (AXIS, AXIS S/R) ou défauts du registre. Une sortie nommée porte son seuil.
+      if (reglagesSeuil.origine === "refus") {
+        setErreurForm(reglagesSeuil.refus);
+        return;
+      }
       if (conditionSeuil === null) {
         setErreurForm("Indicateur, sortie et valeur requis.");
         return;
@@ -432,13 +459,17 @@ export function AlertsPanel() {
           // ailleurs, ou historique plus court que l'amorce de l'indicateur).
           const evaluation = evaluationAlerte(d, graphe, daemonAlertes);
           const nonEvaluee = expiree || !d.actif ? null : texteEvaluation(evaluation);
+          // Évaluée sur une place qui n'a pas l'amorce : dit sous l'état d'armement, qui reste à sa place.
+          const courte = expiree || !d.actif ? null : texteAmorceCourte(evaluation);
           const etatTexte = expiree ? "expirée" : !d.actif ? "en pause" : nonEvaluee ?? arm.texte;
           const etatClasse = expiree || nonEvaluee !== null ? "text-warn" : arm.classe;
-          // « historique insuffisant : N sur A », suivi de « affichez l'indicateur » quand il n'est pas
-          // sur la vue principale, et « condition déjà vraie… » : trop longs pour la ligne du symbole.
+          // « historique en chargement : N sur A », « historique insuffisant : N sur A » et « condition
+          // déjà vraie… » : trop longs pour la ligne du symbole.
           const etatLong = nonEvaluee !== null ? evaluation.etat === "historique" : !expiree && d.actif && arm.long === true;
           // Def créée avant que le formulaire cesse de proposer les sorties de prix d'une stratégie.
           const muette = explicationMuette(d.condition);
+          // Réglages copiés à la création, plus ceux de l'instance du graphe : la def ne la suit pas.
+          const ecartGraphe = differeDuGraphe(d.condition, indicateursActifs);
           return (
             <div
               key={d.id}
@@ -469,6 +500,7 @@ export function AlertsPanel() {
                     {timeframeUnusable && <Badge ton="down" title="RVOL saisonnier : recréer cette alerte sur le graphique 1h.">1h requis</Badge>}
                     {unite !== null && <Badge ton="down" title={motifUniteHorsGraphe(unite, "alerte")}>non évaluée</Badge>}
                     {muette !== null && <Badge ton="down" title={muette}>muette</Badge>}
+                    {ecartGraphe && <Badge ton="neutre" title={EXPLICATION_ECART_GRAPHE}>≠ graphe</Badge>}
                     {frontOnly && (
                       <Badge ton="neutre" title="Évaluée seulement app ouverte (CVD / régime)">
                         front-only
@@ -487,7 +519,9 @@ export function AlertsPanel() {
                   </span>
                 </span>
                 {etatLong && <span data-etat-alerte className={`block break-words text-[10px] ${etatClasse}`}>{etatTexte}</span>}
+                {courte !== null && <span data-amorce-alerte className="block break-words text-[10px] text-warn">{courte}</span>}
                 {muette !== null && <span className="block break-words text-[10px] text-warn">{muette}</span>}
+                {ecartGraphe && <span data-ecart-graphe className="block break-words text-[10px] text-text-dim">{EXPLICATION_ECART_GRAPHE}</span>}
                 {d.expireTs !== undefined && (
                   <span className="block text-[10px] tabular-nums text-text-dim">
                     Échéance {new Date(d.expireTs).toLocaleString("fr-CH", { dateStyle: "short", timeStyle: "short" })}
@@ -697,7 +731,7 @@ export function AlertsPanel() {
               </div>
             )}
             <div data-note-alerte className="space-y-0.5 px-0.5 text-[10px] text-text-dim">
-              {noteAlerteSeuil(conditionSeuil, sortieChoisie, { symbol: symboleCible, source: exchangeCourant, timeframe: tfCourant }, { daemonAlertes, indicateursAffiches }).map((ligne) => (
+              {noteAlerteSeuil(conditionSeuil, sortieChoisie, { symbol: symboleCible, source: exchangeCourant, timeframe: tfCourant }, { daemonAlertes }, reglagesSeuil).map((ligne) => (
                 <p key={ligne} className={ligne.startsWith("Libellé : ") ? "break-words text-text" : "break-words"}>{ligne}</p>
               ))}
             </div>

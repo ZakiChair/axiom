@@ -11,15 +11,18 @@ import {
   lireJournal,
   lireMarche,
   lireMarque,
+  lireReglagesAlertes,
   luEnEntier,
   mesurerAvis,
   ouverture,
   ouvrirAlertes,
   pousserAvisAlerte,
   pousserAvisOrdinaire,
+  poserInstance,
   preparerAxisAlertes,
   QUATRE_HEURES,
   reduireFenetreData,
+  retenirPagesHistorique,
   texteAvis,
   type FluxAxisAlertes,
   type GeometrieAvis,
@@ -53,8 +56,13 @@ import { horlogeDuNavigateur, lireAxisSr, lireEncart, redimensionner, servirSeco
  *  - quatre déclenchements non touchés (320 px, thèmes par défaut, Bloomberg et Matrix) : aucun
  *    avis d'alerte ne quitte l'écran sans trace — les plus anciens deviennent UN avis de synthèse,
  *    un avis ordinaire n'en chasse aucun, et la pile reste dans l'écran au-dessus des barres ;
- *  - une place qui n'a pas l'historique de l'amorce, AXIS déjà affiché : la liste écrit
- *    « historique insuffisant : N sur A », sans conseiller d'afficher ce qui l'est déjà ;
+ *  - lot A2 : une place qui n'a pas l'historique de l'amorce, aucun indicateur affiché — le graphe
+ *    remonte de lui-même l'historique des alertes de son marché, la liste écrit « historique en
+ *    chargement : N sur A » puis « amorce courte : N sur A », et le déclenchement le dit
+ *    (« · amorce courte (N bougies) ») ; une alerte posée depuis le formulaire copie les réglages
+ *    de l'instance du graphe (force de zone 8 : elle ne sonne pas à la bougie 2 988, où la
+ *    réaction n'est que de force 6) et la liste dit « ≠ graphe » pour celle qui ne les a pas ; le
+ *    formulaire propose le pré-signal d'achat, préréglé, avec sa réserve ;
  *  - une alerte baleines, portée par un actif et non par un marché : sa ligne ne navigue pas ;
  *  - les deux lots ensemble (intégration du 12 novembre 2026) : des avis d'alerte à l'écran, le
  *    doigt sur une bande forte puis sur un triangle creux — l'encart écrit son texte complet
@@ -186,14 +194,17 @@ test("390 px : AXIS affiché, « Signal d'achat » créé au toucher, la clôtur
   // Comparateur et valeur sont posés d'office : aucun champ à remplir.
   await expect(panneaux.getByLabel("Comparateur")).toHaveCount(0);
   await expect(panneaux.getByPlaceholder("Seuil (ex. 70)")).toHaveCount(0);
-  // La note dit la portée, le libellé exact, l'historique demandé (AXIS est déjà affiché : rien à
-  // conseiller), d'où viennent les réglages et ce qui ne sonnera pas.
+  // La note dit la portée, le libellé exact, l'historique que le graphe charge pour l'alerte,
+  // d'où viennent les réglages et ce qui ne sonnera pas. Modifié à dessein (lot A2) : la ligne
+  // d'historique était « Évaluée seulement quand le graphe a chargé 1500 bougies. ».
   const note = panneaux.locator("[data-note-alerte]");
   await expect(note.locator("p")).toHaveText([
     "Évaluée à chaque clôture 4h, application ouverte sur BTCUSDT 4h.",
     `Libellé : ${LIBELLE_ACHAT}`,
-    "Évaluée seulement quand le graphe a chargé 1500 bougies.",
-    "Réglages par défaut de l'indicateur, pas ceux de l'instance du graphe.",
+    "Le graphe charge 1500 bougies pour elle ; si la place en a moins, elle est évaluée sur celles-là, avec la mention « amorce courte ».",
+    // Modifié à dessein (lot A2) : « Réglages par défaut de l'indicateur, pas ceux de l'instance
+    // du graphe. » L'alerte copie maintenant les réglages de l'instance d'AXIS affichée.
+    "Réglages de l'instance du graphe, copiés à la création : l'alerte ne suit pas leurs changements.",
     "Rien ne sonne application fermée ou téléphone verrouillé.",
   ]);
   await note.scrollIntoViewIfNeeded();
@@ -313,9 +324,9 @@ test.describe("écrans étroits", () => {
   test.use({ viewport: ECRANS[0] });
 
   /**
-   * Trois alertes déjà enregistrées : l'achat d'AXIS, armé ; une réaction d'AXIS S/R que rien
-   * n'évaluera ici ; un RSI au-dessus de 0, toujours vrai, désarmé sans avoir jamais sonné — l'état
-   * d'une alerte posée alors que sa condition était déjà vraie.
+   * Trois alertes déjà enregistrées : l'achat d'AXIS, armé ; une réaction d'AXIS S/R, évaluée sur
+   * une amorce courte (la place n'a que 2 937 bougies) ; un RSI au-dessus de 0, toujours vrai,
+   * désarmé sans avoir jamais sonné — l'état d'une alerte posée alors que sa condition était déjà vraie.
    */
   const ALERTES = [
     {
@@ -344,7 +355,7 @@ test.describe("écrans étroits", () => {
     return textes;
   }
 
-  /** Dans la liste : chaque libellé lu en entier, « non mesuré » compris, et l'état de l'alerte que rien n'évalue. */
+  /** Dans la liste : chaque libellé lu en entier, « non mesuré » compris, et l'état de l'alerte évaluée sur une amorce courte. */
   async function verifierListe(panneaux: Locator, largeur: number): Promise<void> {
     const achat = panneaux.locator('[data-alerte="e2e-achat"]');
     const reaction = panneaux.locator('[data-alerte="e2e-reaction"]');
@@ -357,10 +368,14 @@ test.describe("écrans étroits", () => {
       // À 320 px le libellé ne tient pas sur une ligne : il revient à la ligne au lieu d'être coupé.
       expect(lecture.lignes).toBeGreaterThanOrEqual(largeur === 320 ? 2 : 1);
     }
-    // AXIS S/R demande 3 000 bougies ; seul AXIS est affiché, le graphe s'est arrêté à son amorce.
-    const etat = reaction.locator("[data-etat-alerte]");
-    await expect(etat).toHaveText("historique insuffisant : 1501 sur 3000, affichez l'indicateur");
-    expect(await luEnEntier(etat), `état à ${largeur} px`).toMatchObject({ dansEcran: true, sansCoupe: true, decouvert: true });
+    // Modifié à dessein (lot A2) : la liste écrivait « historique insuffisant : 1501 sur 3000,
+    // affichez l'indicateur ». AXIS S/R demande 3 000 bougies ; le graphe a remonté de lui-même
+    // toute la place pour l'alerte (2 937 bougies, 2 938 après la clôture d'achat) : elle est
+    // évaluée sur ce qu'il y a (« armée », la réaction n'a pas eu lieu), et la liste le dit.
+    await expect(reaction.locator("[data-etat-alerte]")).toHaveText("armée");
+    const amorce = reaction.locator("[data-amorce-alerte]");
+    await expect(amorce).toHaveText("amorce courte : 2938 sur 3000");
+    expect(await luEnEntier(amorce), `amorce courte à ${largeur} px`).toMatchObject({ dansEcran: true, sansCoupe: true, decouvert: true });
     // Désarmée sans avoir jamais sonné : la liste le dit, en entier, au lieu de « déclenchée ».
     const dejaVraie = panneaux.locator('[data-alerte="e2e-deja-vraie"] [data-etat-alerte]');
     await expect(dejaVraie).toHaveText("condition déjà vraie : sonnera quand elle le redeviendra");
@@ -369,7 +384,9 @@ test.describe("écrans étroits", () => {
 
   test("320, 360 et 375 px, thème par défaut puis Bloomberg : l'avis tient dans l'écran au-dessus de la navigation, la liste se lit en entier", async ({ page }, testInfo) => {
     const flux = await demarrer(page, ALERTES);
-    await afficherAxis(page);
+    // Modifié à dessein (lot A2) : l'alerte AXIS S/R fait remonter au graphe tout ce que la place
+    // sert (2 937 bougies), AXIS affiché ou non ; avant, il s'arrêtait aux 1 500 d'AXIS.
+    await afficherAxis(page, ACHAT);
     await cloturerAchat(page, flux);
 
     const lesAvis = avis(page);
@@ -703,37 +720,154 @@ test("des avis d'alerte à l'écran, le doigt sur une bande forte puis sur un tr
   });
 });
 
-test("390 px : place sans l'historique de l'amorce — « affichez l'indicateur » tant qu'il ne l'est pas, puis « N sur A » seul", async ({ page }, testInfo) => {
-  // La place n'a que 1 200 bougies : AXIS en demande 1 500, aucun geste n'y changera rien.
+// Modifié à dessein (lot A2, 12 novembre 2026) : ce parcours tenait « historique insuffisant :
+// N sur 1500, affichez l'indicateur », puis, AXIS affiché, « historique insuffisant : 1200 sur 1500 »
+// et aucune évaluation. Le graphe remonte maintenant de lui-même l'historique des alertes de son
+// marché ; la place n'ayant que 1 200 bougies, l'alerte est évaluée sur celles-là et le dit.
+test("390 px : place sans l'historique de l'amorce, AXIS non affiché — le graphe remonte ce qu'elle a, l'alerte est évaluée en le disant", async ({ page }, testInfo) => {
+  // La place n'a que 1 200 bougies : AXIS en demande 1 500. Elle a acheté à la bougie 1 186 et tient
+  // sa position à la dernière clôture (1 199, calculé sur la fixture) : l'alerte, armée, sonne.
   const SERVIES = 1200;
+  const DEBUT_ACHAT = 1186;
   const ALERTE_ACHAT = {
     id: "e2e-achat", symbol: "BTCUSDT", source: "binance", timeframe: "4h", actif: true, arme: true, declenchements: [],
     condition: { type: "indicateur-seuil", indicateurId: "stratAxis", params: {}, output: "etat", comparateur: ">=", valeur: 1 },
   };
   await demarrer(page, [ALERTE_ACHAT], SERVIES);
+  // Aucun indicateur affiché : le graphe remonte quand même tout ce que la place a.
+  await expect.poll(async () => (await lireMarche(page)).bougies, { timeout: 60_000 }).toBe(SERVIES);
 
-  // AXIS n'est pas sur la vue principale : l'afficher est le remède, la liste et le formulaire le disent.
-  const chargees = (await lireMarche(page)).bougies;
-  expect(chargees).toBeLessThan(AMORCE_AXIS);
-  let panneaux = await ouvrirAlertes(page);
-  const etat = panneaux.locator('[data-alerte="e2e-achat"] [data-etat-alerte]');
-  await expect(etat).toHaveText(`historique insuffisant : ${chargees} sur 1500, affichez l'indicateur`);
+  const message = `${LIBELLE_ACHAT} · amorce courte (${SERVIES} bougies)${mentionCloture(DEBUT_ACHAT)}`;
+  const lesAvis = avis(page);
+  await expect(lesAvis).toHaveCount(1);
+  expect(await texteAvis(lesAvis)).toBe(`BTCUSDT 4h — ${message}`);
+  expect(await lireJournal(page)).toEqual([message]);
+  await attendreAvisDegage(page, lesAvis);
+  await lesAvis.tap({ position: { x: 12, y: 8 } });
+  await expect(lesAvis).toHaveCount(0);
+
+  const panneaux = await ouvrirAlertes(page);
+  const ligne = panneaux.locator('[data-alerte="e2e-achat"]');
+  await expect(ligne.locator("[data-etat-alerte]")).toHaveText("déclenchée");
+  const amorce = ligne.locator("[data-amorce-alerte]");
+  await expect(amorce).toHaveText(`amorce courte : ${SERVIES} sur 1500`);
+  expect(await luEnEntier(amorce)).toMatchObject({ dansEcran: true, sansCoupe: true, decouvert: true });
+  // Plus de remède à conseiller : la note dit que le graphe charge l'historique lui-même.
   await panneaux.getByRole("combobox").filter({ has: page.locator('option[value="indicateur-seuil"]') }).selectOption("indicateur-seuil");
   await panneaux.getByLabel("Indicateur de l'alerte").selectOption("stratAxis");
   const note = panneaux.locator("[data-note-alerte]");
-  await expect(note.locator("p").nth(2)).toHaveText("Évaluée seulement quand le graphe a chargé 1500 bougies : affichez AXIS.");
-  await page.getByRole("button", { name: "Fermer les panneaux" }).tap();
-
-  // AXIS affiché : le graphe remonte tout ce que la place a, et s'arrête à 1 200.
-  await afficherAxis(page, SERVIES);
-  panneaux = await ouvrirAlertes(page);
-  // Plus de remède à conseiller : l'indicateur est affiché, c'est la source qui est à sec.
-  await expect(etat).toHaveText("historique insuffisant : 1200 sur 1500");
-  expect(await luEnEntier(etat)).toMatchObject({ dansEcran: true, sansCoupe: true, decouvert: true });
-  await expect(note.locator("p").nth(2)).toHaveText("Évaluée seulement quand le graphe a chargé 1500 bougies.");
-  await etat.scrollIntoViewIfNeeded();
+  await expect(note.locator("p").nth(2)).toHaveText("Le graphe charge 1500 bougies pour elle ; si la place en a moins, elle est évaluée sur celles-là, avec la mention « amorce courte ».");
+  await expect(note).not.toContainText("affichez");
+  await amorce.scrollIntoViewIfNeeded();
   await page.screenshot({ path: cheminCapture(testInfo, "historique-court-390x844.png"), animations: "disabled" });
-  // L'alerte n'a été ni calibrée ni évaluée : aucun avis, journal vide.
-  await expect(avis(page)).toHaveCount(0);
+});
+
+// Lot A2 (12 novembre 2026) : le cas que la critique avait reporté du lot des alertes. Aucun
+// indicateur affiché ; la place sert les bougies 0 à 2 987, l'application s'ouvre dans la bougie
+// 2 988, où AXIS S/R réagit sur un support fort (pas à la 2 987 : vérifié sur la fixture).
+test("390 px puis 320 px en Bloomberg : aucun indicateur affiché, place de 2 988 bougies — « historique en chargement », puis « amorce courte » ; réglages de l'instance copiés, « ≠ graphe » ; la clôture de 2 988 sonne en le disant", async ({ page }, testInfo) => {
+  const SERVIES = 2988;
+  const flux = await demarrer(page, undefined, SERVIES);
+  expect(await lireMarche(page)).toMatchObject({ bougies: 500 });
+  const pages = await retenirPagesHistorique(page);
+
+  // Formulaire : AXIS S/R en tête, « Non mesuré · réaction sur support fort », créée au toucher.
+  const panneaux = await ouvrirAlertes(page);
+  await panneaux.getByRole("combobox").filter({ has: page.locator('option[value="indicateur-seuil"]') }).selectOption("indicateur-seuil");
+  await panneaux.getByLabel("Indicateur de l'alerte").selectOption("stratAxisSr");
+  const sortie = panneaux.getByLabel("Sortie de l'indicateur");
+  // Neuvième sortie d'AXIS S/R (alertes A2) : le pré-signal, nommé, préréglé, avec sa réserve.
+  expect((await sortie.locator("option").allTextContents()).slice(0, 5)).toEqual([
+    "Signal d'achat", "Signal de vente", "Non mesuré · réaction sur support fort", "Non mesuré · réaction sur résistance forte", "Non mesuré · pré-signal d'achat",
+  ]);
+  await sortie.selectOption({ label: "Non mesuré · pré-signal d'achat" });
+  await expect(panneaux.getByLabel("Comparateur")).toHaveCount(0);
+  const note = panneaux.locator("[data-note-alerte]");
+  await expect(note.locator("p").nth(1)).toHaveText("Libellé : AXIS S/R non mesuré · pré-signal d'achat (niveau sur le graphe)");
+  await expect(note.locator("p").nth(2)).toHaveText("Signal précoce non mesuré — lecture indicative, jamais une promesse.");
+  await sortie.selectOption({ label: "Non mesuré · réaction sur support fort" });
+  await expect(note.locator("p").nth(3)).toHaveText("Le graphe charge 3000 bougies pour elle ; si la place en a moins, elle est évaluée sur celles-là, avec la mention « amorce courte ».");
+  // AXIS S/R n'est pas sur le graphe : réglages par défaut.
+  await expect(note.locator("p").nth(4)).toHaveText("Réglages par défaut de l'indicateur, absent du graphe.");
+  await panneaux.getByRole("button", { name: "Ajouter sur BTCUSDT" }).tap();
+
+  // Le graphe remonte l'historique pour l'alerte : la première page est retenue, la liste le dit.
+  const ligne = panneaux.locator("[data-alerte]");
+  await expect(ligne).toHaveCount(1);
+  await expect(ligne.locator("[data-libelle-alerte]")).toHaveText(`${LIBELLE_REACTION} · 4h`);
+  const etat = ligne.locator("[data-etat-alerte]");
+  await expect.poll(() => pages.retenues(), { message: "page d'historique demandée par le graphe" }).toBeGreaterThan(0);
+  await expect(etat).toHaveText("historique en chargement : 500 sur 3000");
+  await expect(ligne.locator("[data-amorce-alerte]")).toHaveCount(0);
+  await ligne.scrollIntoViewIfNeeded();
+  await changerTheme(page, "bloomberg");
+  await page.screenshot({ path: cheminCapture(testInfo, "liste-historique-390x844-bloomberg.png"), animations: "disabled" });
+  await page.setViewportSize({ width: 320, height: 568 });
+  for (const texte of [ligne.locator("[data-libelle-alerte]"), etat]) {
+    expect(await luEnEntier(texte), "pendant la remontée, 320 px en Bloomberg").toMatchObject({ dansEcran: true, sansCoupe: true, decouvert: true });
+  }
+  await page.screenshot({ path: cheminCapture(testInfo, "liste-historique-320x568-bloomberg.png"), animations: "disabled" });
+
+  // Les pages passent : le graphe remonte toute la place (2 988), la remontée finit à sec.
+  pages.liberer();
+  await expect.poll(async () => (await lireMarche(page)).bougies, { timeout: 60_000, message: "bougies du graphe principal" }).toBe(SERVIES);
+  // Évaluée sur ce qu'il y a : calibrée (pas de réaction à la bougie 2 987), et la liste le dit.
+  await expect(etat).toHaveText("armée");
+  const amorce = ligne.locator("[data-amorce-alerte]");
+  await expect(amorce).toHaveText("amorce courte : 2988 sur 3000");
+  for (const texte of [ligne.locator("[data-libelle-alerte]"), etat, amorce]) {
+    expect(await luEnEntier(texte), "remontée finie, 320 px en Bloomberg").toMatchObject({ dansEcran: true, sansCoupe: true, decouvert: true });
+  }
+  await page.screenshot({ path: cheminCapture(testInfo, "liste-amorce-courte-320x568-bloomberg.png"), animations: "disabled" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await amorce.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: cheminCapture(testInfo, "liste-amorce-courte-390x844-bloomberg.png"), animations: "disabled" });
+
+  // AXIS S/R affiché avec une force de zone de 8 (réglage de l'instance). La première alerte, posée
+  // aux réglages par défaut, ne le suit pas : la liste le dit (« ≠ graphe », expliqué dessous).
+  await poserInstance(page, "stratAxisSr", { forceZoneForte: 8 });
+  const premiere = ligne.nth(0);
+  await expect(premiere.locator(".axiom-badge", { hasText: "≠ graphe" })).toBeVisible();
+  const ecart = premiere.locator("[data-ecart-graphe]");
+  await expect(ecart).toHaveText("Réglages différents de l'instance du graphe : l'alerte garde ceux de sa création, ses signaux peuvent différer de ceux affichés.");
+  // Une seconde alerte, posée maintenant : elle copie la force 8 de l'instance, la note le dit.
+  await expect(note.locator("p").nth(4)).toHaveText("Réglages de l'instance du graphe, copiés à la création : l'alerte ne suit pas leurs changements.");
+  await note.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: cheminCapture(testInfo, "formulaire-reglages-instance-390x844-bloomberg.png"), animations: "disabled" });
+  await panneaux.getByRole("button", { name: "Ajouter sur BTCUSDT" }).tap();
+  await expect(ligne).toHaveCount(2);
+  expect(await lireReglagesAlertes(page)).toEqual([{}, { forceZoneForte: 8 }]);
+  const seconde = ligne.nth(1);
+  await expect(seconde.locator("[data-libelle-alerte]")).toHaveText(`${LIBELLE_REACTION} · 4h`);
+  await expect(seconde.locator("[data-etat-alerte]")).toHaveText("armée");
+  await expect(seconde.locator("[data-amorce-alerte]")).toHaveText("amorce courte : 2988 sur 3000");
+  await expect(seconde.locator("[data-ecart-graphe]")).toHaveCount(0);
+  await page.setViewportSize({ width: 320, height: 568 });
+  for (const texte of [premiere.locator("[data-libelle-alerte]"), ecart, seconde.locator("[data-libelle-alerte]"), seconde.locator("[data-amorce-alerte]")]) {
+    expect(await luEnEntier(texte), "« ≠ graphe », 320 px en Bloomberg").toMatchObject({ dansEcran: true, sansCoupe: true, decouvert: true });
+  }
+  await ecart.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: cheminCapture(testInfo, "liste-ecart-graphe-320x568-bloomberg.png"), animations: "disabled" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Fermer les panneaux" }).tap();
   expect(await lireJournal(page)).toEqual([]);
+
+  // La bougie 2 988 clôture : UN avis, qui dit l'amorce courte (2 989 bougies closes lues). La
+  // réaction y est de force 6 : l'alerte aux réglages de l'instance (force 8) ne sonne pas.
+  await flux.reglerHorloge(ouverture(SERVIES) + QUATRE_HEURES + 2_000);
+  await expect.poll(() => flux.ouverts().kline).toBeGreaterThan(0);
+  flux.pousserCloture(SERVIES);
+  const message = `${LIBELLE_REACTION} · amorce courte (2989 bougies)`;
+  const lesAvis = avis(page);
+  await expect(lesAvis).toHaveCount(1);
+  expect(await texteAvis(lesAvis)).toBe(`BTCUSDT 4h — ${message}`);
+  expect(await lireJournal(page)).toEqual([message]);
+  await page.setViewportSize({ width: 320, height: 568 });
+  await attendreAvisDegage(page, lesAvis);
+  await page.screenshot({ path: cheminCapture(testInfo, "avis-amorce-courte-320x568-bloomberg.png"), animations: "disabled" });
+  // La même clôture repoussée : pas de second avis.
+  flux.pousserCloture(SERVIES);
+  await page.waitForTimeout(1_000);
+  await expect(lesAvis).toHaveCount(1);
+  expect(await lireJournal(page)).toEqual([message]);
 });

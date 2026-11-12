@@ -16,6 +16,10 @@
  * les réglages portés par la def sont bien ceux du calcul (force de zone 8) ; et les seuils qui
  * ne sonnent jamais sont épinglés (constat IND-2 : `prixSignal > 0`, `reactionSupport > 1`), en
  * regard de celui que le formulaire propose à leur place (`etat >= 1`).
+ *
+ * Alertes A2 (12 novembre 2026) : `preAchat >= 1`, sortie du pré-signal, sur des préfixes depuis
+ * l'index 1 500, avec la référence du garde-fou de régime (les closes de la série, alignées sur
+ * chaque préfixe) et sans elle : les fronts relevés par la sonde du concepteur, confirmés ici.
  */
 import { describe, expect, it } from "vitest";
 import type { Candle } from "@axiom/types";
@@ -43,7 +47,7 @@ const candles: Candle[] = (fixtureBtc.bougies as LigneBougie[]).map(([time, open
  * Pilote une def sur les préfixes croissants ; renvoie les indices de déclenchement. `messages`,
  * s'il est fourni, reçoit le message de chaque déclenchement ; `def` complète la def pilotée.
  */
-function declenchements(condition: Condition, premierIndice: number, messages?: string[], def: Partial<AlertDef> = {}): number[] {
+function declenchements(condition: Condition, premierIndice: number, messages?: string[], def: Partial<AlertDef> = {}, avecReference = false): number[] {
   let courante: AlertDef = {
     id: "axis-sr",
     symbol: "BTCUSDT",
@@ -55,10 +59,12 @@ function declenchements(condition: Condition, premierIndice: number, messages?: 
   };
   const tires: number[] = [];
   for (let i = premierIndice; i < candles.length; i++) {
+    const prefixe = candles.slice(0, i + 1);
     const ctx: ContexteAlerte = {
       maintenant: i,
       dernierPrix: candles[i]!.close,
-      candles: candles.slice(0, i + 1),
+      candles: prefixe,
+      ...(avecReference ? { aux: { refClose: prefixe.map((c) => c.close) } } : {}),
     };
     const res = evaluerAlertes([courante], ctx);
     if (res.defs[0]) courante = res.defs[0];
@@ -132,5 +138,20 @@ describe("message, réglages et seuils muets des alertes AXIS S/R (BTCUSDT 4h, b
     const messages: string[] = [];
     expect(declenchements(seuil("etat", ">=", 1), 2400, messages, { timeframe: "4h" })).toEqual([2475, 2552, 2740, 2937]);
     expect(new Set(messages)).toEqual(new Set(["AXIS S/R test 4h ≈ EMA 200 seule · signal d'achat"]));
+  }, 180_000);
+});
+
+describe("alerte de pré-signal : preAchat >= 1 (alertes A2, BTCUSDT 4h, bougies closes)", () => {
+  const preAchat = seuil("preAchat", ">=", 1);
+  const LIBELLE = "AXIS S/R non mesuré · pré-signal d'achat (niveau sur le graphe)";
+
+  it("avec la référence du garde-fou (les closes de la série) : calibrée à 1 500, tire aux fronts 1 540, 1 546, 1 549, 1 585, 2 168, 2 277", () => {
+    const messages: string[] = [];
+    expect(declenchements(preAchat, 1500, messages, { timeframe: "4h" }, true)).toEqual([1540, 1546, 1549, 1585, 2168, 2277]);
+    expect(messages).toEqual(Array.from({ length: 6 }, () => LIBELLE));
+  }, 180_000);
+
+  it("sans référence (garde-fou non appliqué) : tire aux fronts 1 540, 1 545, 1 585, 2 165, 2 277", () => {
+    expect(declenchements(preAchat, 1500)).toEqual([1540, 1545, 1585, 2165, 2277]);
   }, 180_000);
 });

@@ -13,7 +13,7 @@
  * AXIS et AXIS S/R : le libellé dit ce qui est mesuré, sans jamais dire mieux que l'infobulle du
  * graphe. La mention vient juste après le nom, avant l'évènement, pour rester lue là où le texte
  * est coupé. Seule la sortie `etat` porte le statut des campagnes (`statutAxis`, le même que sur
- * le graphe) ; toute autre sortie, réactions sur zone forte comprises, est « non mesuré ».
+ * le graphe) ; toute autre sortie, réactions sur zone forte et pré-signal compris, est « non mesuré ».
  */
 import { getIndicator, REGIME_TESTE, resolveParams, statutAxis } from "@axiom/indicators";
 import { comparer } from "./comparer";
@@ -23,10 +23,14 @@ import type { AlertDef, Condition } from "./types";
 /** Indicateurs dont les alertes portent une mention de mesure. */
 const AXIS = new Set(["stratAxis", "stratAxisSr"]);
 const NON_MESURE = "non mesuré";
-/** Sorties 0/1 d'AXIS S/R nommées quand l'alerte suit leur évènement (passage à 1). */
-const REACTIONS: Readonly<Record<string, string>> = {
+/**
+ * Sorties 0/1 d'AXIS S/R nommées quand l'alerte suit leur évènement (passage à 1). Toutes non
+ * mesurées. `preAchat` (alertes A2) : le niveau du pré-signal est tracé sur le graphe, pas écrit ici.
+ */
+const EVENEMENTS: Readonly<Record<string, string>> = {
   reactionSupport: "réaction sur support fort",
   reactionResistance: "réaction sur résistance forte",
+  preAchat: "pré-signal d'achat (niveau sur le graphe)",
 };
 
 type CondIndicateur = Extract<Condition, { type: "indicateur-seuil" | "indicateur-croisement" }>;
@@ -69,8 +73,8 @@ function libelleAxis(c: CondIndicateur, unite: AlertDef["timeframe"]): string {
     const suite = pour1 && !pour0 ? "signal d'achat" : pour0 && !pour1 ? "signal de vente" : brut;
     return `${nom} ${statutEtat(c, unite)} · ${suite}`;
   }
-  const reaction = pour1 && !pour0 ? REACTIONS[c.output] : undefined;
-  return `${nom} ${NON_MESURE} · ${reaction ?? brut}`;
+  const evenement = pour1 && !pour0 ? EVENEMENTS[c.output] : undefined;
+  return `${nom} ${NON_MESURE} · ${evenement ?? brut}`;
 }
 
 function libelleCondition(c: Condition, unite: AlertDef["timeframe"]): string {

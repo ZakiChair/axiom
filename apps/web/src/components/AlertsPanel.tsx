@@ -5,8 +5,15 @@
  * condition), création (symbole prérempli = actif courant ; types prix / var% /
  * indicateur-seuil / indicateur-croisement / funding-extreme / cascade liq / score de
  * régime), suppression, bascule actif/inactif, et journal repliable des déclenchements.
- * Un clic sur une alerte (ou sur une ligne de journal) navigue le chart maître vers son
- * symbole (pattern `navigateTo`, cf. SqueezeWindow).
+ * Un clic sur une alerte (ou sur une ligne de journal) ramène la vue PRINCIPALE sur son
+ * symbole et son unité (`voirAlerte` du runtime) : c'est elle que les alertes de bougie lisent.
+ *
+ * Depuis le 12 novembre 2026 : chaque ligne porte le libellé de l'alerte (`decrireAlerte`, qui
+ * dit ce qui est mesuré) suivi de son unité, en entier (retour à la ligne, jamais coupé) ; une
+ * def de bougie que rien n'évalue l'écrit (« hors graphe », « historique insuffisant ») au lieu
+ * de « armée » ; une alerte posée alors que sa condition est déjà vraie l'écrit au lieu de
+ * « déclenchée » ; le formulaire d'indicateur nomme les sorties, pose comparateur et valeur quand
+ * une seule lecture a un sens, et dit sous lui ce que l'alerte portera et ce qui ne sonnera pas.
  *
  * Ce composant se re-rend uniquement sur ÉVÉNEMENT (création, bascule, déclenchement) :
  * aucune donnée haute fréquence n'y transite (le runtime écrit le store hors render-loop).
@@ -16,7 +23,7 @@
 import { useMemo, useState } from "react";
 import { useStore } from "zustand";
 import {
-  decrireCondition,
+  decrireAlerte,
   alerteActiveAuTemps,
   conditionSupporteTimeframe,
   estFrontOnly,
@@ -29,22 +36,32 @@ import {
   type ConditionSimple,
   type SensCroisement,
 } from "@axiom/alerts";
-import { INDICATORS, getIndicator, supportsIndicatorTimeframe, TIMEFRAME_REQUIS } from "@axiom/indicators";
+import { getIndicator, supportsIndicatorTimeframe, TIMEFRAME_REQUIS } from "@axiom/indicators";
 import { marketStore } from "../store/market";
 import { alertsStore } from "../store/alerts";
+import { indicatorsStore } from "../store/indicators";
 import { decisionDossiersStore } from "../store/decisionDossiers";
 import { windowManagerStore } from "../store/windowManager";
 import { presetAlertsStore, type AlertePreset } from "../store/presetAlerts";
-import { demanderPermissionNotifications } from "../alerts/runtime";
+import { demanderPermissionNotifications, voirAlerte } from "../alerts/runtime";
 import { useExpirationClock } from "../alerts/useExpirationClock";
+import { daemonSupporte } from "../data/daemon";
 import { IS_VERCEL } from "../lib/deployment";
 import { formatHeure } from "../lib/format";
-import { navigateTo } from "../lib/navigation";
 import { motifUniteHorsGraphe, uniteImbriquee } from "../chart/uniteParam";
 import {
   cibleAlerte,
   construireConditionCroisement,
+  construireConditionSeuil,
+  etatArmement,
+  evaluationAlerte,
+  explicationMuette,
   INDICATEURS_CROISEMENT,
+  INDICATEURS_SEUIL,
+  noteAlerteSeuil,
+  sansMarche,
+  sortiesAlerte,
+  texteEvaluation,
 } from "./alertsPanel.util";
 import { refusAlertePerp, titreOptionsPerp } from "./optionsPerp.util";
 import { SidebarSection } from "./SidebarSection";
@@ -89,19 +106,6 @@ const FENETRES: Array<{ label: string; ms: number }> = [
 const COMPARATEURS: Comparateur[] = [">", ">=", "<", "<="];
 
 /**
- * Indicateurs utilisables pour `indicateur-seuil` : calculables sur bougies seules
- * (pas de série aux `oi`/`funding`/on-chain — le runtime n'injecte pas d'aux).
- */
-const INDICATEURS_SEUIL = INDICATORS.filter((d) => !d.aux || d.aux.length === 0);
-
-/** Libellé + couleur de l'état d'armement d'une alerte. */
-function etatArmement(arme: boolean | undefined): { texte: string; classe: string } {
-  if (arme === undefined) return { texte: "calibrage", classe: "text-text-dim" };
-  if (arme) return { texte: "armée", classe: "text-up" };
-  return { texte: "déclenchée", classe: "text-serie-3" };
-}
-
-/**
  * État du dernier scan d'une alerte de preset : pastille + libellé. Un échec avalé ne
  * doit PAS rester vert (le scan est front-only, sans relais daemon).
  */
@@ -130,6 +134,16 @@ export function AlertsPanel() {
   const symbolCourant = useStore(marketStore, (s) => s.symbol);
   const exchangeCourant = useStore(marketStore, (s) => s.exchange);
   const tfCourant = useStore(marketStore, (s) => s.timeframe);
+  // Taille du tampon du graphe principal (change à chaque bougie et à chaque page d'historique,
+  // pas à chaque tick) : une alerte n'est pas évaluée sous l'amorce de son indicateur.
+  const bougiesGraphe = useStore(marketStore, (s) => s.candles.length);
+  // Indicateurs de la vue principale : le graphe étend son historique à leur amorce, « affichez
+  // l'indicateur » n'est donc un remède que pour celui qui n'y est pas.
+  const indicateursActifs = useStore(indicatorsStore, (s) => s.indicators);
+  const indicateursAffiches = useMemo(() => indicateursActifs.map((i) => i.defId), [indicateursActifs]);
+  const graphe = { exchange: exchangeCourant, symbol: symbolCourant, timeframe: tfCourant, bougies: bougiesGraphe, indicateurs: indicateursAffiches };
+  // Le daemon local, quand il est là, évalue aussi les alertes de bougie en 1m sur Binance.
+  const daemonAlertes = daemonSupporte("alerts");
   // Alertes de scan (EQS) : liste réactive + message discret sur refus de reprise (limite).
   const alertesScan = useStore(presetAlertsStore, (s) => s.alertes);
   const maintenant = useExpirationClock(defs, alertesScan);
@@ -156,9 +170,13 @@ export function AlertsPanel() {
   const [sens, setSens] = useState<SensCroisement>("hausse");
   const [seuilPct, setSeuilPct] = useState("");
   const [fenetreMs, setFenetreMs] = useState(FENETRES[0]?.ms ?? 60_000);
-  // indicateur-seuil
+  // indicateur-seuil : AXIS S/R puis AXIS en tête ; la sortie est une entrée NOMMÉE (clé de
+  // `sortiesAlerte`), qui porte son comparateur et sa valeur quand une seule lecture a un sens.
   const [indicateurId, setIndicateurId] = useState(INDICATEURS_SEUIL[0]?.id ?? "rsi");
-  const [output, setOutput] = useState(INDICATEURS_SEUIL[0]?.outputs[0]?.key ?? "rsi");
+  const [sortieCle, setSortieCle] = useState(() => {
+    const premier = INDICATEURS_SEUIL[0];
+    return (premier ? sortiesAlerte(premier)[0]?.cle : undefined) ?? "rsi";
+  });
   const [comparateur, setComparateur] = useState<Comparateur>(">");
   const [valeurInd, setValeurInd] = useState("");
   // indicateur-croisement : état PROPRE (catalogue différent de `indicateur-seuil` —
@@ -205,16 +223,19 @@ export function AlertsPanel() {
   // les défs déjà persistées restent, inertes au runtime). Titre propre à un graphe Twelve Data.
   const titrePerp = titreOptionsPerp(exchangeCourant, symboleCible);
 
-  const outputsDispo = useMemo(() => {
+  const sortiesDispo = useMemo(() => {
     const idef = getIndicator(indicateurId);
-    return idef?.outputs ?? [];
+    return idef ? sortiesAlerte(idef) : [];
   }, [indicateurId]);
+  const sortieChoisie = sortiesDispo.find((s) => s.cle === sortieCle);
+  // Condition en cours de saisie (null : incomplète) : le formulaire affiche le libellé qu'elle portera.
+  const conditionSeuil = construireConditionSeuil(indicateurId, sortieCle, comparateur, valeurInd);
 
   const onChangeIndicateur = (id: string) => {
     setIndicateurId(id);
     const idef = getIndicator(id);
-    const firstOut = idef?.outputs[0]?.key;
-    if (firstOut) setOutput(firstOut);
+    const premiere = idef ? sortiesAlerte(idef)[0]?.cle : undefined;
+    if (premiere) setSortieCle(premiere);
   };
 
   const outputsCroisement = useMemo(() => {
@@ -259,20 +280,12 @@ export function AlertsPanel() {
       }
       condition = { type: "variation-pct", seuilPct: s, fenetreMs };
     } else if (type === "indicateur-seuil") {
-      const v = Number(valeurInd);
-      if (!Number.isFinite(v) || !indicateurId || !output) {
+      // Params vides → défauts du registry côté moteur. Une sortie nommée porte son seuil.
+      if (conditionSeuil === null) {
         setErreurForm("Indicateur, sortie et valeur requis.");
         return;
       }
-      // Params vides → défauts du registry côté moteur.
-      condition = {
-        type: "indicateur-seuil",
-        indicateurId,
-        params: {},
-        output,
-        comparateur,
-        valeur: v,
-      };
+      condition = conditionSeuil;
     } else if (type === "indicateur-croisement") {
       const c = construireConditionCroisement(indicateurCroise, outputA, outputB, sensCroisement);
       if (c === null) {
@@ -407,7 +420,7 @@ export function AlertsPanel() {
           </div>
         )}
         {defs.map((d) => {
-          const arm = etatArmement(d.arme);
+          const arm = etatArmement(d);
           const expiree = d.expireTs !== undefined && maintenant >= d.expireTs;
           const derniere = d.declenchements[d.declenchements.length - 1];
           const whaleUnusable = IS_VERCEL && d.condition.type === "whale-flux";
@@ -415,9 +428,21 @@ export function AlertsPanel() {
           // Paramètre « unité » réservé au graphe (import, définition persistée) : badge dédié.
           const unite = uniteImbriquee(d.condition);
           const timeframeUnusable = unite === null && !conditionSupporteTimeframe(d.condition, d.timeframe);
+          // Def de bougie que rien n'évalue : le dire à la place de « armée » (graphe principal
+          // ailleurs, ou historique plus court que l'amorce de l'indicateur).
+          const evaluation = evaluationAlerte(d, graphe, daemonAlertes);
+          const nonEvaluee = expiree || !d.actif ? null : texteEvaluation(evaluation);
+          const etatTexte = expiree ? "expirée" : !d.actif ? "en pause" : nonEvaluee ?? arm.texte;
+          const etatClasse = expiree || nonEvaluee !== null ? "text-warn" : arm.classe;
+          // « historique insuffisant : N sur A », suivi de « affichez l'indicateur » quand il n'est pas
+          // sur la vue principale, et « condition déjà vraie… » : trop longs pour la ligne du symbole.
+          const etatLong = nonEvaluee !== null ? evaluation.etat === "historique" : !expiree && d.actif && arm.long === true;
+          // Def créée avant que le formulaire cesse de proposer les sorties de prix d'une stratégie.
+          const muette = explicationMuette(d.condition);
           return (
             <div
               key={d.id}
+              data-alerte={d.id}
               className="group flex items-center gap-2 border-l-2 border-transparent px-3 py-1.5 text-[11px] hover:bg-surface"
             >
               <button
@@ -430,10 +455,10 @@ export function AlertsPanel() {
               </button>
               <button
                 type="button"
-                onClick={() =>
-                  navigateTo({ symbol: d.symbol, exchange: d.source, source: "alerte" })
-                }
-                title="Voir sur le chart"
+                // Alerte baleines : son symbole est l'actif surveillé, pas un marché — aucune vue à ouvrir.
+                disabled={sansMarche(d.condition)}
+                onClick={() => void voirAlerte(d)}
+                title={sansMarche(d.condition) ? "Actif surveillé : aucun marché à afficher" : "Voir sur la vue principale"}
                 className="min-w-0 flex-1 text-left"
               >
                 {/* Spans (et non divs) : contenu autorisé dans un <button>. */}
@@ -443,22 +468,26 @@ export function AlertsPanel() {
                     {whaleUnusable && <Badge ton="down">UNUSABLE</Badge>}
                     {timeframeUnusable && <Badge ton="down" title="RVOL saisonnier : recréer cette alerte sur le graphique 1h.">1h requis</Badge>}
                     {unite !== null && <Badge ton="down" title={motifUniteHorsGraphe(unite, "alerte")}>non évaluée</Badge>}
+                    {muette !== null && <Badge ton="down" title={muette}>muette</Badge>}
                     {frontOnly && (
                       <Badge ton="neutre" title="Évaluée seulement app ouverte (CVD / régime)">
                         front-only
                       </Badge>
                     )}
-                    <span className={`text-[10px] ${expiree ? "text-warn" : arm.classe}`}>{expiree ? "expirée" : !d.actif ? "en pause" : arm.texte}</span>
+                    {!etatLong && <span data-etat-alerte className={`text-[10px] ${etatClasse}`}>{etatTexte}</span>}
                   </span>
                 </span>
+                {/* Le libellé revient à la ligne : jamais coupé, « non mesuré » compris. */}
                 <span className="flex items-baseline justify-between gap-2">
-                  <span className="truncate text-[11px] text-text-dim">
-                    {decrireCondition(d.condition)}
+                  <span data-libelle-alerte className="min-w-0 break-words text-[11px] text-text-dim">
+                    {decrireAlerte(d)}{d.timeframe !== undefined ? ` · ${d.timeframe}` : ""}
                   </span>
                   <span className="shrink-0 text-[10px] tabular-nums text-text-dim">
                     {formatHeure(derniere ?? 0)}
                   </span>
                 </span>
+                {etatLong && <span data-etat-alerte className={`block break-words text-[10px] ${etatClasse}`}>{etatTexte}</span>}
+                {muette !== null && <span className="block break-words text-[10px] text-warn">{muette}</span>}
                 {d.expireTs !== undefined && (
                   <span className="block text-[10px] tabular-nums text-text-dim">
                     Échéance {new Date(d.expireTs).toLocaleString("fr-CH", { dateStyle: "short", timeStyle: "short" })}
@@ -530,7 +559,7 @@ export function AlertsPanel() {
           <ul className="space-y-0.5 px-0.5">
             {composition.map((c, i) => (
               <li key={i} className="flex items-baseline gap-1 text-[11px] text-text-dim">
-                <span className="truncate">⋀ {decrireCondition(c)}</span>
+                <span className="min-w-0 break-words">⋀ {decrireAlerte({ condition: c, timeframe: tfCourant })}</span>
                 <button
                   type="button"
                   onClick={() => setComposition((cs) => cs.filter((_, j) => j !== i))}
@@ -617,50 +646,60 @@ export function AlertsPanel() {
 
         {type === "indicateur-seuil" && (
           <div className="space-y-1.5">
-            <div className="flex gap-1.5">
-              <select
-                value={indicateurId}
-                onChange={(e) => onChangeIndicateur(e.target.value)}
-                className="min-w-0 flex-1 rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
-              >
-                {INDICATEURS_SEUIL.map((d) => (
-                  <option key={d.id} value={d.id} disabled={!supportsIndicatorTimeframe(d.id, tfCourant)}>
-                    {d.name}{supportsIndicatorTimeframe(d.id, tfCourant) ? "" : ` · ${TIMEFRAME_REQUIS[d.id] ?? "1h"} requis`}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={output}
-                onChange={(e) => setOutput(e.target.value)}
-                className="max-w-[30%] rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
-              >
-                {outputsDispo.map((o) => (
-                  <option key={o.key} value={o.key}>
-                    {o.key}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex gap-1.5">
-              <select
-                value={comparateur}
-                onChange={(e) => setComparateur(e.target.value as Comparateur)}
-                className="rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
-              >
-                {COMPARATEURS.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-              <input
-                value={valeurInd}
-                onChange={(e) => setValeurInd(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && soumettre()}
-                inputMode="decimal"
-                placeholder="Seuil (ex. 70)"
-                className="min-w-0 flex-1 rounded border border-border bg-bg px-2 py-1 text-xs tabular-nums text-text outline-none placeholder:text-text-dim focus:border-text-dim"
-              />
+            <select
+              value={indicateurId}
+              onChange={(e) => onChangeIndicateur(e.target.value)}
+              aria-label="Indicateur de l'alerte"
+              className="w-full rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
+            >
+              {INDICATEURS_SEUIL.map((d) => (
+                <option key={d.id} value={d.id} disabled={!supportsIndicatorTimeframe(d.id, tfCourant)}>
+                  {d.name}{supportsIndicatorTimeframe(d.id, tfCourant) ? "" : ` · ${TIMEFRAME_REQUIS[d.id] ?? "1h"} requis`}
+                </option>
+              ))}
+            </select>
+            {/* Sur sa propre ligne : les sorties portent leur nom, pas leur clé. */}
+            <select
+              value={sortieCle}
+              onChange={(e) => setSortieCle(e.target.value)}
+              aria-label="Sortie de l'indicateur"
+              className="w-full rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
+            >
+              {sortiesDispo.map((s) => (
+                <option key={s.cle} value={s.cle}>
+                  {s.libelle}
+                </option>
+              ))}
+            </select>
+            {/* Une sortie nommée porte son comparateur et sa valeur : rien à deviner, rien à saisir. */}
+            {sortieChoisie?.prereglage === undefined && (
+              <div className="flex gap-1.5">
+                <select
+                  value={comparateur}
+                  onChange={(e) => setComparateur(e.target.value as Comparateur)}
+                  aria-label="Comparateur"
+                  className="rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
+                >
+                  {COMPARATEURS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  value={valeurInd}
+                  onChange={(e) => setValeurInd(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && soumettre()}
+                  inputMode="decimal"
+                  placeholder="Seuil (ex. 70)"
+                  className="min-w-0 flex-1 rounded border border-border bg-bg px-2 py-1 text-xs tabular-nums text-text outline-none placeholder:text-text-dim focus:border-text-dim"
+                />
+              </div>
+            )}
+            <div data-note-alerte className="space-y-0.5 px-0.5 text-[10px] text-text-dim">
+              {noteAlerteSeuil(conditionSeuil, sortieChoisie, { symbol: symboleCible, source: exchangeCourant, timeframe: tfCourant }, { daemonAlertes, indicateursAffiches }).map((ligne) => (
+                <p key={ligne} className={ligne.startsWith("Libellé : ") ? "break-words text-text" : "break-words"}>{ligne}</p>
+              ))}
             </div>
           </div>
         )}
@@ -987,23 +1026,26 @@ export function AlertsPanel() {
               <Vide>Aucun déclenchement.</Vide>
             ) : (
               journal.map((d, i) => {
-                // La def peut avoir été supprimée depuis : sans cible, pas de navigation.
+                // La def peut avoir été supprimée depuis, ou ne désigner aucun marché (baleines) :
+                // sans cible, pas de navigation.
                 const preuve = d.preuve?.origine;
                 const cible = preuve?.symbol && preuve.source
-                  ? { symbol: preuve.symbol, source: preuve.source }
+                  ? { symbol: preuve.symbol, source: preuve.source, ...(preuve.timeframe ? { timeframe: preuve.timeframe } : {}) }
                   : cibleAlerte(defs, d.alertId);
+                // Marque : la bougie évaluée quand le déclenchement vient d'une clôture, sinon son instant.
+                const tempsMarque = d.preuve?.contexte.derniereBougie?.time ?? d.ts;
                 const contenu = (
                   <>
-                    <span className="min-w-0 truncate text-text-dim">{d.message}{d.instantane ? ` · ${d.valeur.toLocaleString("fr-FR")} ${d.instantane.unite} · obs. ${new Date(d.instantane.observeLe).toISOString().slice(0, 10)} · ${d.instantane.source}` : ""}</span>
+                    <span className="min-w-0 break-words text-text-dim">{d.message}{d.instantane ? ` · ${d.valeur.toLocaleString("fr-FR")} ${d.instantane.unite} · obs. ${new Date(d.instantane.observeLe).toISOString().slice(0, 10)} · ${d.instantane.source}` : ""}</span>
                     <span className="shrink-0 tabular-nums text-text-dim">{formatHeure(d.ts)}</span>
                   </>
                 );
                 const classes = "flex w-full items-baseline justify-between gap-2 py-0.5 text-left text-[11px]";
-                return <div key={`${d.alertId}-${d.ts}-${i}`} className="flex items-center gap-1">
+                return <div key={`${d.alertId}-${d.ts}-${i}`} data-journal-alerte className="flex items-center gap-1">
                   {cible === null ? <div className={`${classes} min-w-0 flex-1`}>{contenu}</div> : <button
                     type="button"
-                    onClick={() => navigateTo({ symbol: cible.symbol, exchange: cible.source, markTime: d.ts, source: "alerte" })}
-                    title="Marquer sur le chart"
+                    onClick={() => void voirAlerte(cible, tempsMarque)}
+                    title="Marquer sur la vue principale"
                     className={`${classes} min-w-0 flex-1 transition hover:bg-bg`}
                   >{contenu}</button>}
                   <button type="button" title="Créer un dossier de décision dans EXPY" className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-text-dim hover:text-text" onClick={() => {

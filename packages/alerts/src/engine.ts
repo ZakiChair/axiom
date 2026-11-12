@@ -19,10 +19,10 @@
 
 import type { AuxSeries, Candle, Timeframe } from "@axiom/types";
 import { computeIndicator, getIndicator, supportsIndicatorTimeframe } from "@axiom/indicators";
-import { decrireCondition } from "./describe";
+import { comparer } from "./comparer";
+import { decrireAlerte } from "./libelles";
 import type {
   AlertDef,
-  Comparateur,
   Condition,
   ConditionSimple,
   ContexteAlerte,
@@ -88,7 +88,7 @@ export function evaluerAlertes(defs: AlertDef[], ctx: ContexteAlerte): ResultatE
         alertId: def.id,
         ts: ctx.maintenant,
         valeur: ev.valeur,
-        message: def.message ?? decrireCondition(def.condition),
+        message: decrireAlerte(def),
         ...(ev.instantane ? { instantane: ev.instantane } : {}),
       });
     }
@@ -591,18 +591,4 @@ function deuxDernieresPaires(
   const b0 = b[i1 - 1];
   if (a1 === undefined || b1 === undefined || a0 === undefined || b0 === undefined) return null;
   return { a0, b0, a1, b1 };
-}
-
-/** Comparaison d'une valeur à un seuil selon un comparateur. */
-function comparer(v: number, op: Comparateur, seuil: number): boolean {
-  switch (op) {
-    case ">":
-      return v > seuil;
-    case ">=":
-      return v >= seuil;
-    case "<":
-      return v < seuil;
-    case "<=":
-      return v <= seuil;
-  }
 }

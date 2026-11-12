@@ -161,8 +161,10 @@ export class OverlayLegend {
     this.toggle.setAttribute("aria-expanded", String(this.expanded));
     this.toggle.style.left = "4px";
     this.toggle.style.bottom = "32px";
+    // Au téléphone le panneau déplié passe devant l'encart O/H/L/C (z-index 29, `candleReadout.ts`),
+    // qui ne capte pas les touchers : ce qu'on voit est ce qu'on touche.
     this.panel.style.cssText = mobile
-      ? `position:absolute;z-index:21;left:4px;bottom:80px;width:${Math.max(0, (main?.width ?? 0) - 8)}px;max-height:45%;overflow-y:auto;overscroll-behavior:contain;display:${this.expanded ? "flex" : "none"};flex-direction:column;gap:2px;pointer-events:auto;`
+      ? `position:absolute;z-index:30;left:4px;bottom:80px;width:${Math.max(0, (main?.width ?? 0) - 8)}px;max-height:45%;overflow-y:auto;overscroll-behavior:contain;display:${this.expanded ? "flex" : "none"};flex-direction:column;gap:2px;pointer-events:auto;`
       : "display:contents";
     if (!main) {
       for (const el of this.els.values()) el.style.display = "none";

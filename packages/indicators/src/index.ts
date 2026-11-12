@@ -22,6 +22,8 @@ export {
   dernierRetournementAxis,
   SEUIL_CONFIANCE_RETOURNEMENT_AXIS,
   MAX_RETOURNEMENTS_AXIS,
+  statutAxis,
+  REGIME_TESTE,
   type RetournementPotentielAxis,
   type ComposantesRetournementAxis,
 } from "./strategy/stratAxis";

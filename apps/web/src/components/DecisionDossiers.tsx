@@ -1,5 +1,5 @@
 import { useStore } from "zustand";
-import { decrireCondition, LIBELLES_METRIQUE_ONCHAIN, type MetriqueOnchainAlerte } from "@axiom/alerts";
+import { decrireAlerte, LIBELLES_METRIQUE_ONCHAIN, type MetriqueOnchainAlerte } from "@axiom/alerts";
 import { isTickerSource } from "../data/ticker";
 import type { ContexteDecision, DossierDecision } from "../data/decisionDossier";
 import { decisionDossiersStore } from "../store/decisionDossiers";
@@ -54,7 +54,8 @@ function DossierLigne({ dossier }: { dossier: DossierDecision }) {
       <strong className="min-w-0 flex-1">{origine.message} · {origine.symbol ?? "instrument inconnu"} / {origine.source ?? "source inconnue"}</strong>
       <span>{date(origine.ts)} · {dossier.qualite === "complete" ? "preuve capturée" : "contexte partiel (ancien journal/daemon)"}</span>
     </div>
-    <p className="text-text-dim">Alerte {origine.alertId} · valeur {origine.valeur} · condition {origine.condition ? decrireCondition(origine.condition) : "inconnue"}</p>
+    {/* Libellé de la condition archivée (ce qu'elle mesure), pas sa formule brute ; l'unité est celle de l'alerte au signal. */}
+    <p className="text-text-dim">Alerte {origine.alertId} · valeur {origine.valeur} · condition {origine.condition ? decrireAlerte({ condition: origine.condition, ...(origine.timeframe ? { timeframe: origine.timeframe } : {}) }) : "inconnue"}</p>
     <p className="text-text-dim">Contexte connu au signal : {contexte.length ? contexte.join(" · ") : "aucune valeur archivée"}</p>
     <p className="text-text-dim">Analyse au signal : {dossier.analyse ? `${date(dossier.analyse.captureLe)} · ${dossier.analyse.lectures.length} lecture(s) archivée(s)` : "aucune capture archivée (historique inconnu)"} · dossier créé le {date(dossier.creeMs)}</p>
     {dossier.analyse?.lectures.map((lecture) => <p key={lecture.id} className="text-text-dim">{lecture.nature === "scenario-conditionnel" ? "Scénario conditionnel" : "Observation"} · {lecture.domaine} · {lecture.conclusion} · {lecture.statut} · source {lecture.source}{lecture.valeur === null ? "" : ` · ${lecture.valeur} ${lecture.unite ?? ""}`}</p>)}

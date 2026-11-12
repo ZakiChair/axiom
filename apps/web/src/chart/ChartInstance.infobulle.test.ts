@@ -7,6 +7,10 @@
  * l'infobulle, écrite de 40 à 51 px, passait dessous. Les cas ci-dessous reprennent les mesures du
  * parcours `e2e/mobile-axis-sr.e2e.ts`, qui prouve le câblage sur le vrai graphe.
  *
+ * Bureau (phase 2 d'AXIS, 12 novembre 2026) : la même formule y vaut désormais. Le bandeau du
+ * symbole y descend à 44 px (64 px sur deux rangées en vue étroite) : à 36 px, il entamait la
+ * première rangée de l'infobulle, celle d'un signal ou du pré-signal. 36 px reste le plancher.
+ *
  * NOTE environnement : même préambule que `backfillDelai.test.ts` — le graphe d'import de
  * `ChartInstance.tsx` touche `document` et enregistre des overlays klinecharts dès l'import.
  */
@@ -111,6 +115,17 @@ describe("hautInfobullePrix — l'infobulle du pane des prix passe sous le bas r
     expect(replie(27, 584)).toBe(BUREAU);
     expect(replie(34, 584)).toBe(BUREAU);
     expect(replie(35, 584)).toBe(37);
+  });
+
+  it("bandeau du bureau (bas à 44 px, 64 px sur deux rangées en vue étroite) : 2 px dessous, quelle que soit la hauteur du pane", () => {
+    for (const pane of [120, 300, 560, 820]) {
+      expect(replie(44, pane)).toBe(46);
+      expect(replie(64, pane)).toBe(66);
+    }
+  });
+
+  it("en-tête d'une vue secondaire au bureau, plus court que 34 px : le plancher de 36 px", () => {
+    for (const bas of [0, 20, 28, 33.2, 34]) expect(replie(bas, 400)).toBe(BUREAU);
   });
 
   it("« Détails » ouvert dans le tiers haut du pane : l'infobulle suit le panneau", () => {

@@ -10,7 +10,13 @@
  *    conditions `variation-pct` et `indicateur-*` à chaque nouvelle bougie CLÔTURÉE
  *    (ces conditions requièrent les bougies, présentes uniquement pour le symbole affiché).
  *    Une def n'est évaluée que si son `timeframe` est celui du chart ; `timeframe`
- *    absent (def HÉRITÉE) = évaluée sur le TF affiché, quel qu'il soit.
+ *    absent (def HÉRITÉE) = évaluée sur le TF affiché, quel qu'il soit. Règles (12 novembre
+ *    2026) : chaque def est évaluée UNE fois par bougie close (suivi par def) ; jamais sous
+ *    l'amorce de son indicateur (AXIS 1 500 bougies, AXIS S/R 3 000 : pas d'évaluation à la
+ *    mauvaise profondeur, la liste le dit) ; une def créée ou réactivée en cours de bougie est
+ *    évaluée tout de suite sur la dernière bougie close (une def neuve s'y calibre, la clôture
+ *    suivante peut donc tirer). Au retour sur un état qui dure (AXIS acheté depuis trois
+ *    clôtures), le message date la bougie du signal et « Voir » la marque.
  *  - POLL FUNDING (~60 s) pour les symboles ayant une alerte `funding-extreme` :
  *    injecte `fundingRate` (+ `fundingZScore` si historique dispo) dans le contexte.
  *  - STORE CVD S/P (`cvdDivergenceStore`) : le contrôleur orderflow publie le kind
@@ -42,16 +48,24 @@
  * (dormants côté daemon) : CVD spot/perp-div (pas de pipeline orderflow), `regime-seuil`
  * (score non calculé en v1), `flux-capitaux-seuil` (loader commun local) et les alertes de preset.
  *
- * Un déclenchement → journal du store + notification système (Notification API) + bip
- * discret (WebAudio, aucun fichier binaire). AUCUNE donnée haute fréquence ne transite
- * par React : le store n'est écrit que sur transition d'état (cf. BUILD-CONTRACT).
+ * Un déclenchement → journal du store + avis à l'écran qui reste jusqu'au toucher
+ * (« SYMBOLE UNITÉ — libellé », bouton « Voir ») + notification système (Notification API,
+ * onglet visible) + bip discret (WebAudio, aucun fichier binaire). Au téléphone, l'avis est
+ * le seul signal sûr : un onglet Safari n'a pas de notification système. AUCUNE donnée haute
+ * fréquence ne transite par React : le store n'est écrit que sur transition d'état
+ * (cf. BUILD-CONTRACT).
  *
  * Aucune modification de Chart.tsx : on lit `marketStore` en aval, sans le piloter.
  */
-import { alerteActiveAuTemps, evaluerAlertes, prochaineEcheanceAlerte, typesDeDef, type AlertDef, type ContexteAlerte, type Declenchement, type MetriqueOnchainAlerte } from "@axiom/alerts";
-import type { Unsubscribe } from "@axiom/types";
+import { alerteActiveAuTemps, comparer, evaluerAlertes, prochaineEcheanceAlerte, typesDeDef, type AlertDef, type Condition, type ContexteAlerte, type Declenchement, type MetriqueOnchainAlerte } from "@axiom/alerts";
+import type { Timeframe, Unsubscribe } from "@axiom/types";
 import { marketStore, sansMarchePerpCible } from "../store/market";
-import { getIndicator } from "@axiom/indicators";
+import { chartLayoutStore } from "../store/chart-layout";
+import { pousserToast } from "../store/toasts";
+import { dureeTimeframeMs } from "../data/backtestData";
+import { formatDateCourte, formatHeureMinute } from "../lib/format";
+import { amorceAtteinte, sansMarche } from "../components/alertsPanel.util";
+import { computeIndicator, getIndicator } from "@axiom/indicators";
 import { auxProvider } from "../chart/auxProvider";
 import { refSymbolStore } from "../store/refSymbol";
 import { fluxLiqRetenu, liqEventsStore } from "../chart/liquidationMarkers";
@@ -93,16 +107,18 @@ function fundingSondable(def: AlertDef): boolean {
  * de référence est alors demandée à `auxProvider` avant l'évaluation, alignée
  * par ouverture sur les bougies clôturées — même clé de cache et même fetch que
  * le chart (`refClose:{refSymbol}:{tf}`). Référence indisponible → évaluation
- * sans aux (condition de la v2).
+ * sans aux (condition de la v2). Les sous-conditions d'un composite comptent : sans la
+ * référence, il lisait les signaux de la v2 et tirait sur une bougie où le garde-fou
+ * avait bloqué l'achat, que ni le graphe ni l'alerte simple ne signalaient.
  */
 function lotVeutRefClose(lot: AlertDef[]): boolean {
-  return lot.some((d) => {
-    const c = d.condition;
-    return (
-      (c.type === "indicateur-seuil" || c.type === "indicateur-croisement") &&
-      getIndicator(c.indicateurId)?.auxFacultatives?.includes("refClose") === true
-    );
-  });
+  return lot.some((d) =>
+    (d.condition.type === "composite" ? d.condition.conditions : [d.condition]).some(
+      (c) =>
+        (c.type === "indicateur-seuil" || c.type === "indicateur-croisement") &&
+        getIndicator(c.indicateurId)?.auxFacultatives?.includes("refClose") === true,
+    ),
+  );
 }
 
 /** Période de poll funding (ms) — lent, hors chemin chaud. */
@@ -157,8 +173,82 @@ function sansUniteSuperieure(lot: AlertDef[]): AlertDef[] {
   });
 }
 
-/** Applique une passe d'évaluation : persiste les defs modifiées, journalise + notifie. */
-function appliquerResultat(lotBrut: AlertDef[], ctx: ContexteAlerte): void {
+/** Bougie close sur laquelle porte une évaluation de clôture, dans l'unité du graphe qui la sert. */
+interface BougieEvaluee {
+  /** Ouverture de la bougie (ms epoch). */
+  time: number;
+  timeframe: Timeframe;
+}
+
+/**
+ * Clôture (ms epoch) de la bougie ouverte à `ouverture` : ouverture + durée pour une unité à pas
+ * fixe (`dureeTimeframeMs` ; les secondes et les minutes qu'elle ne couvre pas — 1s, 5s, 15s,
+ * 3m — se lisent dans le nom de l'unité), début du mois calendaire UTC suivant pour 1M, 3M, 6M
+ * et 12M. `null` seulement pour une unité inconnue : jamais une heure inventée.
+ */
+export function clotureBougie(ouverture: number, timeframe: Timeframe): number | null {
+  const duree = dureeTimeframeMs(timeframe);
+  if (duree !== null) return ouverture + duree;
+  const pas = /^(\d+)([sm])$/.exec(timeframe);
+  if (pas !== null) return ouverture + Number(pas[1]) * (pas[2] === "s" ? 1_000 : 60_000);
+  const mois = /^(\d+)M$/.exec(timeframe);
+  if (mois === null) return null;
+  const debut = new Date(ouverture);
+  return Date.UTC(debut.getUTCFullYear(), debut.getUTCMonth() + Number(mois[1]), 1);
+}
+
+/**
+ * Mention ajoutée au message d'un déclenchement quand l'évaluation est un RATTRAPAGE : à l'instant
+ * de l'évaluation, la bougie du signal a clôturé depuis STRICTEMENT plus d'une durée de bougie
+ * (`maintenant − clôture > clôture − ouverture`). La bougie du signal est la bougie évaluée, ou
+ * celle où un seuil d'indicateur est devenu vrai quand elle est plus ancienne (`ouvertureSignal`).
+ * Cas : retour de Safari au premier plan sur un tampon resté en arrière, marché fermé depuis la
+ * dernière bougie, AXIS acheté depuis plusieurs clôtures à la réouverture. Le message dit alors
+ * quand cette bougie a clôturé, en heure locale. Chaîne vide sinon : clôture en direct, ouverture
+ * de l'application dans la bougie qui suit (une durée de bougie de retard au plus), ou unité
+ * inconnue.
+ */
+export function mentionRattrapage(ouverture: number, timeframe: Timeframe, maintenant: number): string {
+  const cloture = clotureBougie(ouverture, timeframe);
+  if (cloture === null || maintenant - cloture <= cloture - ouverture) return "";
+  return ` · bougie close le ${formatDateCourte(cloture)} à ${formatHeureMinute(cloture)}`;
+}
+
+/**
+ * Ouverture de la bougie du SIGNAL d'un seuil d'indicateur vrai sur la dernière bougie de
+ * `ctx.candles` : la première de la suite de bougies, finissant à celle-ci, où la condition est
+ * vraie. En direct c'est la bougie évaluée. Au retour dans l'application, la condition peut être
+ * vraie depuis plusieurs clôtures (AXIS acheté trois bougies plus tôt) : le déclenchement porte
+ * alors sur un signal plus ancien que la bougie évaluée, et c'est lui que le message date et que
+ * « Voir » marque. Même calcul que le moteur (réglages de la condition, référence du garde-fou).
+ * `undefined` : autre type de condition, sortie incalculable, condition fausse, ou vraie depuis
+ * le début de la série lue — le début du signal n'est pas connu, jamais une bougie inventée.
+ */
+export function ouvertureSignal(condition: Condition, ctx: Pick<ContexteAlerte, "candles" | "aux">): number | undefined {
+  const { candles } = ctx;
+  if (condition.type !== "indicateur-seuil" || !candles) return undefined;
+  const def = getIndicator(condition.indicateurId);
+  const serie = def && computeIndicator(def, candles, condition.params, ctx.aux).series[condition.output];
+  if (!serie) return undefined;
+  /** La condition à la bougie `i` ; `undefined` sans valeur. */
+  const vraie = (i: number): boolean | undefined => {
+    const v = serie[i];
+    return v === undefined ? undefined : comparer(v, condition.comparateur, condition.valeur);
+  };
+  let i = candles.length - 1;
+  if (vraie(i) !== true) return undefined;
+  while (i > 0 && vraie(i - 1) === true) i -= 1;
+  return i > 0 && vraie(i - 1) === false ? candles[i]?.time : undefined;
+}
+
+/**
+ * Applique une passe d'évaluation : persiste les defs modifiées, journalise + notifie. `bougie` :
+ * la bougie close évaluée, pour une passe de clôture. « Voir » marque la bougie du signal — la
+ * bougie évaluée, ou celle où un seuil d'indicateur est devenu vrai quand elle est plus ancienne
+ * (`ouvertureSignal`) — et un rattrapage dit dans le message quand elle a clôturé (journal, avis
+ * et notification portent le même texte).
+ */
+function appliquerResultat(lotBrut: AlertDef[], ctx: ContexteAlerte, bougie?: BougieEvaluee): void {
   const lot = sansUniteSuperieure(lotBrut);
   if (lot.length === 0) return;
   const res = evaluerAlertes(lot, ctx);
@@ -167,11 +257,14 @@ function appliquerResultat(lotBrut: AlertDef[], ctx: ContexteAlerte): void {
   const captures = res.declenchements.map((d) => capturerLectures(d.ts));
   const store = alertsStore.getState();
   store.appliquerMisesAJour(res.defs); // fusion par id (n'écrase pas les defs hors lot)
-  for (const [index, d] of res.declenchements.entries()) {
+  for (const [index, brut] of res.declenchements.entries()) {
     // Une autre subscription synchrone peut supprimer ou désactiver la définition
     // pendant l'application des états. Ne pas notifier un ancien snapshot de defs.
-    const def = lot.find((candidate) => candidate.id === d.alertId);
+    const def = lot.find((candidate) => candidate.id === brut.alertId);
     if (!def) continue;
+    const signal = bougie === undefined ? undefined : (ouvertureSignal(def.condition, ctx) ?? bougie.time);
+    const rattrapage = bougie === undefined || signal === undefined ? "" : mentionRattrapage(signal, bougie.timeframe, ctx.maintenant);
+    const d = rattrapage === "" ? brut : { ...brut, message: brut.message + rattrapage };
     const encoreNotifiable = (): boolean => alertsStore.getState().defs.some((courante) =>
       courante.id === d.alertId && courante.expireTs === def.expireTs && alerteActiveAuTemps(courante, Date.now()));
     if (!encoreNotifiable()) continue;
@@ -179,7 +272,7 @@ function appliquerResultat(lotBrut: AlertDef[], ctx: ContexteAlerte): void {
     // Le journal déclenche des abonnés synchrones ; l'échéance ou la génération
     // peut changer entre l'archivage du signal et l'envoi externe.
     if (!encoreNotifiable()) continue;
-    notifier(d);
+    notifier(d, def, signal);
   }
 }
 
@@ -190,8 +283,12 @@ function creerRuntime(): Unsubscribe {
   /** Dernier prix vu par marché (pour le `prixPrecedent` du sens `les-deux`). */
   const dernierPrix = new Map<string, number>();
 
-  /** Contexte fusionné par marché (hors React) — les flux y écrivent leur contribution. */
-  type ContextePartiel = Partial<ContexteAlerte> & { timeframeBougies?: string };
+  /**
+   * Contexte fusionné par marché (hors React) — les flux y écrivent leur contribution.
+   * `bougiesTampon` : taille du tampon du graphe (bougie en formation comprise) d'où viennent
+   * `candles` ; un composite n'est pas évalué sous l'amorce de ses indicateurs.
+   */
+  type ContextePartiel = Partial<ContexteAlerte> & { timeframeBougies?: string; bougiesTampon?: number };
   const contextes = new Map<string, ContextePartiel>();
   const dernierEvalComposite = new Map<string, number>();
 
@@ -212,11 +309,20 @@ function creerRuntime(): Unsubscribe {
     contextes.set(cle, next);
   };
 
-  const evaluerComposites = (source: AlertDef["source"], symbol: string): void => {
+  /** Par marché : composites dont l'évaluation attend la référence du garde-fou de régime. */
+  const attenteReference = new Map<string, Set<string>>();
+
+  /**
+   * `seuls` : passe ciblée, hors cadence. Seuls les composites qu'il retient sont évalués, une
+   * fois et sans le frein (qui n'est pas consommé) : ceux qu'un historique étendu sous la même
+   * clôture vient de sortir de sous leur amorce (R5), ceux qui n'ont jamais été calibrés (R3),
+   * ceux qui attendaient la référence du garde-fou de régime. Les autres l'ont déjà été.
+   */
+  const evaluerComposites = (source: AlertDef["source"], symbol: string, seuls?: (def: AlertDef) => boolean): void => {
     const cle = cleMarche(source, symbol);
     const now = Date.now();
     const last = dernierEvalComposite.get(cle) ?? 0;
-    if (now - last < COMPOSITE_THROTTLE_MS) return;
+    if (seuls === undefined && now - last < COMPOSITE_THROTTLE_MS) return;
     const partiel = contextes.get(cle);
     if (!partiel || partiel.dernierPrix === undefined || !Number.isFinite(partiel.dernierPrix)) return;
     const lot = alertsStore
@@ -226,14 +332,17 @@ function creerRuntime(): Unsubscribe {
           return false;
         }
         const porteBougie = [...TYPES_BOUGIE].some((type) => defPorte(d, type));
-        return !porteBougie || d.timeframe === undefined || d.timeframe === partiel.timeframeBougies;
+        if (porteBougie && d.timeframe !== undefined && d.timeframe !== partiel.timeframeBougies) return false;
+        // Sous l'amorce d'un de ses indicateurs (AXIS, AXIS S/R), le composite n'est pas évalué :
+        // armement figé, jamais un ET calculé à la mauvaise profondeur.
+        return amorceAtteinte(d, partiel.bougiesTampon ?? 0) && (seuls === undefined || seuls(d));
       });
     if (lot.length === 0) return;
-    dernierEvalComposite.set(cle, now);
+    if (seuls === undefined) dernierEvalComposite.set(cle, now);
     const regime = regimeStore.getState().regime;
     const regimeScore =
       regime !== null && regime.libelle !== "indéterminé" ? regime.score : undefined;
-    appliquerResultat(lot, {
+    const ctx: ContexteAlerte = {
       maintenant: now,
       dernierPrix: partiel.dernierPrix,
       prixPrecedent: partiel.prixPrecedent,
@@ -243,7 +352,39 @@ function creerRuntime(): Unsubscribe {
       cvdDivergenceKind: partiel.cvdDivergenceKind,
       liqUsdParMin: partiel.liqUsdParMin,
       regimeScore,
-    });
+    };
+    // Référence du garde-fou de régime, comme pour une def simple : un composite lisant AXIS la
+    // reçoit alignée sur les bougies de son contexte. En vol, ceux qui la lisent attendent son
+    // arrivée (les autres sont évalués) ; en échec, évaluation sans elle (condition de la v2).
+    const avecReference = partiel.candles === undefined || partiel.timeframeBougies === undefined ? [] : lot.filter((d) => lotVeutRefClose([d]));
+    if (avecReference.length === 0) {
+      appliquerResultat(lot, ctx);
+      return;
+    }
+    const statut = auxProvider.getAligned(
+      {
+        exchange: source,
+        symbol,
+        timeframe: partiel.timeframeBougies as Timeframe,
+        ids: ["refClose"],
+        candleTimes: (partiel.candles ?? []).map((c) => c.time),
+      },
+      () => {
+        const attendus = attenteReference.get(cle);
+        if (arrete || attendus === undefined) return;
+        attenteReference.delete(cle);
+        evaluerComposites(source, symbol, (d) => attendus.has(d.id));
+      },
+    );
+    if (statut.status === "pending") {
+      const attendus = attenteReference.get(cle) ?? new Set<string>();
+      for (const d of avecReference) attendus.add(d.id);
+      attenteReference.set(cle, attendus);
+      const sansReference = lot.filter((d) => !avecReference.includes(d));
+      if (sansReference.length > 0) appliquerResultat(sansReference, ctx);
+      return;
+    }
+    appliquerResultat(lot, statut.status === "ready" ? { ...ctx, aux: { refClose: statut.aux.refClose } } : ctx);
   };
 
   // ── Flux ticker : conditions prix-croise ──────────────────────────────────
@@ -311,20 +452,57 @@ function creerRuntime(): Unsubscribe {
   };
 
   // ── Clôture de bougie : conditions variation-pct + indicateur-* ────────────
+  //
+  // Règles d'évaluation (12 novembre 2026). T = dernière bougie close du graphe principal.
+  //  R1. Chaque def de bougie active de ce marché est évaluée UNE fois pour T : à l'arrivée de
+  //      T, au démarrage ou au retour sur ce marché si elle est évaluable ; sinon dès qu'elle le
+  //      devient, tant que T reste la dernière close (`evalueePour`, suivi par def).
+  //  R2. Une def dont un indicateur déclare une amorce A n'est évaluable que si le tampon du
+  //      graphe compte au moins A bougies (`amorceAtteinte`, même décompte que l'extension
+  //      d'historique du graphe). En deçà : aucune évaluation, ni calibrage ni tir ; la liste
+  //      des alertes écrit « historique insuffisant ».
+  //  R3. Conséquence de R1 : une def créée, réactivée ou prolongée en cours de bougie est
+  //      évaluée aussitôt sur T. Une def neuve (`arme` indéfini) s'y calibre sans tirer ; la
+  //      clôture suivante peut donc la déclencher. (Avant : la première clôture servait de
+  //      calibrage, et son signal était perdu.) Un composite jamais calibré, sur le marché
+  //      affiché, l'est de même à chaque changement de définitions (revue globale).
+  //  R4. La def est marquée évaluée pour T AVANT l'appel au moteur : l'écriture du résultat
+  //      rappelle `onMarket` de façon synchrone (abonnement aux définitions).
+  //  R5. Un prix sans route ticker garde sa cadence (à l'arrivée d'une clôture seulement : son
+  //      sens « les deux » tire sans calibrage) ; un composite garde la sienne, mais reste figé
+  //      sous l'amorce de ses indicateurs (`evaluerComposites`). Quand l'historique atteint cette
+  //      amorce sous la même clôture, il est évalué une fois pour T, comme une def simple (R1) :
+  //      fait de conditions de bougie seules, rien d'autre ne l'évaluerait avant la clôture
+  //      suivante. Un composite lisant AXIS reçoit la référence du garde-fou de régime, comme
+  //      une def simple ; tant qu'elle est en vol, il attend (revue globale).
+  //  R6. Le graphe quitte un marché ou une unité : ses bougies ne sont plus tenues à jour, elles
+  //      sont retirées du contexte des composites. Un composite évalué au tick (prix, funding,
+  //      liquidations) ne lit donc jamais des bougies périmées : il reste figé hors graphe, ce
+  //      que la liste des alertes écrit.
   let derniereSource = "";
   let dernierSymbole = "";
   let dernierTf = "";
   let dernierTempsCloture = 0;
+  /** Taille du tampon à la dernière publication du contexte des composites. */
+  let dernierNombre = 0;
+  /** Par def : ouverture de la dernière bougie close pour laquelle elle a été évaluée. */
+  const evalueePour = new Map<string, number>();
   const onMarket = (): void => {
     const { exchange, symbol, timeframe, candles } = marketStore.getState();
     // Changement de source, symbole OU TF (backfill) : on réinitialise le suivi de clôture.
     // Le TF compte depuis que les defs y sont filtrées : les clôtures d'un TF plus long
     // sont ANTÉRIEURES à la dernière vue sur un TF court, et resteraient ignorées.
     if (exchange !== derniereSource || symbol !== dernierSymbole || timeframe !== dernierTf) {
+      // R6 : les bougies du marché quitté sortent du contexte des composites.
+      if (derniereSource !== "") {
+        fusionner(derniereSource as AlertDef["source"], dernierSymbole, { candles: undefined, timeframeBougies: undefined, bougiesTampon: undefined });
+      }
       derniereSource = exchange;
       dernierSymbole = symbol;
       dernierTf = timeframe;
       dernierTempsCloture = 0;
+      dernierNombre = 0;
+      evalueePour.clear();
     }
     if (candles.length < 2) return;
     const last = candles[candles.length - 1];
@@ -332,31 +510,48 @@ function creerRuntime(): Unsubscribe {
     // Bougie de référence = dernière CLÔTURÉE (la live est écartée).
     const idxClose = last.closed === true ? candles.length - 1 : candles.length - 2;
     const barreClose = candles[idxClose];
-    if (!barreClose || barreClose.time <= dernierTempsCloture) return; // déjà évaluée
-    dernierTempsCloture = barreClose.time;
+    if (!barreClose || barreClose.time < dernierTempsCloture) return;
+    const nouvelleCloture = barreClose.time > dernierTempsCloture;
 
     // Une def PORTE son TF d'évaluation ; `undefined` = def héritée (évaluée sur le TF
-    // affiché, comportement d'origine).
+    // affiché, comportement d'origine). R1 : pas encore évaluée pour T ; R2 : amorce atteinte.
     const lot = alertsStore
       .getState()
       .defs.filter(
         (d) =>
+          evalueePour.get(d.id) !== barreClose.time &&
           alerteActiveAuTemps(d, Date.now()) &&
           d.source === exchange &&
           d.symbol === symbol &&
           (TYPES_BOUGIE.has(d.condition.type) ||
-            (!isTickerSource(exchange) && d.condition.type === "prix-croise")) &&
-          (d.timeframe === undefined || d.timeframe === timeframe)
+            (nouvelleCloture && !isTickerSource(exchange) && d.condition.type === "prix-croise")) &&
+          (d.timeframe === undefined || d.timeframe === timeframe) &&
+          amorceAtteinte(d, candles.length)
       );
+    // Chemin chaud (chaque tick de la bougie en formation) : rien de neuf, rien à faire.
+    if (!nouvelleCloture && lot.length === 0 && candles.length === dernierNombre) return;
+    const tamponAvant = dernierNombre;
+    dernierTempsCloture = barreClose.time;
+    for (const d of lot) evalueePour.set(d.id, barreClose.time); // R4
+
     const avant = candles[idxClose - 1];
     const candlesCloturees = candles.slice(0, idxClose + 1);
-    fusionner(exchange, symbol, {
-      dernierPrix: barreClose.close,
-      prixPrecedent: avant?.close,
-      candles: candlesCloturees,
-      timeframeBougies: timeframe,
-    });
+    if (nouvelleCloture) {
+      fusionner(exchange, symbol, {
+        dernierPrix: barreClose.close,
+        prixPrecedent: avant?.close,
+        candles: candlesCloturees,
+        timeframeBougies: timeframe,
+        bougiesTampon: candles.length,
+      });
+    } else if (candles.length !== dernierNombre) {
+      // L'historique s'est étendu sous la même clôture : les composites lisent la nouvelle
+      // profondeur. Le prix n'est pas republié : un ticker plus récent a pu l'écrire.
+      fusionner(exchange, symbol, { candles: candlesCloturees, bougiesTampon: candles.length });
+    }
+    dernierNombre = candles.length;
     if (lot.length > 0) {
+      const bougie: BougieEvaluee = { time: barreClose.time, timeframe };
       const ctxBase: ContexteAlerte = {
         maintenant: Date.now(),
         dernierPrix: barreClose.close,
@@ -364,7 +559,7 @@ function creerRuntime(): Unsubscribe {
         candles: candlesCloturees,
       };
       if (!lotVeutRefClose(lot)) {
-        appliquerResultat(lot, ctxBase);
+        appliquerResultat(lot, ctxBase, bougie);
       } else {
         // Référence du garde-fou de régime : une seule évaluation par clôture,
         // après l'arrivée de la série (échec → évaluation sans aux).
@@ -374,20 +569,31 @@ function creerRuntime(): Unsubscribe {
           ids: ["refClose" as const],
           candleTimes: candlesCloturees.map((c) => c.time),
         };
+        const ids = new Set(lot.map((d) => d.id));
         const reeval = (): void => {
           const a = auxProvider.getAligned(req, () => {});
-          appliquerResultat(lot, a.status === "ready" ? { ...ctxBase, aux: { refClose: a.aux.refClose } } : ctxBase);
+          // Les defs sont RELUES par id : appliquer le lot capturé avant l'attente réécrivait
+          // l'état d'alors, et annulait une pause ou une prolongation faite entre-temps.
+          const courant = alertsStore.getState().defs.filter((d) => ids.has(d.id));
+          const ctx: ContexteAlerte = { ...ctxBase, maintenant: Date.now() };
+          // Une def mise en pause pendant l'attente n'est pas évaluée ici : sa marque est levée,
+          // pour qu'une réactivation dans la même bougie l'évalue (R1).
+          for (const d of courant) {
+            if (!alerteActiveAuTemps(d, ctx.maintenant) && evalueePour.get(d.id) === bougie.time) evalueePour.delete(d.id);
+          }
+          appliquerResultat(courant, a.status === "ready" ? { ...ctx, aux: { refClose: a.aux.refClose } } : ctx, bougie);
         };
         const statut = auxProvider.getAligned(req, reeval);
         if (statut.status === "ready") {
-          appliquerResultat(lot, { ...ctxBase, aux: { refClose: statut.aux.refClose } });
+          appliquerResultat(lot, { ...ctxBase, aux: { refClose: statut.aux.refClose } }, bougie);
         } else if (statut.status === "error") {
-          appliquerResultat(lot, ctxBase);
+          appliquerResultat(lot, ctxBase, bougie);
         }
         // pending : `reeval` évaluera la clôture à l'arrivée de la référence.
       }
     }
-    evaluerComposites(exchange, symbol);
+    if (nouvelleCloture) evaluerComposites(exchange, symbol);
+    else if (candles.length !== tamponAvant) evaluerComposites(exchange, symbol, (d) => !amorceAtteinte(d, tamponAvant)); // R5
   };
 
   // ── Poll funding : conditions funding-extreme ─────────────────────────────
@@ -891,6 +1097,18 @@ function creerRuntime(): Unsubscribe {
     if (state.defs === precedent.defs) return;
     reconcilier(); // re-route et libère les besoins au changement de définitions
     planifierEcheance();
+    // R3 : une def créée ou réactivée en cours de bougie est évaluée sur la dernière bougie
+    // close sans attendre la suivante (les defs déjà évaluées pour elle ne le sont pas deux fois).
+    onMarket();
+    // De même un composite jamais calibré, sur le marché affiché, quand il est fait de conditions
+    // de bougie SEULES : il se calibre sur la dernière bougie close sans tirer, la clôture
+    // suivante peut donc le déclencher (il attendait cette clôture pour se calibrer, et son
+    // signal était perdu). Un composite qui porte une autre condition (prix, funding…) garde son
+    // calibrage au premier évènement de cette condition : ici le « dernier prix » du contexte
+    // peut n'être que la dernière clôture, et un niveau placé entre elle et le prix en direct
+    // serait armé, puis sonnerait au premier tick alors que la condition était déjà vraie.
+    const { exchange, symbol } = marketStore.getState();
+    evaluerComposites(exchange, symbol, (d) => d.arme === undefined && [...typesDeDef(d)].every((type) => TYPES_BOUGIE.has(type)));
   });
   const unsubMarket = marketStore.subscribe(onMarket);
   onMarket(); // calibrage initial des conditions bougie sur le backfill présent
@@ -1105,11 +1323,52 @@ export function demanderPermissionNotifications(): void {
   }
 }
 
-/** Notifie un déclenchement : Notification API seulement si onglet visible ET permission. */
-export function notifier(d: Declenchement): void {
+/**
+ * Ce que « Voir » et la liste des alertes ont besoin de savoir d'une def. `condition` : absente
+ * pour une cible du journal ; présente, elle dit si le symbole est un marché (`sansMarche`).
+ */
+type MarcheAlerte = Pick<AlertDef, "symbol" | "source" | "timeframe"> & Partial<Pick<AlertDef, "condition">>;
+
+/**
+ * Ramène la vue PRINCIPALE (slot 0) sur le marché d'une alerte, dans son unité quand elle en
+ * porte une, et y marque `tempsMarque`. La vue principale, pas la vue focalisée : c'est la seule
+ * que les alertes de bougie lisent ; changer une vue secondaire laisserait l'alerte « hors
+ * graphe ». La navigation tire le graphe et ses dessins : elle est importée ici, à l'usage, pour
+ * que le runtime reste chargeable sans eux.
+ */
+export async function voirAlerte(def: MarcheAlerte, tempsMarque?: number): Promise<void> {
+  const { navigateTo } = await import("../lib/navigation");
+  chartLayoutStore.getState().setFocus(0);
+  navigateTo({
+    symbol: def.symbol,
+    exchange: def.source,
+    ...(def.timeframe !== undefined ? { timeframe: def.timeframe } : {}),
+    ...(tempsMarque !== undefined ? { markTime: tempsMarque } : {}),
+    source: "alerte",
+  });
+}
+
+/**
+ * Notifie un déclenchement. Toujours un avis à l'écran, qui reste jusqu'au toucher : au téléphone
+ * c'est le seul signal sûr. Avec la def : « SYMBOLE UNITÉ — message » (le message ne porte ni l'un
+ * ni l'autre, convention de @axiom/alerts) et le bouton « Voir », qui marque `tempsMarque` — la
+ * bougie du signal pour une alerte de bougie, l'instant du déclenchement sinon. Sans def (alerte de
+ * preset) : le message seul, sans « Voir ». Pas de « Voir » non plus quand le symbole de la def
+ * n'est pas un marché (alerte baleines, portée par l'actif surveillé) : il enverrait la vue
+ * principale sur un marché qui n'existe pas. Notification API seulement si onglet visible ET
+ * permission, titrée du marché ; puis le bip.
+ */
+export function notifier(d: Declenchement, def?: MarcheAlerte, tempsMarque: number = d.ts): void {
+  const marche = def === undefined ? null : def.timeframe === undefined ? def.symbol : `${def.symbol} ${def.timeframe}`;
+  const rienAVoir = def === undefined || (def.condition !== undefined && sansMarche(def.condition));
+  pousserToast(
+    marche === null ? d.message : `${marche} — ${d.message}`,
+    rienAVoir ? undefined : { libelle: "Voir", executer: () => void voirAlerte(def, tempsMarque) },
+    0,
+  );
   try {
     if (ongletVisible() && permissionNotificationAccordee()) {
-      new Notification("AXIOM — alerte", { body: d.message });
+      new Notification(marche === null ? "AXIOM — alerte" : `AXIOM — ${marche}`, { body: d.message });
     }
   } catch {
     /* best-effort */

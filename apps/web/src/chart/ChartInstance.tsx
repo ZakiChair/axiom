@@ -100,7 +100,7 @@ import { fibStore } from "./fibonacci";
 import { createRafThrottle, type RafThrottle } from "./rafThrottle";
 import { bindPriceAlertMenu } from "./priceAlertMenu";
 import { MeasureTool } from "./measureTool";
-import { CandleReadout } from "./candleReadout";
+import { bougieSousReticule, CandleReadout } from "./candleReadout";
 import { SymbolBanner } from "../components/SymbolBanner";
 import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 import { useMobileLayout } from "../hooks/useMobileLayout";
@@ -148,24 +148,27 @@ const Y_AXIS_TYPE: Record<PriceScaleType, YAxisType> = {
 const MOBILE_AXIS_BREAKPOINT_PX = 640;
 const MOBILE_X_AXIS_SIZE_PX = 28;
 const MOBILE_Y_AXIS_SIZE_PX = 80;
-/** Ordonnée de l'infobulle d'indicateur du pane des prix au bureau (px) : inchangée hors mise en page téléphone. */
-const HAUT_INFOBULLE_BUREAU_PX = 36;
+/**
+ * Plancher (px) de l'ordonnée de l'infobulle d'indicateur du pane des prix : sa valeur tant que
+ * rien n'est mesuré, et sous un en-tête plus court (vue secondaire d'une grille au bureau).
+ */
+const HAUT_INFOBULLE_MIN_PX = 36;
 
 /**
- * Ordonnée (px, dans le pane des prix) de la première rangée de l'infobulle d'indicateur en mise
- * en page téléphone : 2 px sous le bas RÉEL de l'en-tête du slot, jamais au-dessus de la valeur
- * du bureau. Ordonnées comptées depuis le haut du pane : `basEntete`, bas de l'en-tête ;
+ * Ordonnée (px, dans le pane des prix) de la première rangée de l'infobulle d'indicateur, au
+ * téléphone comme au bureau : 2 px sous le bas RÉEL de l'en-tête du slot, jamais au-dessus du
+ * plancher. Ordonnées comptées depuis le haut du pane : `basEntete`, bas de l'en-tête ;
  * `basReplie`, bas de sa part toujours affichée (le haut du panneau « Détails » quand il est
  * ouvert, sinon `basEntete`). « Détails » fermé, le résultat ne lit donc pas la hauteur du pane.
  * Ouvert, l'infobulle suit le panneau tant qu'il tient dans le tiers haut du pane (le compte à
  * rebours de clôture y est : les deux se lisent ensemble) ; au-delà elle s'arrête à ce tiers
  * plutôt que de descendre au milieu des bougies, sans jamais remonter sous la part repliée.
- * Mesure non finie → valeur du bureau. PURE.
+ * Mesure non finie → plancher. PURE.
  */
 export function hautInfobullePrix(basReplie: number, basEntete: number, hauteurPane: number): number {
-  if (!Number.isFinite(basReplie) || !Number.isFinite(basEntete) || !Number.isFinite(hauteurPane)) return HAUT_INFOBULLE_BUREAU_PX;
+  if (!Number.isFinite(basReplie) || !Number.isFinite(basEntete) || !Number.isFinite(hauteurPane)) return HAUT_INFOBULLE_MIN_PX;
   const sous = (bas: number): number => Math.ceil(bas) + 2;
-  return Math.max(HAUT_INFOBULLE_BUREAU_PX, sous(basReplie), Math.min(sous(basEntete), Math.floor(hauteurPane / 3)));
+  return Math.max(HAUT_INFOBULLE_MIN_PX, sous(basReplie), Math.min(sous(basEntete), Math.floor(hauteurPane / 3)));
 }
 
 function applyResponsiveAxisStyles(chart: KLineChartInstance, viewportWidth: number, hautInfobulle: number): void {
@@ -488,8 +491,8 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement, hautI
       // elle poussait la légende des INDICATEURS sous ce bandeau, où elle était illisible
       // (seule sa queue dépassait, cf. revue du 2026-08-01 § 3.2).
       //
-      // `offsetTop` place alors la légende d'indicateur SOUS le bandeau (36 px au bureau, bas
-      // réel de l'en-tête au téléphone, cf. `hautInfobullePrix`) : vérifié
+      // `offsetTop` place alors la légende d'indicateur SOUS le bandeau (2 px sous le bas réel
+      // de l'en-tête, au téléphone comme au bureau, cf. `hautInfobullePrix`) : vérifié
       // dans le bundle 9.8.12 — `_drawCandleStandardTooltip` (index.esm.js:9376) retourne
       // `coordinate.y + prevRowHeight`, soit `offsetTop` quand `isDrawTooltip` est faux, et
       // c'est CE retour qui sert d'ordonnée à `drawIndicatorTooltip` (:9356-9357). Poser
@@ -571,6 +574,8 @@ interface SlotMount {
   paneHeaders: PaneHeaders;
   overlayLegend: OverlayLegend;
   updateThrottle: RafThrottle;
+  /** Masque l'encart O/H/L/C : l'effet DONNÉES l'appelle chaque fois qu'il remplace les données du graphe. */
+  cacherEncart: () => void;
   /** Lignes des overlays de niveaux accrochables par le clic droit (renseignées par l'effet DONNÉES). */
   accroche: { lignes: () => readonly LigneNiveau[] };
   // Zoom/décalage de l'instance juste après `init()`, avant toute interaction utilisateur.
@@ -720,14 +725,15 @@ export function ChartInstance({
     chargerViewportSync();
     const unsubscribeViewportOptions = chartLayoutStore.subscribe(chargerViewportSync);
 
-    // Infobulle du pane des prix : en mise en page téléphone, sous le bas RÉEL de l'en-tête du
-    // slot (bandeau du symbole ou en-tête d'une vue secondaire) ; ailleurs, la valeur du bureau.
+    // Infobulle du pane des prix : sous le bas RÉEL de l'en-tête du slot (bandeau du symbole ou
+    // en-tête d'une vue secondaire), au téléphone comme au bureau. Au bureau le bandeau descend à
+    // 44 px (64 px sur deux rangées en vue étroite) : à 36 px, il entamait la première rangée.
     // Relue à chaque redimensionnement du conteneur ou de l'en-tête, reposée à chaque thème.
     const entete = container.querySelector("[data-chart-entete]");
-    let hautInfobulle = HAUT_INFOBULLE_BUREAU_PX;
+    let hautInfobulle = HAUT_INFOBULLE_MIN_PX;
     const mesurerHautInfobulle = (): number => {
       const pane = chart.getDom(CANDLE_PANE_ID, DomPosition.Main)?.getBoundingClientRect();
-      if (container.dataset.mobile !== "true" || !entete || !pane) return HAUT_INFOBULLE_BUREAU_PX;
+      if (!entete || !pane) return HAUT_INFOBULLE_MIN_PX;
       const bas = entete.getBoundingClientRect().bottom;
       // Panneau « Détails » du bandeau, quand il est affiché : la part repliée s'arrête à son haut.
       const panneau = entete.querySelector("#chart-banner-details")?.getBoundingClientRect();
@@ -777,6 +783,36 @@ export function ChartInstance({
     // ── Crosshair synchronisé inter-slots ──────────────────────────────────
     let pointeurPresent = false;
     let dernierX: number | null = null;
+    // Ce que l'encart montre : son réticule (abscisse `x`, bougie ouverte à `t`) et le texte visé
+    // qu'il porte ; `null` quand il est masqué.
+    let encartMontre: { reticule: Crosshair; x: number; t: number; texte: string | undefined } | null = null;
+    const cacherEncart = (): void => {
+      candleReadout.cacher();
+      encartMontre = null;
+    };
+    // Encart de lecture : bougie pointée + pixel du curseur, et le texte complet de l'annotation
+    // visée (zone, triangle, signal), que l'encart n'affiche qu'en mise en page téléphone.
+    const montrerEncart = (reticule: Crosshair): void => {
+      const { kLineData, x, y } = reticule;
+      if (!kLineData || typeof x !== "number" || typeof y !== "number") {
+        cacherEncart();
+        return;
+      }
+      const texte = indicators.texteVise(reticule);
+      candleReadout.montrer(kLineData, x, y, texte);
+      encartMontre = { reticule, x, t: kLineData.timestamp, texte };
+    };
+    // Indicateur fermé, ajouté ou recalculé pendant que l'encart est à l'écran (au doigt il y reste,
+    // doigt levé) : l'annotation qu'il décrit a pu disparaître ou changer, et le moteur ne notifie
+    // rien. Son texte est relu ; sans annotation visée il ne garde que les prix. Avant : AXIS S/R
+    // fermé, l'encart gardait le texte d'une zone que le graphe ne dessinait plus. Si les bougies ont
+    // glissé sous l'indice du réticule (historique préfixé), l'encart est masqué.
+    indicators.apresCalcul = (): void => {
+      if (!encartMontre) return;
+      const { reticule, t, texte } = encartMontre;
+      if (chart.getDataList()[reticule.dataIndex ?? -1]?.timestamp !== t) cacherEncart();
+      else if (indicators.texteVise(reticule) !== texte) montrerEncart(reticule);
+    };
     const slotLive = (position: number): boolean => {
       const replay = replayStore.getState();
       return position >= 0 && position < visibleSlotCount(chartLayoutStore.getState().layout) &&
@@ -866,20 +902,27 @@ export function ChartInstance({
       if (pointeurPresent && chartLayoutStore.getState().syncCrosshair && slotLive(slot)) {
         crosshairSyncStore.setState({ time: typeof t === "number" ? t : null, source: slot });
       }
-      // Encart de lecture : bougie pointée + pixel du curseur (masqué hors survol).
-      if (data?.kLineData && typeof data.x === "number" && typeof data.y === "number") {
-        candleReadout.montrer(data.kLineData, data.x, data.y);
-      } else {
-        candleReadout.cacher();
-      }
+      // Encart de lecture (masqué hors survol).
+      if (data) montrerEncart(data);
+      else cacherEncart();
     };
     const onPointerEnter = (): void => { pointeurPresent = true; };
-    const onPointerLeave = (): void => {
+    const onPointerLeave = (e: PointerEvent): void => {
       pointeurPresent = false;
       dernierX = null;
       effacerReticule();
-      candleReadout.cacher();
+      // Au doigt, le moteur garde son réticule après le lever (et les rangées du canvas avec lui) :
+      // l'encart reste, pour être lu une fois le doigt ôté. Avant : il ne restait qu'après un appui
+      // simple, pas après un glissement, un appui long ou un second appui près du réticule.
+      if (e.pointerType !== "touch") cacherEncart();
     };
+    // Nouveau toucher : le moteur efface son réticule quand le doigt se pose ailleurs, SANS le
+    // notifier (`OnCrosshairChange` n'est émis que pour un réticule posé). L'encart est donc masqué
+    // dès le contact, en phase de capture, avant le moteur ; si celui-ci garde son réticule (doigt
+    // posé à moins de 10 px), il le déplace sous le doigt et `onCrosshair` rouvre l'encart dans le
+    // même instant. LIMITE : doigt reposé exactement au même pixel, le réticule ne change pas, rien
+    // n'est notifié et l'encart reste masqué jusqu'au toucher suivant.
+    chartDom.addEventListener("touchstart", cacherEncart, { capture: true, passive: true });
     chartDom.addEventListener("pointerenter", onPointerEnter);
     chartDom.addEventListener("pointerleave", onPointerLeave);
     chart.subscribeAction(ActionType.OnCrosshairChange, onCrosshair);
@@ -907,6 +950,16 @@ export function ChartInstance({
         const points = chart.convertFromPixel([{ x: dernierX }], { paneId: CANDLE_PANE_ID });
         const point = Array.isArray(points) ? points[0] : points;
         crosshairSyncStore.setState({ time: point?.timestamp ?? null, source: slot });
+      }
+      // Doigt levé, le réticule reste au même pixel et le moteur ne notifie rien quand le graphe
+      // glisse dessous (défilement lancé, rotation, bougie nouvelle) : l'encart décrirait une
+      // autre bougie que celle du réticule. Il est masqué ; le prochain toucher le rouvre. La
+      // bougie comparée est celle que le moteur met sous ce pixel (`bougieSousReticule`) : au-delà
+      // de la dernière, `convertFromPixel` ne rend aucun horodatage, et l'encart restait.
+      if (!pointeurPresent && encartMontre) {
+        const points = chart.convertFromPixel([{ x: encartMontre.x }], { paneId: CANDLE_PANE_ID });
+        const indice = (Array.isArray(points) ? points[0] : points)?.dataIndex;
+        if (bougieSousReticule(indice, chart.getDataList()) !== encartMontre.t) cacherEncart();
       }
       xhairThrottle.trigger();
     };
@@ -945,6 +998,7 @@ export function ChartInstance({
       paneHeaders,
       overlayLegend,
       updateThrottle,
+      cacherEncart,
       accroche,
       defaultBarSpace: chart.getBarSpace(),
       defaultOffsetRight: chart.getOffsetRightDistance(),
@@ -967,9 +1021,11 @@ export function ChartInstance({
       paneHeaders.dispose();
       overlayLegend.dispose();
       measureTool.dispose();
+      indicators.apresCalcul = null;
       candleReadout.dispose();
       chartDom.removeEventListener("pointerenter", onPointerEnter);
       chartDom.removeEventListener("pointerleave", onPointerLeave);
+      chartDom.removeEventListener("touchstart", cacherEncart, { capture: true });
       effacerReticule();
       unsubscribeXhairStore();
       unsubscribeXhairOptions();
@@ -996,7 +1052,7 @@ export function ChartInstance({
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
-    const { chart, indicators, paneHeaders, overlayLegend, updateThrottle, accroche, defaultBarSpace, defaultOffsetRight } =
+    const { chart, indicators, paneHeaders, overlayLegend, updateThrottle, cacherEncart, accroche, defaultBarSpace, defaultOffsetRight } =
       mount;
     const container = containerRef.current;
     const canvas = canvasRef.current;
@@ -1019,7 +1075,20 @@ export function ChartInstance({
     // Capture par slot : un focus déplacé ne doit jamais brancher le moteur replay
     // global sur l'orderflow d'un autre graphique.
     const replayAdapter = replayGen !== 0 ? adaptateurReplayActif() : null;
-    chart.clearData();
+    // KLineChart 9.8.12 efface son réticule chaque fois que ses données sont remplacées
+    // (`clearData`, `applyNewData` : `ChartStore.clear`), sans émettre `OnCrosshairChange`. L'encart
+    // décrit la bougie du réticule : il part avec lui. Avant (revue du 12 novembre 2026) : après un
+    // changement de marché à unité égale, il restait à l'écran, doigt levé, avec le texte et les
+    // prix du marché quitté — rien ne le distinguait du nouveau graphe, aux mêmes horodatages.
+    const viderGraphe = (): void => {
+      chart.clearData();
+      cacherEncart();
+    };
+    const remplacerBougies = (bougies: Candle[]): void => {
+      chart.applyNewData(bougies.map(toKLineData));
+      cacherEncart();
+    };
+    viderGraphe();
     // Neutralise le callback de pagination de l'identité précédente pendant le backfill.
     chart.setLoadDataCallback((params) => params.callback([], false));
 
@@ -1314,11 +1383,11 @@ export function ChartInstance({
         const { candles } = result;
         const adapter = replayAdapter ?? getAdapter(exchange);
         chart.setPriceVolumePrecision(estSerieDominance ? DECIMALES_SERIE_POURCENTAGE : derivePricePrecision(candles), 0);
-        chart.applyNewData(candles.map(toKLineData));
+        remplacerBougies(candles);
         // Le store et la série deviennent « ready » dans le même tour JS. Si l'identité
         // a changé depuis la garde ci-dessus, le commit est refusé et le chart est repurgé.
         if (!store.getState().completeDataLoad(requestedIdentity, requestId, candles)) {
-          chart.clearData();
+          viderGraphe();
           return;
         }
         if (exchange === "kraken") setLimiteKrakenVisible(true);
@@ -1483,7 +1552,7 @@ export function ChartInstance({
             // Même chemin que le resync post-reconnexion : réapplication du buffer entier,
             // puis un seul recalcul, aligné sur les bougies affichées.
             if (complet.length > avant) {
-              chart.applyNewData(complet.map(toKLineData));
+              remplacerBougies(complet);
               rafraichir(complet);
             }
           },
@@ -1531,7 +1600,7 @@ export function ChartInstance({
           const merged = prepareResyncApply(store.getState().candles, fetched);
           if (!merged) return;
           store.getState().setCandles(merged);
-          chart.applyNewData(merged.map(toKLineData));
+          remplacerBougies(merged);
           orderflow?.onCandles();
           indicators.recompute(indicatorsStore.getState().indicators, merged, exchange);
           compare?.onCandles();
@@ -1551,7 +1620,7 @@ export function ChartInstance({
           dataLoadErrorMessage(err),
         );
         if (failed) {
-          chart.clearData();
+          viderGraphe();
           chart.setLoadDataCallback((params) => params.callback([], false));
         }
         console.error("[AXIOM] Échec du backfill", err);

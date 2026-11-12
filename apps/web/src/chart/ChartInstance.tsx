@@ -148,24 +148,27 @@ const Y_AXIS_TYPE: Record<PriceScaleType, YAxisType> = {
 const MOBILE_AXIS_BREAKPOINT_PX = 640;
 const MOBILE_X_AXIS_SIZE_PX = 28;
 const MOBILE_Y_AXIS_SIZE_PX = 80;
-/** Ordonnée de l'infobulle d'indicateur du pane des prix au bureau (px) : inchangée hors mise en page téléphone. */
-const HAUT_INFOBULLE_BUREAU_PX = 36;
+/**
+ * Plancher (px) de l'ordonnée de l'infobulle d'indicateur du pane des prix : sa valeur tant que
+ * rien n'est mesuré, et sous un en-tête plus court (vue secondaire d'une grille au bureau).
+ */
+const HAUT_INFOBULLE_MIN_PX = 36;
 
 /**
- * Ordonnée (px, dans le pane des prix) de la première rangée de l'infobulle d'indicateur en mise
- * en page téléphone : 2 px sous le bas RÉEL de l'en-tête du slot, jamais au-dessus de la valeur
- * du bureau. Ordonnées comptées depuis le haut du pane : `basEntete`, bas de l'en-tête ;
+ * Ordonnée (px, dans le pane des prix) de la première rangée de l'infobulle d'indicateur, au
+ * téléphone comme au bureau : 2 px sous le bas RÉEL de l'en-tête du slot, jamais au-dessus du
+ * plancher. Ordonnées comptées depuis le haut du pane : `basEntete`, bas de l'en-tête ;
  * `basReplie`, bas de sa part toujours affichée (le haut du panneau « Détails » quand il est
  * ouvert, sinon `basEntete`). « Détails » fermé, le résultat ne lit donc pas la hauteur du pane.
  * Ouvert, l'infobulle suit le panneau tant qu'il tient dans le tiers haut du pane (le compte à
  * rebours de clôture y est : les deux se lisent ensemble) ; au-delà elle s'arrête à ce tiers
  * plutôt que de descendre au milieu des bougies, sans jamais remonter sous la part repliée.
- * Mesure non finie → valeur du bureau. PURE.
+ * Mesure non finie → plancher. PURE.
  */
 export function hautInfobullePrix(basReplie: number, basEntete: number, hauteurPane: number): number {
-  if (!Number.isFinite(basReplie) || !Number.isFinite(basEntete) || !Number.isFinite(hauteurPane)) return HAUT_INFOBULLE_BUREAU_PX;
+  if (!Number.isFinite(basReplie) || !Number.isFinite(basEntete) || !Number.isFinite(hauteurPane)) return HAUT_INFOBULLE_MIN_PX;
   const sous = (bas: number): number => Math.ceil(bas) + 2;
-  return Math.max(HAUT_INFOBULLE_BUREAU_PX, sous(basReplie), Math.min(sous(basEntete), Math.floor(hauteurPane / 3)));
+  return Math.max(HAUT_INFOBULLE_MIN_PX, sous(basReplie), Math.min(sous(basEntete), Math.floor(hauteurPane / 3)));
 }
 
 function applyResponsiveAxisStyles(chart: KLineChartInstance, viewportWidth: number, hautInfobulle: number): void {
@@ -488,8 +491,8 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement, hautI
       // elle poussait la légende des INDICATEURS sous ce bandeau, où elle était illisible
       // (seule sa queue dépassait, cf. revue du 2026-08-01 § 3.2).
       //
-      // `offsetTop` place alors la légende d'indicateur SOUS le bandeau (36 px au bureau, bas
-      // réel de l'en-tête au téléphone, cf. `hautInfobullePrix`) : vérifié
+      // `offsetTop` place alors la légende d'indicateur SOUS le bandeau (2 px sous le bas réel
+      // de l'en-tête, au téléphone comme au bureau, cf. `hautInfobullePrix`) : vérifié
       // dans le bundle 9.8.12 — `_drawCandleStandardTooltip` (index.esm.js:9376) retourne
       // `coordinate.y + prevRowHeight`, soit `offsetTop` quand `isDrawTooltip` est faux, et
       // c'est CE retour qui sert d'ordonnée à `drawIndicatorTooltip` (:9356-9357). Poser
@@ -720,14 +723,15 @@ export function ChartInstance({
     chargerViewportSync();
     const unsubscribeViewportOptions = chartLayoutStore.subscribe(chargerViewportSync);
 
-    // Infobulle du pane des prix : en mise en page téléphone, sous le bas RÉEL de l'en-tête du
-    // slot (bandeau du symbole ou en-tête d'une vue secondaire) ; ailleurs, la valeur du bureau.
+    // Infobulle du pane des prix : sous le bas RÉEL de l'en-tête du slot (bandeau du symbole ou
+    // en-tête d'une vue secondaire), au téléphone comme au bureau. Au bureau le bandeau descend à
+    // 44 px (64 px sur deux rangées en vue étroite) : à 36 px, il entamait la première rangée.
     // Relue à chaque redimensionnement du conteneur ou de l'en-tête, reposée à chaque thème.
     const entete = container.querySelector("[data-chart-entete]");
-    let hautInfobulle = HAUT_INFOBULLE_BUREAU_PX;
+    let hautInfobulle = HAUT_INFOBULLE_MIN_PX;
     const mesurerHautInfobulle = (): number => {
       const pane = chart.getDom(CANDLE_PANE_ID, DomPosition.Main)?.getBoundingClientRect();
-      if (container.dataset.mobile !== "true" || !entete || !pane) return HAUT_INFOBULLE_BUREAU_PX;
+      if (!entete || !pane) return HAUT_INFOBULLE_MIN_PX;
       const bas = entete.getBoundingClientRect().bottom;
       // Panneau « Détails » du bandeau, quand il est affiché : la part repliée s'arrête à son haut.
       const panneau = entete.querySelector("#chart-banner-details")?.getBoundingClientRect();
@@ -866,9 +870,11 @@ export function ChartInstance({
       if (pointeurPresent && chartLayoutStore.getState().syncCrosshair && slotLive(slot)) {
         crosshairSyncStore.setState({ time: typeof t === "number" ? t : null, source: slot });
       }
-      // Encart de lecture : bougie pointée + pixel du curseur (masqué hors survol).
+      // Encart de lecture : bougie pointée + pixel du curseur (masqué hors survol), et le texte
+      // complet de l'annotation visée (zone, triangle, signal), que l'encart n'affiche qu'en mise
+      // en page téléphone.
       if (data?.kLineData && typeof data.x === "number" && typeof data.y === "number") {
-        candleReadout.montrer(data.kLineData, data.x, data.y);
+        candleReadout.montrer(data.kLineData, data.x, data.y, indicators.texteVise(data));
       } else {
         candleReadout.cacher();
       }

@@ -28,8 +28,8 @@
  *  - `extendData` comparé par RÉFÉRENCE -> un objet neuf force le recalcul.
  */
 import { registerIndicator, IndicatorSeries } from "klinecharts";
-import type { Chart, IndicatorFigure, IndicatorTooltipData, TooltipLegend } from "klinecharts";
-import type { AuxSeriesId, Candle, ExchangeId, IndicatorDef, IndicatorResult, Timeframe } from "@axiom/types";
+import type { Bounding, Chart, Crosshair, IndicatorFigure, IndicatorStyle, IndicatorTooltipData } from "klinecharts";
+import type { AnnotationsIndicateur, AuxSeriesId, Candle, ExchangeId, IndicatorDef, IndicatorResult, Timeframe } from "@axiom/types";
 import { computeIndicator, getIndicator, resolveParams } from "@axiom/indicators";
 import { couleurDeclaree, lireTokenCanvas, serieCanvas } from "../lib/canvasTokens";
 import { hauteursCorrigees, paneMax } from "./paneBudget";
@@ -234,9 +234,10 @@ const RECOMPUTE_THROTTLE_MS = 500;
 /**
  * Nom KLineChart d'une INSTANCE (identité par pane). Préfixe `AXIOM_` = aucune
  * collision avec les indicateurs natifs (MA/BOLL/RSI…) ; `instanceId` (unique)
- * garantit qu'EMA(20) et EMA(50) coexistent sur le même pane.
+ * garantit qu'EMA(20) et EMA(50) coexistent sur le même pane. Exportée : qui lit l'indicateur
+ * monté d'une instance (`getIndicatorByPaneId`) n'a pas à recopier le préfixe.
  */
-function axiomName(instanceId: string): string {
+export function axiomName(instanceId: string): string {
   return `AXIOM_${instanceId}`;
 }
 
@@ -371,61 +372,171 @@ function ensureRegistered(def: IndicatorDef, name: string, instanceId: string): 
       );
       return false;
     },
-    // Tooltip de pane, 3 lignes max : d'abord les segments et marqueurs dont l'arrivée est à
-    // ≤ 3 barres du crosshair, dans l'ordre de leur tableau ; puis les rubans qui couvrent la
-    // bougie, la bande sous le crosshair en tête (cf. `distanceVerticale`). Crosshair DANS une
-    // bande : une ligne lui est réservée, segments et marqueurs n'en prennent que deux. Objet
-    // vide sinon. `crosshair.dataIndex` est renseigné en même temps que `kLineData` (bundle
-    // 9.8.12) : absent = crosshair hors données, donc rien à afficher.
-    createTooltipDataSource: ({ indicator, crosshair, yAxis }) => {
-      const vide = {} as IndicatorTooltipData;
+    // Tooltip de pane : les textes de `infosSousReticule` (3 au plus), chacun coupé à un mot
+    // entier quand la rangée est plus étroite que lui (`rangeesMesurees`). Objet vide sans
+    // annotation ni texte.
+    createTooltipDataSource: ({ indicator, crosshair, yAxis, bounding, defaultStyles }) => {
       const annotations = (indicator.extendData as IndicatorResult | undefined)?.annotations;
-      if (annotations === undefined) return vide;
-      const idx = crosshair.dataIndex ?? -1;
-      if (idx < 0) return vide;
-      const values: TooltipLegend[] = [];
-      // Dédup par chaîne `info` : une divergence produit DEUX segments porteurs de la
-      // même info (utils-annotations.ts:82-83 — un « prix », un « pane », dont les
-      // pivots d'arrivée sont distants de ≤ 3 barres). Sans ce filtre, la ligne
-      // s'affiche deux fois et consomme 2 des 3 lignes du budget.
-      const vus = new Set<string>();
-      const ajouter = (info: string, max = 3) => {
-        if (vus.has(info) || values.length >= max) return;
-        vus.add(info);
-        values.push({ title: "", value: info });
-      };
-      // Rubans couvrant la bougie (zones d'AXIS S/R, prime spot/perp), rangés par distance verticale
-      // de leur bande, à CETTE bougie, au crosshair : la bande survolée d'abord. Le `y` du crosshair
-      // est relatif au pane survolé (bundle 9.8.12, `_makeWidgetEvent`) : sur un autre pane, ou
-      // sans `y`, toutes les distances valent 0 et l'ordre du tableau reste (tri stable).
-      const yCrosshair =
-        crosshair.paneId === paneHote && typeof crosshair.y === "number" && Number.isFinite(crosshair.y)
-          ? crosshair.y
-          : undefined;
-      const couvrants: Array<{ info: string; distance: number }> = [];
-      for (const r of annotations.rubans ?? []) {
-        const haut = r.hauts[idx - r.deIdx];
-        if (r.info === undefined || idx < r.deIdx || haut === undefined) continue;
-        const distance =
-          yCrosshair === undefined
-            ? 0
-            : distanceVerticale(yCrosshair, yAxis.convertToPixel(haut), yAxis.convertToPixel(r.bas[idx - r.deIdx] ?? haut));
-        couvrants.push({ info: r.info, distance });
-      }
-      couvrants.sort((a, b) => a.distance - b.distance);
-      // Bande sous le crosshair (distance 0, ordonnée connue) : sa ligne est réservée.
-      const max = yCrosshair !== undefined && couvrants[0]?.distance === 0 ? 2 : 3;
-      const pousser = (a: number, info: string | undefined) => {
-        if (info !== undefined && Math.abs(a - idx) <= 3) ajouter(info, max);
-      };
-      for (const s of annotations.segments ?? []) pousser(s.aIdx, s.info);
-      for (const m of annotations.marqueurs ?? []) pousser(m.idx, m.info);
-      for (const { info } of couvrants) ajouter(info);
-      return values.length > 0 ? ({ values } as IndicatorTooltipData) : vide;
+      const infos = annotations ? infosSousReticule(annotations, crosshair, paneHote, (v) => yAxis.convertToPixel(v)).infos : [];
+      if (infos.length === 0) return {} as IndicatorTooltipData;
+      return { values: rangeesMesurees(infos, bounding, defaultStyles).map((value) => ({ title: "", value })) } as IndicatorTooltipData;
     },
   });
 
   registered.add(name);
+}
+
+/**
+ * Textes d'infobulle des annotations d'un indicateur du pane `paneHote` sous le réticule. PURE.
+ *
+ * `infos`, 3 au plus : d'abord les segments et marqueurs dont l'arrivée est à 3 bougies ou moins,
+ * dans l'ordre de leur tableau ; puis les rubans qui couvrent la bougie, la bande sous le réticule
+ * en tête (cf. `distanceVerticale`). Réticule DANS une bande : une ligne lui est réservée, segments
+ * et marqueurs n'en prennent que deux. Vide quand le réticule est hors données.
+ *
+ * `vise`, le texte de CE qui est sous le doigt (encart du téléphone, cf. `texteVise`), seulement
+ * quand le réticule est sur le pane hôte :
+ *  a. le marqueur à 1 bougie ou moins dont le point est à 24 px ou moins de l'ordonnée, le plus
+ *     proche en bougies puis dans l'ordre du tableau — un triangle creux est dessiné DANS la
+ *     bande sur laquelle il réagit, il passe donc avant elle ;
+ *  b. sinon la bande qui contient le réticule ;
+ *  c. sinon le premier segment ou marqueur à 3 bougies ou moins ;
+ *  d. sinon rien.
+ * `rang` classe `vise` entre plusieurs indicateurs du même pane (`texteVise`), le plus petit
+ * d'abord : 0 ou 1 pour (a), l'écart en bougies du marqueur ; 2 pour (b) ; 3 pour (c) et (d).
+ */
+export function infosSousReticule(
+  annotations: AnnotationsIndicateur,
+  { dataIndex: idx, paneId, y }: Pick<Crosshair, "dataIndex" | "paneId" | "y">,
+  paneHote: string,
+  convertirY: (valeur: number) => number,
+): { infos: string[]; vise?: string; rang: number } {
+  const infos: string[] = [];
+  // `dataIndex` est renseigné en même temps que `kLineData` (bundle 9.8.12) : absent = réticule
+  // hors données, donc rien à afficher.
+  if (idx === undefined || idx < 0) return { infos, rang: 3 };
+  // Le `y` du réticule est relatif au pane survolé (bundle 9.8.12, `_makeWidgetEvent`) : sur un
+  // autre pane, ou sans `y`, il n'y a pas d'ordonnée.
+  const yCrosshair = paneId === paneHote && Number.isFinite(y) ? y : undefined;
+  // Dédup par chaîne `info` : une divergence produit DEUX segments porteurs de la
+  // même info (utils-annotations.ts:82-83 — un « prix », un « pane », dont les
+  // pivots d'arrivée sont distants de ≤ 3 barres). Sans ce filtre, la ligne
+  // s'affiche deux fois et consomme 2 des 3 lignes du budget.
+  const ajouter = (info: string, max = 3) => {
+    if (infos.length < max && !infos.includes(info)) infos.push(info);
+  };
+  // Rubans couvrant la bougie (zones d'AXIS S/R, prime spot/perp), rangés par distance verticale
+  // de leur bande, à CETTE bougie, au réticule : la bande survolée d'abord. Sans ordonnée, toutes
+  // les distances valent 0 et l'ordre du tableau reste (tri stable).
+  const couvrants: Array<{ info: string; distance: number }> = [];
+  for (const r of annotations.rubans ?? []) {
+    const haut = r.hauts[idx - r.deIdx];
+    if (r.info === undefined || idx < r.deIdx || haut === undefined) continue;
+    const distance =
+      yCrosshair === undefined ? 0 : distanceVerticale(yCrosshair, convertirY(haut), convertirY(r.bas[idx - r.deIdx] ?? haut));
+    couvrants.push({ info: r.info, distance });
+  }
+  couvrants.sort((a, b) => a.distance - b.distance);
+  // Bande sous le réticule (distance 0, ordonnée connue) : sa ligne est réservée.
+  const bande = yCrosshair !== undefined && couvrants[0]?.distance === 0 ? couvrants[0].info : undefined;
+  const max = bande === undefined ? 3 : 2;
+  const pousser = (a: number, info: string | undefined) => {
+    if (info !== undefined && Math.abs(a - idx) <= 3) ajouter(info, max);
+  };
+  for (const s of annotations.segments ?? []) pousser(s.aIdx, s.info);
+  let marqueur: string | undefined;
+  let ecart = 2;
+  for (const m of annotations.marqueurs ?? []) {
+    pousser(m.idx, m.info);
+    const e = Math.abs(m.idx - idx);
+    // Sans ordonnée, l'écart vertical est NaN : jamais « ≤ 24 », aucun marqueur n'est visé.
+    if (m.info !== undefined && e < ecart && Math.abs(convertirY(m.valeur) - yCrosshair!) <= 24) {
+      marqueur = m.info;
+      ecart = e;
+    }
+  }
+  const proche = infos[0];
+  for (const { info } of couvrants) ajouter(info);
+  // `ecart` vaut encore 2 quand aucun marqueur n'est sous le doigt : c'est le rang de la bande.
+  return { infos, vise: yCrosshair === undefined ? undefined : (marqueur ?? bande ?? proche), rang: (marqueur ?? bande) === undefined ? 3 : ecart };
+}
+
+/**
+ * Coupe `info` à la rangée : le plus long préfixe de MOTS ENTIERS de largeur ≤ `largeur`, suivi de
+ * « … » ; le texte tel quel s'il tient. Avant, le bord du canvas coupait net, au milieu d'un nombre
+ * (« bord à +1 » pour +11.7 %, « > 11302 » pour 113028.30). Un mot entièrement visible sous la coupe
+ * nette n'est JAMAIS retiré pour faire place à « … » : c'est « … » qui dépasse et que le bord rogne
+ * (« non mesuré » reste lisible partout où il l'était). Les séparateurs restés seuls en fin (« — »,
+ * « · », « ; », « : », et « > » sans le niveau qu'il annonce) sont retirés ; un premier mot plus
+ * large que la rangée est rendu seul. LIMITE : une unité peut être coupée de son nombre (« bord à
+ * -1.3… » pour -1.3 %) : le nombre est entier, « % » ne tenait pas dans la rangée.
+ * `mesurer` : largeur d'un texte, dans l'unité de `largeur`. Dichotomie sur le nombre de mots (la
+ * largeur d'un préfixe croît avec lui). PURE.
+ */
+export function couperInfo(info: string, largeur: number, mesurer: (texte: string) => number): string {
+  if (mesurer(info) <= largeur) return info;
+  const mots = info.split(" ");
+  const prefixe = (n: number): string => mots.slice(0, n).join(" ");
+  let n = 1;
+  let trop = mots.length;
+  while (trop - n > 1) {
+    const milieu = (n + trop) >> 1;
+    if (mesurer(prefixe(milieu)) <= largeur) n = milieu;
+    else trop = milieu;
+  }
+  return `${prefixe(n).replace(/( [—·;:>])+$/, "")}…`;
+}
+
+/** Espace insécable : aucun moteur de rendu ne le replie ni ne le retire en fin de texte. */
+const INSECABLE = "\u00a0";
+
+/**
+ * Rangées de l'infobulle pour une rangée large de `largeur`. Rien à couper : les textes tels quels,
+ * la disposition du moteur ne change pas (deux textes courts restent côte à côte). Sinon un texte
+ * par rangée, coupé par `couperInfo`. KLineChart 9.8.12 ne change de rangée qu'ENTRE deux légendes,
+ * quand elles ne tiennent pas ensemble (`drawStandardTooltipLegends`) : chaque rangée sauf la
+ * dernière est donc complétée d'espaces insécables jusqu'à dépasser `largeur` à elle seule. Espace
+ * de largeur nulle : pas de complément. PURE.
+ */
+export function rangeesInfobulle(infos: string[], largeur: number, mesurer: (texte: string) => number): string[] {
+  const coupees = infos.map((info) => couperInfo(info, largeur, mesurer));
+  if (coupees.every((rangee, i) => rangee === infos[i])) return infos;
+  const espace = mesurer(INSECABLE);
+  return coupees.map((rangee, i) => {
+    const manque = largeur - mesurer(rangee);
+    return i === coupees.length - 1 || !(espace > 0) || manque < 0 ? rangee : rangee + INSECABLE.repeat(Math.floor(manque / espace) + 1);
+  });
+}
+
+/** Contexte 2D hors écran qui mesure les textes de l'infobulle, créé au premier besoin (`null` : indisponible). */
+let toileMesure: CanvasRenderingContext2D | null | undefined;
+/** Rangées déjà calculées, par police, largeur et textes : le rappel est relu à chaque dessin du réticule. */
+const memoRangees = new Map<string, string[]>();
+
+/**
+ * `rangeesInfobulle` mesurée dans la police de l'infobulle (celle de `createFont` du moteur), pour
+ * le pane de bornes `pane`. Le premier texte d'une rangée est dessiné à `offsetLeft + marginLeft`
+ * (12 px) et le bord droit du canvas le rogne : c'est la largeur d'une rangée. Le décalage lu est
+ * celui de `indicator.tooltip` ; sur le pane des prix le moteur lit celui de `candle.tooltip` : les
+ * deux valent 4 par défaut, l'application ne les change pas. Sans bornes ni styles (rappel appelé
+ * hors du moteur, tests), sans largeur ou sans contexte de mesure : textes inchangés.
+ */
+function rangeesMesurees(infos: string[], pane: Bounding | undefined, styles: IndicatorStyle | undefined): string[] {
+  if (!pane || !styles) return infos;
+  const ctx = (toileMesure ??= document.createElement("canvas").getContext("2d"));
+  const { offsetLeft, text } = styles.tooltip;
+  const largeur = pane.width - offsetLeft - text.marginLeft;
+  if (!ctx || !(largeur > 0)) return infos;
+  const police = `${text.weight} ${text.size}px ${text.family}`;
+  const cle = `${police}|${largeur}|${infos.join("\n")}`;
+  let rangees = memoRangees.get(cle);
+  if (rangees === undefined) {
+    if (memoRangees.size > 255) memoRangees.clear();
+    ctx.font = police;
+    rangees = rangeesInfobulle(infos, largeur, (t) => ctx.measureText(t).width);
+    memoRangees.set(cle, rangees);
+  }
+  return rangees;
 }
 
 /** Métadonnées d'une instance montée sur le graphe. */
@@ -849,6 +960,33 @@ export class ChartIndicators {
    */
   rafraichirHauteurs(): void {
     this.equilibrerHauteurs();
+  }
+
+  /**
+   * Texte complet de l'annotation que le réticule vise sur le pane des prix ; `undefined` quand le
+   * réticule est sur un autre pane, hors données ou sans ordonnée, ou ne vise rien. Sert l'encart
+   * du téléphone : la rangée du canvas est coupée au bord, l'encart rend le texte entier.
+   *
+   * La règle de `infosSousReticule` (marqueur sous le doigt, sinon bande, sinon voisin à 3 bougies)
+   * vaut pour l'ENSEMBLE des indicateurs montés sur ce pane : le `vise` de plus petit `rang` ; à
+   * rang égal, l'ordre de montage. Sans cela, le voisin à 3 bougies d'un indicateur monté d'abord
+   * (un signal d'AXIS, 370 px plus haut) masquait la zone d'AXIS S/R que le doigt touchait.
+   */
+  texteVise(reticule: Crosshair): string | undefined {
+    const convertirY = (valeur: number): number =>
+      (this.chart.convertToPixel({ value: valeur }, { paneId: CANDLE_PANE_ID }) as { y?: number }).y ?? Number.NaN;
+    let texte: string | undefined;
+    let meilleur = 4;
+    for (const monte of this.active.values()) {
+      if (monte.paneId !== CANDLE_PANE_ID) continue;
+      const annotations = (this.chart.getIndicatorByPaneId(CANDLE_PANE_ID, monte.name) as { extendData?: IndicatorResult } | null)?.extendData?.annotations;
+      const { vise, rang } = infosSousReticule(annotations ?? {}, reticule, CANDLE_PANE_ID, convertirY);
+      if (vise !== undefined && rang < meilleur) {
+        texte = vise;
+        meilleur = rang;
+      }
+    }
+    return texte;
   }
 
   /**

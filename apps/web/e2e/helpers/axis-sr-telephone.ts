@@ -377,6 +377,104 @@ export async function lireAxisSr(page: Page): Promise<LectureAxisSr | null> {
   });
 }
 
+/** Zone active tracée par AXIS S/R, lue sur son ruban : texte d'infobulle, force, rôle et DERNIÈRES bornes. */
+export interface ZoneTracee {
+  info: string;
+  /** Bande pleine (forte) ou bords seuls (faible). */
+  forte: boolean;
+  role: "support" | "resistance";
+  /** Dernière borne haute et dernière borne basse du ruban (valeurs brutes, non arrondies). */
+  haut: number;
+  bas: number;
+}
+
+/**
+ * Zones actives de l'instance AXIS S/R du VRAI graphe actif, dans l'ordre de ses rubans : celles
+ * dont `lireAxisSr` rend le texte et l'opacité (`zones`), avec le rôle (couleur du ruban) et les
+ * dernières bornes. Sert l'alerte de prix au bord d'une zone forte, dont le niveau est le dernier
+ * bord tourné vers le cours. Vide sans AXIS S/R.
+ */
+export async function lireZonesAxisSr(page: Page): Promise<ZoneTracee[]> {
+  return page.evaluate(async () => {
+    const importer = new Function("return Promise.all([import('/src/chart/drawing.ts'), import('/src/store/indicators.ts')])") as () => Promise<Modules>;
+    const [dessin, store] = await importer();
+    const chart = dessin.getActiveChart();
+    const instance = store.indicatorsStore.getState().indicators.find((i) => i.defId === "stratAxisSr");
+    const monte = instance ? (chart?.getIndicatorByPaneId("candle_pane", `AXIOM_${instance.instanceId}`) as IndicateurMonte | null) : null;
+    return (monte?.extendData?.annotations?.rubans ?? [])
+      .filter((r) => r.info !== undefined && r.hauts.length > 0)
+      .map((r) => ({ info: r.info!, forte: r.alpha > 0, role: r.couleur === "--up" ? ("support" as const) : ("resistance" as const), haut: r.hauts.at(-1)!, bas: r.bas.at(-1)! }));
+  });
+}
+
+/** Point d'appui où l'encart écrit le texte d'un AUTRE indicateur alors que le doigt est dans une bande forte d'AXIS S/R. */
+export interface CibleSignalDansBande {
+  /** Bougie du marqueur visé. */
+  idx: number;
+  x: number;
+  y: number;
+  /** Texte du marqueur (un signal d'AXIS, par exemple) : celui que l'encart doit écrire. */
+  info: string;
+  /** Texte de la zone forte dont la bande contient le point d'appui. */
+  zone: string;
+}
+
+/**
+ * Points du VRAI graphe actif où le doigt, DANS la bande d'une zone forte d'AXIS S/R, lit le texte
+ * d'un marqueur d'un autre indicateur du pane des prix : le point d'appui est sur la bougie du
+ * marqueur, dans la bande, à 16 px ou moins de son point (l'encart retient le marqueur à 24 px ou
+ * moins, le plus proche en bougies). AXIS S/R pose souvent son propre marqueur sur la bougie d'un
+ * signal d'AXIS : à égalité de bougies, l'indicateur MONTÉ D'ABORD l'emporte. Le point n'est donc
+ * retenu que si l'autre indicateur précède AXIS S/R dans le store, ou si AXIS S/R n'a aucun
+ * marqueur porteur d'un texte sur cette bougie à 30 px ou moins. Le texte de l'encart y survit
+ * alors à la fermeture d'AXIS S/R, pas la zone. Vide sans AXIS S/R, sans autre indicateur à
+ * marqueurs, ou quand la fenêtre visible n'en montre aucun.
+ */
+export async function lireSignauxDansBandesFortes(page: Page): Promise<CibleSignalDansBande[]> {
+  return page.evaluate(async () => {
+    const importer = new Function("return Promise.all([import('/src/chart/drawing.ts'), import('/src/store/indicators.ts')])") as () => Promise<Modules>;
+    const [dessin, store] = await importer();
+    const chart = dessin.getActiveChart();
+    const dom = chart?.getDom("candle_pane", "main" as DomPosition);
+    const axeY = chart?.getDrawPaneById("candle_pane")?.getAxisComponent();
+    if (!chart || !dom || !axeY) return [];
+    const boite = dom.getBoundingClientRect();
+    const axeX = chart.getXAxisPane().getAxisComponent();
+    const actifs = store.indicatorsStore.getState().indicators;
+    const annotations = (i: ActiveIndicator) => (chart.getIndicatorByPaneId("candle_pane", `AXIOM_${i.instanceId}`) as IndicateurMonte | null)?.extendData?.annotations ?? {};
+    const sr = actifs.find((i) => i.defId === "stratAxisSr");
+    if (sr === undefined) return [];
+    const fortes = (annotations(sr).rubans ?? []).filter((r) => r.info !== undefined && r.alpha > 0);
+    const marqueursSr = (annotations(sr).marqueurs ?? []).filter((m) => m.info !== undefined);
+    const { from, to } = chart.getVisibleRange();
+    const libreDe = chart.getStyles().candle.tooltip.offsetTop + 70;
+    const cibles: CibleSignalDansBande[] = [];
+    for (const autre of actifs.filter((i) => i !== sr)) {
+      const monteAvant = actifs.indexOf(autre) < actifs.indexOf(sr);
+      for (const marqueur of annotations(autre).marqueurs ?? []) {
+        const { idx, info } = marqueur;
+        if (info === undefined || idx < from || idx >= to) continue;
+        const yMarqueur = axeY.convertToPixel(marqueur.valeur);
+        for (const ruban of fortes) {
+          const haut = ruban.hauts[idx - ruban.deIdx];
+          const bas = ruban.bas[idx - ruban.deIdx];
+          if (idx < ruban.deIdx || haut === undefined || bas === undefined) continue;
+          // Le point de la bande le plus proche du marqueur, à 2 px de ses bords au moins.
+          const dessus = Math.min(axeY.convertToPixel(haut), axeY.convertToPixel(bas)) + 2;
+          const dessous = Math.max(axeY.convertToPixel(haut), axeY.convertToPixel(bas)) - 2;
+          const y = Math.max(dessus, Math.min(yMarqueur, dessous));
+          const x = axeX.convertToPixel(idx);
+          if (dessous < dessus || Math.abs(y - yMarqueur) > 16 || y < libreDe || y > boite.height - 4 || x < 4 || x > boite.width - 4) continue;
+          if (!monteAvant && marqueursSr.some((m) => m.idx === idx && Math.abs(axeY.convertToPixel(m.valeur) - y) <= 30)) continue;
+          if (!dom.contains(document.elementFromPoint(boite.x + x, boite.y + y))) continue;
+          cibles.push({ idx, x: boite.x + x, y: boite.y + y, info, zone: ruban.info! });
+        }
+      }
+    }
+    return cibles;
+  });
+}
+
 /** Rangée de l'infobulle telle que le moteur l'a peinte sur le canvas. */
 export interface RangeePeinte {
   /** Texte peint, sans les espaces insécables qui le complètent. */

@@ -98,7 +98,8 @@ import { bindChart, unbindChart, setFocusChart, redrawFibOverlays, restoreDrawin
 import { declarerMarcheVpfr } from "./volumeRangeOverlay";
 import { fibStore } from "./fibonacci";
 import { createRafThrottle, type RafThrottle } from "./rafThrottle";
-import { bindPriceAlertMenu } from "./priceAlertMenu";
+import { bindPriceAlertMenu, type PriceAlertMarket } from "./priceAlertMenu";
+import { offreSousReticule, suivreAlertes } from "./alerteZone";
 import { MeasureTool } from "./measureTool";
 import { bougieSousReticule, CandleReadout } from "./candleReadout";
 import { SymbolBanner } from "../components/SymbolBanner";
@@ -799,24 +800,36 @@ export function ChartInstance({
         return;
       }
       const texte = indicators.texteVise(reticule);
-      candleReadout.montrer(kLineData, x, y, texte);
+      // Téléphone : sous le texte, l'alerte de prix au bord de la bande forte sous le doigt.
+      candleReadout.montrer(kLineData, x, y, texte, () => offreSousReticule(chart, marcheAlerte(), reticule));
       encartMontre = { reticule, x, t: kLineData.timestamp, texte };
     };
+    // Alerte posée, annulée ou supprimée pendant que l'encart est à l'écran : son bouton est relu.
+    const unsubscribeAlertesEncart = suivreAlertes(() => candleReadout.relire());
     // Indicateur fermé, ajouté ou recalculé pendant que l'encart est à l'écran (au doigt il y reste,
     // doigt levé) : l'annotation qu'il décrit a pu disparaître ou changer, et le moteur ne notifie
     // rien. Son texte est relu ; sans annotation visée il ne garde que les prix. Avant : AXIS S/R
     // fermé, l'encart gardait le texte d'une zone que le graphe ne dessinait plus. Si les bougies ont
-    // glissé sous l'indice du réticule (historique préfixé), l'encart est masqué.
+    // glissé sous l'indice du réticule (historique préfixé), l'encart est masqué. L'offre d'alerte
+    // de zone est relue de même : sous un texte inchangé (signal d'AXIS dans une bande forte), le
+    // bouton d'une zone qu'AXIS S/R, fermé, ne trace plus restait, et son toucher posait l'alerte.
     indicators.apresCalcul = (): void => {
       if (!encartMontre) return;
       const { reticule, t, texte } = encartMontre;
       if (chart.getDataList()[reticule.dataIndex ?? -1]?.timestamp !== t) cacherEncart();
-      else if (indicators.texteVise(reticule) !== texte) montrerEncart(reticule);
+      else if (indicators.texteVise(reticule) !== texte || candleReadout.offreChangee()) montrerEncart(reticule);
     };
     const slotLive = (position: number): boolean => {
       const replay = replayStore.getState();
       return position >= 0 && position < visibleSlotCount(chartLayoutStore.getState().layout) &&
         !((replay.active || replay.identityTransition) && replay.slot === position);
+    };
+    // Marché des alertes de prix posées depuis ce graphe (menu du clic droit, bouton de l'encart) :
+    // lu dans le store injecté au moment du geste. L'unité et le rejeu servent l'alerte au bord
+    // d'une zone forte (`alerteZone.ts`).
+    const marcheAlerte = (): PriceAlertMarket => {
+      const s = store.getState();
+      return { symbol: s.symbol, source: s.exchange, timeframe: s.timeframe, rejeu: !slotLive(slot) };
     };
     const effacerReticule = (): void => {
       if (crosshairSyncStore.getState().source === slot) {
@@ -922,6 +935,9 @@ export function ChartInstance({
     // posé à moins de 10 px), il le déplace sous le doigt et `onCrosshair` rouvre l'encart dans le
     // même instant. LIMITE : doigt reposé exactement au même pixel, le réticule ne change pas, rien
     // n'est notifié et l'encart reste masqué jusqu'au toucher suivant.
+    // Garde : l'écouteur est sur `chartDom`, et l'encart est un enfant du CONTENEUR, pas de
+    // `chartDom`. Un toucher sur son bouton d'alerte de zone n'arrive donc ni ici ni au moteur :
+    // l'encart reste, le réticule aussi (prouvé par `e2e/mobile-alerte-zone.e2e.ts`).
     chartDom.addEventListener("touchstart", cacherEncart, { capture: true, passive: true });
     chartDom.addEventListener("pointerenter", onPointerEnter);
     chartDom.addEventListener("pointerleave", onPointerLeave);
@@ -981,15 +997,7 @@ export function ChartInstance({
     // change d'actif sans remonter l'instance KLineChart). Les lignes accrochables
     // sont celles de l'overlay de niveaux du run DONNÉES courant (vide sinon).
     const accroche = { lignes: (): readonly LigneNiveau[] => [] };
-    const unbindPriceAlert = bindPriceAlertMenu(
-      chart,
-      chartDom,
-      () => {
-        const s = store.getState();
-        return { symbol: s.symbol, source: s.exchange };
-      },
-      () => accroche.lignes(),
-    );
+    const unbindPriceAlert = bindPriceAlertMenu(chart, chartDom, marcheAlerte, () => accroche.lignes());
 
     // Publie les objets à vie longue vers l'effet DONNÉES.
     mountRef.current = {
@@ -1022,6 +1030,7 @@ export function ChartInstance({
       overlayLegend.dispose();
       measureTool.dispose();
       indicators.apresCalcul = null;
+      unsubscribeAlertesEncart();
       candleReadout.dispose();
       chartDom.removeEventListener("pointerenter", onPointerEnter);
       chartDom.removeEventListener("pointerleave", onPointerLeave);

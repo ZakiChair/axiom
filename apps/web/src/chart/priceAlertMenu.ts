@@ -12,10 +12,14 @@
  *
  * ACCROCHE (lot A) : un clic à ±6 px d'une ligne de niveau (overlays du chart maître)
  * propose l'alerte au prix EXACT de cette ligne, étiquette en en-tête et en message.
+ *
+ * ZONE FORTE (phase 2 d'AXIS, lot 2) : un clic dans la bande d'une zone forte d'AXIS S/R, ou à
+ * 6 px, ajoute sous l'en-tête l'alerte de prix au BORD de cette zone (`alerteZone.ts`), à niveau
+ * fixe ; les trois entrées au prix du clic restent dessous, inchangées.
  */
 import type { Chart as KLineChartInstance } from "klinecharts";
 import type { SensCroisement } from "@axiom/alerts";
-import type { ExchangeId } from "@axiom/types";
+import type { ExchangeId, Timeframe } from "@axiom/types";
 import {
   alertePrixAuNiveau,
   alertsStore,
@@ -24,6 +28,8 @@ import {
 } from "../store/alerts";
 import { uiSectionsStore } from "../store/ui-sections";
 import { formatPrice } from "../lib/format";
+import { offreAuClic } from "./alerteZone";
+import type { OffreEncart } from "./candleReadout";
 
 /** Pane prix (id par défaut KLineChart). */
 const CANDLE_PANE_ID = "candle_pane";
@@ -35,6 +41,10 @@ const MENU_DOM_ID = "axiom-price-alert-menu";
 export interface PriceAlertMarket {
   symbol: string;
   source: ExchangeId;
+  /** Unité du graphe : celle des zones d'AXIS S/R qu'il trace (message de l'alerte de zone). */
+  timeframe?: Timeframe;
+  /** Le graphe rejoue un jour passé : aucune alerte de zone n'y est proposée. */
+  rejeu?: boolean;
 }
 
 /** Entrée du menu (libellé + sens de croisement). */
@@ -176,9 +186,33 @@ function fermerMenu(): void {
   document.getElementById(MENU_DOM_ID)?.remove();
 }
 
+/** Entrée active du menu : un bouton au style commun, qui agit puis ferme le menu. */
+function entreeMenu(label: string, agir: () => void): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.setAttribute("role", "menuitem");
+  btn.textContent = label;
+  btn.style.cssText =
+    "display:block;width:100%;text-align:left;padding:0.35rem 0.6rem;background:transparent;border:0;color:inherit;cursor:pointer;font:inherit";
+  btn.addEventListener("mouseenter", () => {
+    btn.style.background = "var(--bg)";
+  });
+  btn.addEventListener("mouseleave", () => {
+    btn.style.background = "transparent";
+  });
+  btn.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    agir();
+    fermerMenu(); // retire DOM + listeners window
+  });
+  return btn;
+}
+
 /**
  * Affiche le menu flottant près du curseur (coordonnées viewport).
- * Remplace tout menu précédent (DOM + listeners).
+ * Remplace tout menu précédent (DOM + listeners). `offre` : alerte de prix au bord de la zone
+ * forte sous le clic, placée entre l'en-tête et les trois entrées au prix du clic.
  */
 function afficherMenu(
   clientX: number,
@@ -186,26 +220,19 @@ function afficherMenu(
   niveau: number,
   market: PriceAlertMarket,
   libelle?: string,
+  offre?: OffreEncart,
 ): void {
   fermerMenu();
 
   const menu = document.createElement("div");
   menu.id = MENU_DOM_ID;
   menu.setAttribute("role", "menu");
-  menu.style.cssText = [
-    "position:fixed",
-    `left:${Math.round(clientX)}px`,
-    `top:${Math.round(clientY)}px`,
-    "z-index:80",
-    "min-width:11rem",
-    "padding:0.25rem 0",
-    "border-radius:0.375rem",
-    "border:1px solid var(--border)",
-    "background:var(--surface)",
-    "box-shadow:0 8px 24px rgba(0,0,0,0.35)",
-    "font-size:11px",
-    "color:var(--text)",
-  ].join(";");
+  // `max-width` borne la ligne de l'offre de zone, plus longue que les trois autres : au-delà
+  // (résistance, prix à six chiffres) elle revient à la ligne.
+  menu.style.cssText =
+    `position:fixed;left:${Math.round(clientX)}px;top:${Math.round(clientY)}px;z-index:80;min-width:11rem;max-width:26rem;` +
+    "padding:0.25rem 0;border-radius:0.375rem;border:1px solid var(--border);background:var(--surface);" +
+    "box-shadow:0 8px 24px rgba(0,0,0,0.35);font-size:11px;color:var(--text)";
 
   // En-tête discret (ligne accrochée éventuelle + niveau).
   const header = document.createElement("div");
@@ -214,35 +241,24 @@ function afficherMenu(
     "padding:0.25rem 0.6rem 0.35rem;font-size:10px;color:var(--text-dim);border-bottom:1px solid var(--border);margin-bottom:0.15rem";
   menu.appendChild(header);
 
+  if (offre) {
+    // Bord d'une zone forte : entrée active pour l'état « offre » ; sinon (déjà posée, bord déjà
+    // franchi) la même ligne, grisée et sans effet, qui dit pourquoi. Un filet la sépare des
+    // trois entrées au prix du clic.
+    const actif = offre.etat === "offre";
+    const entree = actif ? entreeMenu(offre.libelle, offre.executer) : document.createElement("div");
+    if (!actif) {
+      entree.textContent = offre.libelle;
+      entree.setAttribute("aria-disabled", "true");
+      entree.style.cssText = "padding:0.35rem 0.6rem;color:var(--text-dim)";
+    }
+    entree.setAttribute("data-alerte-zone", offre.etat);
+    entree.style.cssText += ";white-space:normal;border-bottom:1px solid var(--border)";
+    menu.appendChild(entree);
+  }
+
   for (const item of itemsMenuAlertePrix(niveau)) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.setAttribute("role", "menuitem");
-    btn.textContent = item.label;
-    btn.style.cssText = [
-      "display:block",
-      "width:100%",
-      "text-align:left",
-      "padding:0.35rem 0.6rem",
-      "background:transparent",
-      "border:0",
-      "color:inherit",
-      "cursor:pointer",
-      "font:inherit",
-    ].join(";");
-    btn.addEventListener("mouseenter", () => {
-      btn.style.background = "var(--bg)";
-    });
-    btn.addEventListener("mouseleave", () => {
-      btn.style.background = "transparent";
-    });
-    btn.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      creerAlerteDepuisMenu(market, niveau, item.sens, libelle && `${libelle} ${market.symbol}`);
-      fermerMenu(); // retire DOM + listeners window
-    });
-    menu.appendChild(btn);
+    menu.appendChild(entreeMenu(item.label, () => creerAlerteDepuisMenu(market, niveau, item.sens, libelle && `${libelle} ${market.symbol}`)));
   }
 
   document.body.appendChild(menu);
@@ -316,8 +332,10 @@ export function bindPriceAlertMenu(
       y: (chart.convertToPixel({ value: ligne.price }, { paneId: CANDLE_PANE_ID, absolute: true }) as { y?: number }).y ?? NaN,
       ligne,
     }));
-    const ligne = ligneAccrochee(e.clientY - chartDom.getBoundingClientRect().top, candidats);
-    afficherMenu(e.clientX, e.clientY, ligne?.price ?? niveau, getMarket(), ligne?.label);
+    const racine = chartDom.getBoundingClientRect();
+    const ligne = ligneAccrochee(e.clientY - racine.top, candidats);
+    const market = getMarket();
+    afficherMenu(e.clientX, e.clientY, ligne ? ligne.price : niveau, market, ligne ? ligne.label : undefined, offreAuClic(chart, market, e.clientX - racine.left, e.clientY - racine.top));
   };
 
   chartDom.addEventListener("contextmenu", onContextMenu);

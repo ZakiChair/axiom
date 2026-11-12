@@ -191,6 +191,8 @@ interface BougieEvaluee {
 interface AmorceCourte {
   ids: ReadonlySet<string>;
   bougies: number;
+  /** La remontée a échoué (réseau) : la mention le dit (« chargement échoué »). */
+  echec: boolean;
 }
 
 /**
@@ -278,7 +280,7 @@ function appliquerResultat(lotBrut: AlertDef[], ctx: ContexteAlerte, bougie?: Bo
     if (!def) continue;
     const signal = bougie === undefined ? undefined : (ouvertureSignal(def.condition, ctx) ?? bougie.time);
     const rattrapage = bougie === undefined || signal === undefined ? "" : mentionRattrapage(signal, bougie.timeframe, ctx.maintenant);
-    const amorce = courte !== undefined && courte.ids.has(def.id) ? mentionAmorceCourte(courte.bougies) : "";
+    const amorce = courte !== undefined && courte.ids.has(def.id) ? mentionAmorceCourte(courte.bougies, courte.echec) : "";
     const d = rattrapage === "" && amorce === "" ? brut : { ...brut, message: brut.message + amorce + rattrapage };
     const encoreNotifiable = (): boolean => alertsStore.getState().defs.some((courante) =>
       courante.id === d.alertId && courante.expireTs === def.expireTs && alerteActiveAuTemps(courante, Date.now()));
@@ -335,9 +337,9 @@ function creerRuntime(): Unsubscribe {
   const profondeur = (d: AlertDef, cle: string, bougies: number, extension: ExtensionGraphe | null): ProfondeurAlerte =>
     profondeurAlerte(amorceAlerte(d), bougies, extension, cle);
   /** Les defs d'un lot évaluées sur une amorce courte, et les bougies closes lues ; `undefined` si aucune. */
-  const amorceCourte = (lot: readonly AlertDef[], estCourte: (d: AlertDef) => boolean, bougies: number): AmorceCourte | undefined => {
+  const amorceCourte = (lot: readonly AlertDef[], estCourte: (d: AlertDef) => boolean, bougies: number, extension: ExtensionGraphe | null): AmorceCourte | undefined => {
     const ids = new Set(lot.filter(estCourte).map((d) => d.id));
-    return ids.size === 0 ? undefined : { ids, bougies };
+    return ids.size === 0 ? undefined : { ids, bougies, echec: extension !== null && extension.echec };
   };
 
   /**
@@ -370,7 +372,7 @@ function creerRuntime(): Unsubscribe {
         return profondeurComposite(d) !== "attente" && (seuls === undefined || seuls(d));
       });
     if (lot.length === 0) return;
-    const courte = amorceCourte(lot, (d) => profondeurComposite(d) === "courte", (partiel.candles ?? []).length);
+    const courte = amorceCourte(lot, (d) => profondeurComposite(d) === "courte", (partiel.candles ?? []).length, extension);
     if (seuls === undefined) dernierEvalComposite.set(cle, now);
     const regime = regimeStore.getState().regime;
     const regimeScore =
@@ -494,7 +496,8 @@ function creerRuntime(): Unsubscribe {
   //      compte au moins A bougies (même décompte que l'extension d'historique du graphe), OU si
   //      l'extension de ce marché est TERMINÉE et visait au moins A (`profondeurAlerte`) : la
   //      place n'a pas plus d'historique, la def est évaluée sur ce qu'il y a et le message de son
-  //      déclenchement reçoit « · amorce courte (N bougies) ». Pendant l'extension (que la vue
+  //      déclenchement reçoit « · amorce courte (N bougies) » (« N bougies, chargement échoué »
+  //      quand une page a échoué : le graphe retente la remontée). Pendant l'extension (que la vue
   //      principale fait aussi pour les indicateurs des alertes actives de son marché, depuis le
   //      lot A2) : aucune évaluation, ni calibrage ni tir ; la liste écrit « historique… ».
   //      Quand l'état de l'extension change, `onMarket` est rappelé (R1 : évaluée dès qu'elle le
@@ -600,7 +603,7 @@ function creerRuntime(): Unsubscribe {
     if (lot.length > 0) {
       const bougie: BougieEvaluee = { time: barreClose.time, timeframe };
       // R2 : defs évaluées sous leur amorce, la place n'ayant pas plus d'historique.
-      const courte = amorceCourte(lot, (d) => profondeur(d, cleGraphe, candles.length, extension) === "courte", candlesCloturees.length);
+      const courte = amorceCourte(lot, (d) => profondeur(d, cleGraphe, candles.length, extension) === "courte", candlesCloturees.length, extension);
       const ctxBase: ContexteAlerte = {
         maintenant: Date.now(),
         dernierPrix: barreClose.close,

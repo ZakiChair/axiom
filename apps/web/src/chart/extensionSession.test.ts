@@ -14,7 +14,7 @@
  * d'import de `ChartInstance.tsx` touche `document` et enregistre des overlays
  * klinecharts dès l'import.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
   const noop = (): void => {};
@@ -87,6 +87,8 @@ import {
   bougiesAvantBuffer,
   cibleSessionUTC,
   creerOrdonnanceurExtension,
+  creerRelanceExtension,
+  demarrerCycleDonnees,
   doitEtendreHistorique,
   doitSignalerLimiteKraken,
   etendreSessionJusqua,
@@ -98,7 +100,7 @@ import {
   type EtatPasseExtension,
 } from "./ChartInstance";
 import { alertsStore } from "../store/alerts";
-import { indicateursAlertesMarche, indicateursExtension, surIndicateursAlertes } from "../alerts/amorceGraphe";
+import { extensionGrapheStore, indicateursAlertesMarche, indicateursExtension, publierExtension, surIndicateursAlertes } from "../alerts/amorceGraphe";
 import { REFCLOSE_LIMIT } from "./auxProvider";
 import { PLAFOND_BOUGIES_GRAPHE } from "../data/profondeurHistorique";
 
@@ -588,6 +590,8 @@ describe("historique chargé pour les alertes de la vue principale (lot A2)", ()
     /** Ordre des effets d'une passe : marque d'extension, publication, réapplication du buffer. */
     const ordre: string[] = [];
     const appliques: number[] = [];
+    /** Nouvelles passes programmées après un échec (la minuterie de `creerRelanceExtension` dans le graphe). */
+    let relances = 0;
     let annule = false;
     let echec = false;
     let porte: Promise<void> | null = null;
@@ -631,6 +635,10 @@ describe("historique chargé pour les alertes de la vue principale (lot A2)", ()
           publies.push(etat);
           ordre.push(`publié ${etat.terminee ? "terminée" : "en cours"} ${etat.bougies}`);
         },
+        relancer: () => {
+          relances += 1;
+          ordre.push("relance programmée");
+        },
       }),
     });
     const desabonner = maitre ? surIndicateursAlertes(MARCHE, () => ordonnanceur.demander()) : () => {};
@@ -641,6 +649,8 @@ describe("historique chargé pour les alertes de la vue principale (lot A2)", ()
       liberer: () => { porte = null; ouvrir(); },
       annuler: () => { annule = true; },
       couper: () => { echec = true; },
+      retablir: () => { echec = false; },
+      relances: () => relances,
     };
   }
   const poser = (condition: Condition): void => {
@@ -661,8 +671,8 @@ describe("historique chargé pour les alertes de la vue principale (lot A2)", ()
     poser(SR);
     await vi.waitFor(() => expect(v.publies.at(-1)?.terminee).toBe(true));
     expect(v.publies).toEqual([
-      { terminee: false, amorceVisee: 3000, bougies: 500 },
-      { terminee: true, amorceVisee: 3000, bougies: 2988 },
+      { terminee: false, echec: false, amorceVisee: 3000, bougies: 500 },
+      { terminee: true, echec: false, amorceVisee: 3000, bougies: 2988 },
     ]);
     // Cinq pages de 500, la dernière en rend 488, puis une page vide : la place est à sec.
     expect(v.pages).toEqual([500, 500, 500, 500, 488, 0]);
@@ -680,7 +690,7 @@ describe("historique chargé pour les alertes de la vue principale (lot A2)", ()
     poser(SR);
     v.demander();
     await vi.waitFor(() => expect(v.publies).toHaveLength(1));
-    expect(v.publies).toEqual([{ terminee: true, amorceVisee: 0, bougies: 500 }]);
+    expect(v.publies).toEqual([{ terminee: true, echec: false, amorceVisee: 0, bougies: 500 }]);
     expect(v.pages).toEqual([]);
   });
 
@@ -693,22 +703,58 @@ describe("historique chargé pour les alertes de la vue principale (lot A2)", ()
     // Une alerte RSI change la liste : une passe, qui n'a rien à charger.
     poser({ type: "indicateur-seuil", indicateurId: "rsi", params: {}, output: "rsi", comparateur: ">", valeur: 70 });
     await vi.waitFor(() => expect(v.publies).toHaveLength(1));
-    expect(v.publies).toEqual([{ terminee: true, amorceVisee: 0, bougies: 500 }]);
+    expect(v.publies).toEqual([{ terminee: true, echec: false, amorceVisee: 0, bougies: 500 }]);
     expect(v.pages).toEqual([]);
     v.desabonner();
   });
 
-  it("échec réseau pendant la remontée : « terminée » avec le tampon obtenu (la def sera évaluée en le disant)", async () => {
+  // Modifié à dessein (revue du lot A2) : l'échec est publié comme tel (`echec`), et une nouvelle
+  // passe est programmée ; avant, il était publié comme une place à sec, sans relance.
+  it("échec réseau pendant la remontée : « terminée » avec le tampon obtenu et l'échec, une relance programmée ; la relance réussie remonte toute la place", async () => {
     const v = vue(2988, ["stratAxisSr"]);
     v.couper();
     v.demander();
     await vi.waitFor(() => expect(v.publies.at(-1)?.terminee).toBe(true));
     expect(v.publies).toEqual([
-      { terminee: false, amorceVisee: 3000, bougies: 500 },
-      { terminee: true, amorceVisee: 3000, bougies: 500 },
+      { terminee: false, echec: false, amorceVisee: 3000, bougies: 500 },
+      { terminee: true, echec: true, amorceVisee: 3000, bougies: 500 },
     ]);
     expect(v.enCours).toEqual([true, false]);
+    // La relance n'est programmée qu'APRÈS la publication de l'échec.
+    expect(v.ordre).toEqual(["en cours true", "publié en cours 500", "en cours false", "publié terminée 500", "relance programmée"]);
+    expect(v.relances()).toBe(1);
+    // La minuterie échoit, le réseau est revenu : « en cours », puis la place entière, sans échec ni relance.
+    v.retablir();
+    v.demander();
+    await vi.waitFor(() => expect(v.publies).toHaveLength(4));
+    expect(v.publies.slice(2)).toEqual([
+      { terminee: false, echec: false, amorceVisee: 3000, bougies: 500 },
+      { terminee: true, echec: false, amorceVisee: 3000, bougies: 2988 },
+    ]);
+    expect(v.relances()).toBe(1);
     v.desabonner();
+  });
+
+  it("place à sec, rien à charger ou identité invalidée : aucune relance", async () => {
+    const aSec = vue(2988, []);
+    poser(SR);
+    await vi.waitFor(() => expect(aSec.publies.at(-1)?.terminee).toBe(true));
+    aSec.desabonner();
+    alertsStore.setState({ defs: [], journal: [] });
+    const rien = vue(2988, ["rsi"]);
+    rien.demander();
+    await vi.waitFor(() => expect(rien.publies).toHaveLength(1));
+    const invalidee = vue(2988, ["stratAxisSr"]);
+    invalidee.bloquer();
+    invalidee.couper();
+    invalidee.demander();
+    await vi.waitFor(() => expect(invalidee.publies).toHaveLength(1));
+    invalidee.annuler();
+    invalidee.liberer();
+    await vi.waitFor(() => expect(invalidee.enCours).toEqual([true, false]));
+    expect([aSec.relances(), rien.relances(), invalidee.relances()]).toEqual([0, 0, 0]);
+    rien.desabonner();
+    invalidee.desabonner();
   });
 
   it("identité invalidée pendant la remontée (changement de marché) : plus rien n'est publié", async () => {
@@ -719,7 +765,7 @@ describe("historique chargé pour les alertes de la vue principale (lot A2)", ()
     v.annuler();
     v.liberer();
     await vi.waitFor(() => expect(v.enCours).toEqual([true, false]));
-    expect(v.publies).toEqual([{ terminee: false, amorceVisee: 3000, bougies: 500 }]);
+    expect(v.publies).toEqual([{ terminee: false, echec: false, amorceVisee: 3000, bougies: 500 }]);
     v.desabonner();
   });
 
@@ -732,9 +778,9 @@ describe("historique chargé pour les alertes de la vue principale (lot A2)", ()
     v.liberer();
     await vi.waitFor(() => expect(v.publies).toHaveLength(3));
     expect(v.publies).toEqual([
-      { terminee: false, amorceVisee: 3000, bougies: 500 },
-      { terminee: true, amorceVisee: 3000, bougies: 2988 },
-      { terminee: true, amorceVisee: 0, bougies: 2988 },
+      { terminee: false, echec: false, amorceVisee: 3000, bougies: 500 },
+      { terminee: true, echec: false, amorceVisee: 3000, bougies: 2988 },
+      { terminee: true, echec: false, amorceVisee: 0, bougies: 2988 },
     ]);
     v.desabonner();
   });
@@ -748,10 +794,10 @@ describe("historique chargé pour les alertes de la vue principale (lot A2)", ()
     v.liberer();
     await vi.waitFor(() => expect(v.publies).toHaveLength(4));
     expect(v.publies).toEqual([
-      { terminee: false, amorceVisee: 1500, bougies: 500 },
-      { terminee: true, amorceVisee: 1500, bougies: 1500 },
-      { terminee: false, amorceVisee: 3000, bougies: 1500 },
-      { terminee: true, amorceVisee: 3000, bougies: 2988 },
+      { terminee: false, echec: false, amorceVisee: 1500, bougies: 500 },
+      { terminee: true, echec: false, amorceVisee: 1500, bougies: 1500 },
+      { terminee: false, echec: false, amorceVisee: 3000, bougies: 1500 },
+      { terminee: true, echec: false, amorceVisee: 3000, bougies: 2988 },
     ]);
     v.desabonner();
   });
@@ -767,5 +813,60 @@ describe("historique chargé pour les alertes de la vue principale (lot A2)", ()
     expect(v.publies).toHaveLength(2);
     expect(v.pages).toEqual([500, 500, 500, 500, 488, 0]);
     v.desabonner();
+  });
+});
+
+describe("relance d'une remontée échouée (revue du lot A2)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("une seule passe en attente, au bout du délai entier ; programmer de nouveau repart du délai ; annuler au démontage", () => {
+    vi.useFakeTimers();
+    const demander = vi.fn();
+    const relance = creerRelanceExtension(demander, 60_000);
+    relance.programmer();
+    vi.advanceTimersByTime(59_999);
+    expect(demander).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(demander).toHaveBeenCalledTimes(1);
+    // Deux échecs rapprochés : une seule relance, 60 s après le second.
+    relance.programmer();
+    vi.advanceTimersByTime(30_000);
+    relance.programmer();
+    vi.advanceTimersByTime(59_999);
+    expect(demander).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
+    expect(demander).toHaveBeenCalledTimes(2);
+    // Démontage du cycle de données pendant l'attente : rien n'est relancé.
+    relance.programmer();
+    relance.annuler();
+    vi.advanceTimersByTime(120_000);
+    expect(demander).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("début d'un cycle de données : l'état de l'extension repart de rien (revue du lot A2)", () => {
+  const TERMINEE = { cle: "binance|BTCUSDT|4h", terminee: true, echec: false, amorceVisee: 3000, bougies: 2988 };
+  afterEach(() => {
+    extensionGrapheStore.setState({ extension: null });
+  });
+
+  it("vue principale : `null` est publié AVANT que le buffer ne soit vidé ; la valeur de `demarrer` est rendue", () => {
+    publierExtension(TERMINEE);
+    let vuPendant: unknown = "non appelé";
+    const requestId = demarrerCycleDonnees(true, () => {
+      vuPendant = extensionGrapheStore.getState().extension;
+      return 7;
+    });
+    expect(requestId).toBe(7);
+    expect(vuPendant).toBeNull();
+    expect(extensionGrapheStore.getState().extension).toBeNull();
+  });
+
+  it("vue secondaire : l'état publié par la vue principale n'est pas touché", () => {
+    publierExtension(TERMINEE);
+    expect(demarrerCycleDonnees(false, () => null)).toBeNull();
+    expect(extensionGrapheStore.getState().extension).toEqual(TERMINEE);
   });
 });

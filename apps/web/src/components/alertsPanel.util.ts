@@ -274,9 +274,13 @@ export function profondeurAlerte(amorce: number, bougies: number, extension: Ext
   return extension !== null && extension.cle === cle && extension.terminee && extension.amorceVisee >= amorce ? "courte" : "attente";
 }
 
-/** Mention ajoutée au message d'un déclenchement évalué sur une amorce courte (`bougies` closes lues). */
-export function mentionAmorceCourte(bougies: number): string {
-  return ` · amorce courte (${bougies} bougies)`;
+/**
+ * Mention ajoutée au message d'un déclenchement évalué sur une amorce courte (`bougies` closes
+ * lues). `echec` : la remontée a échoué (réseau), la place a peut-être l'historique — la cause est
+ * dite, jamais confondue avec une place plus courte (revue du lot A2).
+ */
+export function mentionAmorceCourte(bougies: number, echec = false): string {
+  return ` · amorce courte (${bougies} bougies${echec ? ", chargement échoué" : ""})`;
 }
 
 /** Graphe principal, tel que le runtime des alertes le lit. */
@@ -300,8 +304,11 @@ export type EvaluationAlerte =
   | { etat: "hors-graphe" }
   /** Tampon sous l'amorce, rien n'est évalué ; `chargement` : le graphe remonte l'historique. */
   | { etat: "historique"; bougies: number; amorce: number; chargement: boolean }
-  /** La place n'a pas l'amorce : évaluée sur les `bougies` qu'elle a, son message le dit. */
-  | { etat: "amorce-courte"; bougies: number; amorce: number };
+  /**
+   * Remontée finie sous l'amorce : évaluée sur les `bougies` obtenues, son message le dit. `echec` :
+   * une page a échoué (la place a peut-être l'historique) ; le graphe retente la remontée.
+   */
+  | { etat: "amorce-courte"; bougies: number; amorce: number; echec: boolean };
 
 /**
  * Ce que le daemon local voit d'une clôture : Binance, en 1m ou sans unité (ses seules bougies
@@ -337,7 +344,7 @@ export function evaluationAlerte(
   const cle = cleMarcheGraphe(graphe);
   const profondeur = profondeurAlerte(amorce, graphe.bougies, graphe.extension, cle);
   if (profondeur === "atteinte") return { etat: "ici" };
-  if (profondeur === "courte") return { etat: "amorce-courte", bougies: graphe.bougies, amorce };
+  if (profondeur === "courte") return { etat: "amorce-courte", bougies: graphe.bougies, amorce, echec: graphe.extension !== null && graphe.extension.echec };
   // Plus de remède à conseiller (« affichez l'indicateur », lot A1) : le graphe charge lui-même
   // l'historique des alertes actives de son marché, que leur indicateur soit affiché ou non.
   const chargement = graphe.extension !== null && graphe.extension.cle === cle && !graphe.extension.terminee;
@@ -376,11 +383,14 @@ export function texteEvaluation(evaluation: EvaluationAlerte): string | null {
 }
 
 /**
- * Ligne de la liste sous une def évaluée sur une amorce courte : « amorce courte : N sur A ». Son
- * état d'armement reste écrit à sa place ; ses déclenchements portent « · amorce courte (N bougies) ».
+ * Ligne de la liste sous une def évaluée sur une amorce courte : « amorce courte : N sur A », suivi
+ * de « , chargement échoué : nouvel essai sous 1 min » quand la remontée a échoué. Son état
+ * d'armement reste écrit à sa place ; ses déclenchements portent « · amorce courte (N bougies) ».
  */
 export function texteAmorceCourte(evaluation: EvaluationAlerte): string | null {
-  return evaluation.etat === "amorce-courte" ? `amorce courte : ${evaluation.bougies} sur ${evaluation.amorce}` : null;
+  if (evaluation.etat !== "amorce-courte") return null;
+  const texte = `amorce courte : ${evaluation.bougies} sur ${evaluation.amorce}`;
+  return evaluation.echec ? `${texte}, chargement échoué : nouvel essai sous 1 min` : texte;
 }
 
 /** Ce que la note du formulaire lit de l'application : le daemon local. */
@@ -416,7 +426,7 @@ export function noteAlerteSeuil(
     }
     const amorce = amorceAlerte({ condition });
     if (amorce > 0 && condition.type === "indicateur-seuil") {
-      lignes.push(`Le graphe charge ${amorce} bougies pour elle ; si la place en a moins, elle est évaluée sur celles-là, avec la mention « amorce courte ».`);
+      lignes.push(`Le graphe charge ${amorce} bougies pour elle ; s'il en obtient moins (place plus courte, chargement échoué), elle est évaluée sur celles-là, avec la mention «\u00a0amorce courte\u00a0».`);
     }
   }
   lignes.push(

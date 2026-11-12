@@ -201,7 +201,7 @@ test("390 px : AXIS affiché, « Signal d'achat » créé au toucher, la clôtur
   await expect(note.locator("p")).toHaveText([
     "Évaluée à chaque clôture 4h, application ouverte sur BTCUSDT 4h.",
     `Libellé : ${LIBELLE_ACHAT}`,
-    "Le graphe charge 1500 bougies pour elle ; si la place en a moins, elle est évaluée sur celles-là, avec la mention « amorce courte ».",
+    "Le graphe charge 1500 bougies pour elle ; s'il en obtient moins (place plus courte, chargement échoué), elle est évaluée sur celles-là, avec la mention «\u00a0amorce courte\u00a0».",
     // Modifié à dessein (lot A2) : « Réglages par défaut de l'indicateur, pas ceux de l'instance
     // du graphe. » L'alerte copie maintenant les réglages de l'instance d'AXIS affichée.
     "Réglages de l'instance du graphe, copiés à la création : l'alerte ne suit pas leurs changements.",
@@ -756,7 +756,7 @@ test("390 px : place sans l'historique de l'amorce, AXIS non affiché — le gra
   await panneaux.getByRole("combobox").filter({ has: page.locator('option[value="indicateur-seuil"]') }).selectOption("indicateur-seuil");
   await panneaux.getByLabel("Indicateur de l'alerte").selectOption("stratAxis");
   const note = panneaux.locator("[data-note-alerte]");
-  await expect(note.locator("p").nth(2)).toHaveText("Le graphe charge 1500 bougies pour elle ; si la place en a moins, elle est évaluée sur celles-là, avec la mention « amorce courte ».");
+  await expect(note.locator("p").nth(2)).toHaveText("Le graphe charge 1500 bougies pour elle ; s'il en obtient moins (place plus courte, chargement échoué), elle est évaluée sur celles-là, avec la mention «\u00a0amorce courte\u00a0».");
   await expect(note).not.toContainText("affichez");
   await amorce.scrollIntoViewIfNeeded();
   await page.screenshot({ path: cheminCapture(testInfo, "historique-court-390x844.png"), animations: "disabled" });
@@ -786,7 +786,7 @@ test("390 px puis 320 px en Bloomberg : aucun indicateur affiché, place de 2 98
   await expect(note.locator("p").nth(1)).toHaveText("Libellé : AXIS S/R non mesuré · pré-signal d'achat (niveau sur le graphe)");
   await expect(note.locator("p").nth(2)).toHaveText("Signal précoce non mesuré — lecture indicative, jamais une promesse.");
   await sortie.selectOption({ label: "Non mesuré · réaction sur support fort" });
-  await expect(note.locator("p").nth(3)).toHaveText("Le graphe charge 3000 bougies pour elle ; si la place en a moins, elle est évaluée sur celles-là, avec la mention « amorce courte ».");
+  await expect(note.locator("p").nth(3)).toHaveText("Le graphe charge 3000 bougies pour elle ; s'il en obtient moins (place plus courte, chargement échoué), elle est évaluée sur celles-là, avec la mention «\u00a0amorce courte\u00a0».");
   // AXIS S/R n'est pas sur le graphe : réglages par défaut.
   await expect(note.locator("p").nth(4)).toHaveText("Réglages par défaut de l'indicateur, absent du graphe.");
   await panneaux.getByRole("button", { name: "Ajouter sur BTCUSDT" }).tap();

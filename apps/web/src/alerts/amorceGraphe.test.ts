@@ -87,7 +87,7 @@ describe("amorceAlerte", () => {
 });
 
 describe("profondeurAlerte : la règle commune au runtime et à la liste", () => {
-  const extension = (terminee: boolean, amorceVisee: number, cle = CLE): ExtensionGraphe => ({ cle, terminee, amorceVisee, bougies: 2988 });
+  const extension = (terminee: boolean, amorceVisee: number, cle = CLE, echec = false): ExtensionGraphe => ({ cle, terminee, echec, amorceVisee, bougies: 2988 });
 
   it("atteinte : le tampon compte l'amorce, quel que soit l'état de l'extension (règle A1 inchangée)", () => {
     for (const ext of [null, extension(false, 3000), extension(true, 1500, "autre")]) {
@@ -99,6 +99,8 @@ describe("profondeurAlerte : la règle commune au runtime et à la liste", () =>
   it("courte : sous l'amorce, extension de CE marché terminée et visant au moins l'amorce", () => {
     expect(profondeurAlerte(3000, 2988, extension(true, 3000), CLE)).toBe("courte");
     expect(profondeurAlerte(1500, 1200, extension(true, 3000), CLE)).toBe("courte");
+    // Remontée finie sur un échec réseau : évaluée aussi sur le tampon obtenu ; c'est la mention qui dit la cause.
+    expect(profondeurAlerte(3000, 500, extension(true, 3000, CLE, true), CLE)).toBe("courte");
   });
 
   it("attente : rien de connu, remontée en cours, autre marché, ou extension qui visait moins", () => {
@@ -108,8 +110,10 @@ describe("profondeurAlerte : la règle commune au runtime et à la liste", () =>
     expect(profondeurAlerte(3000, 1500, extension(true, 1500), CLE)).toBe("attente");
   });
 
-  it("la mention du message, au caractère près", () => {
+  it("la mention du message, au caractère près ; un échec réseau est dit comme tel (revue du lot A2)", () => {
     expect(mentionAmorceCourte(2989)).toBe(" · amorce courte (2989 bougies)");
+    expect(mentionAmorceCourte(2989, false)).toBe(" · amorce courte (2989 bougies)");
+    expect(mentionAmorceCourte(500, true)).toBe(" · amorce courte (500 bougies, chargement échoué)");
   });
 });
 
@@ -117,15 +121,19 @@ describe("publierExtension : le store n'est écrit que si l'état change", () =>
   afterEach(() => extensionGrapheStore.setState({ extension: null }));
 
   it("même état republié : aucun abonné réveillé ; état différent : un réveil", () => {
-    publierExtension({ cle: CLE, terminee: false, amorceVisee: 3000, bougies: 500 });
+    publierExtension({ cle: CLE, terminee: false, echec: false, amorceVisee: 3000, bougies: 500 });
     const abonne = vi.fn();
     const desabonner = extensionGrapheStore.subscribe(abonne);
-    publierExtension({ cle: CLE, terminee: false, amorceVisee: 3000, bougies: 500 });
+    publierExtension({ cle: CLE, terminee: false, echec: false, amorceVisee: 3000, bougies: 500 });
     expect(abonne).not.toHaveBeenCalled();
-    publierExtension({ cle: CLE, terminee: true, amorceVisee: 3000, bougies: 2988 });
+    publierExtension({ cle: CLE, terminee: true, echec: false, amorceVisee: 3000, bougies: 2988 });
     publierExtension(null);
     publierExtension(null);
     expect(abonne).toHaveBeenCalledTimes(2);
+    // Seul l'échec change (même tampon) : c'est un autre état, la liste et le message changent.
+    publierExtension({ cle: CLE, terminee: true, echec: false, amorceVisee: 3000, bougies: 500 });
+    publierExtension({ cle: CLE, terminee: true, echec: true, amorceVisee: 3000, bougies: 500 });
+    expect(abonne).toHaveBeenCalledTimes(4);
     desabonner();
   });
 });

@@ -29,7 +29,7 @@ import {
   texteAmorceCourte,
   texteEvaluation,
 } from "./alertsPanel.util";
-import { cleMarcheGraphe, type ExtensionGraphe } from "../alerts/amorceGraphe";
+import { cleMarcheGraphe, RELANCE_EXTENSION_MS, type ExtensionGraphe } from "../alerts/amorceGraphe";
 
 /** Def minimale pour les tests de cible de navigation. */
 function def(id: string, symbol: string, source: AlertDef["source"]): AlertDef {
@@ -328,7 +328,7 @@ describe("evaluationAlerte et texteEvaluation", () => {
   // insuffisant »).
   const graphe = { exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "4h" as const, bougies: 1500, extension: null };
   const CLE = cleMarcheGraphe(graphe);
-  const extension = (terminee: boolean, amorceVisee: number, bougies: number, cle = CLE): ExtensionGraphe => ({ cle, terminee, amorceVisee, bougies });
+  const extension = (terminee: boolean, amorceVisee: number, bougies: number, cle = CLE, echec = false): ExtensionGraphe => ({ cle, terminee, echec, amorceVisee, bougies });
   const base = { source: "binance" as const, symbol: "BTCUSDT", timeframe: "4h" as const };
   const axis: Condition = { type: "indicateur-seuil", indicateurId: "stratAxis", params: {}, output: "etat", comparateur: ">=", valeur: 1 };
   const axisSr: Condition = { type: "indicateur-seuil", indicateurId: "stratAxisSr", params: {}, output: "reactionSupport", comparateur: ">=", valeur: 1 };
@@ -374,12 +374,27 @@ describe("evaluationAlerte et texteEvaluation", () => {
   it("remontée finie sur une place à sec : « amorce courte : N sur A », évaluée ; son état d'armement reste à sa place", () => {
     const aSec = { ...graphe, bougies: 2989, extension: extension(true, 3000, 2988) };
     const evaluation = evaluationAlerte({ ...base, condition: axisSr }, aSec, false);
-    expect(evaluation).toEqual({ etat: "amorce-courte", bougies: 2989, amorce: 3000 });
+    expect(evaluation).toEqual({ etat: "amorce-courte", bougies: 2989, amorce: 3000, echec: false });
     expect(texteEvaluation(evaluation)).toBeNull();
     expect(texteAmorceCourte(evaluation)).toBe("amorce courte : 2989 sur 3000");
     // AXIS sur une place de 1 200 bougies : même règle.
     expect(texteAmorceCourte(evaluationAlerte({ ...base, condition: axis }, { ...graphe, bougies: 1200, extension: extension(true, 1500, 1200) }, false)))
       .toBe("amorce courte : 1200 sur 1500");
+  });
+
+  // Revue du lot A2 : une remontée finie sur un échec réseau n'est plus dite comme une place à sec.
+  // La def est évaluée sur le tampon obtenu (la profondeur reste dite), la cause est écrite, et le
+  // graphe retente la remontée (`RELANCE_EXTENSION_MS`).
+  it("remontée finie sur un échec réseau : « amorce courte : N sur A, chargement échoué : nouvel essai sous 1 min »", () => {
+    const echouee = { ...graphe, bougies: 500, extension: extension(true, 3000, 500, CLE, true) };
+    const evaluation = evaluationAlerte({ ...base, condition: axisSr }, echouee, false);
+    expect(evaluation).toEqual({ etat: "amorce-courte", bougies: 500, amorce: 3000, echec: true });
+    expect(texteEvaluation(evaluation)).toBeNull();
+    expect(texteAmorceCourte(evaluation)).toBe("amorce courte : 500 sur 3000, chargement échoué : nouvel essai sous 1 min");
+    expect(RELANCE_EXTENSION_MS).toBe(60_000);
+    // Pendant le nouvel essai, la remontée est de nouveau « en chargement ».
+    expect(texteEvaluation(evaluationAlerte({ ...base, condition: axisSr }, { ...echouee, extension: extension(false, 3000, 500) }, false)))
+      .toBe("historique en chargement : 500 sur 3000");
   });
 
   it("extension terminée qui visait moins que l'amorce (alerte posée pendant une remontée plus courte), ou d'un autre marché : pas d'amorce courte", () => {
@@ -410,7 +425,7 @@ describe("evaluationAlerte et texteEvaluation", () => {
     expect(evaluationAlerte({ ...base, condition: deux }, { ...graphe, bougies: 1200, extension: extension(false, 3000, 500) }, false))
       .toEqual({ etat: "historique", bougies: 1200, amorce: 3000, chargement: true });
     expect(evaluationAlerte({ ...base, condition: deux }, { ...graphe, bougies: 1200, extension: extension(true, 3000, 1200) }, false))
-      .toEqual({ etat: "amorce-courte", bougies: 1200, amorce: 3000 });
+      .toEqual({ etat: "amorce-courte", bougies: 1200, amorce: 3000, echec: false });
     for (const condition of [
       { type: "prix-croise", niveau: 1, sens: "hausse" },
       { type: "funding-extreme", sens: "les-deux", zSeuil: 2 },
@@ -486,7 +501,7 @@ describe("noteAlerteSeuil", () => {
       "Évaluée à chaque clôture 4h, application ouverte sur BTCUSDT 4h.",
       "Libellé : AXIS S/R non mesuré · réaction sur support fort",
       "Signal précoce non mesuré — lecture indicative, jamais une promesse. Sonne aux bougies de réaction ; un signal confirmé sur la même bougie n'a pas de triangle creux.",
-      "Le graphe charge 3000 bougies pour elle ; si la place en a moins, elle est évaluée sur celles-là, avec la mention « amorce courte ».",
+      "Le graphe charge 3000 bougies pour elle ; s'il en obtient moins (place plus courte, chargement échoué), elle est évaluée sur celles-là, avec la mention «\u00a0amorce courte\u00a0».",
       "Réglages par défaut de l'indicateur, absent du graphe.",
       "Rien ne sonne application fermée ou téléphone verrouillé.",
     ]);
@@ -497,7 +512,7 @@ describe("noteAlerteSeuil", () => {
       "Évaluée à chaque clôture 4h, application ouverte sur BTCUSDT 4h.",
       "Libellé : AXIS S/R non mesuré · pré-signal d'achat (niveau sur le graphe)",
       "Signal précoce non mesuré — lecture indicative, jamais une promesse.",
-      "Le graphe charge 3000 bougies pour elle ; si la place en a moins, elle est évaluée sur celles-là, avec la mention « amorce courte ».",
+      "Le graphe charge 3000 bougies pour elle ; s'il en obtient moins (place plus courte, chargement échoué), elle est évaluée sur celles-là, avec la mention «\u00a0amorce courte\u00a0».",
       "Réglages par défaut de l'indicateur, absent du graphe.",
       "Rien ne sonne application fermée ou téléphone verrouillé.",
     ]);
@@ -507,7 +522,7 @@ describe("noteAlerteSeuil", () => {
     expect(note("stratAxis", "achat")).toEqual([
       "Évaluée à chaque clôture 4h, application ouverte sur BTCUSDT 4h.",
       "Libellé : AXIS test 4h ≈ EMA 200 seule · signal d'achat",
-      "Le graphe charge 1500 bougies pour elle ; si la place en a moins, elle est évaluée sur celles-là, avec la mention « amorce courte ».",
+      "Le graphe charge 1500 bougies pour elle ; s'il en obtient moins (place plus courte, chargement échoué), elle est évaluée sur celles-là, avec la mention «\u00a0amorce courte\u00a0».",
       "Réglages par défaut de l'indicateur, absent du graphe.",
       "Rien ne sonne application fermée ou téléphone verrouillé.",
     ]);
@@ -518,7 +533,7 @@ describe("noteAlerteSeuil", () => {
       "Évaluée à chaque clôture 4h, application ouverte sur BTCUSDT 4h.",
       "Libellé : AXIS S/R non mesuré · Score (−6 à +6) > 5",
       "Sortie non mesurée — lecture indicative, jamais une promesse.",
-      "Le graphe charge 3000 bougies pour elle ; si la place en a moins, elle est évaluée sur celles-là, avec la mention « amorce courte ».",
+      "Le graphe charge 3000 bougies pour elle ; s'il en obtient moins (place plus courte, chargement échoué), elle est évaluée sur celles-là, avec la mention «\u00a0amorce courte\u00a0».",
       "Réglages par défaut de l'indicateur, absent du graphe.",
       "Rien ne sonne application fermée ou téléphone verrouillé.",
     ]);
@@ -544,7 +559,7 @@ describe("noteAlerteSeuil", () => {
   it("historique : le graphe le charge pour l'alerte, affichée ou non ; l'amorce courte est annoncée", () => {
     for (const [id, cle, amorce] of [["stratAxis", "achat", 1500], ["stratAxisSr", "reactionSupport", 3000]] as const) {
       const lignes = note(id, cle);
-      expect(lignes).toContain(`Le graphe charge ${amorce} bougies pour elle ; si la place en a moins, elle est évaluée sur celles-là, avec la mention « amorce courte ».`);
+      expect(lignes).toContain(`Le graphe charge ${amorce} bougies pour elle ; s'il en obtient moins (place plus courte, chargement échoué), elle est évaluée sur celles-là, avec la mention «\u00a0amorce courte\u00a0».`);
       expect(lignes.join(" ")).not.toContain("affichez");
     }
   });

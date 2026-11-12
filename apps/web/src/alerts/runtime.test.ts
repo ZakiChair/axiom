@@ -2139,8 +2139,8 @@ describe("lot A2 : historique chargé pour l'alerte, amorce courte dite (12 nove
   });
   let horloge = 0;
   /** État publié par la vue principale (`chart/ChartInstance.tsx`). */
-  const publier = (terminee: boolean, amorceVisee: number, bougies: number, cle = CLE): void =>
-    publierExtension({ cle, terminee, amorceVisee, bougies });
+  const publier = (terminee: boolean, amorceVisee: number, bougies: number, cle = CLE, echec = false): void =>
+    publierExtension({ cle, terminee, echec, amorceVisee, bougies });
   /** La place sert les bougies 0 à 2 987, closes ; l'horloge est dans la bougie 2 988, une demi-heure après son ouverture. */
   function ouvrir(symbol = "BTCUSDT"): void {
     horloge = F[SERVIES]!.time + 30 * 60_000;
@@ -2250,6 +2250,64 @@ describe("lot A2 : historique chargé pour l'alerte, amorce courte dite (12 nove
     expect(lotsEvalues).toEqual([["sr"]]);
     publier(true, 3000, SERVIES, "binance|ETHUSDT|4h");
     expect(lotsEvalues).toEqual([["sr"], ["sr-eth"]]);
+  });
+
+  // Revue du lot A2 : un échec réseau pendant la remontée était dit comme une place à sec.
+  it("remontée finie sur un échec réseau : évaluée sur le tampon obtenu, le message dit « chargement échoué » ; la relance réussie ne fait pas tirer une seconde fois", () => {
+    const score: AlertDef["condition"] = { type: "indicateur-seuil", indicateurId: "stratAxisSr", params: {}, output: "score", comparateur: ">", valeur: -100 };
+    const libelle = "AXIS S/R non mesuré · Score (−6 à +6) > -100";
+    alertsStore.setState({ defs: [def4h("a", score, { arme: true })], journal: [] });
+    horloge = F[SERVIES]!.time + 30 * 60_000;
+    marketStore.setState({ exchange: "binance", symbol: "BTCUSDT", timeframe: "4h", candles: F.slice(SERVIES - 500, SERVIES) });
+    stop = demarrerAlertes();
+    publier(false, 3000, 500);
+    expect(lotsEvalues).toEqual([]);
+    publier(true, 3000, 500, CLE, true);
+    expect(lotsEvalues).toEqual([["a"]]);
+    expect(messagesJournal()).toEqual([`${libelle} · amorce courte (500 bougies, chargement échoué)`]);
+    expect(textesAvis()).toEqual([`BTCUSDT 4h — ${libelle} · amorce courte (500 bougies, chargement échoué)`]);
+    // Nouvel essai une minute plus tard, réussi, sous la même clôture : déjà évaluée pour elle, rien de plus.
+    publier(false, 3000, 500);
+    marketStore.setState({ candles: F.slice(0, SERVIES) });
+    publier(true, 3000, SERVIES);
+    expect(lotsEvalues).toEqual([["a"]]);
+    expect(textesAvis()).toHaveLength(1);
+  });
+
+  // Revue du lot A2 : la vue principale publie `null` au début de chaque cycle de données
+  // (`demarrerCycleDonnees`, épinglé dans `chart/extensionSession.test.ts`). Ces deux tests disent
+  // pourquoi : à marché égal (rejeu arrêté, nouvel essai, révision des données), l'état « terminée »
+  // du cycle précédent vaudrait encore pour le backfill de 500 bougies du nouveau.
+  const nouveauCycle = (): void => {
+    alertsStore.setState({ defs: [def4h("sr", REACTION_SR)], journal: [] });
+    ouvrir();
+    stop = demarrerAlertes();
+    publier(true, 3000, SERVIES);
+    expect(lotsEvalues).toEqual([["sr"]]);
+    // Rejeu arrêté plus tard, pendant la bougie 2 989 : le buffer repart de zéro, puis le backfill
+    // pose les 500 dernières bougies, la 2 988 désormais close.
+    horloge = F[SERVIES + 1]!.time + 30 * 60_000;
+    marketStore.setState({ candles: [] });
+  };
+
+  it("témoin : nouveau cycle du même marché SANS remise à `null` — l'état périmé fait évaluer sur 500 bougies", () => {
+    nouveauCycle();
+    marketStore.setState({ candles: F.slice(SERVIES - 499, SERVIES + 1) });
+    expect(lotsEvalues).toEqual([["sr"], ["sr"]]);
+    expect(messagesJournal()).toEqual([`${LIBELLE} · amorce courte (500 bougies)`]);
+  });
+
+  it("nouveau cycle du même marché avec remise à `null` : rien sur le backfill de 500 bougies, une évaluation à la fin de la nouvelle remontée", () => {
+    nouveauCycle();
+    publierExtension(null);
+    marketStore.setState({ candles: F.slice(SERVIES - 499, SERVIES + 1) });
+    expect(lotsEvalues).toEqual([["sr"]]);
+    publier(false, 3000, 500);
+    marketStore.setState({ candles: F.slice(0, SERVIES + 1) });
+    expect(lotsEvalues).toEqual([["sr"]]);
+    publier(true, 3000, SERVIES + 1);
+    expect(lotsEvalues).toEqual([["sr"], ["sr"]]);
+    expect(messagesJournal()).toEqual([`${LIBELLE} · amorce courte (2989 bougies)`]);
   });
 
   it("alerte supprimée pendant la remontée : ni évaluation ni avis à sa fin", () => {

@@ -13,9 +13,10 @@
  * tampon compte A bougies (règle du lot A1, même décompte que `doitEtendreHistorique` du graphe) ;
  * sinon, si l'extension de ce marché est TERMINÉE et visait au moins A, la place n'a pas plus
  * d'historique (ex. 2 988 bougies servies) : la def est évaluée sur ce qu'il y a, et le message de
- * son déclenchement le dit (« · amorce courte (N bougies) »). Pendant l'extension, ou quand elle
- * visait moins que A (une alerte créée pendant une extension plus courte : correction 2 de la
- * critique), rien n'est évalué.
+ * son déclenchement le dit (« · amorce courte (N bougies) »). Une remontée finie sur un échec
+ * réseau est dite comme telle (« · amorce courte (N bougies, chargement échoué) ») et retentée.
+ * Pendant l'extension, ou quand elle visait moins que A (une alerte créée pendant une extension
+ * plus courte : correction 2 de la critique), rien n'est évalué.
  *
  * Sur le chemin de chargement initial (importé par `chart/ChartInstance.tsx`) : le strict
  * nécessaire au graphe, aucun import du runtime des alertes, aucun `?.`.
@@ -79,11 +80,24 @@ export interface ExtensionGraphe {
    * rien à charger, amorce atteinte, place à sec (page vide), plafond de pages, échec réseau.
    */
   terminee: boolean;
+  /**
+   * Vrai quand une page a échoué (réseau, place en erreur) : le tampon obtenu est publié tel quel,
+   * la def est évaluée sur lui en le disant (« chargement échoué », jamais « la place n'en a pas
+   * plus »), et le graphe retente la remontée (`RELANCE_EXTENSION_MS`, `chart/ChartInstance.tsx`).
+   */
+  echec: boolean;
   /** Amorce que la passe visait (plus grande amorce des indicateurs étendus ; 0 sans amorce). */
   amorceVisee: number;
   /** Bougies du tampon, bougie en formation comprise : au départ pendant la remontée, obtenues une fois terminée. */
   bougies: number;
 }
+
+/**
+ * Délai avant que le graphe retente une remontée d'historique échouée (revue du lot A2) : sans
+ * relance, une panne passagère au démarrage laissait l'alerte évaluée sur 500 bougies toute la
+ * session. La liste l'écrit (« nouvel essai sous 1 min », `texteAmorceCourte`).
+ */
+export const RELANCE_EXTENSION_MS = 60_000;
 
 /** État publié par la vue principale (`chart/ChartInstance.tsx`) ; `null` tant que rien n'est connu pour son marché. */
 export const extensionGrapheStore = createStore<{ extension: ExtensionGraphe | null }>(() => ({ extension: null }));
@@ -94,7 +108,7 @@ export function publierExtension(extension: ExtensionGraphe | null): void {
   if (
     avant === extension ||
     (avant !== null && extension !== null && avant.cle === extension.cle && avant.terminee === extension.terminee &&
-      avant.amorceVisee === extension.amorceVisee && avant.bougies === extension.bougies)
+      avant.echec === extension.echec && avant.amorceVisee === extension.amorceVisee && avant.bougies === extension.bougies)
   ) return;
   extensionGrapheStore.setState({ extension });
 }

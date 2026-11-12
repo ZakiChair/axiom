@@ -31,7 +31,6 @@ import { uiSectionsStore } from "../store/ui-sections";
 import {
   bordZone,
   DUREE_ALERTE_ZONE_MS,
-  MAX_MESSAGE_ZONE,
   offreAuClic,
   offreBordZone,
   offreSousReticule,
@@ -183,7 +182,7 @@ describe("offreBordZone — états et textes", () => {
       symbol: "BTCUSDT",
       source: "binance",
       condition: { type: "prix-croise", niveau: 76601.83, sens: "baisse" },
-      message: "≤ 76,601.83 · bord du support fort AXIS S/R 4h du 31/10 · niveau fixe, zone mobile",
+      message: "≤ 76,601.83 · bord du support fort AXIS S/R 4h du 31/10 · niveau fixe",
       expireTs: MAINTENANT + 604_800_000,
     });
     expect(DUREE_ALERTE_ZONE_MS).toBe(604_800_000);
@@ -197,7 +196,7 @@ describe("offreBordZone — états et textes", () => {
     expect(offre.libelle).toBe("Alerte de prix ↑ 85,314.76 · bord de la résistance forte · niveau fixe, 7 jours");
     expect(offre.avis).toBe("Alerte de prix posée : BTCUSDT ↑ 85,314.76 · niveau fixe · expire dans 7 jours");
     expect(offre.alerte?.condition).toEqual({ type: "prix-croise", niveau: 85314.76, sens: "hausse" });
-    expect(offre.alerte?.message).toBe("≥ 85,314.76 · bord de la résistance forte AXIS S/R 4h du 31/10 · niveau fixe, zone mobile");
+    expect(offre.alerte?.message).toBe("≥ 85,314.76 · bord de la résistance forte AXIS S/R 4h du 31/10 · niveau fixe");
   });
 
   // Constat de la revue du lot : écrit par `formatPrice` (2 décimales au-dessus de 1, 4 en
@@ -215,7 +214,7 @@ describe("offreBordZone — états et textes", () => {
       expect(offre.alerte?.condition).toEqual({ type: "prix-croise", niveau: 2.3457, sens: "baisse" });
       expect(offre.libelle).toBe("Alerte de prix ↓ 2.3457 · bord du support fort · niveau fixe, 7 jours");
       expect(offre.avis).toBe("Alerte de prix posée : XRPUSDT ↓ 2.3457 · niveau fixe · expire dans 7 jours");
-      expect(offre.alerte?.message).toBe("≤ 2.3457 · bord du support fort AXIS S/R 4h du 31/10 · niveau fixe, zone mobile");
+      expect(offre.alerte?.message).toBe("≤ 2.3457 · bord du support fort AXIS S/R 4h du 31/10 · niveau fixe");
     });
 
     it("0.123456 : alerte à 0.12346, écrite « 0.12346 » — offerte, déjà posée, franchie, et en résistance", () => {
@@ -224,13 +223,13 @@ describe("offreBordZone — états et textes", () => {
       expect(offre.alerte?.condition).toEqual({ type: "prix-croise", niveau: 0.12346, sens: "baisse" });
       expect(offre.libelle).toBe("Alerte de prix ↓ 0.12346 · bord du support fort · niveau fixe, 7 jours");
       expect(offre.avis).toBe("Alerte de prix posée : XRPUSDT ↓ 0.12346 · niveau fixe · expire dans 7 jours");
-      expect(offre.alerte?.message).toBe("≤ 0.12346 · bord du support fort AXIS S/R 4h du 31/10 · niveau fixe, zone mobile");
+      expect(offre.alerte?.message).toBe("≤ 0.12346 · bord du support fort AXIS S/R 4h du 31/10 · niveau fixe");
       const posee = defPrix({ symbol: "XRPUSDT", condition: { type: "prix-croise", niveau: 0.12346, sens: "baisse" } });
       expect(offreBordZone(support, XRP_4H, 0.13, [posee], MAINTENANT).libelle).toBe("Alerte déjà posée ↓ 0.12346 · bord du support fort");
       expect(offreBordZone(support, XRP_4H, 0.12346, [], MAINTENANT).libelle).toBe("Pas d'alerte : le cours a déjà franchi le bord du support fort (0.12346)");
       const resistance = offreAu(0.123456, "resistance");
       expect(resistance.libelle).toBe("Alerte de prix ↑ 0.12346 · bord de la résistance forte · niveau fixe, 7 jours");
-      expect(resistance.alerte?.message).toBe("≥ 0.12346 · bord de la résistance forte AXIS S/R 4h du 31/10 · niveau fixe, zone mobile");
+      expect(resistance.alerte?.message).toBe("≥ 0.12346 · bord de la résistance forte AXIS S/R 4h du 31/10 · niveau fixe");
     });
 
     it.each([
@@ -248,8 +247,7 @@ describe("offreBordZone — états et textes", () => {
       const offre = offreAu(bord);
       expect(offre.alerte?.condition).toMatchObject({ niveau });
       expect(offre.libelle).toBe(`Alerte de prix ↓ ${ecrit} · bord du support fort · niveau fixe, 7 jours`);
-      expect(offre.alerte?.message).toMatch(new RegExp(`^≤ ${ecrit.replace(/\./g, "\\.")} · bord du support fort AXIS S/R 4h du 31/10 · niveau fixe`));
-      expect(offre.alerte!.message!.length).toBeLessThanOrEqual(MAX_MESSAGE_ZONE);
+      expect(offre.alerte?.message).toBe(`≤ ${ecrit} · bord du support fort AXIS S/R 4h du 31/10 · niveau fixe`);
       expect(Number(ecrit.replace(/,/g, ""))).toBe(niveau);
     });
 
@@ -275,36 +273,40 @@ describe("offreBordZone — états et textes", () => {
 
   it("unité inconnue : omise ; la date est celle de la pose, en heure locale", () => {
     const sansUnite = offreBordZone(SUPPORT, { symbol: "BTCUSDT", source: "binance" }, COURS, [], MAINTENANT);
-    expect(sansUnite.alerte?.message).toBe("≤ 76,601.83 · bord du support fort AXIS S/R du 31/10 · niveau fixe, zone mobile");
+    expect(sansUnite.alerte?.message).toBe("≤ 76,601.83 · bord du support fort AXIS S/R du 31/10 · niveau fixe");
     const premierJanvier = offreBordZone(SUPPORT, BTC_4H, COURS, [], new Date(2027, 0, 1, 12).getTime());
-    expect(premierJanvier.alerte?.message).toBe("≤ 76,601.83 · bord du support fort AXIS S/R 4h du 01/01 · niveau fixe, zone mobile");
+    expect(premierJanvier.alerte?.message).toBe("≤ 76,601.83 · bord du support fort AXIS S/R 4h du 01/01 · niveau fixe");
   });
 
-  it(`message de ${MAX_MESSAGE_ZONE} caractères au plus : les 8 zones du cas de référence, sur chaque unité`, () => {
-    const unites: Timeframe[] = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "3d", "1w", "1M"];
+  // Arbitrage de l'orchestrateur (12 novembre 2026) : le message finit par « · niveau fixe », sans
+  // « zone mobile ». La règle qui retirait cette mention au-delà de 90 caractères n'a plus d'objet :
+  // le message le plus long du cas de référence en fait 78, et tout niveau sous dix millions tient
+  // en 80. Longueurs épinglées : un texte qui s'allonge se voit ici.
+  it("le message finit par « · niveau fixe » : 69 caractères pour le support de référence, 78 au plus sur les 8 zones et toutes les unités", () => {
+    const unites: Timeframe[] = ["1s", "5s", "15s", "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "3d", "1w", "1M", "3M", "6M", "12M"];
     const longueurs: number[] = [];
     for (const z of zonesFortesTracees(annotationsBtc)) {
       for (const timeframe of unites) {
         const message = offreBordZone(z, { ...BTC_4H, timeframe }, COURS, [], MAINTENANT).alerte!.message!;
         longueurs.push(message.length);
-        expect(message).toMatch(/ · niveau fixe(, zone mobile)?$/);
+        expect(message).toMatch(/ AXIS S\/R \S{2,3} du 31\/10 · niveau fixe$/);
+        expect(message).not.toContain("zone mobile");
       }
     }
-    expect(Math.max(...longueurs)).toBeLessThanOrEqual(MAX_MESSAGE_ZONE);
-    expect(MAX_MESSAGE_ZONE).toBe(90);
-    // En 4h, l'unité du cas de référence, les 8 messages portent la mention entière.
-    for (const z of zonesFortesTracees(annotationsBtc)) {
-      expect(offreBordZone(z, BTC_4H, COURS, [], MAINTENANT).alerte!.message).toMatch(/ · niveau fixe, zone mobile$/);
-    }
+    expect(Math.max(...longueurs)).toBe(78);
+    expect(offreBordZone(SUPPORT, BTC_4H, COURS, [], MAINTENANT).alerte!.message).toHaveLength(69);
+    expect(offreBordZone(RESISTANCE, BTC_4H, COURS, [], MAINTENANT).alerte!.message).toHaveLength(76);
   });
 
-  it("au-delà de 90 caractères (unité à trois caractères, prix à six chiffres, résistance) : « zone mobile » est retiré, « niveau fixe » reste", () => {
+  it("le plus long : résistance, unité à trois caractères — 78 caractères à 106,340.68, 80 à 9,999,999.99 ; rien n'est retiré", () => {
     const haute = zone("resistance", 106340.68, 108000);
-    const entier = offreBordZone(haute, BTC_4H, COURS, [], MAINTENANT).alerte!.message!;
-    expect(entier).toBe("≥ 106,340.68 · bord de la résistance forte AXIS S/R 4h du 31/10 · niveau fixe, zone mobile");
-    expect(entier).toHaveLength(90);
-    const court = offreBordZone(haute, { ...BTC_4H, timeframe: "15m" }, COURS, [], MAINTENANT).alerte!.message!;
-    expect(court).toBe("≥ 106,340.68 · bord de la résistance forte AXIS S/R 15m du 31/10 · niveau fixe");
+    const message = offreBordZone(haute, { ...BTC_4H, timeframe: "15m" }, COURS, [], MAINTENANT).alerte!.message!;
+    expect(message).toBe("≥ 106,340.68 · bord de la résistance forte AXIS S/R 15m du 31/10 · niveau fixe");
+    expect(message).toHaveLength(78);
+    const tresHaute = zone("resistance", 9999999.99, 10_100_000);
+    const plusLong = offreBordZone(tresHaute, { ...BTC_4H, timeframe: "12h" }, 9_000_000, [], MAINTENANT).alerte!.message!;
+    expect(plusLong).toBe("≥ 9,999,999.99 · bord de la résistance forte AXIS S/R 12h du 31/10 · niveau fixe");
+    expect(plusLong).toHaveLength(80);
   });
 
   it("franchi : cours égal au bord, dans la zone ou au-delà — aucune alerte, le texte dit pourquoi", () => {
@@ -472,7 +474,7 @@ describe("poserAlerteZone et offres prêtes pour l'encart et le menu", () => {
       source: "binance",
       actif: true,
       condition: { type: "prix-croise", niveau: 76601.83, sens: "baisse" },
-      message: "≤ 76,601.83 · bord du support fort AXIS S/R 4h du 31/10 · niveau fixe, zone mobile",
+      message: "≤ 76,601.83 · bord du support fort AXIS S/R 4h du 31/10 · niveau fixe",
       expireTs: AUJOURDHUI.getTime() + 7 * 24 * 3_600_000,
       declenchements: [],
     });

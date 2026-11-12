@@ -43,8 +43,6 @@ import { uniteDemandee } from "./uniteParam";
 const CANDLE_PANE_ID = "candle_pane";
 /** Échéance d'une alerte de zone : une des durées du panneau, prolongeable par son « +24 h ». */
 export const DUREE_ALERTE_ZONE_MS = 7 * 24 * 3_600_000;
-/** Longueur maximale du message de l'alerte : lu en entier dans l'avis et la liste à 320 px. */
-export const MAX_MESSAGE_ZONE = 90;
 
 /** Zone forte active telle que le graphe la trace : rôle, et bornes par bougie depuis `deIdx`. */
 export interface ZoneForteTracee {
@@ -123,8 +121,9 @@ export interface OffreBordZone {
  *  - « offre » : alerte `prix-croise` au bord, qui expire 7 jours après `maintenant`.
  * Le message suit la convention de `@axiom/alerts` (ni symbole ni unité de l'ALERTE : l'hôte les
  * ajoute) ; l'unité qu'il cite est celle de l'instance d'AXIS S/R, donc du graphe. Comparateur et
- * niveau d'abord, pour rester lus là où un texte est coupé. `MAX_MESSAGE_ZONE` caractères au
- * plus : au-delà (unité à trois caractères ET prix à six chiffres), « zone mobile » est retiré.
+ * niveau d'abord, pour rester lus là où un texte est coupé ; il finit par « · niveau fixe ». Sa
+ * longueur est de 68 caractères plus celle du niveau écrit, au plus : 78 sur le cas de référence
+ * (résistance à 106,340.68, unité à trois caractères), 80 pour tout niveau sous dix millions.
  */
 export function offreBordZone(
   zone: ZoneForteTracee,
@@ -152,14 +151,13 @@ export function offreBordZone(
   if (dernierPrix !== undefined && (support ? dernierPrix <= niveau : dernierPrix >= niveau)) {
     return { etat: "franchi", avis, libelle: `Pas d'alerte : le cours a déjà franchi le ${bord} (${n})` };
   }
-  const tete = `${support ? "≤" : "≥"} ${n} · ${bord} AXIS S/R${marche.timeframe ? ` ${marche.timeframe}` : ""} du ${formatDateCourte(maintenant)} · niveau fixe`;
-  const message = `${tete}, zone mobile`;
+  const message = `${support ? "≤" : "≥"} ${n} · ${bord} AXIS S/R${marche.timeframe ? ` ${marche.timeframe}` : ""} du ${formatDateCourte(maintenant)} · niveau fixe`;
   return {
     etat: "offre",
     avis,
     libelle: `Alerte de prix ${cible} · ${bord} · niveau fixe, 7 jours`,
     alerte: {
-      ...alertePrixAuNiveau(symbole, marche.source, niveau, sens, message.length <= MAX_MESSAGE_ZONE ? message : tete),
+      ...alertePrixAuNiveau(symbole, marche.source, niveau, sens, message),
       expireTs: maintenant + DUREE_ALERTE_ZONE_MS,
     },
   };

@@ -68,7 +68,7 @@ const SEPT_JOURS = 7 * 24 * 3_600_000;
 /** « JJ/MM » de l'instant figé, en heure locale, comme le produit l'écrit (`formatDateCourte`). */
 const DATE_POSE = new Date(HORLOGE_AXIS_SR).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
 /** Message de l'alerte : ce que la liste, l'avis, le journal et les relais du daemon écrivent. */
-const MESSAGE = `≤ 76,601.83 · bord du support fort AXIS S/R 4h du ${DATE_POSE} · niveau fixe, zone mobile`;
+const MESSAGE = `≤ 76,601.83 · bord du support fort AXIS S/R 4h du ${DATE_POSE} · niveau fixe`;
 const AVIS_POSE = "Alerte de prix posée : BTCUSDT ↓ 76,601.83 · niveau fixe · expire dans 7 jours · sonne application ouverte seulement";
 
 // Les attentes les plus longues : 30 s pour l'affichage, 60 s pour la remontée aux 3 000 bougies.
@@ -365,7 +365,8 @@ test("390 px : le doigt sur le support fort offre l'alerte de prix à son bord �
   const support = supportProche(zones);
   // Le bord proposé est relu sur les rubans du vrai graphe : le haut du support fort le plus proche.
   expect(support.haut).toBeCloseTo(BORD, 2);
-  expect(MESSAGE.length).toBeLessThanOrEqual(90);
+  // Message finissant par « · niveau fixe » (arbitrage du 12 novembre 2026) : 69 caractères.
+  expect(MESSAGE).toHaveLength(69);
 
   // Sans toucher : pas d'encart, pas de bouton.
   await expect(bouton(page)).toHaveCount(0);

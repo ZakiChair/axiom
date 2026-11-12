@@ -162,7 +162,7 @@ describe("menu du clic droit — alerte de prix au bord d'une zone forte", () =>
       symbol: "BTCUSDT",
       source: "binance",
       condition: { type: "prix-croise", niveau: 76601.83, sens: "baisse" },
-      message: "≤ 76,601.83 · bord du support fort AXIS S/R 4h du 31/10 · niveau fixe, zone mobile",
+      message: "≤ 76,601.83 · bord du support fort AXIS S/R 4h du 31/10 · niveau fixe",
       expireTs: AUJOURDHUI.getTime() + 7 * 24 * 3_600_000,
     });
     expect(toastsStore.getState().toasts.map((t) => [t.texte, t.action?.libelle])).toEqual([

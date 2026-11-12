@@ -288,7 +288,7 @@ test("AXIS S/R au bureau : le clic droit dans une bande forte propose l'alerte d
     symbol: "BTCUSDT",
     source: "binance",
     condition: { type: "prix-croise", niveau: 76601.83, sens: "baisse" },
-    message: `≤ 76,601.83 · bord du support fort AXIS S/R 4h du ${date} · niveau fixe, zone mobile`,
+    message: `≤ 76,601.83 · bord du support fort AXIS S/R 4h du ${date} · niveau fixe`,
     expireTs: HORLOGE_AXIS_SR + 7 * 24 * 3_600_000,
   }]);
   const avisPose = page.locator('[aria-live="polite"] > [role="button"]').filter({ hasText: "Alerte de prix posée : BTCUSDT ↓ 76,601.83 · niveau fixe · expire dans 7 jours" });

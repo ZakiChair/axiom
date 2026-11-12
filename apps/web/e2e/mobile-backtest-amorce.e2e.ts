@@ -74,7 +74,22 @@ async function poserTheme(page: Page, theme: "dark" | "bloomberg"): Promise<void
   await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
 }
 
+/** Phase, erreur et avancement du run, lus dans le store du backtest. */
+async function etatDuRun(page: Page): Promise<{ phase: string; error: string | null; progress: unknown }> {
+  return page.evaluate(async () => {
+    const importer = new Function("return import('/src/store/backtest.ts')") as () => Promise<{ backtestStore: { getState: () => {
+      phase: string; error: string | null; progress: unknown } } }>;
+    const s = (await importer()).backtestStore.getState();
+    return { phase: s.phase, error: s.error, progress: s.progress };
+  });
+}
+
 test("AXIS confluence sur 3 mois : les 4 cycles du graphe, la note de l'amorce lue en entier à 390 et 320 px", async ({ page }, testInfo) => {
+  // Erreurs de la page et des workers, rapportées si le run n'aboutit pas.
+  const erreursPage: string[] = [];
+  page.on("pageerror", (e) => erreursPage.push(`page : ${e.message}`));
+  page.on("console", (m) => { if (m.type() === "error") erreursPage.push(`console : ${m.text()}`); });
+  page.on("worker", (w) => w.on("close", () => erreursPage.push(`worker fermé : ${w.url()}`)));
   await bouchonnerReseau(page);
   await preparerAxisSr(page, [{ defId: "stratAxis", params: {} }]);
   await page.goto("/");
@@ -93,7 +108,13 @@ test("AXIS confluence sur 3 mois : les 4 cycles du graphe, la note de l'amorce l
   await bt.getByRole("button", { name: "AXIS confluence (4h)" }).tap();
   await bt.getByLabel("Plage historique").selectOption("3m");
   await bt.getByRole("button", { name: "Lancer le backtest" }).tap();
-  await expect(bt.getByText("Terminé", { exact: true })).toBeVisible({ timeout: 30_000 });
+  // Le premier run charge le worker du backtest et tout son graphe de modules, servis un à un
+  // par le serveur de développement : plus lent sous WebKit que sous Chromium (le 12 novembre,
+  // « Terminé » n'était pas paru au bout de 30 s sous WebKit en CI). L'attente lit l'état du
+  // store et, si elle échoue, dit la phase atteinte, l'erreur et les erreurs de la page.
+  await expect.poll(async () => ({ ...(await etatDuRun(page)), erreursPage }), { timeout: 90_000, message: "run du backtest" })
+    .toMatchObject({ phase: "done" });
+  await expect(bt.getByText("Terminé", { exact: true })).toBeVisible();
   // Le compte lu à l'écran (sur le code d'avant : « 2 trades »).
   const resume = bt.getByText(/^BTCUSDT · 4h · 3 mois · \d+ trades?$/);
   await expect(resume).toBeVisible();

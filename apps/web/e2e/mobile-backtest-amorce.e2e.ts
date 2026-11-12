@@ -112,8 +112,10 @@ test("AXIS confluence sur 3 mois : les 4 cycles du graphe, la note de l'amorce l
   // par le serveur de développement : plus lent sous WebKit que sous Chromium (le 12 novembre,
   // « Terminé » n'était pas paru au bout de 30 s sous WebKit en CI). L'attente lit l'état du
   // store et, si elle échoue, dit la phase atteinte, l'erreur et les erreurs de la page.
-  await expect.poll(async () => ({ ...(await etatDuRun(page)), erreursPage }), { timeout: 90_000, message: "run du backtest" })
-    .toMatchObject({ phase: "done" });
+  await expect.poll(async () => (await etatDuRun(page)).phase, { timeout: 90_000, message: "run du backtest encore en cours" })
+    .not.toMatch(/^(chargement|calcul)$/);
+  const etatFinal = await etatDuRun(page);
+  expect(etatFinal.phase, `run du backtest : ${JSON.stringify({ ...etatFinal, erreursPage })}`).toBe("done");
   await expect(bt.getByText("Terminé", { exact: true })).toBeVisible();
   // Le compte lu à l'écran (sur le code d'avant : « 2 trades »).
   const resume = bt.getByText(/^BTCUSDT · 4h · 3 mois · \d+ trades?$/);

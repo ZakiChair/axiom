@@ -187,22 +187,33 @@ function offreDuGraphe(chart: Chart, marche: PriceAlertMarket, zone: ZoneForteTr
 }
 
 /**
- * Pose l'alerte au bord de `zone`, si l'offre vaut encore AU MOMENT DU GESTE (prix, alertes, heure
- * relus) : sinon rien n'est créé. Ouvre la section « Alertes » et pousse un avis de 6 s dont
- * « Annuler » supprime l'alerte créée. L'avis dit la portée : sans daemon local qui relaie (il
- * n'évalue que Binance, et l'application déployée ne le voit jamais), l'alerte ne sonne
- * qu'application ouverte. Rend l'offre relue après le geste.
+ * Pose l'alerte au bord de `zone`, si l'offre vaut encore AU MOMENT DU GESTE. Ouvre la section
+ * « Alertes » et pousse un avis de 6 s dont « Annuler » supprime l'alerte créée. L'avis dit la
+ * portée : sans daemon local qui relaie (il n'évalue que Binance, et l'application déployée ne le
+ * voit jamais), l'alerte ne sonne qu'application ouverte. Rend l'offre relue après le geste.
  *
- * La ZONE est celle lue à l'affichage du bouton ou de l'entrée. Au téléphone, l'encart ne garde
- * pas le bouton d'une zone qui n'est plus tracée : il relit l'offre après chaque recalcul des
- * indicateurs, puis au toucher, et n'exécute rien si elle a changé (`CandleReadout.offreChangee` :
- * zones, rôle, bord et état relus). LIMITE, au bureau : l'entrée d'un menu resté ouvert pendant
- * qu'une clôture déplace le bord pose l'alerte au niveau qu'elle écrit, celui de l'ouverture du menu.
+ * GARDE COMMUNE (bureau et téléphone ; arbitrage A2 de l'orchestrateur, 12 novembre 2026). La
+ * `zone` est celle lue à l'affichage du bouton ou de l'entrée du menu ; au geste, tout est relu —
+ * zones tracées, prix, alertes, heure. Rien n'est créé si aucune zone forte de même rôle n'est
+ * plus tracée À CE BORD (AXIS S/R fermé, zone cassée ou affaiblie, bord déplacé par une clôture),
+ * ou si l'état n'est plus « offre » (bord franchi, alerte déjà posée). Un avis court le dit alors,
+ * avec le libellé du nouvel état, « Pas d'alerte : la zone forte n'est plus tracée », ou « Pas
+ * d'alerte : le bord de la zone forte a bougé » quand la même zone (même rôle, même bougie de
+ * confirmation) est tracée à un autre bord. Cas du bureau : un menu resté ouvert pendant que l'état
+ * change. Au téléphone, le bouton relit l'offre au toucher et n'appelle pas ce geste quand elle a
+ * changé (`CandleReadout.offreChangee`) : il se réécrit, sans avis.
  */
-export function poserAlerteZone(chart: Chart, marche: PriceAlertMarket, zone: ZoneForteTracee): OffreBordZone {
-  const offre = offreDuGraphe(chart, marche, zone);
+export function poserAlerteZone(chart: Chart, marche: PriceAlertMarket, zone: ZoneForteTracee): OffreBordZone | undefined {
+  const { niveau } = bordZone(zone);
+  const memeRole = zonesDuGraphe(chart, marche).filter((z) => z.role === zone.role);
+  const tracee = memeRole.find((z) => bordZone(z).niveau === niveau);
+  const offre = tracee && offreDuGraphe(chart, marche, tracee);
+  if (!offre || !offre.alerte) {
+    pousserToast(offre ? offre.libelle : `Pas d'alerte : ${memeRole.some((z) => z.deIdx === zone.deIdx) ? "le bord de la zone forte a bougé" : "la zone forte n'est plus tracée"}`);
+    return offre;
+  }
   const alertes = alertsStore.getState();
-  if (offre.alerte === undefined || !alertes.ajouter(offre.alerte)) return offre;
+  if (!alertes.ajouter(offre.alerte)) return offre;
   // `ajouter` ne rend pas l'identifiant : c'est celui de la seule def absente avant l'appel.
   const { id } = alertsStore.getState().defs.find((d) => !alertes.defs.includes(d))!;
   uiSectionsStore.getState().setOpen(SECTION_ALERTES, true);
@@ -211,7 +222,7 @@ export function poserAlerteZone(chart: Chart, marche: PriceAlertMarket, zone: Zo
     libelle: "Annuler",
     executer: () => alertsStore.getState().supprimer(id),
   });
-  return offreDuGraphe(chart, marche, zone);
+  return offreDuGraphe(chart, marche, tracee);
 }
 
 /**

@@ -64,12 +64,16 @@ const yDe = (prix: number): number => (100_000 - prix) / 10;
 const rubanFort = (couleur: "--up" | "--down", bas: number, haut: number): RubanAnnotation => ({ deIdx: 0, hauts: [haut, haut], bas: [bas, bas], couleur, alpha: 0.12, info: "zone" });
 const ZONES: AnnotationsIndicateur = { rubans: [rubanFort("--up", 75626.55, 76601.83), rubanFort("--down", 85314.76, 86430.38)] };
 
+/** Ce que le faux graphe trace et son dernier prix : relus à chaque appel, un test peut les changer menu ouvert. */
+const trace = { zones: ZONES, cloture: 77582.02 };
+
 function fauxGraphe(cloture: number): Chart {
+  trace.cloture = cloture;
   return {
     getSize: () => ({ top: 0, left: 0, width: 800, height: 5000 }),
     getIndicatorByPaneId: (paneId: string, name: string) =>
-      paneId === "candle_pane" && name === axiomName("sr-1") ? { extendData: { series: {}, annotations: ZONES } } : null,
-    getDataList: () => [{ close: 1 }, { close: cloture }],
+      paneId === "candle_pane" && name === axiomName("sr-1") ? { extendData: { series: {}, annotations: trace.zones } } : null,
+    getDataList: () => [{ close: 1 }, { close: trace.cloture }],
     convertToPixel: ({ value }: { value: number }) => ({ y: yDe(value) }),
     convertFromPixel: ([point]: Array<{ x: number; y: number }>) => [{ dataIndex: 1, value: 100_000 - point!.y * 10 }],
   } as unknown as Chart;
@@ -114,6 +118,7 @@ describe("menu du clic droit — alerte de prix au bord d'une zone forte", () =>
     alertsStore.setState({ defs: [], journal: [] });
     toastsStore.setState({ toasts: [] });
     indicatorsStore.setState({ indicators: [{ instanceId: "sr-1", defId: "stratAxisSr", params: {}, couleurIdx: 0 }] });
+    trace.zones = ZONES;
     lier();
   });
   afterEach(() => {
@@ -228,5 +233,73 @@ describe("menu du clic droit — alerte de prix au bord d'une zone forte", () =>
       { balise: "button", role: "menuitem", texte: "Alerte de prix ↓ 76,601.83 · bord du support fort · niveau fixe, 7 jours" },
       ...habituelles(76_050),
     ]);
+  });
+
+  // Arbitrage A2 de l'orchestrateur (12 novembre 2026) : un menu resté ouvert pendant que l'état
+  // change. Au clic, la garde commune de `poserAlerteZone` relit tout : la zone est-elle encore
+  // tracée, à ce bord, et l'offre encore valable ? Sinon RIEN n'est créé, et un avis court le dit
+  // avec le libellé du nouvel état. Avant : rien n'était dit (cours passé, alerte posée ailleurs),
+  // et une zone disparue ou un bord déplacé posait l'alerte au niveau écrit à l'ouverture du menu.
+  describe("offre périmée au moment du clic, menu resté ouvert", () => {
+    /** Ouvre le menu sur l'offre du support fort, laisse `changer` modifier l'état, puis clique l'entrée. */
+    const cliquerApres = (changer: () => void): void => {
+      const entree = clicDroit(76_000).children[1]!;
+      expect(entree.textContent).toBe("Alerte de prix ↓ 76,601.83 · bord du support fort · niveau fixe, 7 jours");
+      changer();
+      entree.emettre("click");
+      expect(menu()).toBeUndefined();
+    };
+    /** Avis à l'écran : texte, et s'il porte une action. Un avis court part de lui-même après 2,5 s. */
+    const lesAvis = () => toastsStore.getState().toasts.map((t) => ({ texte: t.texte, action: t.action?.libelle, reste: t.reste }));
+    const avisCourt = (texte: string) => [{ texte, action: undefined, reste: undefined }];
+
+    it("le cours a franchi le bord : rien n'est créé, l'avis le dit", () => {
+      cliquerApres(() => {
+        trace.cloture = 76_501.83;
+      });
+      expect(alertsStore.getState().defs).toEqual([]);
+      expect(lesAvis()).toEqual(avisCourt("Pas d'alerte : le cours a déjà franchi le bord du support fort (76,601.83)"));
+      vi.advanceTimersByTime(2_500);
+      expect(toastsStore.getState().toasts).toEqual([]);
+    });
+
+    it("la même alerte a été posée ailleurs : rien n'est doublé, l'avis dit « déjà posée »", () => {
+      cliquerApres(() => {
+        alertsStore.getState().ajouter({ symbol: "BTCUSDT", source: "binance", condition: { type: "prix-croise", niveau: 76601.83, sens: "baisse" } });
+      });
+      expect(alertsStore.getState().defs).toHaveLength(1);
+      expect(alertsStore.getState().defs[0]?.message).toBeUndefined();
+      expect(lesAvis()).toEqual(avisCourt("Alerte déjà posée ↓ 76,601.83 · bord du support fort"));
+    });
+
+    it("AXIS S/R fermé : la zone n'est plus tracée, rien n'est créé", () => {
+      cliquerApres(() => indicatorsStore.setState({ indicators: [] }));
+      expect(alertsStore.getState().defs).toEqual([]);
+      expect(lesAvis()).toEqual(avisCourt("Pas d'alerte : la zone forte n'est plus tracée"));
+    });
+
+    it("la zone forte est cassée ou affaiblie (plus de ruban fort de ce rôle) : rien n'est créé", () => {
+      cliquerApres(() => {
+        trace.zones = { rubans: [{ ...rubanFort("--up", 75626.55, 76601.83), alpha: 0 }, rubanFort("--down", 85314.76, 86430.38)] };
+      });
+      expect(alertsStore.getState().defs).toEqual([]);
+      expect(lesAvis()).toEqual(avisCourt("Pas d'alerte : la zone forte n'est plus tracée"));
+    });
+
+    it("une clôture a déplacé le bord : rien n'est créé à l'ancien niveau, l'avis dit que le bord a bougé", () => {
+      cliquerApres(() => {
+        trace.zones = { rubans: [rubanFort("--up", 75626.55, 76529.83), rubanFort("--down", 85314.76, 86430.38)] };
+      });
+      expect(alertsStore.getState().defs).toEqual([]);
+      expect(lesAvis()).toEqual(avisCourt("Pas d'alerte : le bord de la zone forte a bougé"));
+      // Le clic droit suivant propose le nouveau bord.
+      expect(clicDroit(76_000).children[1]?.textContent).toBe("Alerte de prix ↓ 76,529.83 · bord du support fort · niveau fixe, 7 jours");
+    });
+
+    it("rien n'a changé : l'alerte est posée, avec l'avis de pose et « Annuler »", () => {
+      cliquerApres(() => {});
+      expect(alertsStore.getState().defs).toHaveLength(1);
+      expect(lesAvis()).toEqual([{ texte: "Alerte de prix posée : BTCUSDT ↓ 76,601.83 · niveau fixe · expire dans 7 jours · sonne application ouverte seulement", action: "Annuler", reste: undefined }]);
+    });
   });
 });

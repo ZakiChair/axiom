@@ -466,7 +466,7 @@ describe("poserAlerteZone et offres prêtes pour l'encart et le menu", () => {
   const support = (): ZoneForteTracee => zonesDuGraphe(chart, BTC_4H)[0]!;
 
   it("pose UNE alerte à 7 jours, ouvre la section Alertes, pousse un avis de 6 s ; rend l'offre « posee »", () => {
-    const apres = poserAlerteZone(chart, BTC_4H, support());
+    const apres = poserAlerteZone(chart, BTC_4H, support())!;
     const { defs } = alertsStore.getState();
     expect(defs).toHaveLength(1);
     expect(defs[0]).toMatchObject({
@@ -496,12 +496,35 @@ describe("poserAlerteZone et offres prêtes pour l'encart et le menu", () => {
     expect(alertsStore.getState().defs).toHaveLength(1);
   });
 
-  it("second geste : jamais deux alertes pour le même bord, ni second avis", () => {
+  // Depuis l'arbitrage A2 (garde commune) : un geste qui ne crée rien le dit par un avis court, sans
+  // « Annuler ». Au téléphone le bouton « déjà posée » est grisé et n'appelle pas ce geste ; au
+  // bureau, c'est le cas d'un menu ouvert avant qu'une alerte identique soit posée.
+  it("second geste : jamais deux alertes pour le même bord ; un avis court dit « déjà posée »", () => {
     poserAlerteZone(chart, BTC_4H, support());
     const second = poserAlerteZone(chart, BTC_4H, support());
-    expect(second.etat).toBe("posee");
+    expect(second?.etat).toBe("posee");
     expect(alertsStore.getState().defs).toHaveLength(1);
-    expect(toastsStore.getState().toasts).toHaveLength(1);
+    expect(toastsStore.getState().toasts.map((t) => [t.texte, t.action])).toEqual([
+      ["Alerte de prix posée : BTCUSDT ↓ 76,601.83 · niveau fixe · expire dans 7 jours · sonne application ouverte seulement", expect.anything()],
+      ["Alerte déjà posée ↓ 76,601.83 · bord du support fort", undefined],
+    ]);
+  });
+
+  it("garde commune : une zone qui n'est plus tracée à ce bord ne pose rien, et l'avis dit pourquoi", () => {
+    const affichee = support();
+    const avis = (): string[] => toastsStore.getState().toasts.map((t) => t.texte);
+    // Même zone (même rôle, même bougie de confirmation), bord déplacé par une clôture.
+    chart = fauxGraphe({ "sr-1": { rubans: [rubanFort("--up", 75626.55, 76529.83)] } });
+    expect(poserAlerteZone(chart, BTC_4H, affichee)).toBeUndefined();
+    expect(avis()).toEqual(["Pas d'alerte : le bord de la zone forte a bougé"]);
+    // Une autre zone de support, confirmée ailleurs : celle de l'affichage n'est plus tracée.
+    chart = fauxGraphe({ "sr-1": { rubans: [{ ...rubanFort("--up", 60000, 61000), deIdx: 1 }] } });
+    poserAlerteZone(chart, BTC_4H, affichee);
+    // AXIS S/R fermé.
+    indicatorsStore.setState({ indicators: [] });
+    poserAlerteZone(fauxGraphe({ "sr-1": ANNOTATIONS_SR }), BTC_4H, affichee);
+    expect(avis().slice(1)).toEqual(["Pas d'alerte : la zone forte n'est plus tracée", "Pas d'alerte : la zone forte n'est plus tracée"]);
+    expect(alertsStore.getState().defs).toEqual([]);
   });
 
   it("« Annuler » supprime l'alerte créée, et elle seule ; l'offre revient", () => {
@@ -520,7 +543,9 @@ describe("poserAlerteZone et offres prêtes pour l'encart et le menu", () => {
     (chart as unknown as { getDataList: () => Array<{ close: number }> }).getDataList = () => [{ close: 76500 }];
     affichee.executer();
     expect(alertsStore.getState().defs).toEqual([]);
-    expect(toastsStore.getState().toasts).toEqual([]);
+    // Un avis court le dit (garde commune, arbitrage A2) ; au téléphone, le bouton relit l'offre
+    // avant d'appeler ce geste et se réécrit sans avis (`candleReadout.offre.test.ts`).
+    expect(toastsStore.getState().toasts.map((t) => [t.texte, t.action])).toEqual([["Pas d'alerte : le cours a déjà franchi le bord du support fort (76,601.83)", undefined]]);
     expect(offreSousReticule(chart, BTC_4H, { paneId: "candle_pane", dataIndex: 1, y: yPane(76000) })?.etat).toBe("franchi");
   });
 

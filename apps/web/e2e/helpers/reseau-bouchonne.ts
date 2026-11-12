@@ -2,6 +2,14 @@ import type { Page } from "@playwright/test";
 import { E2E_ORIGINE, E2E_WS_ORIGINE } from "../origine";
 
 /**
+ * Chemins des modules servis par Vite en développement : jamais une API ni un proxy.
+ * WebKit classe en « fetch » les modules qu'un worker de module importe (constaté en CI le
+ * 12 novembre 2026 : le worker du backtest recevait 503 sur chacun de ses imports et
+ * échouait). Ils passent donc quel que soit le type de ressource annoncé.
+ */
+const MODULES_VITE = /^\/(src|@fs|@vite|@id|node_modules|@react-refresh)(\/|$)/;
+
+/**
  * Ferme les accès aux API et flux réels. Les specs ajoutent ensuite leurs routes
  * de fixtures (prioritaires dans Playwright). Seuls les fichiers servis par Vite
  * et son WebSocket de développement restent accessibles.
@@ -15,8 +23,7 @@ export async function bouchonnerReseau(page: Page): Promise<void> {
     if (
       url.origin === origine &&
       requete.method() === "GET" &&
-      ressource !== "fetch" &&
-      ressource !== "xhr"
+      ((ressource !== "fetch" && ressource !== "xhr") || MODULES_VITE.test(url.pathname))
     ) {
       await route.continue();
       return;

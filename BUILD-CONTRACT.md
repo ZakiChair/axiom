@@ -3414,7 +3414,11 @@ intégrés dans l'ordre « infobulle », « alertes A1 » sur la branche `feat/a
     série courte fait 11 lignes à 320 × 568 en Matrix et recouvre 12 px du bouton
     « Indicateurs (n) » (mesure de la revue). Doigt reposé exactement au même pixel : le
     réticule ne change pas, l'encart reste masqué jusqu'au toucher suivant. Il ne se replace
-    pas quand un avis paraît après lui. Pas d'encart de texte au bureau.
+    pas quand un avis paraît après lui. (Levée en partie le 12 novembre 2026, lot 2 : l'encart
+    est réaffiché à l'image qui suit tout changement des alertes — pose, « Annuler »,
+    déclenchement — et se replace alors au-dessus de la pile d'avis, mesuré à 390 × 844 et
+    320 × 568 ; un avis sans changement d'alertes ne le replace toujours pas. Voir « AXIS — alerte
+    de prix au bord d'une zone forte ».) Pas d'encart de texte au bureau.
   - **Encart en paysage** (remesuré après la revue globale, texte d'une zone du cas de
     référence). Le pane des prix y est court, et la borne du haut prime : l'encart déborde vers
     le bas. Avec un pane d'indicateur (RSI) : à 844 × 390 (pane de 118 px) il dépasse de 19 px
@@ -3557,7 +3561,8 @@ intégrés dans l'ordre « infobulle », « alertes A1 » sur la branche `feat/a
       correction du défaut est prouvée ici sur Chromium, et sur WebKit par la CI seule.
 - **Reporté.**
   - Alerte de prix au bord d'une zone forte, posée au toucher : le seul avertissement plus tôt
-    que la clôture (lot suivant).
+    que la clôture (lot suivant). (Livrée le 12 novembre 2026 : voir « AXIS — alerte de prix au
+    bord d'une zone forte ».)
   - Alertes A2 : historique chargé pour l'alerte sans l'indicateur affiché, amorce courte,
     réglages de l'instance lus par l'alerte, pastille « ≠ graphe », sortie `preAchat` du
     pré-signal.
@@ -3576,3 +3581,263 @@ intégrés dans l'ordre « infobulle », « alertes A1 » sur la branche `feat/a
   - Correctif du moteur pour le canvas figé, si WebKit ou un vrai téléphone le montrent encore.
   - Test prospectif du signal précoce, du pré-signal et des retournements : aucun n'a été
     soumis à des données jamais vues.
+
+## AXIS — alerte de prix au bord d'une zone forte (phase 2, lot 2, 12 novembre 2026)
+
+Demande du propriétaire, le 9 novembre 2026 : « améliorer les signaux d'AXIS », puis « j'aimerais
+les voir apparaître suffisamment tôt, que je puisse voir quelle zone marque une forte résistance ou
+support » ; le 11 novembre : « Top, merge dans main et poursuit l'amélioration d'axis », puis « Top
+après ça merge directement les pr et déploie ». Le lot 1 de la phase 2 (section précédente) est
+fusionné dans `main`. Ce second lot livre le seul avertissement plus tôt que la clôture : au
+téléphone, le doigt sur la bande d'une zone forte d'AXIS S/R, l'encart écrit sous le texte de la
+zone un bouton qui pose une **alerte de prix existante** (`prix-croise`, évaluée à chaque prix reçu
+d'une source à flux de prix) au bord de la zone tourné vers le cours, **à niveau fixe**, qui expire
+dans 7 jours ; au bureau, la même entrée s'ajoute au menu du clic droit. **Aucun fournisseur, hôte,
+indicateur, type d'alerte, dépendance ni champ de `@axiom/types` nouveau ; aucun fichier de
+`packages/` modifié ; aucune série, aucun signal, aucun marqueur, aucun texte ni aucune sortie
+d'alerte existants ne changent ; aucun chiffre de performance.** Une alerte de prix à niveau fixe
+n'est jamais appelée « signal » ni « réaction ». Le lot a été développé par étapes, revu deux fois
+par des agents indépendants avec un tour de correction entre les deux, réuni en un commit,
+interrompu à l'intégration par une limite d'usage, puis repris : l'intégration applique les
+arbitrages A1 à A4 ci-dessous, une correction de lecture, et cette consignation.
+
+- **Arbitrages de l'orchestrateur, à confirmer par le propriétaire.** Aucun n'a été demandé mot
+  pour mot ; chacun sert la demande du 9 novembre et s'écarte d'une règle écrite ou d'un brief.
+  - **Avertissement en cours de bougie.** Le non-but du 9 novembre « Signaux intrabougie (avant la
+    clôture) » est levé pour cette alerte de PRIX à niveau fixe, et pour elle seule : elle ne lit
+    aucun signal, et aucun signal intrabougie n'est ajouté au graphe ni aux alertes d'indicateur.
+  - **Offre écrite dans l'encart**, sous le texte de la zone, plutôt qu'une pastille séparée sur
+    le graphe ou un appui long : exception au gel G100 (un affichage ajouté dans une surface
+    existante), comme le texte de l'encart du lot 1. L'appui long est reporté.
+  - **Bord tourné vers le cours seulement** : haut d'un support, bas d'une résistance, à sa
+    dernière valeur tracée (celle de l'écart écrit au bord droit). Pas d'offre pour l'autre bord.
+  - **Zones fortes seulement** (actives, bande pleine) ; ni zone faible, ni zone cassée.
+  - **Échéance de 7 jours**, une des durées du panneau Alertes, prolongeable par son « +24 h ».
+  - **Pose directe** au toucher ou au clic, sans confirmation ; l'avis de pose porte « Annuler »
+    pendant 6 s.
+  - **A1 — message.** Il finit par « · niveau fixe » ; « zone mobile » est retiré. La règle qui
+    retirait cette mention au-delà de 90 caractères n'a plus d'objet et disparaît (constante
+    `MAX_MESSAGE_ZONE` retirée) : 69 caractères pour le support du cas de référence, 76 pour sa
+    résistance la plus proche, 78 au plus sur ses 8 zones fortes et les 20 unités, 80 pour tout
+    niveau sous dix millions (longueurs épinglées). Le bouton garde « niveau fixe, 7 jours ».
+  - **A2 — offre périmée au moment du geste.** La garde commune vit dans `poserAlerteZone` : au
+    geste, zones tracées, prix, alertes et heure sont relus ; rien n'est créé si aucune zone forte
+    de même rôle n'est plus tracée à ce bord, ou si l'état n'est plus « offre ». Au bureau, un
+    avis court (2,5 s, sans bouton) le dit avec le libellé du nouvel état ; au téléphone, le
+    bouton relit l'offre au toucher et se réécrit, sans avis. Choix d'intégration, à confirmer :
+    un quatrième texte, « Pas d'alerte : le bord de la zone forte a bougé », quand la même zone
+    (même rôle, même bougie de confirmation) est tracée à un autre bord ; « la zone forte n'est
+    plus tracée » y aurait été faux, la zone restant dessinée.
+  - **A3 — sources sans flux de prix au tick** (`isTickerSource` faux : série synthétique
+    « synthetic », ratio, spread, capitalisation) : aucune offre, ni bouton ni entrée de menu. Le
+    moteur n'y ouvre aucun flux et n'évaluerait l'alerte qu'à la clôture du graphe principal.
+  - **A4 — parcours à 320 × 568 en Bloomberg.** Sur le projet `chromium-phone` le bouton est
+    exigé, rendu entier dans la zone libre (9 px de marge mesurés) ; sur `webkit-phone`, le
+    parcours tient la règle (entier dans la zone libre, sinon absent) et note ce que le moteur a
+    rendu.
+  - **A5 — règle de la zone libre, acceptée.** Le bouton n'est rendu que si l'encart, bouton
+    compris, tient dans la zone libre du pane des prix : un toucher sur « Indicateurs (n) » ou sur
+    l'en-tête d'un pane d'indicateur ne pose jamais d'alerte. Conséquence, aux limites : pas
+    d'offre en paysage, ni sur les écrans courts avec « Détails » ouvert ou des panes.
+  - **A6 — fenêtre de bureau de moins de 768 px pilotée à la souris** : limite consignée, pas de
+    correction.
+  - **A7 — date du message** : le jour local de la pose (JJ/MM), comme « bougie close le JJ/MM ».
+  - **Choix d'intégration** : les trois espaces de « niveau fixe, 7 jours » sont insécables. À
+    390 × 844 en thème par défaut, « jours » restait seul sur la seconde ligne du bouton.
+  - Décisions du développeur entérinées : « déjà posée » passe avant « franchi » (l'alerte
+    existe) ; bande retenue sans tolérance au téléphone, à 6 px au bureau ; instance au réglage
+    « unite » écartée ; niveau écrit avec toutes les décimales de l'alerte (2 à 8), jamais
+    arrondi comme un prix affiché ; menu borné à 26 rem.
+  - Tests épinglés modifiés à dessein, expliqués dans le message de leur commit : le message
+    (A1), deux tests de la pose (A2 : un geste qui ne crée rien pousse un avis court), le parcours
+    à 320 × 568 (A4), les libellés de l'offre (espaces insécables). Aucun test antérieur au lot
+    n'est modifié ; aucun test désactivé, sauté ou supprimé.
+- **Ce qui change.** Fichiers : `apps/web/src/chart/alerteZone.ts` (nouveau),
+  `chart/candleReadout.ts`, `chart/priceAlertMenu.ts`, `chart/ChartInstance.tsx` ; tests
+  `alerteZone.test.ts` (52), `candleReadout.offre.test.ts` (26), `priceAlertMenu.zone.test.ts`
+  (17), nouveaux ; parcours `e2e/mobile-alerte-zone.e2e.ts` (2, nouveau), une étape « AXIS S/R au
+  bureau » ajoutée à `e2e/quatre-lots-indicateurs.e2e.ts`, deux lectures ajoutées à
+  `e2e/helpers/axis-sr-telephone.ts` (`lireZonesAxisSr`, `lireSignauxDansBandesFortes`).
+  - **Zones lues, jamais recalculées.** Rubans de l'instance d'AXIS S/R montée sur le pane des
+    prix, choisie par sa définition : zone forte active = ruban porteur d'un texte et bande pleine.
+    Aucune zone en rejeu, pour une instance au réglage « unite », ni sur une source sans flux de
+    prix au tick. Niveau : `arrondirNiveauAlerte` du dernier bord tracé.
+  - **États** (`offreBordZone`, pure). « déjà posée » : une alerte de prix de même symbole,
+    source, niveau et sens existe, active ou en pause, non expirée. « franchi » : le dernier prix
+    du graphe, bougie en formation comprise, a atteint ou passé le bord ; le moteur se calibrerait
+    désarmé. Prix inconnu : l'offre vaut. « offre » sinon.
+  - **Téléphone.** Le doigt dans la bande (sans tolérance) : bouton `[data-alerte-zone]` sous le
+    texte, 44 px de haut au moins, seul de l'encart à capter le toucher ; un toucher ne déplace
+    ni n'efface le réticule. Rendu seulement si l'encart, bouton compris, tient dans la zone libre
+    (sous l'ordonnée de l'infobulle, au-dessus du bouton « Indicateurs (n) », du panneau déplié, du
+    bas du pane et, à 4 px, de la pile d'avis). L'offre est relue après chaque recalcul des
+    indicateurs et au toucher ; l'encart est réaffiché à l'image qui suit tout changement des
+    alertes (pose, « Annuler », déclenchement), et se replace alors au-dessus de la pile d'avis.
+  - **Bureau.** Clic droit dans la bande, ou à 6 px : l'offre s'ajoute sous l'en-tête du menu,
+    qui reste son premier `div`, au-dessus des trois entrées au prix du clic, inchangées.
+  - **Textes**, au caractère près (cas de référence) :
+    - bouton et entrée, état « offre » : « Alerte de prix ↓ 76,601.83 · bord du support fort ·
+      niveau fixe, 7 jours » ; résistance : « Alerte de prix ↑ 85,314.76 · bord de la résistance
+      forte · niveau fixe, 7 jours » (espaces insécables dans « niveau fixe, 7 jours ») ;
+    - état « déjà posée », grisé et sans effet : « Alerte déjà posée ↓ 76,601.83 · bord du support
+      fort » ;
+    - état « franchi », grisé et sans effet : « Pas d'alerte : le cours a déjà franchi le bord du
+      support fort (76,601.83) » ;
+    - avis de pose, 6 s, bouton « Annuler » : « Alerte de prix posée : BTCUSDT ↓ 76,601.83 ·
+      niveau fixe · expire dans 7 jours · sonne application ouverte seulement ». La dernière
+      mention n'est omise que si un daemon local annonce les alertes ET que la source est Binance :
+      jamais sur l'application déployée ;
+    - avis court du geste périmé (A2) : le libellé du nouvel état, « Pas d'alerte : la zone forte
+      n'est plus tracée » ou « Pas d'alerte : le bord de la zone forte a bougé » ;
+    - message de l'alerte (`def.message`, sans symbole ni unité de l'alerte, convention du lot
+      1) : « ≤ 76,601.83 · bord du support fort AXIS S/R 4h du 01/11 · niveau fixe » ; résistance :
+      « ≥ 85,314.76 · bord de la résistance forte AXIS S/R 4h du 31/10 · niveau fixe ». L'unité est
+      celle du graphe (omise si inconnue) ; la date, le jour local de la pose — 01/11 sous
+      l'horloge des parcours (1er novembre, 00:30 UTC), 31/10 dans les tests unitaires ;
+    - liste du panneau Alertes et journal : le message tel quel. La ligne de la liste écrit, à
+      390 × 844, « BTCUSDT », « calibrage » avant le premier prix reçu, le message, « Échéance
+      08.11.26 00:30 », « +24 h » ;
+    - avis au déclenchement, qui reste jusqu'au toucher : « BTCUSDT — ≤ 76,601.83 · bord du
+      support fort AXIS S/R 4h du 01/11 · niveau fixe », bouton « Voir ». « Voir » ferme l'avis et
+      ramène la vue principale sur le marché de l'alerte ;
+    - notification du navigateur, onglet visible et permission accordée (lu dans le code) : titre
+      « AXIOM — BTCUSDT », corps = le message ;
+    - daemon, lu dans le code et non exécuté : macOS, titre « AXIOM — BTCUSDT » et corps = le
+      message ; Telegram, « 🔔 AXIOM — BTCUSDT » puis le message sur la ligne suivante. Il n'évalue
+      que les alertes Binance, et ne voit que celles posées là où il tourne.
+  - Aucun de ces textes ne contient « signal », « réaction », un pourcentage ou une promesse
+    (test de doctrine sur les 8 zones fortes du cas de référence).
+- **Mesuré à l'intégration sur le vrai graphe** (Chromium, réseau bouchonné comme les parcours,
+  cas de référence BTCUSDT 4h, 3 000 bougies, date figée ; script jetable hors dépôt).
+  - **Le toucher complet du propriétaire**, à 390 × 844 et 320 × 568, thème par défaut et
+    Bloomberg : toucher la bande du support fort, lire l'encart, poser, lire l'avis de pose,
+    « Annuler » (plus d'alerte, l'offre revient), reposer, lire le message entier dans la liste du
+    panneau, pousser le cours à 77 000 (calibrage, aucun avis) puis à 76 500 : un avis, encore là
+    7 s plus tard, une entrée au journal, « Voir » touchable. Les quatre parcours vont au bout.
+
+    | Écran, thème | Encart, bouton compris | Lignes : texte / bouton | Au-dessus de « Indicateurs (1) » | Avis de pose à l'écran |
+    |---|---|---|---|---|
+    | 390 × 844, défaut | 164,1 px | 4 / 2 | 7,9 px | 90 px ; bouton « déjà posée » sur 1 ligne, encart 3,9 px au-dessus |
+    | 390 × 844, Bloomberg | 179,5 px | 5 / 2 | 7,5 px | 106 px ; bouton rendu, 3,5 px au-dessus |
+    | 320 × 568, défaut | 179,5 px | 5 / 2 | 7,5 px | 90 px ; bouton rendu, 3,5 px au-dessus |
+    | 320 × 568, Bloomberg | 194,8 px pour 204 libres | 6 / 2 | 8,2 px | 106 px ; bouton NON rendu, encart du texte (146,8 px) 4,2 px au-dessus |
+
+  - Avis au déclenchement, lu en entier : 2 lignes et 74 px à 390 × 844 en thème par défaut,
+    3 lignes et 90 px dans les trois autres cas. L'encart affiché se replace au-dessus de lui :
+    3,9 px (390 × 844, défaut), 3,5 px (390 × 844 Bloomberg et 320 × 568 défaut), 4,2 px sans
+    bouton (320 × 568 Bloomberg).
+  - Ligne de la liste, libellé entier, rien par-dessus : 77 px et 2 lignes à 390 × 844 en thème
+    par défaut ; 93 px et 3 lignes en Bloomberg ; 93,5 px et 3 lignes à 320 × 568 en thème par
+    défaut ; 93 px et 3 lignes en Bloomberg.
+  - Bougies où la bande du support fort se touche sans zoom : 11 à 390 × 844 en thème par défaut,
+    10 en Bloomberg, 5 à 320 × 568 en thème par défaut, 1 (la dernière) en Bloomberg.
+  - **Garde A2 au bureau** (1 440 × 900, menu ouvert sur l'offre) : une clôture poussée par le
+    flux déplace le bord de 76,529.83 à 76,601.83 (bougie 2 997) — clic, aucune alerte, avis
+    « Pas d'alerte : le bord de la zone forte a bougé » ; la même alerte posée ailleurs — avis
+    « Alerte déjà posée ↓ 76,601.83 · bord du support fort », une seule alerte ; AXIS S/R fermé —
+    avis « Pas d'alerte : la zone forte n'est plus tracée », aucune alerte.
+  - **Bureau, 1 440 × 900** : le menu a cinq lignes (en-tête, offre sur une ligne, trois entrées
+    habituelles), 378 px de large.
+- **Limites**, dites sans détour.
+  - **Niveau fixe.** Le niveau ne suit pas la zone, qui peut bouger, casser ou s'inverser.
+    L'alerte reste à son niveau jusqu'à l'échéance et se réarme : elle sonne à chaque nouveau
+    franchissement.
+  - **Les alertes s'accumulent quand le bord bouge** : chaque bord déplacé propose une alerte de
+    plus, rien ne les relie ni ne les purge avant 7 jours. Mesuré : graphe chargé de 2 900
+    bougies, puis clôtures poussées une à une jusqu'à la bougie 2 907 ; trois poses au fil des
+    bords proposés (80,485.04, 81,774.11 puis 80,465.81, la première et la troisième à 19,23
+    d'écart) donnent trois lignes au panneau, 231 px à 390 × 844 en thème par défaut
+    (77 px chacune), 280,5 px à 320 × 568 en thème par défaut, 279 px en Bloomberg.
+  - **Zone forte hors de la fenêtre de prix** : elle ne se touche pas. Sur le cas de référence, à
+    390 × 844 comme à 320 × 568 en thème par défaut, seul le support à 76,601.83 est touchable ;
+    les trois autres supports forts et les quatre résistances fortes sont hors de l'écran.
+  - **Pas d'offre quand l'encart ne tient pas** (A5). Doigt sur le support fort, Chromium :
+
+    | Écran | Pane des prix | Zone libre | Encart du texte seul, défaut / Bloomberg | Bouton compris | Bouton |
+    |---|---|---|---|---|---|
+    | Paysage 844 × 390 | 219 px | 111 px | 85,3 / 100,7 px | 133,3 / 148,7 px | non rendu |
+    | 320 × 568, « Détails » ouvert | 308 px | 154 px | 131,5 / 146,8 px | 179,5 / 194,8 px | non rendu |
+    | 320 × 568, un pane RSI | 207 px | 155 px | 131,5 / 146,8 px | 179,5 / 194,8 px | non rendu |
+    | 375 × 667, panes RSI et MACD | 205 px | 153 px | 116,1 / 131,5 px | 164,1 / 179,5 px | non rendu |
+    | 375 × 667, un pane RSI | 306 px | 254 px | — | 164,1 / 179,5 px | rendu |
+    | 390 × 844, panes RSI et MACD | 382 px | 330 px | — | 164,1 / 179,5 px | rendu |
+
+    Sous un avis de pose à 320 × 568 en Bloomberg, le bouton n'est pas rendu (tableau
+    précédent). Il ne revient pas quand l'avis part, seulement au toucher suivant sur la bande ;
+    sur cet écran la bande n'a qu'une bougie touchable, et un doigt reposé au même pixel ne
+    change pas le réticule (limite du lot 1) : il faut toucher ailleurs, puis y revenir.
+  - **Fenêtre de bureau de moins de 768 px pilotée à la souris** (A6). La mise en page est celle
+    du téléphone. Mesuré à 700 × 800 : au survol du support fort, l'encart montre le bouton
+    « offre » ; dès que le pointeur va vers lui, il quitte la bande et le bouton disparaît (le
+    texte reste) ; un clic à son emplacement ne crée rien. Le clic droit reste le geste du bureau.
+  - **L'état « franchi » lit la dernière clôture du graphe** ; le moteur, lui, se calibre sur le
+    premier prix du flux (lu dans le code). Si le cours passe le bord entre les deux, l'alerte est
+    créée désarmée et reste muette jusqu'à une sortie puis un retour.
+  - **Le bouton n'est relu qu'au recalcul des indicateurs, au changement d'alertes ou de
+    réticule.** Un cours qui franchit le bord entre deux relectures laisse « offre » à l'écran ; le
+    toucher ne crée alors rien (garde A2) et réécrit le bouton.
+  - Un avis paru sans changement d'alertes (avis ordinaire) ne replace pas l'encart. Mesure de la
+    revue du lot : un tel avis recouvrait 13 px du bas du bouton. À l'intégration, un avis
+    ordinaire d'une ligne (34 px) ne l'atteint ni à 390 × 844 ni à 320 × 568 en thème par défaut.
+  - L'avis de pose, comme tout avis, recouvre le bouton « Indicateurs (n) » et le bas du graphe
+    tant qu'il est à l'écran (vu sur la capture à 390 × 844). Au bureau, le menu ouvert près du
+    bord droit passe sur le panneau latéral (vu sur la capture à 1 440 × 900).
+  - **Sur l'iPhone, rien ne sonne Safari fermé ou téléphone verrouillé** : l'alerte n'est évaluée
+    que par l'application ouverte, ce que l'avis de pose dit (« sonne application ouverte
+    seulement »). **Elle n'atteint ni Telegram ni macOS** : l'application déployée ne voit jamais
+    le daemon (`daemonSupporte` rend faux sur Vercel).
+  - **Rien n'est prouvé sur WebKit ici** (il ne tourne qu'en CI : le parcours à 320 × 568 y lira
+    l'annotation « limite »), **ni sur un vrai iPhone** (police, zone de sécurité, barre de
+    Safari), **ni sur les API réelles** (flux bouchonnés, cas de référence déjà vu). Daemon, macOS
+    et Telegram : lus dans le code seulement. Le rejeu n'est prouvé que par le drapeau du store
+    que le graphe lit, pas par un vrai rejeu.
+- **Budget.** Chargement initial, octets bruts / gzip, par `scripts/verifier-budget-build.mjs`
+  (Node 22.23.4), plafonds 1 220 000 / 360 000 inchangés.
+  - Avant, sur `main` (fin du lot 1) : **1 177 441 / 353 593**.
+  - Lot réuni, après les deux revues et la correction : 1 181 693 / 355 046 (+4 252 / +1 453).
+  - A1 : 1 181 650 / 355 056 ; A2 : 1 181 885 / 355 183 ; A3 : 1 181 900 / 355 192 ; espaces
+    insécables : **1 181 903 / 355 186**.
+  - Lot entier : **+4 462 / +1 593**, sous les +1 700 accordés ; marge gzip **4 814**, au-dessus
+    des 3 000 exigés. `alerteZone.ts` est dans le chargement initial : pas de `?.` (la cible du
+    build le réécrit en long), aucun `import()`.
+  - Fichiers à la demande : 141, 1 734 145 / 638 935 ; aucun module du lot n'y est.
+- **Revues et tests.**
+  - Développement par étapes ; contre-épreuves du développeur : 61 règles retirées une à une côté
+    unitaire, 60 détectées d'emblée, la dernière révélant une garde redondante, retirée ; 13 sur
+    le vrai graphe, 12 détectées d'emblée, la treizième après une attente ajoutée au parcours.
+  - Revue indépendante, tour 1 : « corrections ». Un majeur — le bouton sortait de la zone libre
+    et captait le toucher de « Indicateurs (n) » ou de l'en-tête d'un pane (paysage 844 × 390 ;
+    320 × 568 avec « Détails » ou un pane) — et quatre mineurs : bouton d'une zone qui n'est plus
+    tracée, câblage du rejeu sans test, niveau écrit arrondi, fenêtre étroite à la souris.
+  - Correction : le majeur par la règle de la zone libre (rejouée sur 8 écrans et 3 thèmes, sans
+    défaut), trois mineurs corrigés, le quatrième consigné (A6).
+  - Revue indépendante, tour 2 : « ok », aucun bloquant ni majeur, 36 contre-épreuves détectées,
+    quatre mineurs, tranchés par l'orchestrateur : offre périmée muette au bureau (A2), série
+    synthétique (A3), parcours à 320 px qui n'exigeait plus le bouton (A4), « zone mobile » (A1).
+  - Interruption à l'intégration (limite d'usage), reprise sur le commit réuni du lot.
+  - Contre-épreuves de l'intégration : sans A1, 17 tests échouent ; sans la garde A2, 8 ; sans la
+    condition A3, 2 ; avec un bouton porté à 54 px, le parcours à 320 × 568 échoue avec A4 et
+    passait sans lui ; avec des espaces ordinaires, le parcours échoue à 390 px (dernière ligne du
+    bouton « jours ») et 26 tests unitaires échouent.
+  - Vérification de l'intégration (12 novembre 2026, Node 22.23.4) : typage des 7 projets ;
+    indicateurs 232 fichiers / 1 144 tests, alertes 147, backtest 131, pacte 120, daemon 786,
+    web 476 fichiers / 7 190 tests (sans `chart/orderflow.cadence.test.ts`, qui lève une erreur
+    sans réseau) ; build du web et budget verts ; parcours hermétiques du bureau des zones
+    touchées, 34 sur 34 en 1,4 min (`quatre-lots-indicateurs`, `quatre-lots-alertes`,
+    `gate-g4-alertes`, `multivue`, `niveaux-chart`, `revue-outils-avances`, `analyse-expy`,
+    `quatre-lots-decisions`) ; parcours téléphone sur Chromium, 41 sur 41 en 2,8 min, dont les
+    deux de `mobile-alerte-zone` (20 s et 6 s). Non lancés ici : WebKit, `pnpm check:e2e` complet,
+    Vercel, daemon et flux réels.
+  - Revue finale du lot intégré : à venir.
+- **Limites des sections précédentes levées** (annotées sur place).
+  - Lot 1 : l'encart se replace au-dessus de la pile d'avis après tout changement des alertes
+    (en partie : pas après un avis ordinaire).
+  - Lot 1, « Reporté » : l'alerte de prix au bord d'une zone forte est livrée.
+- **Reporté.**
+  - Alerte qui suit la zone (niveau relu à chaque clôture), et regroupement des alertes d'une même
+    zone.
+  - Liste des zones fortes dans le panneau Alertes, pour une zone hors de la fenêtre de prix.
+  - Appui long sur la bande ; offre en paysage (dessin de l'encart à refaire, voir le lot 1).
+  - Alertes A2 : historique chargé pour l'alerte sans l'indicateur affiché, amorce courte,
+    réglages de l'instance lus par l'alerte, pastille « ≠ graphe », sortie `preAchat`.
+  - Amorce du backtest (BT-1).

@@ -313,6 +313,19 @@ datant sa bougie (« · bougie close le 21/10 à 16:00 »), et « Voir » la mar
 **Rien ne sonne Safari fermé ou téléphone verrouillé**, et l'application
 déployée ne voit jamais le daemon : une alerte posée sur l'iPhone n'atteint
 pas Telegram.
+**Alerte de prix au bord d'une zone forte (12 novembre 2026)** : au
+téléphone, le doigt sur la bande d'une zone forte d'AXIS S/R, l'encart écrit
+sous le texte de la zone un bouton, « Alerte de prix ↓ 76,601.83 · bord du
+support fort · niveau fixe, 7 jours ». Un toucher pose une **alerte de prix
+ordinaire, à niveau fixe**, au bord de la zone tourné vers le cours, qui
+expire dans 7 jours ; l'avis de pose porte « Annuler ». Au bureau, la même
+entrée s'ajoute au menu du clic droit. Ce n'est pas un signal : le niveau ne
+suit pas la zone, et chaque bord déplacé propose une alerte de plus. Son
+message, « ≤ 76,601.83 · bord du support fort AXIS S/R 4h du 01/11 · niveau
+fixe », est ce qu'écrivent la liste, le journal et l'avis au déclenchement.
+Pas de bouton en paysage, ni quand l'encart ne tient pas dans la place libre
+du graphe, ni sur une série synthétique ; une zone hors de l'écran ne se
+touche pas. Sur l'iPhone, elle ne sonne qu'application ouverte.
 [Méthode, réglages, limites et backtests](docs/axis-2026-10-07.md).
 
 ### COT — exposition des catégories de traders

@@ -4122,8 +4122,10 @@ avant la fusion, puis la revue finale l'a contre-vérifié (« Revues et tests �
     - l'erreur écrite : « Worker du backtest en échec. » (2 039 bougies reçues sur 2 040), après
       37 réponses 503 dans la console ;
     - la cause était dans le harnais, pas dans le produit. `bouchonnerReseau` ne laissait passer
-      que les GET de l'origine annoncés ni « fetch » ni « xhr » ; WebKit annonce « fetch » les
-      imports d'un worker de module ; chacun recevait la 503 des API fermées, et `onerror` du
+      que les GET de l'origine annoncés ni « fetch » ni « xhr » ; WebKit annonce « fetch » ou
+      « xhr » les imports d'un worker de module (déduit : `ebb0518` ne change que cette
+      condition et le parcours passe ; le type exact n'est pas journalisé) ; chacun recevait la
+      503 des API fermées, et `onerror` du
       worker, dans le store, écrivait ce message. Chromium annonce « script » le worker et ses
       241 imports (sonde hors dépôt), d'où le parcours vert sous Chromium ;
     - corrigé par `ebb0518` (helper seul ; le parcours n'est ni sauté ni assoupli) : sur ce
@@ -4134,7 +4136,11 @@ avant la fusion, puis la revue finale l'a contre-vérifié (« Revues et tests �
       échec. », 36 réponses 503) ;
     - ces échecs n'ont pas pu être rejoués sous WebKit dans le conteneur, où il ne s'installe
       pas : le correctif est prouvé sous WebKit par la CI seule, et sous Chromium par la garde
-      ci-dessous.
+      ci-dessous ;
+    - sur `3b6dc5f` (correction de la revue finale, avec la garde), jobs `check` et `mobile`
+      verts : `mobile-backtest-amorce` passé sous WebKit (6,7 s), garde comprise ; 83 parcours
+      passés et 1 sauté en 7,1 min, étape de 7 min 04 s. Sous WebKit, la garde a reçu la 503 du
+      proxy fermé : un `fetch()` de la page y est bien intercepté comme « fetch » ou « xhr ».
   - Revue finale (12 novembre 2026), sur `5ed1b10` : un constat bloquant, le job `mobile` rouge
     sous WebKit sans cause lue ; contre-vérifié, il est retenu mineur, la cause étant dans le
     harnais et déjà corrigée par `ebb0518` (CI verte). Deux mineurs : l'attente n'écrivait que la

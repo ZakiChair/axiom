@@ -100,7 +100,7 @@ import {
   type EtatPasseExtension,
 } from "./ChartInstance";
 import { alertsStore } from "../store/alerts";
-import { extensionGrapheStore, indicateursAlertesMarche, indicateursExtension, publierExtension, surIndicateursAlertes } from "../alerts/amorceGraphe";
+import { extensionGrapheStore, indicateursAlertesMarche, indicateursExtension, publierExtension, RELANCE_EXTENSION_MS, surIndicateursAlertes } from "../alerts/amorceGraphe";
 import { REFCLOSE_LIMIT } from "./auxProvider";
 import { PLAFOND_BOUGIES_GRAPHE } from "../data/profondeurHistorique";
 
@@ -590,8 +590,10 @@ describe("historique chargé pour les alertes de la vue principale (lot A2)", ()
     /** Ordre des effets d'une passe : marque d'extension, publication, réapplication du buffer. */
     const ordre: string[] = [];
     const appliques: number[] = [];
-    /** Nouvelles passes programmées après un échec (la minuterie de `creerRelanceExtension` dans le graphe). */
+    /** Nouvelles passes programmées après un échec (la minuterie de `creerRelanceExtension`, comme dans le graphe). */
     let relances = 0;
+    /** Annulations de la relance en attente par une passe finie sans échec. */
+    let annulations = 0;
     let annule = false;
     let echec = false;
     let porte: Promise<void> | null = null;
@@ -638,10 +640,22 @@ describe("historique chargé pour les alertes de la vue principale (lot A2)", ()
         relancer: () => {
           relances += 1;
           ordre.push("relance programmée");
+          relance.programmer();
+        },
+        annulerRelance: () => {
+          annulations += 1;
+          relance.annuler();
         },
       }),
     });
-    const desabonner = maitre ? surIndicateursAlertes(MARCHE, () => ordonnanceur.demander()) : () => {};
+    // Même câblage que le graphe : la relance redemande une passe à l'ordonnanceur au délai.
+    const relance = creerRelanceExtension(() => ordonnanceur.demander(), RELANCE_EXTENSION_MS);
+    const desabonnerAlertes = maitre ? surIndicateursAlertes(MARCHE, () => ordonnanceur.demander()) : () => {};
+    // Démontage : comme au démontage du cycle de données, aucune relance ne survit au test.
+    const desabonner = (): void => {
+      desabonnerAlertes();
+      relance.annuler();
+    };
     return {
       demander: () => ordonnanceur.demander(),
       publies, pages, enCours, appliques, ordre, desabonner,
@@ -651,6 +665,7 @@ describe("historique chargé pour les alertes de la vue principale (lot A2)", ()
       couper: () => { echec = true; },
       retablir: () => { echec = false; },
       relances: () => relances,
+      annulations: () => annulations,
     };
   }
   const poser = (condition: Condition): void => {
@@ -733,6 +748,78 @@ describe("historique chargé pour les alertes de la vue principale (lot A2)", ()
     ]);
     expect(v.relances()).toBe(1);
     v.desabonner();
+  });
+
+  // Revue finale du lot A2 (sonde F5 sur le vrai graphe : relance partie 60 s après l'échec, alors
+  // qu'une passe déclenchée par un RSI ajouté avait déjà remonté toute la place).
+  describe("relance après un échec, sur la vraie minuterie (`creerRelanceExtension`)", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("sans autre passe, la relance part au délai entier et remonte toute la place", async () => {
+      const v = vue(2988, ["stratAxisSr"]);
+      v.couper();
+      v.demander();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(v.publies).toEqual([
+        { terminee: false, echec: false, amorceVisee: 3000, bougies: 500 },
+        { terminee: true, echec: true, amorceVisee: 3000, bougies: 500 },
+      ]);
+      v.retablir();
+      await vi.advanceTimersByTimeAsync(RELANCE_EXTENSION_MS - 1);
+      expect(v.publies, `états publiés avant le délai : ${JSON.stringify(v.publies)}`).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(v.publies.slice(2)).toEqual([
+        { terminee: false, echec: false, amorceVisee: 3000, bougies: 500 },
+        { terminee: true, echec: false, amorceVisee: 3000, bougies: 2988 },
+      ]);
+      v.desabonner();
+    });
+
+    it("un échec, puis une passe réussie pour une autre cause : la relance en attente est annulée, aucune passe ne part au délai", async () => {
+      const v = vue(2988, ["stratAxisSr"]);
+      v.couper();
+      v.demander();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(v.relances()).toBe(1);
+      // Réseau rétabli ; une autre cause (indicateur ajouté, alerte créée) demande une passe, qui
+      // remonte toute la place.
+      v.retablir();
+      await vi.advanceTimersByTimeAsync(10_000);
+      v.demander();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(v.publies.at(-1)).toEqual({ terminee: true, echec: false, amorceVisee: 3000, bougies: 2988 });
+      expect(v.annulations()).toBe(1);
+      const pages = [...v.pages];
+      const publies = v.publies.length;
+      // Au délai de la relance, et bien après : aucune page redemandée, « en cours » jamais republié.
+      await vi.advanceTimersByTimeAsync(2 * RELANCE_EXTENSION_MS);
+      expect(v.pages, `pages après le délai : ${JSON.stringify(v.pages)}`).toEqual(pages);
+      expect(v.publies, `états publiés après le délai : ${JSON.stringify(v.publies.slice(publies))}`).toHaveLength(publies);
+      v.desabonner();
+    });
+
+    it("un échec, puis une passe qui n'a plus rien à charger (indicateur retiré) : la relance en attente est annulée", async () => {
+      const affiches = ["stratAxisSr"];
+      const v = vue(2988, affiches);
+      v.couper();
+      v.demander();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(v.relances()).toBe(1);
+      affiches.splice(0, affiches.length, "rsi");
+      v.demander();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(v.publies.at(-1)).toEqual({ terminee: true, echec: false, amorceVisee: 0, bougies: 500 });
+      const publies = v.publies.length;
+      await vi.advanceTimersByTimeAsync(2 * RELANCE_EXTENSION_MS);
+      expect(v.publies, `états publiés après le délai : ${JSON.stringify(v.publies.slice(publies))}`).toHaveLength(publies);
+      expect(v.pages).toEqual([]);
+      v.desabonner();
+    });
   });
 
   it("place à sec, rien à charger ou identité invalidée : aucune relance", async () => {

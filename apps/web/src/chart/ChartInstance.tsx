@@ -433,6 +433,13 @@ export interface ParamsPasseExtension {
   publier: (etat: EtatPasseExtension) => void;
   /** Après un échec, slot encore valide : programme une nouvelle passe (`creerRelanceExtension`). */
   relancer: () => void;
+  /**
+   * Passe finie sans échec (rien à charger compris) : annule la relance qu'un échec antérieur a
+   * programmée. Sans elle, une passe réussie pour une autre cause (indicateur ajouté, alerte créée)
+   * laissait partir la relance au délai : page redemandée, « en cours » republié, et l'alerte non
+   * évaluée pendant ce temps (revue finale du lot A2).
+   */
+  annulerRelance: () => void;
 }
 
 /**
@@ -440,8 +447,9 @@ export interface ParamsPasseExtension {
  * « terminée » APRÈS la réapplication du buffer — le runtime des alertes réévalue alors sur le
  * tampon final —, quelle qu'en soit l'issue : rien à charger, amorce atteinte, place à sec, plafond
  * de pages ou échec réseau (le tampon obtenu est publié tel quel, `echec` vrai, et une nouvelle
- * passe est programmée : `relancer`). Rien après une identité invalidée : le cycle de données
- * suivant publie son propre état (`null` à son début, `demarrerCycleDonnees`).
+ * passe est programmée : `relancer`). Une passe finie sans échec annule la relance en attente
+ * (`annulerRelance`). Rien après une identité invalidée : le cycle de données suivant publie son
+ * propre état (`null` à son début, `demarrerCycleDonnees`).
  */
 export async function passeExtension(p: ParamsPasseExtension): Promise<void> {
   const buffer = p.lireBuffer();
@@ -453,6 +461,7 @@ export async function passeExtension(p: ParamsPasseExtension): Promise<void> {
   const amorceVisee = amorce === undefined ? 0 : amorce;
   if (!doitEtendreHistorique(defIds, premier.time, dernier.time, buffer.length)) {
     p.publier({ terminee: true, echec: false, amorceVisee, bougies: buffer.length });
+    p.annulerRelance();
     return;
   }
   const avant = buffer.length;
@@ -474,11 +483,13 @@ export async function passeExtension(p: ParamsPasseExtension): Promise<void> {
   if (complet.length > avant) p.appliquer(complet);
   p.publier({ terminee: true, echec, amorceVisee, bougies: complet.length });
   if (echec) p.relancer();
+  else p.annulerRelance();
 }
 
 /**
  * Relance différée d'une passe d'extension échouée : une seule en attente (programmer de nouveau
- * repart du délai entier), annulée au démontage du cycle de données.
+ * repart du délai entier), annulée par une passe finie sans échec et au démontage du cycle de
+ * données.
  */
 export function creerRelanceExtension(demander: () => void, delaiMs: number): { programmer: () => void; annuler: () => void } {
   let minuterie: ReturnType<typeof setTimeout> | null = null;
@@ -1673,6 +1684,7 @@ export function ChartInstance({
               if (isMaster && !cancelled) publierExtension({ cle: cleMarcheGraphe(marcheSlot), ...etat });
             },
             relancer: () => relanceExtension?.programmer(),
+            annulerRelance: () => relanceExtension?.annuler(),
           }),
         });
         relanceExtension = creerRelanceExtension(() => ordonnanceurExtension.demander(), RELANCE_EXTENSION_MS);

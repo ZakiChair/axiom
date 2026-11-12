@@ -117,7 +117,7 @@ jobs:
 
   mobile:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 18 # garde-fou global : installation (~1,5 min) + parcours (plafond 12) + marge
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -137,7 +137,9 @@ jobs:
         run: bash scripts/ci.sh --mobile
         env:
           AXIOM_E2E_PORT: 5281
-        timeout-minutes: 9
+        # Chromium puis WebKit : observé 5,3 min puis 7 min 07 s (12/11, 41 parcours par moteur,
+        # après l'alerte de prix au bord d'une zone). 9 ne laissait plus que 2 min de marge.
+        timeout-minutes: 12
 
       - name: diagnostics playwright téléphone en cas d'échec
         if: failure()

@@ -326,6 +326,18 @@ fixe », est ce qu'écrivent la liste, le journal et l'avis au déclenchement.
 Pas de bouton en paysage, ni quand l'encart ne tient pas dans la place libre
 du graphe, ni sur une série synthétique ; une zone hors de l'écran ne se
 touche pas. Sur l'iPhone, elle ne sonne qu'application ouverte.
+**Backtest avec l'amorce des indicateurs (12 novembre 2026)** : quand une
+règle lit un indicateur (ou avec un stop ATR), la fenêtre **BT** charge
+avant la plage des bougies strictement antérieures — 1 500 pour AXIS, 3 000
+pour AXIS S/R, au moins 300 sinon — et ne mesure que la plage. Sur BTCUSDT 4h
+(fixture des tests), « AXIS confluence (4h) » sur 3 mois liste 4 trades au
+lieu de 2, chacun entré à l'ouverture qui suit un ▲ du graphe. La note du
+run le dit : « 539 bougies mesurées · BTCUSDT 4h · Binance spot · amorce 1500
+bougies · … », ou « amorce courte (811 bougies sur 1500) : premiers signaux
+pouvant différer de ceux d'une série longue » quand l'historique manque.
+Les résultats de tous les presets qui lisent un indicateur bougent en début
+de plage ; une règle de prix seule ne change pas. Simulation sur des données
+passées : une mesure, pas une promesse.
 [Méthode, réglages, limites et backtests](docs/axis-2026-10-07.md).
 
 ### COT — exposition des catégories de traders
@@ -537,6 +549,10 @@ Le backtest valorise l'équité à chaque clôture de bougie, positions ouvertes
 Le drawdown mesure la baisse depuis le plus haut de cette équité ; il ne mesure pas les
 extrêmes intrabar. Les frais d'entrée sont déduits dès l'entrée, les frais de sortie lors
 de la sortie. Les décisions restent exécutées à l'ouverture de la bougie suivante.
+Quand une règle lit un indicateur, ou avec un stop ATR, le run charge avant la plage une
+amorce de bougies strictement antérieures, lue par les indicateurs et jamais mesurée :
+aucun fill, aucune équité ni statistique avant le début de la plage (depuis le
+12 novembre 2026, version du moteur `bt-2026-11-12`).
 
 Par défaut, le stop et l'objectif sont jugés à la **clôture** (un pic intrabar qui se
 referme ne déclenche rien). La case **Intrabar** du panneau BT les juge sur le **high/low**

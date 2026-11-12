@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 import {
   changerTheme,
+  clotureFormatee,
   espionnerRangees,
   HORLOGE_AXIS_SR,
   horlogeDuNavigateur,
@@ -37,6 +38,10 @@ import {
  *  - LIMITE consignée : « Détails » ouvert à 320 × 568, le pane est trop court pour l'encart sous
  *    le panneau ; il en recouvre le bas, jamais la part repliée du bandeau ni le bouton.
  *  - AXIS monté AVANT AXIS S/R : le doigt dans une bande lit la zone, pas le signal d'AXIS voisin.
+ *  - Le doigt levé, l'encart reste tant que le réticule reste, second appui sur la bougie voisine
+ *    compris ; un toucher ailleurs l'efface avec le réticule ; quand le graphe glisse sous un
+ *    réticule resté en place (rotation), l'encart est masqué plutôt que de décrire une autre bougie.
+ *  - Panneau « Indicateurs (n) » déplié : l'encart s'arrête à son haut, ses boutons restent visibles.
  * Les attentes lisent la STRUCTURE des annotations (ruban porteur d'un texte, opacité de la bande,
  * étiquette au bord droit, triangle creux), jamais le libellé d'une infobulle de zone.
  */
@@ -532,4 +537,84 @@ test("AXIS monté avant AXIS S/R : le doigt dans une bande lit la zone, pas le s
     await attendreEncart(page, surBande, bande.info);
     await page.screenshot({ path: testInfo.outputPath(`deux-indicateurs-zone-${nom}.png`) });
   }
+
+  // Revue du 12 novembre 2026 (mineur). L'encart ne restait qu'après un appui simple : un second
+  // appui près du réticule le déplaçait, puis le lever du doigt masquait l'encart alors que le
+  // réticule et les rangées du canvas restaient. (Un glissement et un appui long faisaient de
+  // même : ils demandent des gestes que ce harnais ne sait pas rejouer sur les deux moteurs.)
+  await test.step("le doigt levé, l'encart reste tant que le réticule reste ; un toucher ailleurs l'efface", async () => {
+    const libres = repos.bandes.filter((cible) => !cible.marqueurSousLeDoigt);
+    // Deux bougies voisines de la même bande, à moins de 10 px l'une de l'autre : le moteur
+    // déplace alors son réticule au lieu de l'effacer. Loin du bord droit, pour la rotation.
+    const paire = libres
+      .flatMap((a) => libres.filter((b) => b.idx === a.idx + 1 && b.info === a.info && Math.hypot(b.x - a.x, b.y - a.y) < 10).map((b) => [a, b] as const))
+      .filter(([a]) => a.idx <= repos.bougies - 8)
+      .at(-1);
+    expect(paire, "aucune paire de bougies voisines touchables dans une même bande").toBeDefined();
+    const [premiere, voisine] = paire!;
+    const surPremiere = await poserReticule(page, premiere);
+    const encartPremiere = await attendreEncart(page, surPremiere, premiere.info);
+    expect(encartPremiere.cloture).toBe(await clotureFormatee(page, premiere.idx));
+
+    // Second appui, sur la bougie voisine (au-delà du délai de double appui du moteur).
+    await page.waitForTimeout(600);
+    await page.touchscreen.tap(voisine.x, voisine.y);
+    await expect.poll(async () => (await lire(page)).reticule).toEqual({ paneId: "candle_pane", dataIndex: voisine.idx });
+    const encartVoisine = await attendreEncart(page, await lire(page), voisine.info);
+    // L'encart décrit la bougie du réticule, pas celle du premier appui.
+    expect(encartVoisine.cloture).toBe(await clotureFormatee(page, voisine.idx));
+    expect(encartVoisine.cloture).not.toBe(encartPremiere.cloture);
+
+    // Rotation : le réticule reste au même pixel, le graphe glisse dessous sans que le moteur le
+    // notifie. L'encart décrirait une autre bougie que celle du réticule : il est masqué.
+    await redimensionner(page, 375, 667);
+    const tourne = await lire(page);
+    expect(tourne.reticule.paneId).toBe("candle_pane");
+    expect(tourne.reticule.dataIndex).not.toBe(voisine.idx);
+    await expect.poll(async () => (await lireEncart(page))?.affichage).toBe("none");
+    await redimensionner(page, 390, 844);
+
+    // Un toucher ailleurs efface le réticule ; le moteur ne le notifie pas, l'encart part avec lui.
+    const reposee = await poserReticule(page, premiere);
+    await attendreEncart(page, reposee, premiere.info);
+    const ailleurs = repos.libres.filter((cible) => Math.hypot(cible.x - premiere.x, cible.y - premiere.y) > 40).at(-1);
+    expect(ailleurs, "aucun point libre loin du réticule").toBeDefined();
+    await page.waitForTimeout(600);
+    await page.touchscreen.tap(ailleurs!.x, ailleurs!.y);
+    await expect.poll(async () => (await lire(page)).reticule.paneId).toBeNull();
+    expect((await lireEncart(page))?.affichage).toBe("none");
+  });
+
+  // Revue du 12 novembre 2026 (mineur). Panneau « Indicateurs (n) » déplié, l'encart passait
+  // par-dessus ses lignes sans capter les touchers : un appui sur le texte de l'encart pouvait
+  // fermer un indicateur caché dessous.
+  await test.step("panneau « Indicateurs (2) » déplié : l'encart s'arrête à son haut, les boutons restent visibles", async () => {
+    const bascule = page.getByRole("button", { name: /^Indicateurs \(2\)/ });
+    await bascule.tap();
+    await expect(bascule).toHaveAttribute("aria-expanded", "true");
+    const panneau = page.locator("[data-overlay-legend]");
+    await expect(panneau.getByRole("button", { name: "Fermer AXIS S/R" })).toBeVisible();
+    // Les cibles sont relues : celles que le panneau recouvre ne sont plus touchables. La plus
+    // basse des bandes touchables est la plus proche du panneau.
+    const deplie = await lire(page);
+    const bande = deplie.bandes
+      .filter((cible) => !cible.marqueurSousLeDoigt)
+      .reduce<CibleAxisSr | undefined>((bas, cible) => (bas === undefined || cible.y > bas.y ? cible : bas), undefined);
+    expect(bande, "aucune bande touchable, panneau déplié").toBeDefined();
+    const surBande = await poserReticule(page, bande!);
+    const encart = await attendreEncart(page, surBande, bande!.info);
+    const boitePanneau = (await panneau.boundingBox())!;
+    // Témoin : sous le doigt, l'encart n'aurait pas tenu au-dessus du panneau ; il est passé au-dessus du doigt.
+    expect(bande!.y + 14 + encart.boite.height).toBeGreaterThan(boitePanneau.y);
+    expect(encart.boite.y + encart.boite.height).toBeLessThanOrEqual(boitePanneau.y + 0.5);
+    // Sans place au-dessus (écran plus court), le panneau passe DEVANT l'encart.
+    const plans = await page.evaluate(() => ({
+      panneau: Number(getComputedStyle(document.querySelector("[data-overlay-legend]")!).zIndex),
+      encart: Number(getComputedStyle(document.querySelector("[data-candle-readout]")!).zIndex),
+    }));
+    expect(plans.panneau).toBeGreaterThan(plans.encart);
+    await page.screenshot({ path: testInfo.outputPath("deux-indicateurs-panneau-deplie.png") });
+    await bascule.tap();
+    await expect(bascule).toHaveAttribute("aria-expanded", "false");
+  });
 });

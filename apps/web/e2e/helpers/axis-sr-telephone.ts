@@ -5,12 +5,12 @@ import type { AnnotationsIndicateur } from "@axiom/types";
 import type { ActiveIndicator } from "../../src/store/indicators";
 
 /** Une ligne de la fixture : time, open, high, low, close, volume, buyVolume. */
-type LigneFixture = [number, number, number, number, number, number, number];
+export type LigneFixture = [number, number, number, number, number, number, number];
 
-const QUATRE_HEURES = 14_400_000;
+export const QUATRE_HEURES = 14_400_000;
 
 /** Cas de référence d'AXIS S/R : 3 000 bougies BTCUSDT 4h, lues telles quelles dans le dépôt. */
-const BOUGIES = (
+export const BOUGIES = (
   JSON.parse(
     readFileSync(new URL("../../../../packages/indicators/src/strategy/fixtures/btcusdt-4h-3000.json", import.meta.url), "utf8"),
   ) as { bougies: LigneFixture[] }
@@ -25,7 +25,14 @@ export const HORLOGE_AXIS_SR = BOUGIES.at(-1)![0] + QUATRE_HEURES + 1_800_000;
 /**
  * Fige `Date` SEULE sur `instant` (ms) : `new Date()`, `Date()` et `Date.now()` le rendent ;
  * minuteries, `performance.now()` et `requestAnimationFrame` restent ceux du navigateur. À appeler
- * avant `page.goto` ; vaut pour chaque document de la page, rechargement compris.
+ * avant `page.goto` ; vaut pour chaque document de la page, rechargement compris. L'instant se
+ * déplace ensuite par `reglerDate` (une clôture qui arrive), sans jamais avancer de lui-même.
+ *
+ * CONSÉQUENCE pour un parcours qui GLISSE le doigt sur le graphe : toute durée calculée avec `Date`
+ * vaut 0. KLineChart mesure ainsi la durée d'un geste tactile (`touchEndEvent`) ; sous ce harnais,
+ * un glissement se termine donc toujours en défilement lancé (mesuré à la revue du 12 novembre
+ * 2026 : cinq bougies glissées en 600 ms, le graphe défile d'environ 2 400 bougies). Un tel
+ * parcours ne fige pas `Date`, ou s'attend à ce défilement. Appuis simples : sans effet.
  *
  * Pourquoi pas `page.clock.setFixedTime` : Playwright 1.61 y remplace aussi
  * `requestAnimationFrame`. Dans une image, les observateurs de taille passent alors AVANT le rappel
@@ -38,8 +45,9 @@ export const HORLOGE_AXIS_SR = BOUGIES.at(-1)![0] + QUATRE_HEURES + 1_800_000;
  * chaîne de l'instant figé, comme l'original. `parse` et `UTC` sont ceux d'origine.
  */
 export async function figerDate(page: Page, instant: number): Promise<void> {
-  await page.addInitScript((fixe) => {
+  await page.addInitScript((depart) => {
     const Vraie = Date;
+    let fixe = depart;
     function DateFigee(...args: unknown[]): unknown {
       if (new.target === undefined) return new Vraie(fixe).toString();
       return Reflect.construct(Vraie, args.length === 0 ? [fixe] : args, new.target);
@@ -50,8 +58,17 @@ export async function figerDate(page: Page, instant: number): Promise<void> {
     DateFigee.now = () => fixe;
     DateFigee.parse = Vraie.parse;
     DateFigee.UTC = Vraie.UTC;
-    (window as unknown as { Date: unknown }).Date = DateFigee;
+    const fenetre = window as unknown as { Date: unknown; __axiomReglerDate: (t: number) => void };
+    fenetre.Date = DateFigee;
+    fenetre.__axiomReglerDate = (t) => {
+      fixe = t;
+    };
   }, instant);
+}
+
+/** Déplace l'instant figé par `figerDate` dans le document courant (un rechargement revient à l'instant de départ). */
+export async function reglerDate(page: Page, instant: number): Promise<void> {
+  await page.evaluate((t) => (window as unknown as { __axiomReglerDate: (t: number) => void }).__axiomReglerDate(t), instant);
 }
 
 /**
@@ -87,6 +104,15 @@ export async function horlogeDuNavigateur(page: Page, instant: number): Promise<
  */
 export async function preparerAxisSr(page: Page, indicateurs: Array<Pick<ActiveIndicator, "defId" | "params">> = []): Promise<void> {
   await figerDate(page, HORLOGE_AXIS_SR);
+  await persisterBtc4h(page, indicateurs);
+  await servirKlines(page, BOUGIES);
+}
+
+/**
+ * Premier chargement : accueil passé, BTCUSDT 4h sur la vue principale et les vues secondaires,
+ * `indicateurs` persistés. N'écrase rien de ce qu'un rechargement retrouve.
+ */
+export async function persisterBtc4h(page: Page, indicateurs: Array<Pick<ActiveIndicator, "defId" | "params">> = []): Promise<void> {
   await page.addInitScript((persistes) => {
     const btc4h = { exchange: "binance", symbol: "BTCUSDT", timeframe: "4h" };
     localStorage.setItem("axiom:onboarding:v1", JSON.stringify({ completed: true, step: 0 }));
@@ -97,6 +123,13 @@ export async function preparerAxisSr(page: Page, indicateurs: Array<Pick<ActiveI
       localStorage.setItem("axiom:chartLayout:v1", JSON.stringify({ layout: "1", slots: [btc4h, btc4h, btc4h] }));
     }
   }, indicateurs);
+}
+
+/**
+ * Route des klines BTCUSDT 4h : `bougies` (une tranche de la fixture) servies en respectant
+ * `startTime`, `endTime` et `limit`, comme Binance. Tout autre symbole ou intervalle est absent.
+ */
+export async function servirKlines(page: Page, bougies: LigneFixture[]): Promise<void> {
   await page.route("**/api.binance.com/api/v3/klines*", (route) => {
     const params = new URL(route.request().url()).searchParams;
     if (params.get("symbol") !== "BTCUSDT" || params.get("interval") !== "4h") {
@@ -105,7 +138,7 @@ export async function preparerAxisSr(page: Page, indicateurs: Array<Pick<ActiveI
     const debut = Number(params.get("startTime") ?? -Infinity);
     const fin = Number(params.get("endTime") ?? Infinity);
     const limite = Number(params.get("limit") ?? 500);
-    const fenetre = BOUGIES.filter(([t]) => t >= debut && t <= fin);
+    const fenetre = bougies.filter(([t]) => t >= debut && t <= fin);
     const lignes = params.has("startTime") ? fenetre.slice(0, limite) : fenetre.slice(-limite);
     return route.fulfill({
       json: lignes.map(([t, o, h, l, c, v, achat]) =>
@@ -402,6 +435,8 @@ export interface LectureEncart {
   fondAlpha: number;
   /** Texte du bloc `[data-candle-readout-texte]`, `null` sans bloc. */
   texte: string | null;
+  /** Clôture écrite sur la ligne « C » de l'encart : celle de la bougie qu'il décrit. */
+  cloture: string | null;
   /** Le bloc de texte déborde de sa boîte (`scrollWidth > clientWidth`). */
   deborde: boolean;
   /** Lignes du bloc de texte. */
@@ -432,11 +467,25 @@ export async function lireEncart(page: Page): Promise<LectureEncart | null> {
       boite: { x: b.x, y: b.y, width: b.width, height: b.height },
       fondAlpha: ctx.getImageData(0, 0, 1, 1).data[3]! / 255,
       texte: bloc?.textContent ?? null,
+      cloture: Array.from(encart.children).find((ligne) => ligne.firstElementChild?.textContent === "C")?.lastElementChild?.textContent ?? null,
       deborde: bloc ? bloc.scrollWidth > bloc.clientWidth : false,
       lignes: bloc ? Math.round(bloc.getBoundingClientRect().height / parseFloat(getComputedStyle(bloc).lineHeight)) : 0,
       largeurEcran: window.innerWidth,
     };
   });
+}
+
+/** Clôture de la bougie `idx` du graphe actif, écrite comme l'encart l'écrit (`formatPrice` du produit). */
+export async function clotureFormatee(page: Page, idx: number): Promise<string | null> {
+  return page.evaluate(async (i) => {
+    const importer = new Function("return Promise.all([import('/src/chart/drawing.ts'), import('/src/lib/format.ts')])") as () => Promise<[
+      Modules[0],
+      { formatPrice: (v: number) => string },
+    ]>;
+    const [dessin, format] = await importer();
+    const bougie = dessin.getActiveChart()?.getDataList()[i];
+    return bougie ? format.formatPrice(bougie.close) : null;
+  }, idx);
 }
 
 /**

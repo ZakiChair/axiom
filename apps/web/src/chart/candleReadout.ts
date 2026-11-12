@@ -161,7 +161,12 @@ export class CandleReadout {
         // sont moins que l'encart, 131 à 147 px selon le thème). Pane trop court pour les deux
         // bornes : celle du haut d'abord, l'encart dépasse vers le bas.
         haut += this.chart.getStyles().candle.tooltip.offsetTop;
-        bas = Math.min(bas, this.container.clientHeight - 80);
+        // Panneau « Indicateurs (n) » déplié : il monte depuis ces 80 px, l'encart s'arrête à son
+        // haut (replié ou au bureau, sa hauteur est nulle). Sans place au-dessus, le panneau passe
+        // DEVANT l'encart (`overlayLegend.ts`) : l'encart ne capte pas les touchers, un bouton
+        // caché dessous resterait actif.
+        const panneau = this.container.querySelector<HTMLElement>("[data-overlay-legend]");
+        bas = Math.min(bas, this.container.clientHeight - 80 - (panneau?.offsetHeight ?? 0));
       }
       if (left + bw > bound.left + bound.width) left = x - OFFSET - bw;
       if (top + bh > bas) top = y - OFFSET - bh;

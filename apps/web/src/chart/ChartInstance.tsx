@@ -781,6 +781,12 @@ export function ChartInstance({
     // ── Crosshair synchronisé inter-slots ──────────────────────────────────
     let pointeurPresent = false;
     let dernierX: number | null = null;
+    // Abscisse du réticule et bougie que l'encart montre ; `null` quand il est masqué.
+    let encartMontre: { x: number; t: number } | null = null;
+    const cacherEncart = (): void => {
+      candleReadout.cacher();
+      encartMontre = null;
+    };
     const slotLive = (position: number): boolean => {
       const replay = replayStore.getState();
       return position >= 0 && position < visibleSlotCount(chartLayoutStore.getState().layout) &&
@@ -875,17 +881,28 @@ export function ChartInstance({
       // en page téléphone.
       if (data?.kLineData && typeof data.x === "number" && typeof data.y === "number") {
         candleReadout.montrer(data.kLineData, data.x, data.y, indicators.texteVise(data));
+        encartMontre = { x: data.x, t: data.kLineData.timestamp };
       } else {
-        candleReadout.cacher();
+        cacherEncart();
       }
     };
     const onPointerEnter = (): void => { pointeurPresent = true; };
-    const onPointerLeave = (): void => {
+    const onPointerLeave = (e: PointerEvent): void => {
       pointeurPresent = false;
       dernierX = null;
       effacerReticule();
-      candleReadout.cacher();
+      // Au doigt, le moteur garde son réticule après le lever (et les rangées du canvas avec lui) :
+      // l'encart reste, pour être lu une fois le doigt ôté. Avant : il ne restait qu'après un appui
+      // simple, pas après un glissement, un appui long ou un second appui près du réticule.
+      if (e.pointerType !== "touch") cacherEncart();
     };
+    // Nouveau toucher : le moteur efface son réticule quand le doigt se pose ailleurs, SANS le
+    // notifier (`OnCrosshairChange` n'est émis que pour un réticule posé). L'encart est donc masqué
+    // dès le contact, en phase de capture, avant le moteur ; si celui-ci garde son réticule (doigt
+    // posé à moins de 10 px), il le déplace sous le doigt et `onCrosshair` rouvre l'encart dans le
+    // même instant. LIMITE : doigt reposé exactement au même pixel, le réticule ne change pas, rien
+    // n'est notifié et l'encart reste masqué jusqu'au toucher suivant.
+    chartDom.addEventListener("touchstart", cacherEncart, { capture: true, passive: true });
     chartDom.addEventListener("pointerenter", onPointerEnter);
     chartDom.addEventListener("pointerleave", onPointerLeave);
     chart.subscribeAction(ActionType.OnCrosshairChange, onCrosshair);
@@ -913,6 +930,14 @@ export function ChartInstance({
         const points = chart.convertFromPixel([{ x: dernierX }], { paneId: CANDLE_PANE_ID });
         const point = Array.isArray(points) ? points[0] : points;
         crosshairSyncStore.setState({ time: point?.timestamp ?? null, source: slot });
+      }
+      // Doigt levé, le réticule reste au même pixel et le moteur ne notifie rien quand le graphe
+      // glisse dessous (défilement lancé, rotation, bougie nouvelle) : l'encart décrirait une
+      // autre bougie que celle du réticule. Il est masqué ; le prochain toucher le rouvre.
+      if (!pointeurPresent && encartMontre) {
+        const points = chart.convertFromPixel([{ x: encartMontre.x }], { paneId: CANDLE_PANE_ID });
+        const t = (Array.isArray(points) ? points[0] : points)?.timestamp;
+        if (typeof t === "number" && t !== encartMontre.t) cacherEncart();
       }
       xhairThrottle.trigger();
     };
@@ -976,6 +1001,7 @@ export function ChartInstance({
       candleReadout.dispose();
       chartDom.removeEventListener("pointerenter", onPointerEnter);
       chartDom.removeEventListener("pointerleave", onPointerLeave);
+      chartDom.removeEventListener("touchstart", cacherEncart, { capture: true });
       effacerReticule();
       unsubscribeXhairStore();
       unsubscribeXhairOptions();

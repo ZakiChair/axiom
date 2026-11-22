@@ -294,15 +294,15 @@ Puis `pnpm check` vert, et **revue par un agent indépendant** (`AGENTS.md` : ca
   historique ; la nouvelle remplace sa description du menu.
 - Mémoire de session : le dépôt est `~/Projects/axiom`.
 
-## 9. Arbitrages de l'orchestrateur, à confirmer par le propriétaire
+## 9. Arbitrages de l'orchestrateur (spec validée par le propriétaire le 22/11 : « parfait go »)
 
 1. ETF plutôt que spot (spot refusé par l'offre), toujours nommé dans le libellé.
 2. Ajouts au-delà de la demande : argent, platine, palladium, Brent, gaz, blé, maïs, soja, et les
    paniers DBA et DBC.
 3. « Marchés » devient « Indices » ; l'Or rejoint « Matières premières » (id inchangé).
-4. **Question posée au propriétaire le 22/11** : préréglages BTC/GLD, BTC/UUP et ratios SYN
-   utilisateur reconnus comme ratios actifs (lot 2). Toute reconnaissance d'un ratio « Autre
-   actif… » se déduit du seul symbole, sans état : elle entraîne forcément celle-ci.
+4. **Confirmé par le propriétaire le 22/11** (« parfait go ») : préréglages BTC/GLD, BTC/UUP et
+   ratios SYN utilisateur reconnus comme ratios actifs (lot 2). Toute reconnaissance d'un ratio
+   « Autre actif… » se déduit du seul symbole, sans état : elle entraîne forcément celle-ci.
 5. Café absent ; perpétuels TradFi des plateformes crypto écartés.
 6. « USOIL » mène à USO ; WTI/USD reste au catalogue avec la mention de l'offre.
 7. Prime entre places permise quand aucun bouton fixe ne s'applique.

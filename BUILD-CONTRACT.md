@@ -4524,6 +4524,22 @@ premières** (ETF Twelve Data) dans le menu ÷ du bandeau, regroupés avec l'Or,
 titre de la demande explicite. Spec : `docs/superpowers/specs/2026-11-22-ratios-matieres-premieres-design.md`
 (validée le 22/11 : « parfait go ») ; plan : `docs/superpowers/plans/2026-11-23-ratios-matieres-premieres.md`.
 
+- **Arbitrages de l'orchestrateur, à confirmer par le propriétaire.** Aucun n'a été demandé mot
+  pour mot ; certains figurent dans la spec validée, d'autres ont été tranchés en cours de
+  chantier.
+  - **« USOIL » vers l'ETF USO.** Le résumé validé annonçait que « USOIL » trouverait l'ETF, mais
+    la décision du 23 septembre (WTI/USD, jamais USO) et ses trois parcours épinglés n'ont été
+    découverts qu'après la validation : son renversement reste à confirmer.
+  - **Budget au-delà du garde-fou.** La spec validée disait « au-delà de +1 200 octets gzip,
+    arrêter et le signaler » ; le chantier a continué (+1 580 en Node 26, marge CI 2 460) après
+    avoir récupéré les économies sûres. Signalé ici.
+  - **« Marchés » devient « Indices »** et l'Or rejoint « Matières premières » (id `OR` inchangé).
+  - **Reconnaissance resserrée** : un dénominateur fixe n'est plus reconnu que par recomposition
+    exacte (`kraken:SOLUSD|/|binance:ETHUSDT` n'est plus lu ÷ETH) ; les préréglages et SYN « / »
+    deviennent des ratios libres (ce point-là a été confirmé explicitement le 22/11).
+  - Ajouts au-delà des actifs nommés (argent, platine, palladium, Brent, gaz, blé, maïs, soja,
+    paniers DBA et DBC) ; ETF plutôt que spot, toujours nommé ; pas de « Récents » ; la devise
+    des boutons crypto fixes reste non vérifiée, comme avant (voir les limites).
 - **Offre vérifiée le 22/11** (sondes `time_series` 1d, clé serveur `/tdapi`) :
   - servis : CPER (cuivre), CANE (sucre), USO (pétrole WTI), SLV (argent), PPLT (platine), PALL
     (palladium), BNO (Brent), UNG (gaz naturel), WEAT (blé), CORN (maïs), SOYB (soja), DBA
@@ -4555,8 +4571,8 @@ titre de la demande explicite. Spec : `docs/superpowers/specs/2026-11-22-ratios-
     ≈ 82 crédits par jour ouvré et par ratio ouvert (28 dès 1d).
 - **Lot 1 — recherche.** SOYB ajouté au catalogue curé ; libellés « … — ETF » et alias sans
   accents (CUIVRE, SUCRE, PETROLE, BLE, MAIS, SOJA, GAZ, ARGENT…). **« USOIL » propose
-  désormais l'ETF USO**, ce qui renverse la décision du 23 septembre (WTI/USD, jamais USO), sur
-  validation du propriétaire : son intention reste épinglée, car choisir WTI/USD explicitement
+  désormais l'ETF USO**, ce qui renverse la décision du 23 septembre (WTI/USD, jamais USO) —
+  arbitrage à confirmer (ci-dessus) : son intention reste épinglée, car choisir WTI/USD explicitement
   affiche toujours le refus d'abonnement, sans ETF de remplacement (trois parcours
   `sources-automatiques` réécrits).
 - **Lot 2 — « Autre actif… ».** Dernière entrée du menu ÷ : elle ferme le menu et ouvre un

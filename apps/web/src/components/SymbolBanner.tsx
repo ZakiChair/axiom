@@ -27,12 +27,14 @@ import { formatSyntheticLabel, parseSyntheticSymbol } from "../data/synthetic";
 import { COMPOSITION_DOMINANCE_STABLECOINS, estSerieEnPourcentage, estSymboleCapitalisation } from "../data/mcap";
 import { sourcesCapitalisationStore, type SourceCapitalisation } from "../data/mcapCandles";
 import {
+  baseDuRatio,
   DENOMINATEURS_CRYPTO,
   DENOMINATEURS_DEVISES,
   DENOMINATEURS_INDICES,
   DENOMINATEURS_MATIERES,
   detailDenominateur,
   estRatio,
+  libelleBandeauRatio,
   libelleDenominateur,
   noteDollar,
   symboleRatio,
@@ -194,12 +196,8 @@ function BoutonsRatio({
 
   const actif = estRatio(symbol, exchange);
   // Base de composition : la jambe A du ratio actif, sinon le marché courant.
-  const baseEx: ExchangeId = actif?.spec.exA === "mcap"
-    ? "synthetic"
-    : actif
-      ? actif.spec.exA
-      : exchange;
-  const baseSym = actif ? actif.spec.legA : symbol;
+  const { symbol: baseSym, exchange: baseEx } = baseDuRatio(actif, symbol, exchange);
+  const libre = actif !== null && actif.denom === null;
 
   /**
    * Pose le ratio ÷denom (sans jamais détoggler). Sans cible composable : rien. Unité de temps
@@ -240,7 +238,7 @@ function BoutonsRatio({
       ? `${libelleDenominateur(denom)} indisponible : l'actif est déjà ${denom} ou coté en ${denom}`
       : `${libelleDenominateur(denom)} indisponible : actif non coté en dollar, ou déjà cette référence`;
   // Puce du menu : le ratio affiché, sinon la préférence du bouton scindé.
-  const marque = actif?.denom ?? choisi;
+  const marque = actif === null ? choisi : actif.denom;
 
   // Bouton scindé : tout sauf BTC, qui garde son bouton propre. Si le dénominateur
   // préféré n'est pas composable ici (ex. ÷ETH sur ETHUSDT, ÷Or sur BTCEUR), on retombe
@@ -254,7 +252,7 @@ function BoutonsRatio({
   const candidats = groupes.flatMap(([, , liste]) => liste);
   const disponibles = candidats.filter(disponible);
   const denomScinde: DenominateurId | undefined =
-    actif !== null && actif.denom !== "BTC"
+    actif !== null && actif.denom !== null && actif.denom !== "BTC"
       ? actif.denom
       : disponibles.includes(choisi)
         ? choisi
@@ -274,20 +272,22 @@ function BoutonsRatio({
         </button>
       )}
 
-      {denomScinde !== undefined && (
+      {(denomScinde !== undefined || libre) && (
         <span className="pointer-events-auto relative inline-flex">
           <button
             type="button"
             title={
-              actif?.denom === denomScinde
-                ? `Revenir à ${actif.spec.legA}`
-                : detail(denomScinde)
+              libre || actif?.denom === denomScinde
+                ? `Revenir à ${baseSym}`
+                : detail(denomScinde as DenominateurId)
             }
-            onClick={() => basculer(denomScinde)}
-            aria-pressed={actif?.denom === denomScinde}
-            className={`${classeBouton(actif?.denom === denomScinde, mobile)} rounded-r-none border-r-0`}
+            onClick={() => (libre
+              ? marketStore.getState().setMarket({ exchange: baseEx, symbol: baseSym, timeframe })
+              : basculer(denomScinde as DenominateurId))}
+            aria-pressed={libre || actif?.denom === denomScinde}
+            className={`${classeBouton(libre || actif?.denom === denomScinde, mobile)} rounded-r-none border-r-0`}
           >
-            {libelleDenominateur(denomScinde)}
+            {libre ? `÷${actif.spec.legB}` : libelleDenominateur(denomScinde as DenominateurId)}
           </button>
           <MenuDeroulant
             declencheur="▾"
@@ -342,11 +342,10 @@ export function SymbolBanner() {
   const timeframe = useStore(marketStore, (s) => s.timeframe);
   useStore(marketStore, (s) => s.dataLoad.status);
   const syntheticSpec = exchange === "synthetic" ? parseSyntheticSymbol(symbol) : null;
-  // Ratio ÷ marché ou devise : « BTCUSDT ÷Or », « BTCUSDT en CHF » ; sinon le libellé SYN.
-  const ratioTradfi = syntheticSpec?.exB === "twelvedata" ? estRatio(symbol, exchange) : null;
-  const bannerSymbol = ratioTradfi
-    ? `${ratioTradfi.spec.legA} ${libelleDenominateur(ratioTradfi.denom)}`
-    : syntheticSpec ? formatSyntheticLabel(syntheticSpec) : symbol;
+  // Ratio fixe Twelve Data ou libre : « BTCUSDT ÷Or », « BTCUSD ÷ BTCUSDT » ; sinon le libellé SYN.
+  const ratioActif = syntheticSpec ? estRatio(symbol, exchange) : null;
+  const bannerSymbol = (ratioActif && libelleBandeauRatio(ratioActif))
+    ?? (syntheticSpec ? formatSyntheticLabel(syntheticSpec) : symbol);
   const estCapitalisation =
     estSymboleCapitalisation(symbol) || syntheticSpec?.exA === "mcap" || syntheticSpec?.exB === "mcap";
   // Pour un ratio, la jambe mcap porte la provenance (fetchKlines est appelé avec elle).

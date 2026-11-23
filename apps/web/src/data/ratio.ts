@@ -236,42 +236,6 @@ export function symboleRatio(
   return encodeSyntheticSymbol({ exA: exchange, legA: symbol, exB: exchange, legB: ref, op: "/" });
 }
 
-/** Ratio actif posé par un toggle, avec le dénominateur reconnu. */
-export interface RatioActif {
-  spec: SyntheticSpec;
-  denom: DenominateurId;
-}
-
-/**
- * Ratio ÷DENOM actif si le marché courant EST un ratio posé par un toggle
- * (exchange="synthetic", op="/", jambe B = réf du dénominateur), sinon null.
- * Le dénominateur renvoyé est celui dont la réf correspond à la jambe B.
- *
- * La jambe B est TOUJOURS vérifiée contre la réf de SON exchange (spec.exB, jamais
- * celle de exA — sinon un SYN quelconque à legB « BTCUSD » serait faussement reconnu) :
- *  - même source (exB === exA) : réf locale `REFS[denom][exB]` ;
- *  - cross-source (exB !== exA, lot D) : exactement la réf canonique
- *    (`exB === REF_CANONIQUE[denom].ex` ET `legB === REF_CANONIQUE[denom].sym`) ;
- *  - marchés et devises : jambe B Twelve Data égale à `REFS_TRADFI[denom].sym`.
- */
-export function estRatio(symbol: string, exchange: ExchangeId): RatioActif | null {
-  if (exchange !== "synthetic") return null;
-  const spec = parseSyntheticSymbol(symbol);
-  if (spec === null) return null;
-  const exB = spec.exB;
-  if (spec.op !== "/" || exB === "mcap") return null;
-  const denom = DENOMINATEURS.find((d) =>
-    !estCrypto(d)
-      // Jambe A cotée en dollar : c'est exactement le ratio que le bouton aurait posé.
-      ? exB === "twelvedata" && spec.legB === REFS_TRADFI[d].sym
-        && symboleRatioTradfi(spec.legA, spec.exA === "mcap" ? "synthetic" : spec.exA, d) === symbol
-      : exB === spec.exA
-        ? spec.legB === REFS[d][exB]
-        : exB === REF_CANONIQUE[d].ex && spec.legB === REF_CANONIQUE[d].sym,
-  );
-  return denom === undefined ? null : { spec, denom };
-}
-
 /** Jambe choisie dans le sélecteur « Autre actif… » : un actif du catalogue, sur sa place. */
 export interface JambeChoisie { exchange: ExchangeId; symbol: string }
 
@@ -318,3 +282,39 @@ export function composerRatioLibre(baseSym: string, baseEx: ExchangeId, jambe: J
     denom: null,
   };
 }
+
+/** Ratio actif : `denom` = dénominateur fixe recomposé exactement, `null` = ratio libre. */
+export interface RatioActif {
+  spec: SyntheticSpec;
+  denom: DenominateurId | null;
+}
+
+/**
+ * Ratio actif du symbole (sans état). FIXE : le symbole se recompose exactement par
+ * `symboleRatio(jambe A, d)`. Sinon LIBRE (`denom: null`) : tout « A / B » que
+ * `composerRatioLibre` accepterait. Un spread ou un ratio refusé n'est pas reconnu.
+ */
+export function estRatio(symbol: string, exchange: ExchangeId): RatioActif | null {
+  if (exchange !== "synthetic") return null;
+  const spec = parseSyntheticSymbol(symbol);
+  if (spec === null || spec.op !== "/") return null;
+  const exA: ExchangeId = spec.exA === "mcap" ? "synthetic" : spec.exA;
+  const fixe = DENOMINATEURS.find((d) => symboleRatio(spec.legA, exA, d) === symbol);
+  if (fixe !== undefined) return { spec, denom: fixe };
+  const libre = composerRatioLibre(spec.legA, exA, { exchange: spec.exB === "mcap" ? "synthetic" : spec.exB, symbol: spec.legB });
+  return "symbole" in libre && libre.symbole === symbol ? { spec, denom: null } : null;
+}
+
+/** Base de composition : jambe A du ratio (`mcap` redevient `synthetic`), sinon le marché. PURE. */
+export function baseDuRatio(actif: RatioActif | null, symbol: string, exchange: ExchangeId): { symbol: string; exchange: ExchangeId } {
+  if (actif === null) return { symbol, exchange };
+  return { symbol: actif.spec.legA, exchange: actif.spec.exA === "mcap" ? "synthetic" : actif.spec.exA };
+}
+
+/** « BTCUSDT ÷Cuivre (CPER) », « BTCUSDT en CHF » (fixe Twelve Data), « BTCUSD ÷ BTCUSDT » (libre) ; null pour un fixe crypto (libellé SYN « A / B » conservé). PURE. */
+export function libelleBandeauRatio(actif: RatioActif): string | null {
+  const { denom, spec } = actif;
+  if (denom === null) return `${spec.legA} ÷ ${spec.legB}`;
+  return estCrypto(denom) ? null : `${spec.legA} ${libelleDenominateur(denom)}`;
+}
+

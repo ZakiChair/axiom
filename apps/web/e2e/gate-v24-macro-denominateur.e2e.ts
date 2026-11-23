@@ -299,3 +299,17 @@ test("focus sorti du menu par ⇧Tab : le menu se ferme et ↓ garde son sens gl
   await page.keyboard.press("ArrowDown");
   await expect.poll(symbole).not.toBe("BTCUSDT");
 });
+
+test("bandeau : un ratio libre (BTCUSDT ÷ GLD) affiche ÷GLD enfoncé et revient à BTCUSDT d'un clic", async ({ page }) => {
+  await bouchonnerTwelveData(page);
+  await page.addInitScript(() => {
+    window.localStorage.setItem("axiom:chartState:v1", JSON.stringify({ exchange: "synthetic", symbol: "binance:BTCUSDT|/|twelvedata:GLD", timeframe: "1d" }));
+  });
+  await page.goto("/");
+  await expect(page.getByText("BTCUSDT ÷ GLD", { exact: true })).toBeVisible({ timeout: 15_000 });
+  const bouton = page.getByRole("button", { name: "÷GLD", exact: true });
+  await expect(bouton).toHaveAttribute("aria-pressed", "true");
+  await bouton.click();
+  await expect(page.getByText("BTCUSDT ÷ GLD", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("BTCUSDT", { exact: true }).first()).toBeVisible();
+});

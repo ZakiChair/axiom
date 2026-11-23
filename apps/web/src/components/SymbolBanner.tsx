@@ -29,7 +29,8 @@ import { sourcesCapitalisationStore, type SourceCapitalisation } from "../data/m
 import {
   DENOMINATEURS_CRYPTO,
   DENOMINATEURS_DEVISES,
-  DENOMINATEURS_MARCHES,
+  DENOMINATEURS_INDICES,
+  DENOMINATEURS_MATIERES,
   detailDenominateur,
   estRatio,
   libelleDenominateur,
@@ -163,7 +164,8 @@ function classeBouton(actif: boolean, mobile = false): string {
 /**
  * Boutons de ratio du bandeau : « ÷BTC » (un clic, contrat inchangé) + un bouton SCINDÉ
  * « ÷ETH ▾ » dont le dénominateur se choisit dans un menu groupé : crypto (ETH, SOL),
- * marchés (or, Nasdaq 100, S&P 500) et devises (« en CHF », « en JPY »…).
+ * indices (Nasdaq 100, S&P 500), matières premières (or, argent, cuivre, pétrole… et
+ * paniers d'ETF) et devises (« en CHF », « en JPY »…).
  *
  * Composant ENFANT à dessein : son état de menu (useState) ne doit pas re-rendre le
  * bandeau, dont le prix / H-L / volume sont écrits IMPÉRATIVEMENT dans le DOM.
@@ -243,12 +245,13 @@ function BoutonsRatio({
   // Bouton scindé : tout sauf BTC, qui garde son bouton propre. Si le dénominateur
   // préféré n'est pas composable ici (ex. ÷ETH sur ETHUSDT, ÷Or sur BTCEUR), on retombe
   // sur le premier disponible plutôt que de faire disparaître le bouton.
-  const groupes: Array<[string, DenominateurId[]]> = [
-    ["Crypto", DENOMINATEURS_CRYPTO.filter((d) => d !== "BTC")],
-    ["Marchés", [...DENOMINATEURS_MARCHES]],
-    ["Devises", [...DENOMINATEURS_DEVISES]],
+  const groupes: Array<[titre: string, cle: string, liste: DenominateurId[]]> = [
+    ["Crypto", "crypto", DENOMINATEURS_CRYPTO.filter((d) => d !== "BTC")],
+    ["Indices", "indices", [...DENOMINATEURS_INDICES]],
+    ["Matières premières", "matieres", [...DENOMINATEURS_MATIERES]],
+    ["Devises", "devises", [...DENOMINATEURS_DEVISES]],
   ];
-  const candidats = groupes.flatMap(([, liste]) => liste);
+  const candidats = groupes.flatMap(([, , liste]) => liste);
   const disponibles = candidats.filter(disponible);
   const denomScinde: DenominateurId | undefined =
     actif !== null && actif.denom !== "BTC"
@@ -295,9 +298,9 @@ function BoutonsRatio({
             classePanneau="w-56"
             declencheurClasse={`${classeBouton(false, mobile)} rounded-l-none px-1`}
           >
-            {(fermer) => groupes.map(([titre, liste]) => (
-              <div key={titre} role="group" aria-labelledby={`ratio-groupe-${titre}`} className="flex flex-col">
-                <span id={`ratio-groupe-${titre}`} className="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-dim">
+            {(fermer) => groupes.map(([titre, cle, liste]) => (
+              <div key={cle} role="group" aria-labelledby={`ratio-groupe-${cle}`} className="flex flex-col">
+                <span id={`ratio-groupe-${cle}`} className="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-dim">
                   {titre}
                 </span>
                 {liste.map((denom) => (

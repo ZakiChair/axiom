@@ -3,10 +3,12 @@
  * Zéro import React/store — le moteur SYN (data/synthetic.ts) fait tout le reste
  * (live, AT). Détoggle SANS ÉTAT : quitter un ratio = revenir à sa jambe A.
  *
- * Trois familles de dénominateurs (demande du 26/09/2026) :
+ * Quatre familles de dénominateurs (demandes du 26/09 et du 22/11/2026) :
  *  - crypto (BTC, ETH, SOL) : réf locale de la source quand elle existe, sinon réf
  *    canonique Binance (cross-source, lot D) ;
- *  - marchés (or, Nasdaq 100, S&P 500) et devises (EUR, GBP, CHF, JPY, CAD, AUD) : une
+ *  - indices (Nasdaq 100, S&P 500), matières premières (or spot, puis 13 ETF : argent,
+ *    platine, palladium, cuivre, pétrole, Brent, gaz, blé, maïs, soja, sucre, panier
+ *    agricole, panier large) et devises (EUR, GBP, CHF, JPY, CAD, AUD) : une
  *    jambe Twelve Data UNIQUE, quelle que soit la source de l'actif. Réservés aux actifs
  *    cotés en dollar (USD, USDT, USDC, FDUSD — stablecoin ≈ USD) : diviser BTCEUR par
  *    XAU/USD mélangerait deux devises. Une devise s'exprime par sa paire CCY/USD : BTC en
@@ -30,10 +32,11 @@ import { estCapitalisationUsd } from "./mcap";
 import { basePerp, COTATIONS_USD, splitSymbol } from "./symbol";
 
 export const DENOMINATEURS_CRYPTO = ["BTC", "ETH", "SOL"] as const;
-export const DENOMINATEURS_MARCHES = ["OR", "NASDAQ", "SP500"] as const;
+export const DENOMINATEURS_INDICES = ["NASDAQ", "SP500"] as const;
+export const DENOMINATEURS_MATIERES = ["OR", "ARGENT", "PLATINE", "PALLADIUM", "CUIVRE", "PETROLE", "BRENT", "GAZ", "BLE", "MAIS", "SOJA", "SUCRE", "AGRICULTURE", "PANIER"] as const;
 export const DENOMINATEURS_DEVISES = ["EUR", "GBP", "CHF", "JPY", "CAD", "AUD"] as const;
 /** Dénominateurs proposés par les toggles de ratio, dans l'ordre d'affichage. */
-export const DENOMINATEURS = [...DENOMINATEURS_CRYPTO, ...DENOMINATEURS_MARCHES, ...DENOMINATEURS_DEVISES] as const;
+export const DENOMINATEURS = [...DENOMINATEURS_CRYPTO, ...DENOMINATEURS_INDICES, ...DENOMINATEURS_MATIERES, ...DENOMINATEURS_DEVISES] as const;
 export type DenominateurId = (typeof DENOMINATEURS)[number];
 type DenominateurCrypto = (typeof DENOMINATEURS_CRYPTO)[number];
 type DenominateurTradfi = Exclude<DenominateurId, DenominateurCrypto>;
@@ -62,13 +65,44 @@ export const REF_CANONIQUE: Record<DenominateurCrypto, { ex: "binance"; sym: str
   SOL: { ex: "binance", sym: "SOLUSDT" },
 };
 
+type MatiereEtf = Exclude<(typeof DENOMINATEURS_MATIERES)[number], "OR">;
+type RefTradfi = { sym: string; libelle: string; detail: string };
+
 /**
- * Jambe Twelve Data des dénominateurs marchés et devises, vérifiée sur l'offre du
- * propriétaire le 26/09/2026 : XAU/USD, EUR/USD, CHF/USD, JPY/USD, CAD/USD servis ; les
- * indices SPX et NDX exigent l'offre Grow — le S&P 500 et le Nasdaq 100 passent donc par
- * leurs ETF SPY et QQQ, NOMMÉS dans le libellé (jamais une substitution silencieuse).
+ * Matières premières par ETF : [id, ticker, nom du libellé, nom de l'infobulle, adossé au
+ * métal physique, spot refusé par l'offre]. Le libellé et l'infobulle en sont générés :
+ * l'ETF est toujours NOMMÉ (jamais une substitution silencieuse au cours spot).
  */
-export const REFS_TRADFI: Record<DenominateurTradfi, { sym: string; libelle: string; detail: string }> = {
+const ETF_MATIERES: ReadonlyArray<readonly [MatiereEtf, string, string, string, boolean, string?]> = [
+  ["ARGENT", "SLV", "Argent", "l'argent", true, "XAG/USD"],
+  ["PLATINE", "PPLT", "Platine", "le platine", true, "XPT/USD"],
+  ["PALLADIUM", "PALL", "Palladium", "le palladium", true],
+  ["CUIVRE", "CPER", "Cuivre", "le cuivre", false, "HG1"],
+  ["PETROLE", "USO", "Pétrole WTI", "le pétrole WTI", false, "WTI/USD"],
+  ["BRENT", "BNO", "Brent", "le Brent", false, "XBR/USD"],
+  ["GAZ", "UNG", "Gaz naturel", "le gaz naturel", false],
+  ["BLE", "WEAT", "Blé", "le blé", false],
+  ["MAIS", "CORN", "Maïs", "le maïs", false],
+  ["SOJA", "SOYB", "Soja", "le soja", false],
+  ["SUCRE", "CANE", "Sucre", "le sucre", false],
+  ["AGRICULTURE", "DBA", "Agriculture", "un panier agricole (dont café et cacao)", false],
+  ["PANIER", "DBC", "Matières premières", "un panier large (énergie, métaux, agriculture)", false],
+];
+
+const REFS_MATIERES = Object.fromEntries(ETF_MATIERES.map(([id, ticker, nom, nomInfobulle, physique, spot]) => [id, {
+  sym: ticker,
+  libelle: `÷${nom} (${ticker})`,
+  detail: `${nomInfobulle} via l'ETF ${ticker} (prix de la part, ${physique ? "adossé au métal" : "contrats à terme renouvelés : écart possible au cours sur plusieurs années"})${spot ? ` ; le spot ${spot} exige une offre Twelve Data supérieure` : ""}`,
+}])) as Record<MatiereEtf, RefTradfi>;
+
+/**
+ * Jambe Twelve Data des dénominateurs tradfi, vérifiée sur l'offre du propriétaire le
+ * 26/09/2026 : XAU/USD, EUR/USD, CHF/USD, JPY/USD, CAD/USD servis ; les indices SPX et NDX
+ * exigent l'offre Grow — le S&P 500 et le Nasdaq 100 passent donc par leurs ETF SPY et QQQ,
+ * NOMMÉS dans le libellé. Même principe pour les matières premières (cf. `ETF_MATIERES`).
+ */
+export const REFS_TRADFI: Record<DenominateurTradfi, RefTradfi> = {
+  ...REFS_MATIERES,
   OR: { sym: "XAU/USD", libelle: "÷Or", detail: "l'or spot (XAU/USD, en onces)" },
   NASDAQ: { sym: "QQQ", libelle: "÷Nasdaq 100 (QQQ)", detail: "le Nasdaq 100 via l'ETF QQQ : prix de l'ETF, pas le niveau de l'indice (≈ NDX/41) ; l'indice NDX exige l'offre Grow de Twelve Data" },
   SP500: { sym: "SPY", libelle: "÷S&P 500 (SPY)", detail: "le S&P 500 via l'ETF SPY : prix de l'ETF, pas le niveau de l'indice (≈ SPX/10) ; l'indice SPX exige l'offre Grow de Twelve Data" },
@@ -79,6 +113,9 @@ export const REFS_TRADFI: Record<DenominateurTradfi, { sym: string; libelle: str
   CAD: { sym: "CAD/USD", libelle: "en CAD", detail: "le dollar canadien (÷ CAD/USD)" },
   AUD: { sym: "AUD/USD", libelle: "en AUD", detail: "le dollar australien (÷ AUD/USD)" },
 };
+
+const estDevise = (denom: DenominateurId): boolean =>
+  (DENOMINATEURS_DEVISES as readonly string[]).includes(denom);
 
 const estCrypto = (denom: DenominateurId): denom is DenominateurCrypto =>
   (DENOMINATEURS_CRYPTO as readonly string[]).includes(denom);
@@ -109,7 +146,7 @@ function decouper(symbol: string, exchange: ExchangeId): { base: string; quote: 
 const COTATIONS_DOLLAR = COTATIONS_USD;
 
 /**
- * Ratio ÷ marché ou devise : jambe B Twelve Data unique. Actifs cotés en dollar seulement
+ * Ratio ÷ indice, matière première ou devise : jambe B Twelve Data unique. Actifs cotés en dollar seulement
  * (capitalisations TOTAL* en USD, tickers Twelve Data sans barre = valeurs US, paires
  * X/USD) ; jamais l'actif divisé par lui-même ou par sa propre devise (EURUSDT en EUR).
  * La dominance STABLE.D (série en %) n'est pas cotée en dollar : aucun ratio.
@@ -123,11 +160,11 @@ function symboleRatioTradfi(symbol: string, exchange: ExchangeId, denom: Denomin
   } else if (exchange === "twelvedata") {
     const [base, quote] = symbol.toUpperCase().split("/");
     // « RY:TSX » : place explicite, cotation hors dollar possible — refusé.
-    if (symbol === ref || symbol.includes(":") || base === denom || (quote !== undefined && quote !== "USD")) return null;
+    if (symbol === ref || symbol.includes(":") || (estDevise(denom) && base === denom) || (quote !== undefined && quote !== "USD")) return null;
     exA = exchange;
   } else {
     const parts = decouper(symbol, exchange);
-    if (parts === null || parts.base === denom || !COTATIONS_DOLLAR.includes(parts.quote)) return null;
+    if (parts === null || (estDevise(denom) && parts.base === denom) || !COTATIONS_DOLLAR.includes(parts.quote)) return null;
     exA = exchange;
   }
   return encodeSyntheticSymbol({ exA, legA: symbol, exB: "twelvedata", legB: ref, op: "/" });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DENOMINATEURS, detailDenominateur, estRatio, libelleDenominateur, noteDollar, symboleRatio } from "./ratio";
+import { DENOMINATEURS, DENOMINATEURS_MATIERES, detailDenominateur, estRatio, libelleDenominateur, noteDollar, symboleRatio } from "./ratio";
 
 describe("symboleRatio — cible SYN X/DENOM pour le marché courant", () => {
   it("compose le ratio ÷BTC sur binance (réf BTCUSDT)", () => {
@@ -318,5 +318,44 @@ describe("STABLE.D (dominance, série en %) : aucun ratio ni conversion de devis
     expect(symboleRatio("TOTAL3", "synthetic", "SOL")).toBe("mcap:TOTAL3|/|binance:SOLUSDT");
     expect(symboleRatio("TOTAL3", "synthetic", "OR")).toBe("mcap:TOTAL3|/|twelvedata:XAU/USD");
     expect(estRatio("mcap:TOTAL3|/|binance:SOLUSDT", "synthetic")?.denom).toBe("SOL");
+  });
+});
+
+describe("matières premières (demande du 22/11/2026)", () => {
+  const ETF = [["ARGENT", "SLV"], ["PLATINE", "PPLT"], ["PALLADIUM", "PALL"], ["CUIVRE", "CPER"], ["PETROLE", "USO"], ["BRENT", "BNO"], ["GAZ", "UNG"], ["BLE", "WEAT"], ["MAIS", "CORN"], ["SOJA", "SOYB"], ["SUCRE", "CANE"], ["AGRICULTURE", "DBA"], ["PANIER", "DBC"]] as const;
+
+  it("compose chaque matière première pour un actif en dollar, un ticker Twelve Data et TOTAL", () => {
+    for (const [id, etf] of ETF) {
+      expect(symboleRatio("BTCUSDT", "binance", id)).toBe(`binance:BTCUSDT|/|twelvedata:${etf}`);
+      expect(symboleRatio("AAPL", "twelvedata", id)).toBe(`twelvedata:AAPL|/|twelvedata:${etf}`);
+      expect(symboleRatio("TOTAL", "synthetic", id)).toBe(`mcap:TOTAL|/|twelvedata:${etf}`);
+    }
+  });
+  it("refuse un actif hors dollar et l'ETF divisé par lui-même", () => {
+    expect(symboleRatio("BTCEUR", "kraken", "CUIVRE")).toBeNull();
+    expect(symboleRatio("CPER", "twelvedata", "CUIVRE")).toBeNull();
+    expect(symboleRatio("USO", "twelvedata", "PETROLE")).toBeNull();
+    expect(symboleRatio("GLD", "twelvedata", "OR")).toBe("twelvedata:GLD|/|twelvedata:XAU/USD");
+  });
+  it("la garde « base = dénominateur » ne vaut que pour les devises", () => {
+    expect(symboleRatio("GAZUSDT", "binance", "GAZ")).toBe("binance:GAZUSDT|/|twelvedata:UNG");
+    expect(symboleRatio("EURUSDT", "binance", "EUR")).toBeNull();
+  });
+  it("estRatio reconnaît chaque matière première et rend la jambe A", () => {
+    for (const id of DENOMINATEURS_MATIERES) {
+      const actif = estRatio(symboleRatio("BTCUSDT", "binance", id) as string, "synthetic");
+      expect(actif?.denom).toBe(id);
+      expect(actif?.spec.legA).toBe("BTCUSDT");
+    }
+  });
+  it("libellés : l'ETF est toujours nommé ; infobulles : nature et spot refusé", () => {
+    expect(DENOMINATEURS_MATIERES.map(libelleDenominateur)).toEqual(["÷Or", "÷Argent (SLV)", "÷Platine (PPLT)", "÷Palladium (PALL)", "÷Cuivre (CPER)", "÷Pétrole WTI (USO)", "÷Brent (BNO)", "÷Gaz naturel (UNG)", "÷Blé (WEAT)", "÷Maïs (CORN)", "÷Soja (SOYB)", "÷Sucre (CANE)", "÷Agriculture (DBA)", "÷Matières premières (DBC)"]);
+    expect(detailDenominateur("CUIVRE")).toBe("le cuivre via l'ETF CPER (prix de la part, contrats à terme renouvelés : écart possible au cours sur plusieurs années) ; le spot HG1 exige une offre Twelve Data supérieure");
+    expect(detailDenominateur("ARGENT")).toBe("l'argent via l'ETF SLV (prix de la part, adossé au métal) ; le spot XAG/USD exige une offre Twelve Data supérieure");
+    expect(detailDenominateur("PALLADIUM")).not.toContain("spot");
+    expect(detailDenominateur("AGRICULTURE")).toContain("café");
+  });
+  it("ordre des familles : crypto, indices, matières premières, devises", () => {
+    expect(DENOMINATEURS).toEqual(["BTC", "ETH", "SOL", "NASDAQ", "SP500", "OR", "ARGENT", "PLATINE", "PALLADIUM", "CUIVRE", "PETROLE", "BRENT", "GAZ", "BLE", "MAIS", "SOJA", "SUCRE", "AGRICULTURE", "PANIER", "EUR", "GBP", "CHF", "JPY", "CAD", "AUD"]);
   });
 });

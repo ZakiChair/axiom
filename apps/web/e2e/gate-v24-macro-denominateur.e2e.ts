@@ -169,9 +169,9 @@ test("bandeau : BTCUSDT ÷Or puis en CHF, jambe Twelve Data demandée, détoggle
   // Menu groupé : les marchés et les devises s'ajoutent à ETH et SOL.
   await page.getByRole("button", { name: "Choisir l'actif de comparaison" }).click();
   await expect(page.getByRole("group", { name: "Crypto" }).getByRole("menuitem", { name: "÷SOL" })).toBeEnabled();
-  await expect(page.getByRole("group", { name: "Marchés" }).getByRole("menuitem", { name: "÷S&P 500 (SPY)" })).toBeEnabled();
+  await expect(page.getByRole("group", { name: "Indices" }).getByRole("menuitem", { name: "÷S&P 500 (SPY)" })).toBeEnabled();
   await expect(page.getByRole("group", { name: "Devises" }).getByRole("menuitem", { name: "en JPY" })).toBeEnabled();
-  await page.getByRole("group", { name: "Marchés" }).getByRole("menuitem", { name: "÷Or" }).click();
+  await page.getByRole("group", { name: "Matières premières" }).getByRole("menuitem", { name: "÷Or" }).click();
   await expect(page.getByText("BTCUSDT ÷Or", { exact: true })).toBeVisible({ timeout: 15_000 });
   await expect.poll(() => demandes).toContain("XAU/USD");
 
@@ -205,8 +205,24 @@ test("bandeau : un actif non coté en dollar (BTCEUR) n'offre ni ÷Or ni devise"
   const menu = page.getByRole("button", { name: "Choisir l'actif de comparaison" });
   await expect(menu).toBeVisible({ timeout: 15_000 });
   await menu.click();
-  await expect(page.getByRole("group", { name: "Marchés" }).getByRole("menuitem", { name: "÷Or" })).toBeDisabled();
+  await expect(page.getByRole("group", { name: "Matières premières" }).getByRole("menuitem", { name: "÷Or" })).toBeDisabled();
+  await expect(page.getByRole("group", { name: "Matières premières" }).getByRole("menuitem", { name: "÷Cuivre (CPER)" })).toBeDisabled();
   await expect(page.getByRole("group", { name: "Devises" }).getByRole("menuitem", { name: "en CHF" })).toBeDisabled();
+});
+
+test("bandeau : BTCUSDT ÷Cuivre (CPER), jambe CPER demandée, ETF nommé dans le bandeau", async ({ page }) => {
+  const demandes: string[] = [];
+  await page.route("**/tdapi/time_series*", (route) => {
+    demandes.push(new URL(route.request().url()).searchParams.get("symbol") ?? "");
+    return route.fulfill({ json: SERIE_TD });
+  });
+  await page.route("**/tdapi/quote*", (route) => route.fulfill({ json: QUOTE_TD }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Choisir l'actif de comparaison" }).click();
+  await page.getByRole("group", { name: "Matières premières" }).getByRole("menuitem", { name: "÷Cuivre (CPER)" }).click();
+  await expect(page.getByText("BTCUSDT ÷Cuivre (CPER)", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect.poll(() => demandes).toContain("CPER");
+  await expect(page.locator("[data-chart-status]")).toHaveCount(0);
 });
 
 test("menu des dénominateurs au clavier : ↓ parcourt le menu sans changer de paire, Échap le ferme", async ({ page }) => {

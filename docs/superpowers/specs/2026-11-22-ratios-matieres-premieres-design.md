@@ -144,6 +144,12 @@ de 14 phrases littérales, pour le budget (§6).
   `PETROLE` ; CANE `SUCRE`, `SUGAR`). L'alias `USOIL` passe de `WTI/USD` à `USO`. `WTI/USD` reste
   au catalogue, avec un libellé qui dit qu'il exige une offre supérieure. `searchMarkets` classe un
   alias exact au rang 2 : « USOIL » ouvre donc USO.
+- **Renversement de la décision du 23 septembre**, sur validation du propriétaire le 22/11.
+  Cette décision (`docs/revue-2026-09-23-sources-automatiques.md`) envoyait « USOIL » vers
+  `WTI/USD`, jamais vers USO, au nom d'« aucun remplacement par un autre instrument ». Son
+  intention reste épinglée : choisir `WTI/USD` explicitement affiche toujours le refus
+  d'abonnement, sans ETF de remplacement. À réécrire : le bloc « recherche du pétrole » de
+  `marketRouting.test.ts` et les trois parcours USOIL de `sources-automatiques.e2e.ts`.
 
 ### 4.6 Limites assumées
 

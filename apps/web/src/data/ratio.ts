@@ -21,10 +21,13 @@
  *
  * CROSS-SOURCE (lot D) : une source SANS réf locale mais dont les jambes sont acceptées
  * par le moteur SYN (twelvedata) se compose contre la RÉFÉRENCE CANONIQUE Binance
- * (`REF_CANONIQUE`) — ex. or ÷ BTC = `twelvedata:GLD|/|binance:BTCUSDT`. `estRatio`
- * reconnaît symétriquement une jambe B sur un AUTRE exchange que la jambe A, à condition
- * qu'elle soit exactement la réf canonique de SON exchange. Les SYN composés restent
- * exclus comme jambes ; les séries autonomes TOTAL* passent par la jambe virtuelle `mcap`.
+ * (`REF_CANONIQUE`) — ex. or ÷ BTC = `twelvedata:GLD|/|binance:BTCUSDT`.
+ *
+ * RECONNAISSANCE (`estRatio`) : un dénominateur fixe n'est reconnu que si le symbole se
+ * recompose À L'IDENTIQUE depuis sa jambe A (`symboleRatio`) ; tout autre « / » valide — que
+ * le cœur `composerRatioLibreCode` recomposerait tel quel — est un ratio LIBRE, sans id
+ * (`denom: null`). Les SYN composés restent exclus comme jambes ; les séries autonomes TOTAL*
+ * passent par la jambe virtuelle `mcap`.
  */
 import type { ExchangeId } from "@axiom/types";
 import { encodeSyntheticSymbol, parseSyntheticSymbol, type SyntheticLegSource, type SyntheticSpec } from "./synthetic";
@@ -146,10 +149,11 @@ function decouper(symbol: string, exchange: ExchangeId): { base: string; quote: 
 const COTATIONS_DOLLAR = COTATIONS_USD;
 
 /**
- * Ratio ÷ indice, matière première ou devise : jambe B Twelve Data unique. Actifs cotés en dollar seulement
- * (capitalisations TOTAL* en USD, tickers Twelve Data sans barre = valeurs US, paires
- * X/USD) ; jamais l'actif divisé par lui-même ou par sa propre devise (EURUSDT en EUR).
- * La dominance STABLE.D (série en %) n'est pas cotée en dollar : aucun ratio.
+ * Ratio ÷ indice, matière première ou devise : jambe B Twelve Data unique. Actifs cotés en
+ * dollar seulement (capitalisations TOTAL* en USD, tickers Twelve Data sans barre = valeurs
+ * US, paires X/USD) ; jamais l'actif divisé par lui-même (CPER ÷ CPER) ou par sa propre
+ * devise (EURUSDT en EUR). La dominance STABLE.D (série en %) n'est pas cotée en dollar :
+ * aucun ratio.
  */
 function symboleRatioTradfi(symbol: string, exchange: ExchangeId, denom: DenominateurTradfi): string | null {
   const ref = REFS_TRADFI[denom].sym;
@@ -170,7 +174,10 @@ function symboleRatioTradfi(symbol: string, exchange: ExchangeId, denom: Denomin
   return encodeSyntheticSymbol({ exA, legA: symbol, exB: "twelvedata", legB: ref, op: "/" });
 }
 
-/** Mention d'un prix coté en stablecoin compté pour 1 USD par les ratios marchés et devises. */
+/**
+ * Mention d'un prix coté en stablecoin compté pour 1 USD par les ratios à jambe Twelve Data
+ * (indices, matières premières, devises).
+ */
 export function noteDollar(symbol: string, exchange: ExchangeId): string | null {
   if (exchange === "hyperliquid") return basePerp(symbol) === null ? null : "perp réglé en USDC, compté pour 1 USD";
   if (exchange === "twelvedata" || exchange === "synthetic") return null;

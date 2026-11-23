@@ -263,7 +263,7 @@ describe("dénominateurs marchés et devises (demande du 26/09/2026) : jambe Twe
     expect(or?.spec).toMatchObject({ exA: "binance", legA: "BTCUSDT" });
     expect(estRatio("bybit:HYPEUSDT|/|twelvedata:CHF/USD", "synthetic")?.denom).toBe("CHF");
     expect(estRatio("mcap:TOTAL|/|twelvedata:SPY", "synthetic")?.denom).toBe("SP500");
-    // Jambe Twelve Data étrangère aux dénominateurs : non reconnue.
+    // Jambe Twelve Data étrangère aux dénominateurs : ratio libre, sans dénominateur fixe.
     expect(estRatio("binance:BTCUSDT|/|twelvedata:GLD", "synthetic")).toMatchObject({ denom: null });
     // Réf Twelve Data posée sur une autre source : non reconnue.
     expect(estRatio("binance:BTCUSDT|/|binance:XAU/USD", "synthetic")).toBeNull();

@@ -239,12 +239,20 @@ export function symboleRatio(
 /** Jambe choisie dans le sélecteur « Autre actif… » : un actif du catalogue, sur sa place. */
 export interface JambeChoisie { exchange: ExchangeId; symbol: string }
 
-/** Ratio libre composé (`denom` non nul = dénominateur fixe reconnu), ou refus à afficher tel quel. */
-export type ResultatRatioLibre = { symbole: string; denom: DenominateurId | null } | { refus: string };
+/**
+ * Ratio libre composé, ou CODE du refus — sans texte : les messages vivent dans
+ * `data/choixDiviseur.ts`, chargé avec le sélecteur, hors du chargement initial.
+ */
+export type CompositionLibre =
+  | { symbole: string }
+  | { code: "serie" | "compose" | "meme" | "devise" }
+  | { code: "devises"; a: string; b: string };
 
 /** Devise du prix, stablecoins USD comptés « USD » ; null si inconnue. PURE. */
 export function deviseCotation(symbol: string, exchange: ExchangeId): string | null {
   const enDollar = (devise: string): string => (COTATIONS_DOLLAR.includes(devise) ? "USD" : devise);
+  // Symbole composé (« a|/|b », « a|-|b ») : jamais une devise, quelle que soit la place annoncée.
+  if (symbol.includes("|")) return null;
   if (exchange === "synthetic") return estCapitalisationUsd(symbol) ? "USD" : null;
   if (exchange === "twelvedata") {
     if (symbol.includes(":")) return null;
@@ -258,19 +266,19 @@ export function deviseCotation(symbol: string, exchange: ExchangeId): string | n
   return parts === null ? null : enDollar(parts.quote);
 }
 
-/** Règles 2 à 4 de la spec (§5.2) seules : jambe B, A ÷ A, devise. PURE. */
-export function composerRatioLibre(baseSym: string, baseEx: ExchangeId, jambe: JambeChoisie): ResultatRatioLibre {
-  if (jambe.exchange === "synthetic" && !estCapitalisationUsd(jambe.symbol)) {
-    return { refus: "Série en % ou déjà composée : pas un diviseur" };
-  }
-  if (baseEx === "synthetic" && !estCapitalisationUsd(baseSym)) {
-    return { refus: "Graphique composé : revenez à un actif simple" };
-  }
-  if (baseEx === jambe.exchange && baseSym === jambe.symbol) return { refus: "Même actif que le graphique" };
+/**
+ * Cœur SANS TEXTE des règles 2 à 4 de la spec (§5.2), dans cet ordre : jambe B (série en % ou
+ * déjà composée), base composée, A ÷ A, devise. `estRatio` (chargement initial) n'en lit que le
+ * symbole ; `composerRatioLibre` (data/choixDiviseur.ts) traduit les codes en messages. PURE.
+ */
+export function composerRatioLibreCode(baseSym: string, baseEx: ExchangeId, jambe: JambeChoisie): CompositionLibre {
+  if (jambe.exchange === "synthetic" && !estCapitalisationUsd(jambe.symbol)) return { code: "serie" };
+  if (baseEx === "synthetic" && !estCapitalisationUsd(baseSym)) return { code: "compose" };
+  if (baseEx === jambe.exchange && baseSym === jambe.symbol) return { code: "meme" };
   const a = deviseCotation(baseSym, baseEx);
   const b = deviseCotation(jambe.symbol, jambe.exchange);
-  if (a === null || b === null) return { refus: "Devise de cotation inconnue" };
-  if (a !== b) return { refus: `Devises différentes (${a} contre ${b})` };
+  if (a === null || b === null) return { code: "devise" };
+  if (a !== b) return { code: "devises", a, b };
   return {
     symbole: encodeSyntheticSymbol({
       exA: baseEx === "synthetic" ? "mcap" : baseEx,
@@ -279,7 +287,6 @@ export function composerRatioLibre(baseSym: string, baseEx: ExchangeId, jambe: J
       legB: jambe.symbol,
       op: "/",
     }),
-    denom: null,
   };
 }
 
@@ -291,8 +298,8 @@ export interface RatioActif {
 
 /**
  * Ratio actif du symbole (sans état). FIXE : le symbole se recompose exactement par
- * `symboleRatio(jambe A, d)`. Sinon LIBRE (`denom: null`) : tout « A / B » que
- * `composerRatioLibre` accepterait. Un spread ou un ratio refusé n'est pas reconnu.
+ * `symboleRatio(jambe A, d)`. Sinon LIBRE (`denom: null`) : tout « A / B » que le cœur
+ * `composerRatioLibreCode` recomposerait à l'identique. Un spread ou un ratio refusé n'est pas reconnu.
  */
 export function estRatio(symbol: string, exchange: ExchangeId): RatioActif | null {
   if (exchange !== "synthetic") return null;
@@ -301,7 +308,7 @@ export function estRatio(symbol: string, exchange: ExchangeId): RatioActif | nul
   const exA: ExchangeId = spec.exA === "mcap" ? "synthetic" : spec.exA;
   const fixe = DENOMINATEURS.find((d) => symboleRatio(spec.legA, exA, d) === symbol);
   if (fixe !== undefined) return { spec, denom: fixe };
-  const libre = composerRatioLibre(spec.legA, exA, { exchange: spec.exB === "mcap" ? "synthetic" : spec.exB, symbol: spec.legB });
+  const libre = composerRatioLibreCode(spec.legA, exA, { exchange: spec.exB === "mcap" ? "synthetic" : spec.exB, symbol: spec.legB });
   return "symbole" in libre && libre.symbole === symbol ? { spec, denom: null } : null;
 }
 

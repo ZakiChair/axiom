@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { optionsDiviseur, referenceFixe, symboleRatioLibre } from "./choixDiviseur";
+import { composerRatioLibre, optionsDiviseur, referenceFixe, symboleRatioLibre } from "./choixDiviseur";
 import type { MarketCatalog } from "./marketRouting";
 
 /** Catalogue fixe, toutes sources : crypto (Binance), Twelve Data (ETF, action, forex) et série autonome. */
@@ -59,6 +59,25 @@ describe("« Autre actif… » : options du sélecteur (optionsDiviseur)", () =>
   it("limite : nombre maximal de résultats", () => {
     expect(optionsDiviseur(CATALOGUE, "USD", BASE, "1d").length).toBeGreaterThan(1);
     expect(optionsDiviseur(CATALOGUE, "USD", BASE, "1d", 1)).toHaveLength(1);
+  });
+});
+
+describe("« Autre actif… » : composition libre et messages de refus (hors chargement initial)", () => {
+  it("composerRatioLibre : compositions libres", () => {
+    expect(composerRatioLibre("BTCUSD", "coinbase", { exchange: "binance", symbol: "BTCUSDT" })).toEqual({ symbole: "coinbase:BTCUSD|/|binance:BTCUSDT", denom: null });
+    expect(composerRatioLibre("ETHBTC", "binance", { exchange: "binance", symbol: "ADABTC" })).toEqual({ symbole: "binance:ETHBTC|/|binance:ADABTC", denom: null });
+    expect(composerRatioLibre("BTCUSDT", "binance", { exchange: "twelvedata", symbol: "AAPL" })).toEqual({ symbole: "binance:BTCUSDT|/|twelvedata:AAPL", denom: null });
+    expect(composerRatioLibre("TOTAL", "synthetic", { exchange: "twelvedata", symbol: "AAPL" })).toEqual({ symbole: "mcap:TOTAL|/|twelvedata:AAPL", denom: null });
+    expect(composerRatioLibre("BTCUSDT", "binance", { exchange: "synthetic", symbol: "TOTAL2" })).toEqual({ symbole: "binance:BTCUSDT|/|mcap:TOTAL2", denom: null });
+  });
+
+  it("composerRatioLibre : refus", () => {
+    expect(composerRatioLibre("ETHUSDT", "binance", { exchange: "binance", symbol: "ETHUSDT" })).toEqual({ refus: "Même actif que le graphique" });
+    expect(composerRatioLibre("BTCUSDT", "binance", { exchange: "twelvedata", symbol: "USD/JPY" })).toEqual({ refus: "Devises différentes (USD contre JPY)" });
+    expect(composerRatioLibre("BTCEUR", "kraken", { exchange: "twelvedata", symbol: "CPER" })).toEqual({ refus: "Devises différentes (EUR contre USD)" });
+    expect(composerRatioLibre("BTCUSDT", "binance", { exchange: "twelvedata", symbol: "RY:TSX" })).toEqual({ refus: "Devise de cotation inconnue" });
+    expect(composerRatioLibre("BTCUSDT", "binance", { exchange: "synthetic", symbol: "STABLE.D" })).toEqual({ refus: "Série en % ou déjà composée : pas un diviseur" });
+    expect(composerRatioLibre("binance:ETHUSDT|-|binance:BTCUSDT", "synthetic", { exchange: "twelvedata", symbol: "AAPL" })).toEqual({ refus: "Graphique composé : revenez à un actif simple" });
   });
 });
 

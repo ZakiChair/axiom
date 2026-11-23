@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { baseDuRatio, composerRatioLibre, DENOMINATEURS, DENOMINATEURS_MATIERES, detailDenominateur, deviseCotation, estRatio, libelleBandeauRatio, libelleDenominateur, noteDollar, symboleRatio } from "./ratio";
+import { baseDuRatio, composerRatioLibreCode, DENOMINATEURS, DENOMINATEURS_MATIERES, detailDenominateur, deviseCotation, estRatio, libelleBandeauRatio, libelleDenominateur, noteDollar, symboleRatio } from "./ratio";
 
 describe("symboleRatio — cible SYN X/DENOM pour le marché courant", () => {
   it("compose le ratio ÷BTC sur binance (réf BTCUSDT)", () => {
@@ -387,24 +387,33 @@ describe("« Autre actif… » : composition libre (lot 2)", () => {
       ["BTCUSDT", "binance", "USD"], ["BTCEUR", "kraken", "EUR"], ["ETHBTC", "binance", "BTC"], ["HYPE-PERP", "hyperliquid", "USD"],
       ["SPY", "twelvedata", "USD"], ["USD/JPY", "twelvedata", "JPY"], ["XAU/USD", "twelvedata", "USD"], ["RY:TSX", "twelvedata", null],
       ["TOTAL", "synthetic", "USD"], ["STABLE.D", "synthetic", null], ["XYZ", "binance", null], ["XAU/USD", "binance", null],
+      // Symbole composé (« | ») annoncé sur une place réelle : jamais une devise.
+      ["binance:ETHUSDT|-|binance:BTCUSDT", "binance", null],
     ];
     for (const [symbol, exchange, attendu] of table) expect(deviseCotation(symbol, exchange)).toEqual(attendu);
   });
 
-  it("composerRatioLibre : compositions libres", () => {
-    expect(composerRatioLibre("BTCUSD", "coinbase", { exchange: "binance", symbol: "BTCUSDT" })).toEqual({ symbole: "coinbase:BTCUSD|/|binance:BTCUSDT", denom: null });
-    expect(composerRatioLibre("ETHBTC", "binance", { exchange: "binance", symbol: "ADABTC" })).toEqual({ symbole: "binance:ETHBTC|/|binance:ADABTC", denom: null });
-    expect(composerRatioLibre("BTCUSDT", "binance", { exchange: "twelvedata", symbol: "AAPL" })).toEqual({ symbole: "binance:BTCUSDT|/|twelvedata:AAPL", denom: null });
-    expect(composerRatioLibre("TOTAL", "synthetic", { exchange: "twelvedata", symbol: "AAPL" })).toEqual({ symbole: "mcap:TOTAL|/|twelvedata:AAPL", denom: null });
-    expect(composerRatioLibre("BTCUSDT", "binance", { exchange: "synthetic", symbol: "TOTAL2" })).toEqual({ symbole: "binance:BTCUSDT|/|mcap:TOTAL2", denom: null });
+  it("composerRatioLibreCode : compositions libres (cœur sans texte)", () => {
+    expect(composerRatioLibreCode("BTCUSD", "coinbase", { exchange: "binance", symbol: "BTCUSDT" })).toEqual({ symbole: "coinbase:BTCUSD|/|binance:BTCUSDT" });
+    expect(composerRatioLibreCode("ETHBTC", "binance", { exchange: "binance", symbol: "ADABTC" })).toEqual({ symbole: "binance:ETHBTC|/|binance:ADABTC" });
+    expect(composerRatioLibreCode("BTCUSDT", "binance", { exchange: "twelvedata", symbol: "AAPL" })).toEqual({ symbole: "binance:BTCUSDT|/|twelvedata:AAPL" });
+    expect(composerRatioLibreCode("TOTAL", "synthetic", { exchange: "twelvedata", symbol: "AAPL" })).toEqual({ symbole: "mcap:TOTAL|/|twelvedata:AAPL" });
+    expect(composerRatioLibreCode("BTCUSDT", "binance", { exchange: "synthetic", symbol: "TOTAL2" })).toEqual({ symbole: "binance:BTCUSDT|/|mcap:TOTAL2" });
   });
 
-  it("composerRatioLibre : refus", () => {
-    expect(composerRatioLibre("ETHUSDT", "binance", { exchange: "binance", symbol: "ETHUSDT" })).toEqual({ refus: "Même actif que le graphique" });
-    expect(composerRatioLibre("BTCUSDT", "binance", { exchange: "twelvedata", symbol: "USD/JPY" })).toEqual({ refus: "Devises différentes (USD contre JPY)" });
-    expect(composerRatioLibre("BTCEUR", "kraken", { exchange: "twelvedata", symbol: "CPER" })).toEqual({ refus: "Devises différentes (EUR contre USD)" });
-    expect(composerRatioLibre("BTCUSDT", "binance", { exchange: "twelvedata", symbol: "RY:TSX" })).toEqual({ refus: "Devise de cotation inconnue" });
-    expect(composerRatioLibre("BTCUSDT", "binance", { exchange: "synthetic", symbol: "STABLE.D" })).toEqual({ refus: "Série en % ou déjà composée : pas un diviseur" });
-    expect(composerRatioLibre("binance:ETHUSDT|-|binance:BTCUSDT", "synthetic", { exchange: "twelvedata", symbol: "AAPL" })).toEqual({ refus: "Graphique composé : revenez à un actif simple" });
+  it("composerRatioLibreCode : refus par code (les messages vivent dans choixDiviseur.ts)", () => {
+    expect(composerRatioLibreCode("ETHUSDT", "binance", { exchange: "binance", symbol: "ETHUSDT" })).toEqual({ code: "meme" });
+    expect(composerRatioLibreCode("BTCUSDT", "binance", { exchange: "twelvedata", symbol: "USD/JPY" })).toEqual({ code: "devises", a: "USD", b: "JPY" });
+    expect(composerRatioLibreCode("BTCEUR", "kraken", { exchange: "twelvedata", symbol: "CPER" })).toEqual({ code: "devises", a: "EUR", b: "USD" });
+    expect(composerRatioLibreCode("BTCUSDT", "binance", { exchange: "twelvedata", symbol: "RY:TSX" })).toEqual({ code: "devise" });
+    expect(composerRatioLibreCode("BTCUSDT", "binance", { exchange: "synthetic", symbol: "STABLE.D" })).toEqual({ code: "serie" });
+    expect(composerRatioLibreCode("binance:ETHUSDT|-|binance:BTCUSDT", "synthetic", { exchange: "twelvedata", symbol: "AAPL" })).toEqual({ code: "compose" });
+  });
+
+  it("composerRatioLibreCode : ordre des règles — jambe B, base, A ÷ A, devise", () => {
+    // Jambe B et base refusables toutes deux : la jambe B parle d'abord.
+    expect(composerRatioLibreCode("binance:ETHUSDT|-|binance:BTCUSDT", "synthetic", { exchange: "synthetic", symbol: "STABLE.D" })).toEqual({ code: "serie" });
+    // Même actif à devise inconnue : A ÷ A parle avant la devise.
+    expect(composerRatioLibreCode("RY:TSX", "twelvedata", { exchange: "twelvedata", symbol: "RY:TSX" })).toEqual({ code: "meme" });
   });
 });

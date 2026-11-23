@@ -1,11 +1,28 @@
 /**
  * Logique pure du sélecteur « Autre actif… » (diviser le marché affiché par un actif du
  * catalogue). Importée seulement par le sélecteur chargé à la demande : ce module reste
- * hors du chargement initial.
+ * hors du chargement initial — d'où les messages de refus ici, et non dans `ratio.ts`, dont
+ * `estRatio` (chargement initial) ne lit que le cœur sans texte `composerRatioLibreCode`.
  */
-import { composerRatioLibre, REFS, REFS_TRADFI, symboleRatio, type DenominateurId, type JambeChoisie, type ResultatRatioLibre } from "./ratio";
+import { composerRatioLibreCode, REFS, REFS_TRADFI, symboleRatio, type DenominateurId, type JambeChoisie } from "./ratio";
 import { searchMarkets, type MarketCandidate, type MarketCatalog } from "./marketRouting";
 import type { ExchangeId, Timeframe } from "@axiom/types";
+
+/** Ratio libre composé (`denom` non nul = dénominateur fixe reconnu), ou refus à afficher tel quel. */
+export type ResultatRatioLibre = { symbole: string; denom: DenominateurId | null } | { refus: string };
+
+/** Règles 2 à 4 de la spec (§5.2) seules : jambe B, A ÷ A, devise ; les codes du cœur deviennent des messages. PURE. */
+export function composerRatioLibre(baseSym: string, baseEx: ExchangeId, jambe: JambeChoisie): ResultatRatioLibre {
+  const libre = composerRatioLibreCode(baseSym, baseEx, jambe);
+  if ("symbole" in libre) return { symbole: libre.symbole, denom: null };
+  switch (libre.code) {
+    case "serie": return { refus: "Série en % ou déjà composée : pas un diviseur" };
+    case "compose": return { refus: "Graphique composé : revenez à un actif simple" };
+    case "meme": return { refus: "Même actif que le graphique" };
+    case "devise": return { refus: "Devise de cotation inconnue" };
+    case "devises": return { refus: `Devises différentes (${libre.a} contre ${libre.b})` };
+  }
+}
 
 /** Dénominateur fixe dont `jambe` est la référence sur sa place, sinon null. PURE. */
 export function referenceFixe(jambe: JambeChoisie): DenominateurId | null {

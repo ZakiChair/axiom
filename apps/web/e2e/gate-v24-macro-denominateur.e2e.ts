@@ -313,3 +313,113 @@ test("bandeau : un ratio libre (BTCUSDT ÷ GLD) affiche ÷GLD enfoncé et revien
   await expect(page.getByText("BTCUSDT ÷ GLD", { exact: true })).toHaveCount(0);
   await expect(page.getByText("BTCUSDT", { exact: true }).first()).toBeVisible();
 });
+
+// ───────── Lot 2 du 22/11/2026 — « Autre actif… » : diviser par n'importe quel actif du catalogue ─────────
+
+const COMBOBOX_DIVISEUR = { name: "Rechercher un diviseur" } as const;
+
+/** Ouvre le sélecteur « Autre actif… » à la souris, depuis le menu ÷ ▾. */
+async function ouvrirAutreActif(page: import("@playwright/test").Page): Promise<void> {
+  await page.getByRole("button", { name: "Choisir l'actif de comparaison" }).click();
+  await page.getByRole("menuitem", { name: "Autre actif…" }).click();
+  await expect(page.getByRole("combobox", COMBOBOX_DIVISEUR)).toBeFocused();
+}
+
+test("« Autre actif… » au clavier : Fin, Entrée, AAPL puis Entrée pose BTCUSDT ÷ AAPL ; Échap rend le focus au bouton ▾", async ({ page }) => {
+  await bouchonnerTwelveData(page);
+  await page.goto("/");
+  const menu = page.getByRole("button", { name: "Choisir l'actif de comparaison" });
+  await expect(menu).toHaveAttribute("aria-haspopup", "menu");
+  await menu.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("menuitem", { name: "÷ETH" })).toBeFocused();
+  // Fin : dernière entrée active du menu, après les quatre groupes et le séparateur.
+  await page.keyboard.press("End");
+  await expect(page.getByRole("menuitem", { name: "Autre actif…" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  const champ = page.getByRole("combobox", COMBOBOX_DIVISEUR);
+  await expect(champ).toBeFocused();
+  await expect(page.getByRole("dialog", { name: "Diviser par un autre actif" })).toContainText("Diviser BTCUSDT par…");
+  await champ.fill("AAPL");
+  const aapl = page.getByRole("listbox", { name: "Diviseurs" }).getByRole("option", { name: /^AAPL\b/ });
+  await expect(aapl).toBeVisible();
+  // Tab mène au résultat ; ↓ y ramène au champ sans changer la paire affichée (raccourci global).
+  await page.keyboard.press("Tab");
+  await expect(aapl).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(champ).toBeFocused();
+  expect(await page.evaluate(async () => {
+    const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{ marketStore: { getState: () => { symbol: string } } }>;
+    return (await importer()).marketStore.getState().symbol;
+  })).toBe("BTCUSDT");
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("BTCUSDT ÷ AAPL", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(champ).toHaveCount(0);
+
+  // Rouvert depuis le ratio libre actif, Échap ferme le sélecteur et rend le focus au bouton ▾.
+  await ouvrirAutreActif(page);
+  await page.keyboard.press("Escape");
+  await expect(champ).toHaveCount(0);
+  await expect(menu).toBeFocused();
+});
+
+test("« Autre actif… » : ETHUSDT choisi pose le ÷ETH du bouton (fixe d'abord)", async ({ page }) => {
+  await bouchonnerTwelveData(page);
+  await page.goto("/");
+  await ouvrirAutreActif(page);
+  await page.getByRole("combobox", COMBOBOX_DIVISEUR).fill("ETHUSDT");
+  await expect(page.getByRole("option", { name: /^ETHUSDT\b/ })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("BTCUSDT / ETHUSDT")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("button", { name: "÷ETH", exact: true })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("« Autre actif… » : WTI/USD refusé par l'offre Twelve Data, sans glisser vers USO", async ({ page }) => {
+  const demandes: string[] = [];
+  await page.route("**/tdapi/time_series*", (route) => {
+    const symbole = new URL(route.request().url()).searchParams.get("symbol") ?? "";
+    demandes.push(symbole);
+    return symbole === "WTI/USD"
+      ? route.fulfill({ status: 404, json: { status: "error", code: 404, message: "This symbol is available starting with the Grow or Venture plan. Consider upgrading now at https://twelvedata.com/pricing" } })
+      : route.fulfill({ json: SERIE_TD });
+  });
+  await page.route("**/tdapi/quote*", (route) => route.fulfill({ json: QUOTE_TD }));
+  await page.goto("/");
+  await ouvrirAutreActif(page);
+  await page.getByRole("combobox", COMBOBOX_DIVISEUR).fill("WTI/USD");
+  await expect(page.getByRole("option", { name: /^WTI\/USD\b/ })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.locator('[data-chart-status="error"]')).toContainText(/abonnement.*Grow/i, { timeout: 15_000 });
+  expect(demandes).toContain("WTI/USD");
+  expect(demandes).not.toContain("USO");
+});
+
+test("« Autre actif… » : un changement de marché ferme le sélecteur", async ({ page }) => {
+  await bouchonnerTwelveData(page);
+  await page.goto("/");
+  await ouvrirAutreActif(page);
+  await page.evaluate(async () => {
+    const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{
+      marketStore: { getState: () => { setMarket: (identite: { exchange: string; symbol: string; timeframe: string }) => void } };
+    }>;
+    (await importer()).marketStore.getState().setMarket({ exchange: "binance", symbol: "ETHUSDT", timeframe: "1d" });
+  });
+  await expect(page.getByRole("combobox", COMBOBOX_DIVISEUR)).toHaveCount(0);
+});
+
+test("« Autre actif… » : une saisie hors catalogue se vérifie par Entrée (FOOUSDT indisponible, orcl posé)", async ({ page }) => {
+  await bouchonnerTwelveData(page);
+  await page.goto("/");
+  await ouvrirAutreActif(page);
+  const champ = page.getByRole("combobox", COMBOBOX_DIVISEUR);
+  // Crypto absente de toute place confirmée : sources automatiques sans candidat réel.
+  await champ.fill("FOOUSDT");
+  await expect(page.getByText("Aucun actif trouvé. Entrée pour vérifier ce symbole.")).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("Actif indisponible : FOOUSDT")).toBeVisible();
+  // Ticker Twelve Data hors catalogue curé, saisi en minuscules : mis en majuscules, puis posé.
+  await champ.fill("orcl");
+  await expect(champ).toHaveValue("ORCL");
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("BTCUSDT ÷ ORCL", { exact: true })).toBeVisible({ timeout: 15_000 });
+});

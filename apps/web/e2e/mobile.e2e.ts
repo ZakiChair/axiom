@@ -155,6 +155,19 @@ test("ratios : le menu de comparaison et les statistiques se referment sans couv
   await expect(page.getByRole("button", { name: "Détails du marché et ratios" })).toHaveAttribute("aria-expanded", "false");
 });
 
+test("ratios : « Autre actif… » s'ouvre au toucher", async ({ page }) => {
+  await preparer(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Détails du marché et ratios" }).tap();
+  await page.getByRole("button", { name: "Choisir l'actif de comparaison", exact: true }).tap();
+  // Dernière entrée d'un menu de 25 : atteinte en faisant défiler le menu, entièrement à l'écran.
+  const autreActif = menuMobile(page).getByRole("menuitem", { name: "Autre actif…" });
+  await autreActif.scrollIntoViewIfNeeded();
+  await dansEcran(page, autreActif);
+  await autreActif.tap();
+  await dansEcran(page, menuMobile(page).getByRole("combobox", { name: "Rechercher un diviseur" }));
+});
+
 test("quatre vues : focus dessin, instruments et disposition conservés entre portrait, paysage et bureau", async ({ page }, testInfo) => {
   await preparer(page);
   await page.goto("/");

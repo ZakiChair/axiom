@@ -456,3 +456,53 @@ test("« Autre actif… » : un chunk introuvable n'emporte que le sélecteur, j
   await expect(page.locator("[data-chart-banner]")).toBeVisible();
   await expect(page.getByText("Graphiques indisponible")).toHaveCount(0);
 });
+
+/** Symbole et unité de temps du marché affiché, lus dans le store (« BTCUSDT 1m »). */
+async function marcheAffiche(page: import("@playwright/test").Page): Promise<string> {
+  return page.evaluate(async () => {
+    const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{ marketStore: { getState: () => { symbol: string; timeframe: string } } }>;
+    const { symbol, timeframe } = (await importer()).marketStore.getState();
+    return `${symbol} ${timeframe}`;
+  });
+}
+
+test("« Autre actif… » : un clic sur le titre garde le focus dans le sélecteur ; ], ↓ et Échap n'atteignent pas les raccourcis globaux", async ({ page }) => {
+  await bouchonnerTwelveData(page);
+  await page.goto("/");
+  await expect.poll(() => marcheAffiche(page)).toMatch(/^BTCUSDT /);
+  const avant = await marcheAffiche(page);
+  await ouvrirAutreActif(page);
+  const dialogue = page.getByRole("dialog", { name: "Diviser par un autre actif" });
+  // Texte non focalisable : le focus reste dans le dialogue au lieu de tomber sur body.
+  await dialogue.getByText("Diviser BTCUSDT par…").click();
+  await expect(dialogue).toBeFocused();
+  // Hors du champ, aucune touche n'atteint le répartiteur global : ni l'unité de temps (]), ni la paire (↓).
+  await page.keyboard.press("]");
+  expect(await marcheAffiche(page)).toBe(avant);
+  await page.keyboard.press("ArrowDown");
+  expect(await marcheAffiche(page)).toBe(avant);
+  await page.keyboard.press("Escape");
+  await expect(dialogue).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Choisir l'actif de comparaison" })).toBeFocused();
+  expect(await marcheAffiche(page)).toBe(avant);
+});
+
+test("« Autre actif… » : focus perdu vers body, Échap ferme le sélecteur sans quitter le plein écran", async ({ page }) => {
+  await bouchonnerTwelveData(page);
+  await page.goto("/");
+  /** Plein écran lu (et posé si `valeur` est donnée) dans le store du répartiteur global. */
+  const pleinEcran = (valeur?: boolean) => page.evaluate(async (v) => {
+    const importer = new Function("return import('/src/commands/hotkeys.ts')") as () => Promise<{ fullscreenStore: { getState: () => { plein: boolean; definir: (plein: boolean) => void } } }>;
+    const { fullscreenStore } = await importer();
+    if (v !== undefined) fullscreenStore.getState().definir(v);
+    return fullscreenStore.getState().plein;
+  }, valeur);
+  await ouvrirAutreActif(page);
+  expect(await pleinEcran(true)).toBe(true);
+  // Émule un clic qui ne donne pas le focus : la touche part alors de body.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("Escape");
+  expect(await pleinEcran()).toBe(true);
+  await expect(page.getByRole("dialog", { name: "Diviser par un autre actif" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Choisir l'actif de comparaison" })).toBeFocused();
+});

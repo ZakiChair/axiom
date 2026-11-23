@@ -12,6 +12,10 @@
  *
  * Fermeture : Échap (focus rendu au bouton ▾), choix posé, pointeur hors du panneau ou focus
  * parti ailleurs (sans reprendre le focus) ; un changement de marché le ferme aussi (SymbolBanner).
+ *
+ * Clavier : le dialogue est focalisable (`tabIndex={-1}`) — un clic sur son titre y garde le focus
+ * au lieu de body ; hors du champ, aucune touche n'atteint les raccourcis globaux, et Échap reçu
+ * sur body ferme encore le sélecteur au lieu de réduire une fenêtre ou de quitter le plein écran.
  */
 import { useEffect, useId, useRef, useState } from "react";
 import type { ExchangeId, Timeframe } from "@axiom/types";
@@ -51,6 +55,21 @@ export function ChoixDiviseur({ base, timeframe, fermer }: {
     // Au téléphone, le portail a déjà focalisé le champ (`focusInitial`) : sans effet.
     champRef.current?.focus();
     return () => { monte = false; verification.current += 1; desabonner(); };
+  }, []);
+
+  // Échap reçu quand le focus n'est nulle part (body, ex. clic Safari qui ne le donne pas) : il ferme
+  // le sélecteur et rend le focus au bouton ▾, au lieu de quitter le plein écran ou de réduire la
+  // fenêtre au premier plan (`preventDefault`, respecté par commands/hotkeys.ts). Depuis le dialogue,
+  // son `onKeyDown` (ou le portail au téléphone) l'a déjà traité.
+  useEffect(() => {
+    const surEchap = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (document.activeElement !== null && document.activeElement !== document.body) return;
+      e.preventDefault();
+      fermerRef.current(true);
+    };
+    document.addEventListener("keydown", surEchap);
+    return () => document.removeEventListener("keydown", surEchap);
   }, []);
 
   // Bureau : un pointeur hors du panneau ferme sans reprendre le focus. Au téléphone, le voile du
@@ -117,12 +136,15 @@ export function ChoixDiviseur({ base, timeframe, fermer }: {
   const texteStatut = statut?.texte ?? (saisie.trim() && !listeVisible ? "Aucun actif trouvé. Entrée pour vérifier ce symbole." : null);
 
   return <PortailMobile fermer={rendreFocus} focusInitial={champRef}>
-    <div ref={panneauRef} role="dialog" aria-label="Diviser par un autre actif"
+    <div ref={panneauRef} role="dialog" aria-label="Diviser par un autre actif" tabIndex={-1}
       onKeyDown={(e) => {
         // Échap : ici au bureau ; au téléphone, le portail l'intercepte et appelle `rendreFocus`.
         if (e.key === "Escape") { e.preventDefault(); rendreFocus(); }
-        // ↑/↓ hors du champ (résultat atteint par Tab) : retour au champ, jamais la paire voisine de la watchlist.
+        // ↑/↓ hors du champ (dialogue cliqué, résultat atteint par Tab) : retour au champ.
         else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && e.target !== champRef.current) { e.preventDefault(); champRef.current?.focus(); }
+        // Hors du champ, aucune touche n'atteint le répartiteur global (commands/hotkeys.ts : [ ] chiffres ?
+        // lettres…) ; Entrée et Espace gardent leur action native sur une option, Tab son déplacement.
+        if (e.target !== champRef.current) e.stopPropagation();
       }}
       onBlur={(e) => {
         // Bureau : focus parti vers un autre contrôle (Tab) → fermeture, comme le menu ÷ ▾. Pas au
@@ -130,7 +152,7 @@ export function ChoixDiviseur({ base, timeframe, fermer }: {
         // par le bouton ▾ avant de le rendre au champ.
         if (!mobile && e.relatedTarget !== null && !panneauRef.current?.contains(e.relatedTarget as Node)) fermer(false);
       }}
-      className={`axiom-menu-mobile ${classesPanneauMenu("right", "bas")} top-full w-72`}>
+      className={`axiom-menu-mobile ${classesPanneauMenu("right", "bas")} top-full w-72 outline-none`}>
       <EnteteMenuMobile titre="Autre actif" fermer={rendreFocus} />
       <p className="px-1 pb-1 text-[11px] font-semibold text-text">{`Diviser ${base.symbol} par…`}</p>
       <input ref={champRef} value={saisie} role="combobox" aria-label="Rechercher un diviseur"

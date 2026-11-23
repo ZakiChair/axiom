@@ -271,3 +271,50 @@ export function estRatio(symbol: string, exchange: ExchangeId): RatioActif | nul
   );
   return denom === undefined ? null : { spec, denom };
 }
+
+/** Jambe choisie dans le sélecteur « Autre actif… » : un actif du catalogue, sur sa place. */
+export interface JambeChoisie { exchange: ExchangeId; symbol: string }
+
+/** Ratio libre composé (`denom` non nul = dénominateur fixe reconnu), ou refus à afficher tel quel. */
+export type ResultatRatioLibre = { symbole: string; denom: DenominateurId | null } | { refus: string };
+
+/** Devise du prix, stablecoins USD comptés « USD » ; null si inconnue. PURE. */
+export function deviseCotation(symbol: string, exchange: ExchangeId): string | null {
+  const enDollar = (devise: string): string => (COTATIONS_DOLLAR.includes(devise) ? "USD" : devise);
+  if (exchange === "synthetic") return estCapitalisationUsd(symbol) ? "USD" : null;
+  if (exchange === "twelvedata") {
+    if (symbol.includes(":")) return null;
+    const droite = symbol.split("/")[1];
+    return droite === undefined ? "USD" : enDollar(droite.trim().toUpperCase());
+  }
+  if (exchange === "hyperliquid") return basePerp(symbol) === null ? null : "USD";
+  // Format non normalisé (ex. « binance:XAU/USD ») : splitSymbol le lirait à tort en USD.
+  if (symbol.includes("/")) return null;
+  const parts = decouper(symbol, exchange);
+  return parts === null ? null : enDollar(parts.quote);
+}
+
+/** Règles 2 à 4 de la spec (§5.2) seules : jambe B, A ÷ A, devise. PURE. */
+export function composerRatioLibre(baseSym: string, baseEx: ExchangeId, jambe: JambeChoisie): ResultatRatioLibre {
+  if (jambe.exchange === "synthetic" && !estCapitalisationUsd(jambe.symbol)) {
+    return { refus: "Série en % ou déjà composée : pas un diviseur" };
+  }
+  if (baseEx === "synthetic" && !estCapitalisationUsd(baseSym)) {
+    return { refus: "Graphique composé : revenez à un actif simple" };
+  }
+  if (baseEx === jambe.exchange && baseSym === jambe.symbol) return { refus: "Même actif que le graphique" };
+  const a = deviseCotation(baseSym, baseEx);
+  const b = deviseCotation(jambe.symbol, jambe.exchange);
+  if (a === null || b === null) return { refus: "Devise de cotation inconnue" };
+  if (a !== b) return { refus: `Devises différentes (${a} contre ${b})` };
+  return {
+    symbole: encodeSyntheticSymbol({
+      exA: baseEx === "synthetic" ? "mcap" : baseEx,
+      legA: baseSym,
+      exB: jambe.exchange === "synthetic" ? "mcap" : jambe.exchange,
+      legB: jambe.symbol,
+      op: "/",
+    }),
+    denom: null,
+  };
+}

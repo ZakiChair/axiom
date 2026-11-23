@@ -169,9 +169,9 @@ test("bandeau : BTCUSDT ÷Or puis en CHF, jambe Twelve Data demandée, détoggle
   // Menu groupé : les marchés et les devises s'ajoutent à ETH et SOL.
   await page.getByRole("button", { name: "Choisir l'actif de comparaison" }).click();
   await expect(page.getByRole("group", { name: "Crypto" }).getByRole("menuitem", { name: "÷SOL" })).toBeEnabled();
-  await expect(page.getByRole("group", { name: "Marchés" }).getByRole("menuitem", { name: "÷S&P 500 (SPY)" })).toBeEnabled();
+  await expect(page.getByRole("group", { name: "Indices" }).getByRole("menuitem", { name: "÷S&P 500 (SPY)" })).toBeEnabled();
   await expect(page.getByRole("group", { name: "Devises" }).getByRole("menuitem", { name: "en JPY" })).toBeEnabled();
-  await page.getByRole("group", { name: "Marchés" }).getByRole("menuitem", { name: "÷Or" }).click();
+  await page.getByRole("group", { name: "Matières premières" }).getByRole("menuitem", { name: "÷Or" }).click();
   await expect(page.getByText("BTCUSDT ÷Or", { exact: true })).toBeVisible({ timeout: 15_000 });
   await expect.poll(() => demandes).toContain("XAU/USD");
 
@@ -205,8 +205,24 @@ test("bandeau : un actif non coté en dollar (BTCEUR) n'offre ni ÷Or ni devise"
   const menu = page.getByRole("button", { name: "Choisir l'actif de comparaison" });
   await expect(menu).toBeVisible({ timeout: 15_000 });
   await menu.click();
-  await expect(page.getByRole("group", { name: "Marchés" }).getByRole("menuitem", { name: "÷Or" })).toBeDisabled();
+  await expect(page.getByRole("group", { name: "Matières premières" }).getByRole("menuitem", { name: "÷Or" })).toBeDisabled();
+  await expect(page.getByRole("group", { name: "Matières premières" }).getByRole("menuitem", { name: "÷Cuivre (CPER)" })).toBeDisabled();
   await expect(page.getByRole("group", { name: "Devises" }).getByRole("menuitem", { name: "en CHF" })).toBeDisabled();
+});
+
+test("bandeau : BTCUSDT ÷Cuivre (CPER), jambe CPER demandée, ETF nommé dans le bandeau", async ({ page }) => {
+  const demandes: string[] = [];
+  await page.route("**/tdapi/time_series*", (route) => {
+    demandes.push(new URL(route.request().url()).searchParams.get("symbol") ?? "");
+    return route.fulfill({ json: SERIE_TD });
+  });
+  await page.route("**/tdapi/quote*", (route) => route.fulfill({ json: QUOTE_TD }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Choisir l'actif de comparaison" }).click();
+  await page.getByRole("group", { name: "Matières premières" }).getByRole("menuitem", { name: "÷Cuivre (CPER)" }).click();
+  await expect(page.getByText("BTCUSDT ÷Cuivre (CPER)", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect.poll(() => demandes).toContain("CPER");
+  await expect(page.locator("[data-chart-status]")).toHaveCount(0);
 });
 
 test("menu des dénominateurs au clavier : ↓ parcourt le menu sans changer de paire, Échap le ferme", async ({ page }) => {
@@ -282,4 +298,238 @@ test("focus sorti du menu par ⇧Tab : le menu se ferme et ↓ garde son sens gl
   await expect(menu).toHaveAttribute("aria-expanded", "false");
   await page.keyboard.press("ArrowDown");
   await expect.poll(symbole).not.toBe("BTCUSDT");
+});
+
+test("bandeau : un ratio libre (BTCUSDT ÷ GLD) affiche ÷GLD enfoncé et revient à BTCUSDT d'un clic", async ({ page }) => {
+  await bouchonnerTwelveData(page);
+  await page.addInitScript(() => {
+    window.localStorage.setItem("axiom:chartState:v1", JSON.stringify({ exchange: "synthetic", symbol: "binance:BTCUSDT|/|twelvedata:GLD", timeframe: "1d" }));
+  });
+  await page.goto("/");
+  await expect(page.getByText("BTCUSDT ÷ GLD", { exact: true })).toBeVisible({ timeout: 15_000 });
+  const bouton = page.getByRole("button", { name: "÷GLD", exact: true });
+  await expect(bouton).toHaveAttribute("aria-pressed", "true");
+  await bouton.click();
+  await expect(page.getByText("BTCUSDT ÷ GLD", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("BTCUSDT", { exact: true }).first()).toBeVisible();
+});
+
+// ───────── Lot 2 du 22/11/2026 — « Autre actif… » : diviser par n'importe quel actif du catalogue ─────────
+
+const COMBOBOX_DIVISEUR = { name: "Rechercher un diviseur" } as const;
+
+/** Ouvre le sélecteur « Autre actif… » à la souris, depuis le menu ÷ ▾. */
+async function ouvrirAutreActif(page: import("@playwright/test").Page): Promise<void> {
+  await page.getByRole("button", { name: "Choisir l'actif de comparaison" }).click();
+  await page.getByRole("menuitem", { name: "Autre actif…" }).click();
+  await expect(page.getByRole("combobox", COMBOBOX_DIVISEUR)).toBeFocused();
+}
+
+test("« Autre actif… » au clavier : Fin, Entrée, AAPL puis Entrée pose BTCUSDT ÷ AAPL ; Échap rend le focus au bouton ▾", async ({ page }) => {
+  await bouchonnerTwelveData(page);
+  await page.goto("/");
+  const menu = page.getByRole("button", { name: "Choisir l'actif de comparaison" });
+  await expect(menu).toHaveAttribute("aria-haspopup", "menu");
+  await menu.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("menuitem", { name: "÷ETH" })).toBeFocused();
+  // Fin : dernière entrée active du menu, après les quatre groupes et le séparateur.
+  await page.keyboard.press("End");
+  await expect(page.getByRole("menuitem", { name: "Autre actif…" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  const champ = page.getByRole("combobox", COMBOBOX_DIVISEUR);
+  await expect(champ).toBeFocused();
+  await expect(page.getByRole("dialog", { name: "Diviser par un autre actif" })).toContainText("Diviser BTCUSDT par…");
+  // Liste plus longue que sa hauteur : ↓ jusqu'à la dernière option la fait défiler dans la liste
+  // (sinon Entrée poserait un actif que l'on ne voit pas).
+  await champ.fill("A");
+  const options = page.getByRole("listbox", { name: "Diviseurs" }).getByRole("option");
+  await expect.poll(() => options.count()).toBeGreaterThan(15);
+  const nombre = await options.count();
+  for (let i = 1; i < nombre; i++) await page.keyboard.press("ArrowDown");
+  await expect(options.last()).toHaveAttribute("aria-selected", "true");
+  await expect(options.last()).toBeInViewport();
+  await expect(options.first()).not.toBeInViewport();
+  await champ.fill("AAPL");
+  const aapl = page.getByRole("listbox", { name: "Diviseurs" }).getByRole("option", { name: /^AAPL\b/ });
+  await expect(aapl).toBeVisible();
+  // Tab mène au résultat ; ↓ y ramène au champ sans changer la paire affichée (raccourci global).
+  await page.keyboard.press("Tab");
+  await expect(aapl).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(champ).toBeFocused();
+  expect(await page.evaluate(async () => {
+    const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{ marketStore: { getState: () => { symbol: string } } }>;
+    return (await importer()).marketStore.getState().symbol;
+  })).toBe("BTCUSDT");
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("BTCUSDT ÷ AAPL", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(champ).toHaveCount(0);
+
+  // Rouvert depuis le ratio libre actif, Échap ferme le sélecteur et rend le focus au bouton ▾.
+  await ouvrirAutreActif(page);
+  await page.keyboard.press("Escape");
+  await expect(champ).toHaveCount(0);
+  await expect(menu).toBeFocused();
+});
+
+test("« Autre actif… » : ETHUSDT choisi pose le ÷ETH du bouton (fixe d'abord)", async ({ page }) => {
+  await bouchonnerTwelveData(page);
+  // ETHUSDT coté sur deux places, sans mesure de profondeur : la source affichée est la place
+  // retenue pour la jambe (Binance d'abord), jamais « Auto ».
+  await page.route("**/api.bybit.com/v5/market/instruments-info*", (route) => route.fulfill({
+    json: { retCode: 0, result: { list: [{ symbol: "ETHUSDT", status: "Trading" }] } },
+  }));
+  await page.goto("/");
+  await ouvrirAutreActif(page);
+  await page.getByRole("combobox", COMBOBOX_DIVISEUR).fill("ETHUSDT");
+  const ethusdt = page.getByRole("option", { name: /^ETHUSDT\b/ });
+  await expect(ethusdt).toBeVisible();
+  await expect(ethusdt).toContainText("Binance");
+  await expect(ethusdt).not.toContainText("Auto");
+  // La ligne signale qu'elle reproduit le ÷ETH du menu (presentationOption).
+  await expect(ethusdt).toContainText("Dénominateur du menu : ÷ETH");
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("BTCUSDT / ETHUSDT")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("button", { name: "÷ETH", exact: true })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("« Autre actif… » : WTI/USD refusé par l'offre Twelve Data, sans glisser vers USO", async ({ page }) => {
+  const demandes: string[] = [];
+  await page.route("**/tdapi/time_series*", (route) => {
+    const symbole = new URL(route.request().url()).searchParams.get("symbol") ?? "";
+    demandes.push(symbole);
+    return symbole === "WTI/USD"
+      ? route.fulfill({ status: 404, json: { status: "error", code: 404, message: "This symbol is available starting with the Grow or Venture plan. Consider upgrading now at https://twelvedata.com/pricing" } })
+      : route.fulfill({ json: SERIE_TD });
+  });
+  await page.route("**/tdapi/quote*", (route) => route.fulfill({ json: QUOTE_TD }));
+  await page.goto("/");
+  await ouvrirAutreActif(page);
+  await page.getByRole("combobox", COMBOBOX_DIVISEUR).fill("WTI/USD");
+  await expect(page.getByRole("option", { name: /^WTI\/USD\b/ })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.locator('[data-chart-status="error"]')).toContainText(/abonnement.*Grow/i, { timeout: 15_000 });
+  expect(demandes).toContain("WTI/USD");
+  expect(demandes).not.toContain("USO");
+});
+
+test("« Autre actif… » : un changement de marché ferme le sélecteur", async ({ page }) => {
+  await bouchonnerTwelveData(page);
+  await page.goto("/");
+  await ouvrirAutreActif(page);
+  await page.evaluate(async () => {
+    const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{
+      marketStore: { getState: () => { setMarket: (identite: { exchange: string; symbol: string; timeframe: string }) => void } };
+    }>;
+    (await importer()).marketStore.getState().setMarket({ exchange: "binance", symbol: "ETHUSDT", timeframe: "1d" });
+  });
+  await expect(page.getByRole("combobox", COMBOBOX_DIVISEUR)).toHaveCount(0);
+});
+
+test("« Autre actif… » : une saisie hors catalogue se vérifie par Entrée (FOOUSDT indisponible, orcl posé)", async ({ page }) => {
+  await bouchonnerTwelveData(page);
+  await page.goto("/");
+  await ouvrirAutreActif(page);
+  const champ = page.getByRole("combobox", COMBOBOX_DIVISEUR);
+  // Crypto absente de toute place confirmée : sources automatiques sans candidat réel.
+  await champ.fill("FOOUSDT");
+  await expect(page.getByText("Aucun actif trouvé. Entrée pour vérifier ce symbole.")).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("Actif indisponible : FOOUSDT")).toBeVisible();
+  // Ticker Twelve Data hors catalogue curé, saisi en minuscules : mis en majuscules, puis posé.
+  await champ.fill("orcl");
+  await expect(champ).toHaveValue("ORCL");
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("BTCUSDT ÷ ORCL", { exact: true })).toBeVisible({ timeout: 15_000 });
+});
+
+test("« Autre actif… » : un chunk introuvable n'emporte que le sélecteur, jamais la grille des graphiques", async ({ page }) => {
+  // Hash périmé après un redéploiement, ou réseau coupé : le module du sélecteur ne se charge pas.
+  await page.route("**/components/ChoixDiviseur.tsx*", (route) => route.abort());
+  await page.goto("/");
+  await page.getByRole("button", { name: "Choisir l'actif de comparaison" }).click();
+  await page.getByRole("menuitem", { name: "Autre actif…" }).click();
+  const alerte = page.getByRole("alert").filter({ hasText: "Autre actif indisponible" });
+  await expect(alerte).toBeVisible();
+  await expect(alerte.getByRole("button", { name: "Recharger l’application" })).toBeVisible();
+  await expect(page.locator("[data-chart-banner]")).toBeVisible();
+  await expect(page.getByText("Graphiques indisponible")).toHaveCount(0);
+});
+
+/** Symbole et unité de temps du marché affiché, lus dans le store (« BTCUSDT 1m »). */
+async function marcheAffiche(page: import("@playwright/test").Page): Promise<string> {
+  return page.evaluate(async () => {
+    const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{ marketStore: { getState: () => { symbol: string; timeframe: string } } }>;
+    const { symbol, timeframe } = (await importer()).marketStore.getState();
+    return `${symbol} ${timeframe}`;
+  });
+}
+
+test("« Autre actif… » : un clic sur le titre garde le focus dans le sélecteur ; ], ↓ et Échap n'atteignent pas les raccourcis globaux", async ({ page }) => {
+  await bouchonnerTwelveData(page);
+  await page.goto("/");
+  await expect.poll(() => marcheAffiche(page)).toMatch(/^BTCUSDT /);
+  const avant = await marcheAffiche(page);
+  await ouvrirAutreActif(page);
+  const dialogue = page.getByRole("dialog", { name: "Diviser par un autre actif" });
+  // Texte non focalisable : le focus reste dans le dialogue au lieu de tomber sur body.
+  await dialogue.getByText("Diviser BTCUSDT par…").click();
+  await expect(dialogue).toBeFocused();
+  // Hors du champ, aucune touche n'atteint le répartiteur global : ni l'unité de temps (]), ni la paire (↓).
+  await page.keyboard.press("]");
+  expect(await marcheAffiche(page)).toBe(avant);
+  await page.keyboard.press("ArrowDown");
+  expect(await marcheAffiche(page)).toBe(avant);
+  await page.keyboard.press("Escape");
+  await expect(dialogue).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Choisir l'actif de comparaison" })).toBeFocused();
+  expect(await marcheAffiche(page)).toBe(avant);
+});
+
+test("« Autre actif… » : hors du champ, ⌘[ recule dans l'historique d'AXIOM et ⌘K ouvre la palette", async ({ page }) => {
+  await bouchonnerTwelveData(page);
+  await page.goto("/");
+  await expect.poll(() => marcheAffiche(page)).toMatch(/^BTCUSDT /);
+  // Historique d'AXIOM : BTCUSDT puis ETHUSDT (toute navigation y compte).
+  await page.evaluate(async () => {
+    const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{
+      marketStore: { getState: () => { setMarket: (identite: { exchange: string; symbol: string; timeframe: string }) => void } };
+    }>;
+    (await importer()).marketStore.getState().setMarket({ exchange: "binance", symbol: "ETHUSDT", timeframe: "1d" });
+  });
+  await expect.poll(() => marcheAffiche(page)).toMatch(/^ETHUSDT /);
+  const dialogue = page.getByRole("dialog", { name: "Diviser par un autre actif" });
+  await ouvrirAutreActif(page);
+  await dialogue.getByText("Diviser ETHUSDT par…").click();
+  await expect(dialogue).toBeFocused();
+  // Arrêté par le dialogue, ⌘[ n'atteignait pas AXIOM et devenait le « Précédent » du navigateur.
+  await page.keyboard.press("ControlOrMeta+[");
+  await expect.poll(() => marcheAffiche(page)).toMatch(/^BTCUSDT /);
+  await expect(dialogue).toHaveCount(0);
+  await ouvrirAutreActif(page);
+  await dialogue.getByText("Diviser BTCUSDT par…").click();
+  await expect(dialogue).toBeFocused();
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByRole("dialog", { name: "Palette de commandes" })).toBeVisible();
+});
+
+test("« Autre actif… » : focus perdu vers body, Échap ferme le sélecteur sans quitter le plein écran", async ({ page }) => {
+  await bouchonnerTwelveData(page);
+  await page.goto("/");
+  /** Plein écran lu (et posé si `valeur` est donnée) dans le store du répartiteur global. */
+  const pleinEcran = (valeur?: boolean) => page.evaluate(async (v) => {
+    const importer = new Function("return import('/src/commands/hotkeys.ts')") as () => Promise<{ fullscreenStore: { getState: () => { plein: boolean; definir: (plein: boolean) => void } } }>;
+    const { fullscreenStore } = await importer();
+    if (v !== undefined) fullscreenStore.getState().definir(v);
+    return fullscreenStore.getState().plein;
+  }, valeur);
+  await ouvrirAutreActif(page);
+  expect(await pleinEcran(true)).toBe(true);
+  // Émule un clic qui ne donne pas le focus : la touche part alors de body.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("Escape");
+  expect(await pleinEcran()).toBe(true);
+  await expect(page.getByRole("dialog", { name: "Diviser par un autre actif" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Choisir l'actif de comparaison" })).toBeFocused();
 });

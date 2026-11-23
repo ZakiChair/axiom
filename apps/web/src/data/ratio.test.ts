@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DENOMINATEURS, detailDenominateur, estRatio, libelleDenominateur, noteDollar, symboleRatio } from "./ratio";
+import { baseDuRatio, composerRatioLibreCode, DENOMINATEURS, DENOMINATEURS_MATIERES, detailDenominateur, deviseCotation, estRatio, libelleBandeauRatio, libelleDenominateur, noteDollar, symboleRatio } from "./ratio";
 
 describe("symboleRatio — cible SYN X/DENOM pour le marché courant", () => {
   it("compose le ratio ÷BTC sur binance (réf BTCUSDT)", () => {
@@ -114,7 +114,8 @@ describe("estRatio — reconnaît un ratio posé par le toggle ET son dénominat
     expect(tradfi?.spec.exA).toBe("twelvedata");
     expect(tradfi?.spec.legA).toBe("GLD");
     // La jambe A peut être N'IMPORTE QUELLE source non virtuelle (SYN bâti à la main).
-    expect(estRatio("kraken:SOLUSD|/|binance:ETHUSDT", "synthetic")?.denom).toBe("ETH");
+    // ÷ETH sur Kraken poserait kraken:ETHUSD : ici la jambe B est binance → ratio libre.
+    expect(estRatio("kraken:SOLUSD|/|binance:ETHUSDT", "synthetic")).toMatchObject({ denom: null, spec: { legA: "SOLUSD" } });
   });
 
   it("reconnaît les ratios de capitalisation et conserve leur jambe mcap", () => {
@@ -124,21 +125,41 @@ describe("estRatio — reconnaît un ratio posé par le toggle ET son dénominat
     expect(actif?.spec.legA).toBe("TOTAL3");
   });
 
-  it("refuse un exB cross-source qui n'est pas l'exchange canonique (binance)", () => {
+  it("un exB cross-source qui n'est pas l'exchange canonique est un ratio libre, jamais un dénominateur fixe", () => {
     // legB = BTCUSD = réf kraken : valable en MÊME source, jamais en cross-source.
-    expect(estRatio("binance:ETHUSDT|/|kraken:BTCUSD", "synthetic")).toBeNull();
-    expect(estRatio("twelvedata:GLD|/|kraken:BTCUSD", "synthetic")).toBeNull();
-    // Ticker canonique (BTCUSDT) mais sur le MAUVAIS exchange : refusé aussi.
-    expect(estRatio("binance:ETHUSDT|/|kraken:BTCUSDT", "synthetic")).toBeNull();
+    expect(estRatio("binance:ETHUSDT|/|kraken:BTCUSD", "synthetic")).toMatchObject({ denom: null });
+    expect(estRatio("twelvedata:GLD|/|kraken:BTCUSD", "synthetic")).toMatchObject({ denom: null });
+    // Ticker canonique (BTCUSDT) mais sur le MAUVAIS exchange : libre aussi.
+    expect(estRatio("binance:ETHUSDT|/|kraken:BTCUSDT", "synthetic")).toMatchObject({ denom: null });
   });
 
-  it("refuse un legB étranger aux réfs des dénominateurs", () => {
-    expect(estRatio("binance:ETHUSDT|/|binance:BNBUSDT", "synthetic")).toBeNull();
-    // Réf d'une AUTRE source que celle de la jambe B : ETHUSD est la réf kraken/coinbase,
-    // pas binance — la jambe B se vérifie toujours contre la réf de SON exchange (exB).
-    expect(estRatio("binance:SOLUSDT|/|binance:ETHUSD", "synthetic")).toBeNull();
+  it("un legB étranger aux réfs des dénominateurs est un ratio libre, jamais un dénominateur fixe", () => {
+    expect(estRatio("binance:ETHUSDT|/|binance:BNBUSDT", "synthetic")).toMatchObject({ denom: null });
+    // ETHUSD est la réf kraken/coinbase, pas binance : libre, et non ETH.
+    expect(estRatio("binance:SOLUSDT|/|binance:ETHUSD", "synthetic")).toMatchObject({ denom: null });
     // Idem en cross-source : BTCUSD n'est pas la réf canonique binance (BTCUSDT).
-    expect(estRatio("twelvedata:GLD|/|binance:BTCUSD", "synthetic")).toBeNull();
+    expect(estRatio("twelvedata:GLD|/|binance:BTCUSD", "synthetic")).toMatchObject({ denom: null });
+  });
+
+  it("reconnaît les préréglages GLD et UUP comme ratios libres, jamais un spread", () => {
+    expect(estRatio("binance:BTCUSDT|/|twelvedata:GLD", "synthetic")).toMatchObject({ denom: null });
+    expect(estRatio("binance:BTCUSDT|/|twelvedata:UUP", "synthetic")).toMatchObject({ denom: null });
+    expect(estRatio("binance:BTCUSDT|-|twelvedata:GLD", "synthetic")).toBeNull();
+    expect(estRatio("binance:BTCUSDT|/|mcap:TOTAL2", "synthetic")).toMatchObject({ denom: null });
+    expect(estRatio("binance:ETHBTC|/|twelvedata:EUR/USD", "synthetic")).toBeNull();
+  });
+
+  it("baseDuRatio : jambe A du ratio (mcap lu synthetic), sinon le marché", () => {
+    expect(baseDuRatio(estRatio("mcap:TOTAL3|/|twelvedata:AAPL", "synthetic"), "x", "synthetic")).toEqual({ symbol: "TOTAL3", exchange: "synthetic" });
+    expect(baseDuRatio(estRatio("twelvedata:GLD|/|binance:BNBUSDT", "synthetic"), "x", "synthetic")).toEqual({ symbol: "GLD", exchange: "twelvedata" });
+    expect(baseDuRatio(null, "BTCUSDT", "binance")).toEqual({ symbol: "BTCUSDT", exchange: "binance" });
+  });
+
+  it("libelleBandeauRatio : fixe Twelve Data, libre, null pour un fixe crypto", () => {
+    const lib = (s: string) => libelleBandeauRatio(estRatio(s, "synthetic") as NonNullable<ReturnType<typeof estRatio>>);
+    expect(lib("binance:BTCUSDT|/|twelvedata:CPER")).toBe("BTCUSDT ÷Cuivre (CPER)");
+    expect(lib("coinbase:BTCUSD|/|binance:BTCUSDT")).toBe("BTCUSD ÷ BTCUSDT");
+    expect(lib("binance:ETHUSDT|/|binance:BTCUSDT")).toBeNull();
   });
 
   it("refuse un exchange autre que synthetic", () => {
@@ -242,8 +263,8 @@ describe("dénominateurs marchés et devises (demande du 26/09/2026) : jambe Twe
     expect(or?.spec).toMatchObject({ exA: "binance", legA: "BTCUSDT" });
     expect(estRatio("bybit:HYPEUSDT|/|twelvedata:CHF/USD", "synthetic")?.denom).toBe("CHF");
     expect(estRatio("mcap:TOTAL|/|twelvedata:SPY", "synthetic")?.denom).toBe("SP500");
-    // Jambe Twelve Data étrangère aux dénominateurs : non reconnue.
-    expect(estRatio("binance:BTCUSDT|/|twelvedata:GLD", "synthetic")).toBeNull();
+    // Jambe Twelve Data étrangère aux dénominateurs : ratio libre, sans dénominateur fixe.
+    expect(estRatio("binance:BTCUSDT|/|twelvedata:GLD", "synthetic")).toMatchObject({ denom: null });
     // Réf Twelve Data posée sur une autre source : non reconnue.
     expect(estRatio("binance:BTCUSDT|/|binance:XAU/USD", "synthetic")).toBeNull();
   });
@@ -318,5 +339,81 @@ describe("STABLE.D (dominance, série en %) : aucun ratio ni conversion de devis
     expect(symboleRatio("TOTAL3", "synthetic", "SOL")).toBe("mcap:TOTAL3|/|binance:SOLUSDT");
     expect(symboleRatio("TOTAL3", "synthetic", "OR")).toBe("mcap:TOTAL3|/|twelvedata:XAU/USD");
     expect(estRatio("mcap:TOTAL3|/|binance:SOLUSDT", "synthetic")?.denom).toBe("SOL");
+  });
+});
+
+describe("matières premières (demande du 22/11/2026)", () => {
+  const ETF = [["ARGENT", "SLV"], ["PLATINE", "PPLT"], ["PALLADIUM", "PALL"], ["CUIVRE", "CPER"], ["PETROLE", "USO"], ["BRENT", "BNO"], ["GAZ", "UNG"], ["BLE", "WEAT"], ["MAIS", "CORN"], ["SOJA", "SOYB"], ["SUCRE", "CANE"], ["AGRICULTURE", "DBA"], ["PANIER", "DBC"]] as const;
+
+  it("compose chaque matière première pour un actif en dollar, un ticker Twelve Data et TOTAL", () => {
+    for (const [id, etf] of ETF) {
+      expect(symboleRatio("BTCUSDT", "binance", id)).toBe(`binance:BTCUSDT|/|twelvedata:${etf}`);
+      expect(symboleRatio("AAPL", "twelvedata", id)).toBe(`twelvedata:AAPL|/|twelvedata:${etf}`);
+      expect(symboleRatio("TOTAL", "synthetic", id)).toBe(`mcap:TOTAL|/|twelvedata:${etf}`);
+    }
+  });
+  it("refuse un actif hors dollar et l'ETF divisé par lui-même", () => {
+    expect(symboleRatio("BTCEUR", "kraken", "CUIVRE")).toBeNull();
+    expect(symboleRatio("CPER", "twelvedata", "CUIVRE")).toBeNull();
+    expect(symboleRatio("USO", "twelvedata", "PETROLE")).toBeNull();
+    expect(symboleRatio("GLD", "twelvedata", "OR")).toBe("twelvedata:GLD|/|twelvedata:XAU/USD");
+  });
+  it("la garde « base = dénominateur » ne vaut que pour les devises", () => {
+    expect(symboleRatio("GAZUSDT", "binance", "GAZ")).toBe("binance:GAZUSDT|/|twelvedata:UNG");
+    expect(symboleRatio("EURUSDT", "binance", "EUR")).toBeNull();
+  });
+  it("estRatio reconnaît chaque matière première et rend la jambe A", () => {
+    for (const id of DENOMINATEURS_MATIERES) {
+      const actif = estRatio(symboleRatio("BTCUSDT", "binance", id) as string, "synthetic");
+      expect(actif?.denom).toBe(id);
+      expect(actif?.spec.legA).toBe("BTCUSDT");
+    }
+  });
+  it("libellés : l'ETF est toujours nommé ; infobulles : nature et spot refusé", () => {
+    expect(DENOMINATEURS_MATIERES.map(libelleDenominateur)).toEqual(["÷Or", "÷Argent (SLV)", "÷Platine (PPLT)", "÷Palladium (PALL)", "÷Cuivre (CPER)", "÷Pétrole WTI (USO)", "÷Brent (BNO)", "÷Gaz naturel (UNG)", "÷Blé (WEAT)", "÷Maïs (CORN)", "÷Soja (SOYB)", "÷Sucre (CANE)", "÷Agriculture (DBA)", "÷Matières premières (DBC)"]);
+    expect(detailDenominateur("CUIVRE")).toBe("le cuivre via l'ETF CPER (prix de la part, contrats à terme renouvelés : écart possible au cours sur plusieurs années) ; le spot HG1 exige une offre Twelve Data supérieure");
+    expect(detailDenominateur("ARGENT")).toBe("l'argent via l'ETF SLV (prix de la part, adossé au métal) ; le spot XAG/USD exige une offre Twelve Data supérieure");
+    expect(detailDenominateur("PALLADIUM")).not.toContain("spot");
+    expect(detailDenominateur("AGRICULTURE")).toContain("café");
+  });
+  it("ordre des familles : crypto, indices, matières premières, devises", () => {
+    expect(DENOMINATEURS).toEqual(["BTC", "ETH", "SOL", "NASDAQ", "SP500", "OR", "ARGENT", "PLATINE", "PALLADIUM", "CUIVRE", "PETROLE", "BRENT", "GAZ", "BLE", "MAIS", "SOJA", "SUCRE", "AGRICULTURE", "PANIER", "EUR", "GBP", "CHF", "JPY", "CAD", "AUD"]);
+  });
+});
+
+describe("« Autre actif… » : composition libre (lot 2)", () => {
+  it("deviseCotation : devise du prix, stablecoins comptés USD, null si inconnue", () => {
+    const table: Array<[string, Parameters<typeof deviseCotation>[1], string | null]> = [
+      ["BTCUSDT", "binance", "USD"], ["BTCEUR", "kraken", "EUR"], ["ETHBTC", "binance", "BTC"], ["HYPE-PERP", "hyperliquid", "USD"],
+      ["SPY", "twelvedata", "USD"], ["USD/JPY", "twelvedata", "JPY"], ["XAU/USD", "twelvedata", "USD"], ["RY:TSX", "twelvedata", null],
+      ["TOTAL", "synthetic", "USD"], ["STABLE.D", "synthetic", null], ["XYZ", "binance", null], ["XAU/USD", "binance", null],
+      // Symbole composé (« | ») annoncé sur une place réelle : jamais une devise.
+      ["binance:ETHUSDT|-|binance:BTCUSDT", "binance", null],
+    ];
+    for (const [symbol, exchange, attendu] of table) expect(deviseCotation(symbol, exchange)).toEqual(attendu);
+  });
+
+  it("composerRatioLibreCode : compositions libres (cœur sans texte)", () => {
+    expect(composerRatioLibreCode("BTCUSD", "coinbase", { exchange: "binance", symbol: "BTCUSDT" })).toEqual({ symbole: "coinbase:BTCUSD|/|binance:BTCUSDT" });
+    expect(composerRatioLibreCode("ETHBTC", "binance", { exchange: "binance", symbol: "ADABTC" })).toEqual({ symbole: "binance:ETHBTC|/|binance:ADABTC" });
+    expect(composerRatioLibreCode("BTCUSDT", "binance", { exchange: "twelvedata", symbol: "AAPL" })).toEqual({ symbole: "binance:BTCUSDT|/|twelvedata:AAPL" });
+    expect(composerRatioLibreCode("TOTAL", "synthetic", { exchange: "twelvedata", symbol: "AAPL" })).toEqual({ symbole: "mcap:TOTAL|/|twelvedata:AAPL" });
+    expect(composerRatioLibreCode("BTCUSDT", "binance", { exchange: "synthetic", symbol: "TOTAL2" })).toEqual({ symbole: "binance:BTCUSDT|/|mcap:TOTAL2" });
+  });
+
+  it("composerRatioLibreCode : refus par code (les messages vivent dans choixDiviseur.ts)", () => {
+    expect(composerRatioLibreCode("ETHUSDT", "binance", { exchange: "binance", symbol: "ETHUSDT" })).toEqual({ code: "meme" });
+    expect(composerRatioLibreCode("BTCUSDT", "binance", { exchange: "twelvedata", symbol: "USD/JPY" })).toEqual({ code: "devises", a: "USD", b: "JPY" });
+    expect(composerRatioLibreCode("BTCEUR", "kraken", { exchange: "twelvedata", symbol: "CPER" })).toEqual({ code: "devises", a: "EUR", b: "USD" });
+    expect(composerRatioLibreCode("BTCUSDT", "binance", { exchange: "twelvedata", symbol: "RY:TSX" })).toEqual({ code: "devise" });
+    expect(composerRatioLibreCode("BTCUSDT", "binance", { exchange: "synthetic", symbol: "STABLE.D" })).toEqual({ code: "serie" });
+    expect(composerRatioLibreCode("binance:ETHUSDT|-|binance:BTCUSDT", "synthetic", { exchange: "twelvedata", symbol: "AAPL" })).toEqual({ code: "compose" });
+  });
+
+  it("composerRatioLibreCode : ordre des règles — jambe B, base, A ÷ A, devise", () => {
+    // Jambe B et base refusables toutes deux : la jambe B parle d'abord.
+    expect(composerRatioLibreCode("binance:ETHUSDT|-|binance:BTCUSDT", "synthetic", { exchange: "synthetic", symbol: "STABLE.D" })).toEqual({ code: "serie" });
+    // Même actif à devise inconnue : A ÷ A parle avant la devise.
+    expect(composerRatioLibreCode("RY:TSX", "twelvedata", { exchange: "twelvedata", symbol: "RY:TSX" })).toEqual({ code: "meme" });
   });
 });

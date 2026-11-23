@@ -2,7 +2,7 @@
  * Store du dénominateur CHOISI pour le bouton de ratio scindé (Zustand VANILLA).
  *
  * Réglage unique : l'actif servant de dénominateur au bouton « ÷X ▾ » du bandeau
- * (ETH par défaut ; SOL, or, Nasdaq 100, S&P 500 ou une devise au choix — cf.
+ * (ETH par défaut ; SOL, indice, matière première ou devise au choix — cf.
  * `DENOMINATEURS`). Le ÷BTC a son propre bouton, un clic, et n'est PAS concerné par
  * cette préférence.
  *

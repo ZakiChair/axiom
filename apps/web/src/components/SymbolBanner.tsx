@@ -10,7 +10,7 @@
  *  - variation 24 h : abonnement `subscribeTickers` existant (data/ticker.ts) ;
  *  - prix / H-L / volume : dérivés du buffer de bougies (marketStore), fenêtre 24 h.
  */
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { Candle, ExchangeId, Timeframe, Unsubscribe } from "@axiom/types";
 import { marketStore } from "../store/market";
@@ -27,11 +27,14 @@ import { formatSyntheticLabel, parseSyntheticSymbol } from "../data/synthetic";
 import { COMPOSITION_DOMINANCE_STABLECOINS, estSerieEnPourcentage, estSymboleCapitalisation } from "../data/mcap";
 import { sourcesCapitalisationStore, type SourceCapitalisation } from "../data/mcapCandles";
 import {
+  baseDuRatio,
   DENOMINATEURS_CRYPTO,
   DENOMINATEURS_DEVISES,
-  DENOMINATEURS_MARCHES,
+  DENOMINATEURS_INDICES,
+  DENOMINATEURS_MATIERES,
   detailDenominateur,
   estRatio,
+  libelleBandeauRatio,
   libelleDenominateur,
   noteDollar,
   symboleRatio,
@@ -39,8 +42,12 @@ import {
 } from "../data/ratio";
 import { supportedTimeframesFor, timeframeProche } from "../data/adapters";
 import { MenuDeroulant } from "./ui";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { formatCompact, formatCountdown, formatPct, formatPourcentage, formatPrice } from "../lib/format";
 import { useMobileLayout } from "../hooks/useMobileLayout";
+
+/** Sélecteur « Autre actif… » : chargé à la demande, hors du chargement initial (chunk séparé). */
+const ChoixDiviseur = lazy(() => import("./ChoixDiviseur").then((m) => ({ default: m.ChoixDiviseur })));
 
 /** Durée (ms) d'une bougie pour les timeframes à pas FIXE. */
 export const TF_DURATION_MS: Partial<Record<Timeframe, number>> = {
@@ -161,21 +168,30 @@ function classeBouton(actif: boolean, mobile = false): string {
 }
 
 /**
- * Boutons de ratio du bandeau : « ÷BTC » (un clic, contrat inchangé) + un bouton SCINDÉ
- * « ÷ETH ▾ » dont le dénominateur se choisit dans un menu groupé : crypto (ETH, SOL),
- * marchés (or, Nasdaq 100, S&P 500) et devises (« en CHF », « en JPY »…).
+ * Boutons de ratio du bandeau :
+ *  - « ÷BTC », bouton fixe : un clic pose le ratio, un second revient à la jambe A ;
+ *  - un bouton SCINDÉ « ÷ETH ▾ » pour les autres dénominateurs fixes, choisis dans un menu
+ *    groupé : crypto (ETH, SOL), indices (Nasdaq 100, S&P 500), matières premières (or,
+ *    argent, cuivre, pétrole… et paniers d'ETF) et devises (« en CHF », « en JPY »…) ;
+ *  - un ratio LIBRE actif (posé par « Autre actif… », ou tout SYN « A / B » que ce sélecteur
+ *    aurait composé) s'affiche « ÷<jambe B> » enfoncé sur le bouton scindé ; un clic revient
+ *    à la jambe A ;
+ *  - « Autre actif… », dernière entrée du menu, ouvre le sélecteur `ChoixDiviseur` (chargé à
+ *    la demande) : n'importe quel actif du catalogue commun divise la jambe A. Échap y rend le
+ *    focus au bouton ▾ ; un changement de marché le ferme.
  *
- * Composant ENFANT à dessein : son état de menu (useState) ne doit pas re-rendre le
- * bandeau, dont le prix / H-L / volume sont écrits IMPÉRATIVEMENT dans le DOM.
+ * Composant ENFANT à dessein : ses états de menu et de sélecteur (useState) ne doivent pas
+ * re-rendre le bandeau, dont le prix / H-L / volume sont écrits IMPÉRATIVEMENT dans le DOM.
  *
  * Trois règles :
  *  - le ratio ACTIF se déduit du symbole seul (`estRatio`) — c'est lui qui décide quel
  *    bouton est en teinte pleine et vers quelle jambe le détoggle revient ;
  *  - quand un ratio est actif, les AUTRES dénominateurs se composent depuis sa jambe A
- *    (le symbole SYN courant, de source `synthetic`, n'est pas basculable tel quel) —
- *    d'où ÷BTC ⇄ ÷ETH ⇄ ÷Or ⇄ en CHF en un clic chacun ;
+ *    (`baseDuRatio` : le symbole SYN courant, de source `synthetic`, n'est pas basculable
+ *    tel quel) — d'où ÷BTC ⇄ ÷ETH ⇄ ÷Or ⇄ en CHF en un clic chacun ;
  *  - le bouton scindé suit le ratio actif quand celui-ci n'est pas ÷BTC (sinon il
- *    deviendrait impossible de le détoggler), sinon la préférence persistée.
+ *    deviendrait impossible de le détoggler), sinon la préférence persistée — qui ne retient
+ *    jamais un diviseur libre.
  */
 function BoutonsRatio({
   exchange,
@@ -189,15 +205,15 @@ function BoutonsRatio({
   const mobile = useMobileLayout();
   const choisi = useStore(denominateurStore, (s) => s.denominateur);
   const setChoisi = useStore(denominateurStore, (s) => s.setDenominateur);
+  const [autreActif, setAutreActif] = useState(false);
+  const ancre = useRef<HTMLSpanElement>(null);
+  // Tout changement de marché (choix posé, watchlist, raccourci…) ferme le sélecteur.
+  useEffect(() => setAutreActif(false), [exchange, symbol]);
 
   const actif = estRatio(symbol, exchange);
   // Base de composition : la jambe A du ratio actif, sinon le marché courant.
-  const baseEx: ExchangeId = actif?.spec.exA === "mcap"
-    ? "synthetic"
-    : actif
-      ? actif.spec.exA
-      : exchange;
-  const baseSym = actif ? actif.spec.legA : symbol;
+  const { symbol: baseSym, exchange: baseEx } = baseDuRatio(actif, symbol, exchange);
+  const libre = actif !== null && actif.denom === null;
 
   /**
    * Pose le ratio ÷denom (sans jamais détoggler). Sans cible composable : rien. Unité de temps
@@ -238,20 +254,21 @@ function BoutonsRatio({
       ? `${libelleDenominateur(denom)} indisponible : l'actif est déjà ${denom} ou coté en ${denom}`
       : `${libelleDenominateur(denom)} indisponible : actif non coté en dollar, ou déjà cette référence`;
   // Puce du menu : le ratio affiché, sinon la préférence du bouton scindé.
-  const marque = actif?.denom ?? choisi;
+  const marque = actif === null ? choisi : actif.denom;
 
   // Bouton scindé : tout sauf BTC, qui garde son bouton propre. Si le dénominateur
   // préféré n'est pas composable ici (ex. ÷ETH sur ETHUSDT, ÷Or sur BTCEUR), on retombe
   // sur le premier disponible plutôt que de faire disparaître le bouton.
-  const groupes: Array<[string, DenominateurId[]]> = [
-    ["Crypto", DENOMINATEURS_CRYPTO.filter((d) => d !== "BTC")],
-    ["Marchés", [...DENOMINATEURS_MARCHES]],
-    ["Devises", [...DENOMINATEURS_DEVISES]],
+  const groupes: Array<[titre: string, cle: string, liste: DenominateurId[]]> = [
+    ["Crypto", "crypto", DENOMINATEURS_CRYPTO.filter((d) => d !== "BTC")],
+    ["Indices", "indices", [...DENOMINATEURS_INDICES]],
+    ["Matières premières", "matieres", [...DENOMINATEURS_MATIERES]],
+    ["Devises", "devises", [...DENOMINATEURS_DEVISES]],
   ];
-  const candidats = groupes.flatMap(([, liste]) => liste);
+  const candidats = groupes.flatMap(([, , liste]) => liste);
   const disponibles = candidats.filter(disponible);
   const denomScinde: DenominateurId | undefined =
-    actif !== null && actif.denom !== "BTC"
+    actif !== null && actif.denom !== null && actif.denom !== "BTC"
       ? actif.denom
       : disponibles.includes(choisi)
         ? choisi
@@ -271,20 +288,22 @@ function BoutonsRatio({
         </button>
       )}
 
-      {denomScinde !== undefined && (
-        <span className="pointer-events-auto relative inline-flex">
+      {(denomScinde !== undefined || libre) && (
+        <span ref={ancre} className="pointer-events-auto relative inline-flex">
           <button
             type="button"
             title={
-              actif?.denom === denomScinde
-                ? `Revenir à ${actif.spec.legA}`
-                : detail(denomScinde)
+              libre || actif?.denom === denomScinde
+                ? `Revenir à ${baseSym}`
+                : detail(denomScinde as DenominateurId)
             }
-            onClick={() => basculer(denomScinde)}
-            aria-pressed={actif?.denom === denomScinde}
-            className={`${classeBouton(actif?.denom === denomScinde, mobile)} rounded-r-none border-r-0`}
+            onClick={() => (libre
+              ? marketStore.getState().setMarket({ exchange: baseEx, symbol: baseSym, timeframe })
+              : basculer(denomScinde as DenominateurId))}
+            aria-pressed={libre || actif?.denom === denomScinde}
+            className={`${classeBouton(libre || actif?.denom === denomScinde, mobile)} rounded-r-none border-r-0`}
           >
-            {libelleDenominateur(denomScinde)}
+            {libre ? `÷${actif.spec.legB}` : libelleDenominateur(denomScinde as DenominateurId)}
           </button>
           <MenuDeroulant
             declencheur="▾"
@@ -295,9 +314,9 @@ function BoutonsRatio({
             classePanneau="w-56"
             declencheurClasse={`${classeBouton(false, mobile)} rounded-l-none px-1`}
           >
-            {(fermer) => groupes.map(([titre, liste]) => (
-              <div key={titre} role="group" aria-labelledby={`ratio-groupe-${titre}`} className="flex flex-col">
-                <span id={`ratio-groupe-${titre}`} className="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-dim">
+            {(fermer) => <>{groupes.map(([titre, cle, liste]) => (
+              <div key={cle} role="group" aria-labelledby={`ratio-groupe-${cle}`} className="flex flex-col">
+                <span id={`ratio-groupe-${cle}`} className="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-dim">
                   {titre}
                 </span>
                 {liste.map((denom) => (
@@ -324,7 +343,36 @@ function BoutonsRatio({
                 ))}
               </div>
             ))}
+              <div role="separator" className="my-1 border-t border-border" />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  fermer();
+                  setAutreActif(true);
+                }}
+                className={`flex ${mobile ? "min-h-11" : ""} w-full items-center gap-1.5 px-2 py-1 text-left text-xs text-text hover:bg-neutral-800 focus:bg-neutral-800 focus:outline-none`}
+              >
+                <span aria-hidden className="w-2 text-accent">{libre ? "•" : ""}</span>
+                <span>Autre actif…</span>
+              </button>
+            </>}
           </MenuDeroulant>
+          {/* Chunk introuvable (hash périmé, hors ligne) : seul le sélecteur tombe, pas la grille des graphiques. */}
+          {autreActif && (
+            <ErrorBoundary scope="Autre actif" compact recovery="reload">
+              <Suspense fallback={null}>
+                <ChoixDiviseur
+                  base={{ symbol: baseSym, exchange: baseEx }}
+                  timeframe={timeframe}
+                  fermer={(rendreFocus) => {
+                    setAutreActif(false);
+                    if (rendreFocus) ancre.current?.querySelector<HTMLElement>('[aria-haspopup="menu"]')?.focus();
+                  }}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          )}
         </span>
       )}
     </>
@@ -339,11 +387,10 @@ export function SymbolBanner() {
   const timeframe = useStore(marketStore, (s) => s.timeframe);
   useStore(marketStore, (s) => s.dataLoad.status);
   const syntheticSpec = exchange === "synthetic" ? parseSyntheticSymbol(symbol) : null;
-  // Ratio ÷ marché ou devise : « BTCUSDT ÷Or », « BTCUSDT en CHF » ; sinon le libellé SYN.
-  const ratioTradfi = syntheticSpec?.exB === "twelvedata" ? estRatio(symbol, exchange) : null;
-  const bannerSymbol = ratioTradfi
-    ? `${ratioTradfi.spec.legA} ${libelleDenominateur(ratioTradfi.denom)}`
-    : syntheticSpec ? formatSyntheticLabel(syntheticSpec) : symbol;
+  // Ratio fixe Twelve Data ou libre : « BTCUSDT ÷Or », « BTCUSD ÷ BTCUSDT » ; sinon le libellé SYN.
+  const ratioActif = syntheticSpec ? estRatio(symbol, exchange) : null;
+  const bannerSymbol = (ratioActif && libelleBandeauRatio(ratioActif))
+    ?? (syntheticSpec ? formatSyntheticLabel(syntheticSpec) : symbol);
   const estCapitalisation =
     estSymboleCapitalisation(symbol) || syntheticSpec?.exA === "mcap" || syntheticSpec?.exB === "mcap";
   // Pour un ratio, la jambe mcap porte la provenance (fetchKlines est appelé avec elle).

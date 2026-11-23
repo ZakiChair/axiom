@@ -147,8 +147,8 @@ export const TWELVEDATA_SYMBOLS: string[] = [
   "GBTC", "IBIT", "ETHA", "ETHE",
   // Commodités via ETF (or→GLD, argent→SLV, pétrole WTI→USO, Brent→BNO, gaz→UNG,
   // cuivre→CPER, platine→PPLT, palladium→PALL, agriculture→DBA, large→DBC, blé→WEAT,
-  // maïs→CORN, sucre→CANE).
-  "GLD", "SLV", "USO", "BNO", "UNG", "CPER", "PPLT", "PALL", "DBA", "DBC", "WEAT", "CORN", "CANE",
+  // maïs→CORN, sucre→CANE, soja→SOYB).
+  "GLD", "SLV", "USO", "BNO", "UNG", "CPER", "PPLT", "PALL", "DBA", "DBC", "WEAT", "CORN", "CANE", "SOYB",
   // Pétrole WTI spot, distinct de l'ETF USO et de l'action WTI.
   "WTI/USD",
   // Dollar US via ETF (proxy DXY pour les synthétiques BTC/DXY).
@@ -163,7 +163,20 @@ export const TWELVEDATA_SYMBOLS: string[] = [
 
 /** Aide à la recherche uniquement : ne réécrit ni symboles stockés ni requêtes de prix. */
 export const TRADFI_SEARCH_METADATA: Readonly<Record<string, { label: string; aliases: readonly string[] }>> = {
-  "WTI/USD": { label: "Pétrole WTI — spot", aliases: ["USOIL"] },
+  "WTI/USD": { label: "Pétrole WTI — spot (offre Twelve Data supérieure)", aliases: ["PETROLE"] },
+  USO: { label: "Pétrole WTI — ETF", aliases: ["USOIL", "PETROLE"] },
+  BNO: { label: "Brent — ETF", aliases: ["BRENT", "UKOIL"] },
+  SLV: { label: "Argent — ETF", aliases: ["ARGENT", "SILVER"] },
+  PPLT: { label: "Platine — ETF", aliases: ["PLATINE"] },
+  PALL: { label: "Palladium — ETF", aliases: ["PALLADIUM"] },
+  CPER: { label: "Cuivre — ETF", aliases: ["CUIVRE", "COPPER"] },
+  UNG: { label: "Gaz naturel — ETF", aliases: ["GAZ", "NATGAS"] },
+  WEAT: { label: "Blé — ETF", aliases: ["BLE", "WHEAT"] },
+  CORN: { label: "Maïs — ETF", aliases: ["MAIS"] },
+  SOYB: { label: "Soja — ETF", aliases: ["SOJA"] },
+  CANE: { label: "Sucre — ETF", aliases: ["SUCRE", "SUGAR"] },
+  DBA: { label: "Agriculture (panier) — ETF", aliases: ["AGRICULTURE"] },
+  DBC: { label: "Matières premières (panier) — ETF", aliases: ["MATIERES"] },
   WTI: { label: "W&T Offshore — action", aliases: [] },
 };
 

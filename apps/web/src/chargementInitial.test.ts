@@ -63,6 +63,9 @@ const MODULES_DIFFERES: Record<string, string> = {
   "store/presetAlerts": "alertes de preset d'EQS — chargées avec alerts/runtime, AlertsPanel et ScreenerWindow (React.lazy)",
   "store/fluxCapitaux": "store des flux de capitaux — chargé avec alerts/runtime et les sections CHAIN / STBL / BRIEF (React.lazy)",
   "components/liquidationsWindow.util": "calculs de la fenêtre LIQ (minute glissante de liq-cascade) — chargés avec alerts/runtime et LiquidationsWindow (React.lazy)",
+  // Ratios ÷ autre actif (demande du 22 novembre 2026) : seule l'entrée du menu ÷ ▾ est au démarrage.
+  "components/ChoixDiviseur": "sélecteur « Autre actif… » du menu ÷ ▾ — React.lazy depuis SymbolBanner",
+  "data/choixDiviseur": "composition d'un diviseur libre et options du sélecteur — chargées avec ChoixDiviseur",
 };
 
 /** `import type { A } from "x"`, `import type * as M from "x"`, `export type { A } from "x"`, multi-lignes compris. */

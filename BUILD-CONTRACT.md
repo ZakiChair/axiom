@@ -4511,3 +4511,138 @@ intégrée, a relevé trois mineurs, corrigés (voir « Revues et tests »).
     soumis à des données jamais vues.
   - Comparer « ≠ graphe » à toutes les instances, et proposer de recopier les réglages
     actuels ; délai pour une page qui ne répond jamais.
+
+## Ratios ÷ matières premières et ÷ autre actif (demande du 22 novembre 2026)
+
+Le propriétaire demande : « ajoute la possibilité de diviser les actifs par d'autres actifs comme
+le cuivre », précise « Café, sucre, autre commodité ou actif, USOIL, CHF », puis « ajoute en plus
+si tu peux ». Livré en deux lots sur `feat/ratios-matieres-premieres` : **13 dénominateurs matières
+premières** (ETF Twelve Data) dans le menu ÷ du bandeau, regroupés avec l'Or, et une entrée
+**« Autre actif… »** qui divise le marché affiché par n'importe quel actif du catalogue commun.
+**Aucun fournisseur, hôte, proxy, dépendance ni champ de `@axiom/types` nouveau ; moteur SYN
+(`data/synthetic.ts`), `heuresMarche.ts` et `twelvedata.ts` inchangés.** Exception au gel G100 au
+titre de la demande explicite. Spec : `docs/superpowers/specs/2026-11-22-ratios-matieres-premieres-design.md`
+(validée le 22/11 : « parfait go ») ; plan : `docs/superpowers/plans/2026-11-23-ratios-matieres-premieres.md`.
+
+- **Arbitrages de l'orchestrateur, à confirmer par le propriétaire.** Aucun n'a été demandé mot
+  pour mot ; certains figurent dans la spec validée, d'autres ont été tranchés en cours de
+  chantier.
+  - **« USOIL » vers l'ETF USO.** Le résumé validé annonçait que « USOIL » trouverait l'ETF, mais
+    la décision du 23 septembre (WTI/USD, jamais USO) et ses trois parcours épinglés n'ont été
+    découverts qu'après la validation : **renversement confirmé par le propriétaire le 23/11**
+    (« L'ETF USO »).
+  - **Budget au-delà du garde-fou.** La spec validée disait « au-delà de +1 200 octets gzip,
+    arrêter et le signaler » ; le chantier a continué (+1 580 en Node 26, marge CI 2 460) après
+    avoir récupéré les économies sûres. Signalé ici.
+  - **« Marchés » devient « Indices »** et l'Or rejoint « Matières premières » (id `OR` inchangé).
+  - **Reconnaissance resserrée** : un dénominateur fixe n'est plus reconnu que par recomposition
+    exacte (`kraken:SOLUSD|/|binance:ETHUSDT` n'est plus lu ÷ETH) ; les préréglages et SYN « / »
+    deviennent des ratios libres (ce point-là a été confirmé explicitement le 22/11).
+  - Ajouts au-delà des actifs nommés (argent, platine, palladium, Brent, gaz, blé, maïs, soja,
+    paniers DBA et DBC) ; ETF plutôt que spot, toujours nommé ; pas de « Récents » ; la devise
+    des boutons crypto fixes reste non vérifiée, comme avant (voir les limites).
+- **Offre vérifiée le 22/11** (sondes `time_series` 1d, clé serveur `/tdapi`) :
+  - servis : CPER (cuivre), CANE (sucre), USO (pétrole WTI), SLV (argent), PPLT (platine), PALL
+    (palladium), BNO (Brent), UNG (gaz naturel), WEAT (blé), CORN (maïs), SOYB (soja), DBA
+    (panier agricole, dont café et cacao), DBC (panier large) ;
+  - refusés : HG1 (cuivre spot, « Grow ou Venture »), XAG/USD, WTI/USD, XBR/USD, XPT/USD,
+    COFF:LSE, SUGA:LSE ; `JO` (ETN café) introuvable ;
+  - **café : aucune source**, ni Twelve Data ni perpétuels Binance, Bybit, OKX, MEXC ou Hyperliquid
+    (dex HIP-3 compris) ;
+  - perpétuels « TradFi » des places crypto (Binance XAU, XAG, XPT, XPD, COPPER, CL, BZ, NATGAS…)
+    écartés : AXIOM n'affiche que le spot Binance, et ils sont listés depuis décembre 2025 à avril
+    2026 ;
+  - historiques ajustés des regroupements (USO commence à 378,40 en 2007) ; CPER a deux barres
+    aberrantes isolées à volume nul (2014-12-04 à 13,05 ; 2015-02-02 à 11,90).
+- **Lot 1 — menu.** Groupes Crypto · **Indices** (« Marchés » renommé : ÷Nasdaq 100 (QQQ),
+  ÷S&P 500 (SPY)) · **Matières premières** (÷Or, déplacé, id `OR` inchangé ; ÷Argent (SLV),
+  ÷Platine (PPLT), ÷Palladium (PALL), ÷Cuivre (CPER), ÷Pétrole WTI (USO), ÷Brent (BNO), ÷Gaz
+  naturel (UNG), ÷Blé (WEAT), ÷Maïs (CORN), ÷Soja (SOYB), ÷Sucre (CANE), ÷Agriculture (DBA),
+  ÷Matières premières (DBC)) · Devises. Ids persistés figés : `ARGENT`, `PLATINE`, `PALLADIUM`,
+  `CUIVRE`, `PETROLE`, `BRENT`, `GAZ`, `BLE`, `MAIS`, `SOJA`, `SUCRE`, `AGRICULTURE`, `PANIER`.
+  - L'ETF est toujours nommé. L'infobulle, composée depuis une table, dit « prix de la part »,
+    « adossé au métal » (SLV, PPLT, PALL) ou « contrats à terme renouvelés : écart possible au
+    cours sur plusieurs années », et « le spot X exige une offre Twelve Data supérieure » quand le
+    spot a été vu refusé. Écart assumé avec la spec §4.3, qui écrivait « offre Grow » : l'API ne
+    nomme l'offre que pour HG1 et WTI/USD.
+  - La garde « base = dénominateur » de `symboleRatioTradfi` ne vaut plus que pour les devises
+    (EURUSDT en EUR) ; l'auto-division reste refusée par `symbol === ref` (CPER ÷Cuivre).
+  - Règles héritées du 26/09 sans changement : actifs cotés en dollar seulement ; ETF classés
+    `stock` (séance de New York) ; 1h et 4h non proposées face à une autre grille ; quota
+    ≈ 82 crédits par jour ouvré et par ratio ouvert (28 dès 1d).
+- **Lot 1 — recherche.** SOYB ajouté au catalogue curé ; libellés « … — ETF » et alias sans
+  accents (CUIVRE, SUCRE, PETROLE, BLE, MAIS, SOJA, GAZ, ARGENT…). **« USOIL » propose
+  désormais l'ETF USO**, ce qui renverse la décision du 23 septembre (WTI/USD, jamais USO) —
+  renversement confirmé le 23/11 (ci-dessus) : son intention reste épinglée, car choisir WTI/USD explicitement
+  affiche toujours le refus d'abonnement, sans ETF de remplacement (trois parcours
+  `sources-automatiques` réécrits).
+- **Lot 2 — « Autre actif… ».** Dernière entrée du menu ÷ : elle ferme le menu et ouvre un
+  sélecteur séparé, **chargé à la demande** (chunk `ChoixDiviseur`, gardé par
+  `chargementInitial.test.ts`, isolé par un `ErrorBoundary` : un chunk introuvable n'emporte
+  plus la grille de graphiques). Recherche sur le catalogue commun, toutes sources, saisie en
+  majuscules, résolution des tickers hors catalogue comme le constructeur SYN. Règles, dans
+  l'ordre (`composerRatioLibreCode` au chemin initial, messages dans `data/choixDiviseur.ts`) :
+  1. **fixe d'abord** : un actif qui est la référence d'un dénominateur fixe (ETHUSDT, CPER,
+     SPY…) pose ce bouton, sur la place du numérateur ; la ligne nomme alors la jambe réellement
+     posée et « Dénominateur du menu : ÷ETH » ;
+  2. jambe B : un marché réel ou une capitalisation en USD (STABLE.D refusée, jamais de SYN
+     imbriqué) ;
+  3. jamais A ÷ A (même place, même symbole) ;
+  4. même devise de cotation des deux côtés, stablecoins USD comptés pour 1 USD.
+  Un résultat refusé est grisé avec sa raison. Le sélecteur se ferme au changement de marché ;
+  hors du champ, aucune touche nue n'en part vers les raccourcis globaux, mais ⌘K et ⌘[ / ⌘]
+  y restent ceux d'AXIOM (correctif du 23/11 : arrêté par le dialogue, ⌘[ devenait le
+  « Précédent » du navigateur). Pas de « Récents ».
+- **Reconnaissance (`estRatio`).** Un dénominateur fixe n'est reconnu que s'il se **recompose
+  à l'identique** depuis la jambe A ; tout autre SYN « / » valide est un **ratio libre**
+  (`denom: null`), affiché « ÷<jambe B> » enfoncé, un clic revenant à la jambe A. La règle du
+  26/09 devient : « `estRatio` ne reconnaît que ce que les contrôles ÷ auraient posé, « Autre
+  actif… » compris ». Conséquences, validées par le propriétaire : les préréglages BTC / OR
+  (proxy GLD) et BTC / DXY (proxy UUP) et tout ratio SYN deviennent des ratios actifs ;
+  `kraken:SOLUSD|/|binance:ETHUSDT` n'est plus lu ÷ETH. La préférence du bouton scindé ne
+  stocke jamais un diviseur libre ; aucun état persisté nouveau.
+- **Contrôle en données réelles** (serveur de dev sur 127.0.0.1, clé serveur) :
+  - BTCUSDT ÷Cuivre (CPER) 1d **1 866,76 = BTC 61 453,78 ÷ CPER 32,92** (clôture du 20/11),
+    bougies de juillet à novembre visibles ; 15m 1 866,74 ;
+  - ÷Sucre (CANE) 6 005,33 ; ÷Soja (SOYB) 2 401,06 ; en CHF 51 493,52 ;
+  - « Autre actif… » : ETHUSDT sur BTCUSDT → ÷ETH (35,65) ; sur Bybit HYPEUSDT →
+    `bybit:HYPEUSDT|/|bybit:ETHUSDT` ; SPY → ÷S&P 500 (SPY) (88,98) ; AAPL → ratio libre
+    « BTCUSDT ÷ AAPL » (179,19), retour à BTCUSDT d'un clic ;
+  - préréglage BTC / OR (proxy GLD) → « BTCUSDT ÷ GLD », ÷GLD enfoncé.
+- **Limites assumées.**
+  - Un ETF de contrats à terme dérive du cours de la matière sur plusieurs années (UNG au
+    premier chef) ; les deux barres aberrantes de CPER font un pic d'un jour sur un numérateur
+    antérieur à 2017.
+  - **Les boutons crypto fixes (÷BTC, ÷ETH, ÷SOL) ne vérifient pas la devise** (préexistant) :
+    BTCEUR ÷ETH donne `…:BTCEUR|/|…:ETHUSD(T)` (EUR ÷ USD) et ETHBTC ÷SOL est permis ; la règle
+    « fixe d'abord » du sélecteur les reprend. Vu en réel : sur BTCEUR, ETHUSDT est accepté alors
+    que WBETHUSDT est refusé « Devises différentes (EUR contre USD) ». Correctif séparé proposé
+    au propriétaire (garde de devise dans les branches crypto de `symboleRatio`, et « Autre
+    actif… » joignable sans dénominateur fixe composable).
+  - Une place par ticker dans le sélecteur (`searchMarkets` groupe par `kind:symbol`) ; « ETH »
+    affiche trois lignes identiques « ETHUSDT · Dénominateur du menu : ÷ETH » (ETHUSDT, ETHUSD,
+    ETH-PERP posent le même ÷ETH).
+  - Enchaîner plusieurs jambes Twelve Data en quelques secondes atteint 8 requêtes par minute :
+    « Quota Twelve Data : prochain créneau dans N s » (comportement existant).
+  - Sélecteur : ⇧Tab depuis le dialogue peut sortir de la feuille en disposition téléphone
+    avec clavier ; iOS peut ne pas ouvrir le clavier au premier affichage (focus après import
+    asynchrone) ; le panneau déborde d'environ 10 px à gauche sur un ticker d'une lettre.
+  - Jours fériés US sondés pour rien ; ouverture et clôture 1d des ETF comme SPY/QQQ (26/09).
+- **Budget.** Chargement initial, octets bruts / gzip, plafonds 1 220 000 / 360 000 inchangés.
+  - Avant, sur `main` (33994cd) : 1 184 044 / 354 567 (Node 26.7.0).
+  - Après : **1 188 219 / 356 147 (Node 26.7.0) = 357 540 gzip en Node 24.13.0**, version du
+    CI : **marge gzip 2 460**. Lot entier **+4 175 / +1 580** (Node 26), au-delà du garde-fou de
+    +1 200 que la spec s'était fixé : dépassement accepté (la demande est explicite, le plafond
+    vérifié par le CI tient), après récupération des économies sûres (messages de refus et
+    sélecteur hors du chemin initial). Chunk `ChoixDiviseur` ≈ 4,5 ko / 2,2 ko gzip.
+- **Revues et tests.** Cinq tâches, chacune relue par un agent indépendant (un tour de
+  correction sur la tâche 5 : option active hors de vue, échec du chunk, source affichée) ; revue
+  finale de la branche entière (3 importantes corrigées en une vague : raccourcis globaux depuis
+  le sélecteur, ligne « fixe d'abord » qui nommait une autre place, cœur à codes pour
+  `estRatio`) puis re-relecture ciblée. `pnpm check` vert : **web 7 326**, indicators 1 151,
+  backtest 131, alerts 150, pacte 120 ; typage et build. E2E `gate-v24-macro-denominateur`,
+  `sources-automatiques` et `multivue` : **51/51 deux fois de suite**. Téléphone (chromium et
+  WebKit 26.5) : 86 réussis ; les deux parcours « ratios » passent sur les deux navigateurs ; un
+  échec WebKit `mobile-axis-sr.e2e.ts:395` (rangée AXIS S/R coupée à 320 px, thème bloomberg)
+  **reproduit à l'identique sur 33994cd**, hors périmètre. `gate-v24-macro-denominateur` reste
+  hors de la liste hermétique du CI.

@@ -340,6 +340,16 @@ test("« Autre actif… » au clavier : Fin, Entrée, AAPL puis Entrée pose BTC
   const champ = page.getByRole("combobox", COMBOBOX_DIVISEUR);
   await expect(champ).toBeFocused();
   await expect(page.getByRole("dialog", { name: "Diviser par un autre actif" })).toContainText("Diviser BTCUSDT par…");
+  // Liste plus longue que sa hauteur : ↓ jusqu'à la dernière option la fait défiler dans la liste
+  // (sinon Entrée poserait un actif que l'on ne voit pas).
+  await champ.fill("A");
+  const options = page.getByRole("listbox", { name: "Diviseurs" }).getByRole("option");
+  await expect.poll(() => options.count()).toBeGreaterThan(15);
+  const nombre = await options.count();
+  for (let i = 1; i < nombre; i++) await page.keyboard.press("ArrowDown");
+  await expect(options.last()).toHaveAttribute("aria-selected", "true");
+  await expect(options.last()).toBeInViewport();
+  await expect(options.first()).not.toBeInViewport();
   await champ.fill("AAPL");
   const aapl = page.getByRole("listbox", { name: "Diviseurs" }).getByRole("option", { name: /^AAPL\b/ });
   await expect(aapl).toBeVisible();
@@ -365,10 +375,18 @@ test("« Autre actif… » au clavier : Fin, Entrée, AAPL puis Entrée pose BTC
 
 test("« Autre actif… » : ETHUSDT choisi pose le ÷ETH du bouton (fixe d'abord)", async ({ page }) => {
   await bouchonnerTwelveData(page);
+  // ETHUSDT coté sur deux places, sans mesure de profondeur : la source affichée est la place
+  // retenue pour la jambe (Binance d'abord), jamais « Auto ».
+  await page.route("**/api.bybit.com/v5/market/instruments-info*", (route) => route.fulfill({
+    json: { retCode: 0, result: { list: [{ symbol: "ETHUSDT", status: "Trading" }] } },
+  }));
   await page.goto("/");
   await ouvrirAutreActif(page);
   await page.getByRole("combobox", COMBOBOX_DIVISEUR).fill("ETHUSDT");
-  await expect(page.getByRole("option", { name: /^ETHUSDT\b/ })).toBeVisible();
+  const ethusdt = page.getByRole("option", { name: /^ETHUSDT\b/ });
+  await expect(ethusdt).toBeVisible();
+  await expect(ethusdt).toContainText("Binance");
+  await expect(ethusdt).not.toContainText("Auto");
   await page.keyboard.press("Enter");
   await expect(page.getByText("BTCUSDT / ETHUSDT")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole("button", { name: "÷ETH", exact: true })).toHaveAttribute("aria-pressed", "true");
@@ -422,4 +440,17 @@ test("« Autre actif… » : une saisie hors catalogue se vérifie par Entrée (
   await expect(champ).toHaveValue("ORCL");
   await page.keyboard.press("Enter");
   await expect(page.getByText("BTCUSDT ÷ ORCL", { exact: true })).toBeVisible({ timeout: 15_000 });
+});
+
+test("« Autre actif… » : un chunk introuvable n'emporte que le sélecteur, jamais la grille des graphiques", async ({ page }) => {
+  // Hash périmé après un redéploiement, ou réseau coupé : le module du sélecteur ne se charge pas.
+  await page.route("**/components/ChoixDiviseur.tsx*", (route) => route.abort());
+  await page.goto("/");
+  await page.getByRole("button", { name: "Choisir l'actif de comparaison" }).click();
+  await page.getByRole("menuitem", { name: "Autre actif…" }).click();
+  const alerte = page.getByRole("alert").filter({ hasText: "Autre actif indisponible" });
+  await expect(alerte).toBeVisible();
+  await expect(alerte.getByRole("button", { name: "Recharger l’application" })).toBeVisible();
+  await expect(page.locator("[data-chart-banner]")).toBeVisible();
+  await expect(page.getByText("Graphiques indisponible")).toHaveCount(0);
 });

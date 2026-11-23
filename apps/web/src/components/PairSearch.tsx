@@ -18,7 +18,7 @@ export interface PairSearchProps {
   placeholder?: string;
 }
 
-function sourceLabel(source: ExchangeId): string {
+export function sourceLabel(source: ExchangeId): string {
   if (source === "twelvedata") return "Twelve Data";
   if (source === "synthetic") return "Capitalisation";
   return source === "okx" ? "OKX" : source === "mexc" ? "MEXC" : source[0]?.toUpperCase() + source.slice(1);

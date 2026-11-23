@@ -42,6 +42,7 @@ import {
 } from "../data/ratio";
 import { supportedTimeframesFor, timeframeProche } from "../data/adapters";
 import { MenuDeroulant } from "./ui";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { formatCompact, formatCountdown, formatPct, formatPourcentage, formatPrice } from "../lib/format";
 import { useMobileLayout } from "../hooks/useMobileLayout";
 
@@ -357,17 +358,20 @@ function BoutonsRatio({
               </button>
             </>}
           </MenuDeroulant>
+          {/* Chunk introuvable (hash périmé, hors ligne) : seul le sélecteur tombe, pas la grille des graphiques. */}
           {autreActif && (
-            <Suspense fallback={null}>
-              <ChoixDiviseur
-                base={{ symbol: baseSym, exchange: baseEx }}
-                timeframe={timeframe}
-                fermer={(rendreFocus) => {
-                  setAutreActif(false);
-                  if (rendreFocus) ancre.current?.querySelector<HTMLElement>('[aria-haspopup="menu"]')?.focus();
-                }}
-              />
-            </Suspense>
+            <ErrorBoundary scope="Autre actif" compact recovery="reload">
+              <Suspense fallback={null}>
+                <ChoixDiviseur
+                  base={{ symbol: baseSym, exchange: baseEx }}
+                  timeframe={timeframe}
+                  fermer={(rendreFocus) => {
+                    setAutreActif(false);
+                    if (rendreFocus) ancre.current?.querySelector<HTMLElement>('[aria-haspopup="menu"]')?.focus();
+                  }}
+                />
+              </Suspense>
+            </ErrorBoundary>
           )}
         </span>
       )}

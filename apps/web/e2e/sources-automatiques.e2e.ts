@@ -361,7 +361,7 @@ test("CARDS : une ancienne provenance Binance erronée est réparée après reto
   await expect.poll(() => marche(page)).toMatchObject({ symbol: "CARDSUSDT", exchange: "okx", prix: 0.12, status: "ready" });
 });
 
-test("USOIL : la suggestion ouvre le pétrole spot canonique, sans confusion avec crypto, action ou ETF", async ({ page }) => {
+test("USOIL : la suggestion ouvre l'ETF USO servi, sans confusion avec crypto, action ou spot", async ({ page }) => {
   await fixtures(page);
   await page.route("**/mexcapi/api/v3/exchangeInfo*", (route) => route.fulfill({ json: { symbols: [{ symbol: "USOILUSDT", status: "1", isSpotTradingAllowed: true }] } }));
   await page.clock.install();
@@ -370,12 +370,12 @@ test("USOIL : la suggestion ouvre le pétrole spot canonique, sans confusion ave
   const search = page.getByRole("combobox", { name: "Rechercher une paire", exact: true });
   await search.fill("usoil");
   const first = page.getByRole("listbox", { name: "Résultats de paires" }).getByRole("option").first();
-  await expect(first).toContainText("WTI/USD");
-  await expect(first).toContainText("Pétrole WTI — spot");
+  await expect(first).toContainText("USO");
+  await expect(first).toContainText("Pétrole WTI — ETF");
   await expect(first).toContainText("Twelve Data");
   await search.press("Enter");
-  await expect.poll(() => marche(page)).toMatchObject({ symbol: "WTI/USD", exchange: "twelvedata", status: "ready" });
-  for (const symbol of ["WTI", "USO", "AAPL", "SPY", "EUR/USD"]) {
+  await expect.poll(() => marche(page)).toMatchObject({ symbol: "USO", exchange: "twelvedata", status: "ready" });
+  for (const symbol of ["WTI/USD", "WTI", "AAPL", "SPY", "EUR/USD"]) {
     // Chart et cotations partagent le quota Twelve Data : simuler des navigations espacées.
     await page.clock.fastForward(61_000);
     await choisir(page, symbol);
@@ -384,7 +384,7 @@ test("USOIL : la suggestion ouvre le pétrole spot canonique, sans confusion ave
   await expect(page.getByRole("combobox", { name: "Source", exact: true })).toHaveCount(0);
 });
 
-test("USOIL : un abonnement Grow requis reste visible et ne déclenche aucun ETF de remplacement", async ({ page }) => {
+test("WTI/USD : un abonnement Grow requis reste visible et ne déclenche aucun ETF de remplacement", async ({ page }) => {
   await fixtures(page);
   const symbolsRequested: string[] = [];
   await page.route("**/tdapi/time_series*", (route) => {
@@ -393,7 +393,7 @@ test("USOIL : un abonnement Grow requis reste visible et ne déclenche aucun ETF
   });
   await page.goto("/");
   const search = page.getByRole("combobox", { name: "Rechercher une paire", exact: true });
-  await search.fill("USOIL");
+  await search.fill("WTI/USD");
   await expect(page.getByRole("option", { name: /^WTI\/USD\b/ })).toBeVisible();
   await search.press("Enter");
   await expect.poll(() => marche(page)).toMatchObject({ symbol: "WTI/USD", exchange: "twelvedata", status: "error" });
@@ -414,10 +414,10 @@ test("TradFi : le catalogue local reste recherchable pendant une source crypto b
     await page.goto("/");
     const search = page.getByRole("combobox", { name: "Rechercher une paire", exact: true });
     await search.fill("USOIL");
-    await expect(page.getByRole("option", { name: /^WTI\/USD\b/ })).toBeVisible();
+    await expect(page.getByRole("option", { name: /^USO\b/ })).toBeVisible();
     await expect(page.getByText("Recherche des actifs disponibles…", { exact: true })).toBeVisible();
     await search.press("Enter");
-    await expect.poll(() => marche(page)).toMatchObject({ symbol: "WTI/USD", exchange: "twelvedata", status: "ready" });
+    await expect.poll(() => marche(page)).toMatchObject({ symbol: "USO", exchange: "twelvedata", status: "ready" });
     await choisir(page, "SPY");
     await expect.poll(() => marche(page)).toMatchObject({ symbol: "SPY", exchange: "twelvedata", status: "ready" });
   } finally { release(); }

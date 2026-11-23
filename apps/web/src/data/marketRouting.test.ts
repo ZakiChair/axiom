@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Candle, ExchangeId, Timeframe } from "@axiom/types";
 import { resolveMarketCandidates, resolveMarketCandidatesProgressifs, searchMarkets, type MarketCatalog } from "./marketRouting";
 import { SYMBOLES_CAPITALISATION } from "./mcap";
+import { TWELVEDATA_SYMBOLS } from "./pairs";
 import * as profondeur from "./profondeurHistorique";
 
 // Hors des blocs dédiés, la profondeur reste inconnue : aucune sonde réseau réelle.
@@ -518,10 +519,16 @@ describe("recherche du pétrole : identité spot, action et ETF distinctes", () 
     { exchange: "twelvedata", symbol: "WTI", kind: "tradfi" },
     { exchange: "twelvedata", symbol: "USO", kind: "tradfi" },
   ] };
-  it("USOIL propose le spot WTI/USD avant un symbole crypto ressemblant et jamais l'ETF USO", () => {
+  it("USOIL propose l'ETF USO servi par l'offre, nommé ETF, avant le symbole crypto ressemblant", () => {
     const results = searchMarkets(oil, "USOIL");
-    expect(results[0]).toMatchObject({ symbol: "WTI/USD", exchange: "twelvedata", label: "Pétrole WTI — spot" });
-    expect(results.some((result) => result.symbol === "USO")).toBe(false);
+    expect(results[0]).toMatchObject({ symbol: "USO", exchange: "twelvedata", label: "Pétrole WTI — ETF" });
+    expect(results.some((r) => r.symbol === "WTI/USD")).toBe(false);
+    expect(results.findIndex((r) => r.symbol === "USOILUSDT")).toBeGreaterThan(0);
+  });
+  it("PETROLE propose l'ETF et le spot, chacun nommé", () => {
+    const results = searchMarkets(oil, "PETROLE");
+    expect(results.map((r) => r.symbol)).toEqual(expect.arrayContaining(["USO", "WTI/USD"]));
+    expect(results.find((r) => r.symbol === "WTI/USD")?.label).toBe("Pétrole WTI — spot (offre Twelve Data supérieure)");
   });
   it("l'exact WTI reste l'action, indépendamment de la suggestion pétrole", () => {
     expect(searchMarkets(oil, "WTI")[0]).toMatchObject({ symbol: "WTI", label: "W&T Offshore — action" });
@@ -534,6 +541,18 @@ describe("recherche du pétrole : identité spot, action et ETF distinctes", () 
   it.each(["USOIL", "WTI", "USO"])("ne réécrit jamais le symbole brut %s dans le résolveur", async (symbol) => {
     expect(await resolveMarketCandidates({ symbol, timeframe: "1h" }, oil))
       .toEqual([{ exchange: "twelvedata", symbol, timeframe: "1h" }]);
+  });
+});
+
+describe("matières premières par leur nom (demande du 22/11/2026)", () => {
+  const tradfi: MarketCatalog = { unavailableSources: [], instruments: TWELVEDATA_SYMBOLS.map((symbol) => ({ exchange: "twelvedata", symbol, kind: "tradfi" })) };
+  it.each([
+    ["CUIVRE", "CPER"], ["SUCRE", "CANE"], ["ARGENT", "SLV"], ["PLATINE", "PPLT"], ["PALLADIUM", "PALL"], ["BRENT", "BNO"],
+    ["GAZ", "UNG"], ["BLE", "WEAT"], ["MAIS", "CORN"], ["SOJA", "SOYB"], ["AGRICULTURE", "DBA"], ["MATIERES", "DBC"],
+  ])("%s propose %s en tête, nommé ETF", (q, etf) => {
+    const premier = searchMarkets(tradfi, q)[0];
+    expect(premier).toMatchObject({ symbol: etf });
+    expect(premier?.label).toContain("ETF");
   });
 });
 

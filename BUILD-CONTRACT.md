@@ -4529,7 +4529,8 @@ titre de la demande explicite. Spec : `docs/superpowers/specs/2026-11-22-ratios-
   chantier.
   - **« USOIL » vers l'ETF USO.** Le résumé validé annonçait que « USOIL » trouverait l'ETF, mais
     la décision du 23 septembre (WTI/USD, jamais USO) et ses trois parcours épinglés n'ont été
-    découverts qu'après la validation : son renversement reste à confirmer.
+    découverts qu'après la validation : **renversement confirmé par le propriétaire le 23/11**
+    (« L'ETF USO »).
   - **Budget au-delà du garde-fou.** La spec validée disait « au-delà de +1 200 octets gzip,
     arrêter et le signaler » ; le chantier a continué (+1 580 en Node 26, marge CI 2 460) après
     avoir récupéré les économies sûres. Signalé ici.
@@ -4572,7 +4573,7 @@ titre de la demande explicite. Spec : `docs/superpowers/specs/2026-11-22-ratios-
 - **Lot 1 — recherche.** SOYB ajouté au catalogue curé ; libellés « … — ETF » et alias sans
   accents (CUIVRE, SUCRE, PETROLE, BLE, MAIS, SOJA, GAZ, ARGENT…). **« USOIL » propose
   désormais l'ETF USO**, ce qui renverse la décision du 23 septembre (WTI/USD, jamais USO) —
-  arbitrage à confirmer (ci-dessus) : son intention reste épinglée, car choisir WTI/USD explicitement
+  renversement confirmé le 23/11 (ci-dessus) : son intention reste épinglée, car choisir WTI/USD explicitement
   affiche toujours le refus d'abonnement, sans ETF de remplacement (trois parcours
   `sources-automatiques` réécrits).
 - **Lot 2 — « Autre actif… ».** Dernière entrée du menu ÷ : elle ferme le menu et ouvre un
@@ -4588,8 +4589,10 @@ titre de la demande explicite. Spec : `docs/superpowers/specs/2026-11-22-ratios-
      imbriqué) ;
   3. jamais A ÷ A (même place, même symbole) ;
   4. même devise de cotation des deux côtés, stablecoins USD comptés pour 1 USD.
-  Un résultat refusé est grisé avec sa raison. Le sélecteur se ferme au changement de marché et
-  ne laisse partir aucun raccourci global tant qu'il est ouvert. Pas de « Récents ».
+  Un résultat refusé est grisé avec sa raison. Le sélecteur se ferme au changement de marché ;
+  hors du champ, aucune touche nue n'en part vers les raccourcis globaux, mais ⌘K et ⌘[ / ⌘]
+  y restent ceux d'AXIOM (correctif du 23/11 : arrêté par le dialogue, ⌘[ devenait le
+  « Précédent » du navigateur). Pas de « Récents ».
 - **Reconnaissance (`estRatio`).** Un dénominateur fixe n'est reconnu que s'il se **recompose
   à l'identique** depuis la jambe A ; tout autre SYN « / » valide est un **ratio libre**
   (`denom: null`), affiché « ÷<jambe B> » enfoncé, un clic revenant à la jambe A. La règle du
@@ -4621,8 +4624,7 @@ titre de la demande explicite. Spec : `docs/superpowers/specs/2026-11-22-ratios-
     ETH-PERP posent le même ÷ETH).
   - Enchaîner plusieurs jambes Twelve Data en quelques secondes atteint 8 requêtes par minute :
     « Quota Twelve Data : prochain créneau dans N s » (comportement existant).
-  - Sélecteur : avec le focus sur le dialogue (pas le champ), ⌘K et ⌘[ / ⌘] ne passent plus à
-    l'application ; ⇧Tab depuis le dialogue peut sortir de la feuille en disposition téléphone
+  - Sélecteur : ⇧Tab depuis le dialogue peut sortir de la feuille en disposition téléphone
     avec clavier ; iOS peut ne pas ouvrir le clavier au premier affichage (focus après import
     asynchrone) ; le panneau déborde d'environ 10 px à gauche sur un ticker d'une lettre.
   - Jours fériés US sondés pour rien ; ouverture et clôture 1d des ETF comme SPY/QQQ (26/09).

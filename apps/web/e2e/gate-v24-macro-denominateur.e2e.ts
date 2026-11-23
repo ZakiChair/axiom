@@ -487,6 +487,33 @@ test("« Autre actif… » : un clic sur le titre garde le focus dans le sélect
   expect(await marcheAffiche(page)).toBe(avant);
 });
 
+test("« Autre actif… » : hors du champ, ⌘[ recule dans l'historique d'AXIOM et ⌘K ouvre la palette", async ({ page }) => {
+  await bouchonnerTwelveData(page);
+  await page.goto("/");
+  await expect.poll(() => marcheAffiche(page)).toMatch(/^BTCUSDT /);
+  // Historique d'AXIOM : BTCUSDT puis ETHUSDT (toute navigation y compte).
+  await page.evaluate(async () => {
+    const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{
+      marketStore: { getState: () => { setMarket: (identite: { exchange: string; symbol: string; timeframe: string }) => void } };
+    }>;
+    (await importer()).marketStore.getState().setMarket({ exchange: "binance", symbol: "ETHUSDT", timeframe: "1d" });
+  });
+  await expect.poll(() => marcheAffiche(page)).toMatch(/^ETHUSDT /);
+  const dialogue = page.getByRole("dialog", { name: "Diviser par un autre actif" });
+  await ouvrirAutreActif(page);
+  await dialogue.getByText("Diviser ETHUSDT par…").click();
+  await expect(dialogue).toBeFocused();
+  // Arrêté par le dialogue, ⌘[ n'atteignait pas AXIOM et devenait le « Précédent » du navigateur.
+  await page.keyboard.press("ControlOrMeta+[");
+  await expect.poll(() => marcheAffiche(page)).toMatch(/^BTCUSDT /);
+  await expect(dialogue).toHaveCount(0);
+  await ouvrirAutreActif(page);
+  await dialogue.getByText("Diviser BTCUSDT par…").click();
+  await expect(dialogue).toBeFocused();
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByRole("dialog", { name: "Palette de commandes" })).toBeVisible();
+});
+
 test("« Autre actif… » : focus perdu vers body, Échap ferme le sélecteur sans quitter le plein écran", async ({ page }) => {
   await bouchonnerTwelveData(page);
   await page.goto("/");

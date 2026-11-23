@@ -142,9 +142,11 @@ export function ChoixDiviseur({ base, timeframe, fermer }: {
         if (e.key === "Escape") { e.preventDefault(); rendreFocus(); }
         // ↑/↓ hors du champ (dialogue cliqué, résultat atteint par Tab) : retour au champ.
         else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && e.target !== champRef.current) { e.preventDefault(); champRef.current?.focus(); }
-        // Hors du champ, aucune touche n'atteint le répartiteur global (commands/hotkeys.ts : [ ] chiffres ?
+        // Hors du champ, aucune touche nue n'atteint le répartiteur global (commands/hotkeys.ts : [ ] chiffres ?
         // lettres…) ; Entrée et Espace gardent leur action native sur une option, Tab son déplacement.
-        if (e.target !== champRef.current) e.stopPropagation();
+        // ⌘/Ctrl passent : ⌘K et ⌘[ ⌘] y sont traités comme depuis le champ (arrêté ici, ⌘[ devenait le
+        // « Précédent » du navigateur et quittait AXIOM) ; il rend les autres au navigateur.
+        if (e.target !== champRef.current && !e.metaKey && !e.ctrlKey) e.stopPropagation();
       }}
       onBlur={(e) => {
         // Bureau : focus parti vers un autre contrôle (Tab) → fermeture, comme le menu ÷ ▾. Pas au

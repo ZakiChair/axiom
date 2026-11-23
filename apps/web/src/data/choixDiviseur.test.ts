@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { composerRatioLibre, optionsDiviseur, referenceFixe, symboleRatioLibre } from "./choixDiviseur";
-import type { MarketCatalog } from "./marketRouting";
+import { composerRatioLibre, optionsDiviseur, presentationOption, referenceFixe, symboleRatioLibre, type OptionDiviseur } from "./choixDiviseur";
+import type { MarketCandidate, MarketCatalog } from "./marketRouting";
+import type { ExchangeId } from "@axiom/types";
 
 /** Catalogue fixe, toutes sources : crypto (Binance), Twelve Data (ETF, action, forex) et série autonome. */
 const CATALOGUE: MarketCatalog = {
@@ -59,6 +60,27 @@ describe("« Autre actif… » : options du sélecteur (optionsDiviseur)", () =>
   it("limite : nombre maximal de résultats", () => {
     expect(optionsDiviseur(CATALOGUE, "USD", BASE, "1d").length).toBeGreaterThan(1);
     expect(optionsDiviseur(CATALOGUE, "USD", BASE, "1d", 1)).toHaveLength(1);
+  });
+});
+
+describe("« Autre actif… » : ligne affichée d'une option (presentationOption)", () => {
+  /** Option telle que la compose le sélecteur : candidat du catalogue composé contre la base. */
+  const option = (base: { symbol: string; exchange: ExchangeId }, candidat: MarketCandidate): OptionDiviseur =>
+    ({ candidat, resultat: symboleRatioLibre(base.symbol, base.exchange, { exchange: candidat.exchange, symbol: candidat.symbol }) });
+  const ETHUSDT: MarketCandidate = { exchange: "binance", symbol: "ETHUSDT", kind: "spot" };
+
+  it("fixe d'abord hors Binance : la jambe posée sur la place du numérateur, signalée comme dénominateur du menu", () => {
+    const kraken = presentationOption(option({ symbol: "BTCEUR", exchange: "kraken" }, ETHUSDT));
+    expect(kraken).toMatchObject({ symbole: "ETHUSD", source: "Kraken" });
+    expect(kraken.detail).toContain("÷ETH");
+    expect(presentationOption(option({ symbol: "BTC-PERP", exchange: "hyperliquid" }, ETHUSDT))).toMatchObject({ symbole: "ETH-PERP", source: "Hyperliquid" });
+    // Perp choisi, spot posé : la ligne nomme l'instrument réellement divisé, sans « Perp · ».
+    expect(presentationOption(option(BASE, { exchange: "hyperliquid", symbol: "ETH-PERP", kind: "perp" }))).toMatchObject({ symbole: "ETHUSDT", source: "Binance" });
+  });
+
+  it("ligne libre inchangée : symbole du candidat, son libellé et sa place (« Perp · » pour un perp)", () => {
+    expect(presentationOption(option(BASE, { exchange: "twelvedata", symbol: "AAPL", kind: "tradfi", label: "Apple" }))).toEqual({ symbole: "AAPL", detail: "Apple", source: "Twelve Data" });
+    expect(presentationOption(option(BASE, { exchange: "hyperliquid", symbol: "HYPE-PERP", kind: "perp" }))).toEqual({ symbole: "HYPE-PERP", source: "Perp · Hyperliquid" });
   });
 });
 

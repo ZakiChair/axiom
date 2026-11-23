@@ -19,8 +19,8 @@ import { marketStore } from "../store/market";
 import { syntheticsStore } from "../store/synthetics";
 import { supportedTimeframesFor, timeframeProche } from "../data/adapters";
 import { fetchMarketCatalog, resolveMarketCandidates, subscribeMarketCatalog, type MarketCatalog } from "../data/marketRouting";
-import { optionsDiviseur, symboleRatioLibre, type ResultatRatioLibre } from "../data/choixDiviseur";
-import { CATALOGUE_LOCAL, catalogueInterroge, sourceLabel } from "./PairSearch";
+import { optionsDiviseur, presentationOption, symboleRatioLibre, type ResultatRatioLibre } from "../data/choixDiviseur";
+import { CATALOGUE_LOCAL, catalogueInterroge } from "./PairSearch";
 import { CLASSES_CHAMP, classesPanneauMenu, EnteteMenuMobile, PortailMobile } from "./ui";
 import { useMobileLayout } from "../hooks/useMobileLayout";
 
@@ -140,16 +140,19 @@ export function ChoixDiviseur({ base, timeframe, fermer }: {
         onKeyDown={surToucheChamp} placeholder="Action, ETF, crypto, devise…" autoComplete="off" spellCheck={false}
         className={`${CLASSES_CHAMP} w-full`} />
       {listeVisible && <ul id={idListe} role="listbox" aria-label="Diviseurs" className="mt-1 max-h-72 overflow-y-auto">
-        {options.map(({ candidat, resultat }, i) => {
+        {options.map((option, i) => {
+          const { candidat, resultat } = option;
           const refus = "refus" in resultat ? resultat.refus : null;
+          // Ce qui sera réellement divisé : la jambe posée (fixe : sur la place du numérateur), sinon le candidat.
+          const ligne = presentationOption(option);
           return <li key={`${candidat.kind}:${candidat.symbol}`} role="none"><button id={`${idListe}-opt-${i}`} type="button" role="option"
             aria-selected={i === indexActif} aria-disabled={refus !== null || undefined}
             onMouseDown={(e) => e.preventDefault()} onClick={() => poser(resultat)} onMouseEnter={() => setIndexActif(i)}
             className={`flex w-full items-center justify-between gap-2 px-2 py-1 text-left text-xs ${refus === null ? "text-text" : "cursor-not-allowed text-text-dim"} ${i === indexActif ? "bg-neutral-800" : "hover:bg-neutral-800"}`}>
-            <span className="min-w-0"><span>{candidat.symbol}</span>{candidat.label && <span className="block text-[10px] text-text-dim">{candidat.label}</span>}</span>
-            {/* Source : la place réellement retenue pour la jambe (`candidat.exchange`), jamais « Auto » —
-                le sélecteur ne lance pas les mesures de profondeur de la recherche principale. */}
-            <span className="max-w-[140px] shrink-0 text-right text-[10px] text-text-dim">{refus ?? `${candidat.kind === "perp" ? "Perp · " : ""}${sourceLabel(candidat.exchange)}`}</span>
+            <span className="min-w-0"><span>{ligne.symbole}</span>{ligne.detail && <span className="block text-[10px] text-text-dim">{ligne.detail}</span>}</span>
+            {/* Source : la place réellement retenue pour la jambe, jamais « Auto » — le sélecteur ne lance
+                pas les mesures de profondeur de la recherche principale. */}
+            <span className="max-w-[140px] shrink-0 text-right text-[10px] text-text-dim">{refus ?? ligne.source}</span>
           </button></li>;
         })}
       </ul>}

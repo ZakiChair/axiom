@@ -387,6 +387,8 @@ test("« Autre actif… » : ETHUSDT choisi pose le ÷ETH du bouton (fixe d'abor
   await expect(ethusdt).toBeVisible();
   await expect(ethusdt).toContainText("Binance");
   await expect(ethusdt).not.toContainText("Auto");
+  // La ligne signale qu'elle reproduit le ÷ETH du menu (presentationOption).
+  await expect(ethusdt).toContainText("Dénominateur du menu : ÷ETH");
   await page.keyboard.press("Enter");
   await expect(page.getByText("BTCUSDT / ETHUSDT")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole("button", { name: "÷ETH", exact: true })).toHaveAttribute("aria-pressed", "true");

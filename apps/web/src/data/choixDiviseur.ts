@@ -4,8 +4,10 @@
  * hors du chargement initial — d'où les messages de refus ici, et non dans `ratio.ts`, dont
  * `estRatio` (chargement initial) ne lit que le cœur sans texte `composerRatioLibreCode`.
  */
-import { composerRatioLibreCode, REFS, REFS_TRADFI, symboleRatio, type DenominateurId, type JambeChoisie } from "./ratio";
+import { composerRatioLibreCode, libelleDenominateur, REFS, REFS_TRADFI, symboleRatio, type DenominateurId, type JambeChoisie } from "./ratio";
 import { searchMarkets, type MarketCandidate, type MarketCatalog } from "./marketRouting";
+import { parseSyntheticSymbol } from "./synthetic";
+import { sourceLabel } from "../components/PairSearch";
 import type { ExchangeId, Timeframe } from "@axiom/types";
 
 /** Ratio libre composé (`denom` non nul = dénominateur fixe reconnu), ou refus à afficher tel quel. */
@@ -46,6 +48,33 @@ export function symboleRatioLibre(baseSym: string, baseEx: ExchangeId, jambe: Ja
 
 /** Option du sélecteur : un résultat de la recherche commune et sa composition contre la base. */
 export interface OptionDiviseur { candidat: MarketCandidate; resultat: ResultatRatioLibre }
+
+/** Ligne d'une option : symbole, détail sous le symbole, place (remplacée par le refus s'il y en a un). */
+export interface PresentationOption { symbole: string; detail?: string; source: string }
+
+/**
+ * Ce qu'affiche une option. Fixe d'abord (`denom` non nul) : la jambe B POSÉE et sa place — la
+ * règle 1 recompose le ratio sur la place du numérateur (ETHUSDT choisi sur Kraken BTCEUR →
+ * ETHUSD · Kraken) — avec le dénominateur du menu qu'elle reproduit. Sinon le candidat tel quel :
+ * symbole, libellé, place (« Perp · » pour un perp). PURE.
+ */
+export function presentationOption({ candidat, resultat }: OptionDiviseur): PresentationOption {
+  if ("symbole" in resultat && resultat.denom !== null) {
+    const pose = parseSyntheticSymbol(resultat.symbole);
+    if (pose !== null) {
+      return {
+        symbole: pose.legB,
+        detail: `Dénominateur du menu : ${libelleDenominateur(resultat.denom)}`,
+        source: sourceLabel(pose.exB === "mcap" ? "synthetic" : pose.exB),
+      };
+    }
+  }
+  return {
+    symbole: candidat.symbol,
+    detail: candidat.label,
+    source: `${candidat.kind === "perp" ? "Perp · " : ""}${sourceLabel(candidat.exchange)}`,
+  };
+}
 
 /**
  * Recherche commune (toutes sources, une place par ticker comme `searchMarkets`), chaque résultat
